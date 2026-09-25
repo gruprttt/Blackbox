@@ -1,5 +1,4 @@
-# Build context is this repository. Your saved DevOps & SRE lessons are optional: put (or copy)
-# them in ./learn inside the repo — git ignores that folder — and they're built in too.
+# Build context is this repository; the DevOps & SRE lessons are in ./learn.
 
 # ── site: generate static pages ─────────────────────────────────────────────
 FROM python:3.12-alpine AS build
