@@ -73,6 +73,19 @@ LOBES = [
          blurb="ML foundations, LLMs, training and serving."),
 ]
 LOBE_BY_ID = {d["id"]: d for d in LOBES}
+# How the lobes feed each other — drawn as connections when you click a lobe on the Brain page.
+LOBE_LINKS = [
+    ("dsa", "backend", "Data structures behind caches, indexes and queues"),
+    ("dsa", "system-design", "Complexity decides what scales"),
+    ("backend", "system-design", "Services grow into systems"),
+    ("backend", "devops", "Ship and run what you build"),
+    ("system-design", "devops", "Designs meet production"),
+    ("devops", "cybersecurity", "Secure the pipeline and the platform"),
+    ("backend", "cybersecurity", "Auth, validation and hardening"),
+    ("backend", "ai-ml", "Serving models behind APIs"),
+    ("dsa", "ai-ml", "The maths and algorithms under ML"),
+    ("devops", "ai-ml", "Infrastructure for training and inference"),
+]
 # Old per-area domain ids (focus history recorded before lobes existed) now belong to DevOps.
 DOMAIN_ALIASES = {"foundations": "devops", "code": "devops", "systems": "devops", "distributed": "devops",
                   "infra": "devops", "reliability": "devops", "security": "devops", "ai": "devops", "design": "system-design", "be": "backend"}
@@ -147,6 +160,7 @@ MAP_EDGES = [
 ]
 
 TRACKS = []  # filled in main(); used by the header's Tracks dropdown
+PROGRAM_NAV = []  # filled in main(): one row per program for the Tracks dropdown
 
 # Programs are the top-level curricula. Each has its own numbered path of tracks.
 # Tracks not listed in a later program belong to the first (live) one.
@@ -312,10 +326,7 @@ ICON = {
 }
 
 NAV = [("Learn", "index.html", "learn", ("home",)),
-       ("Tracks", "tracks/index.html", "map", ("tracks", "track", "topic", "lesson")),
-       ("DSA", "dsa/index.html", "code", ("dsa",)),
-       ("Design", "system-design/index.html", "design", ("sd",)),
-       ("Backend", "backend/index.html", "server", ("be", "be-chapter")),
+       ("Tracks", "tracks/index.html", "map", ("tracks", "track", "topic", "lesson", "dsa", "sd", "be", "be-chapter")),
        ("Brain", "brain/index.html", "brain", ("brain",)),
        ("Focus", "focus/index.html", "focus", ("focus",)),
        ("Tasks", "tasks/index.html", "tasks", ("tasks",)),
@@ -328,7 +339,7 @@ THEME_BOOT = (
 )
 
 APP_PAGES = ("home", "brain", "focus", "tasks", "habits")
-TABBAR = ("Learn", "DSA", "Brain", "Focus", "Tasks")
+TABBAR = ("Learn", "Tracks", "Brain", "Focus", "Tasks")
 
 
 def logo(size=""):
@@ -342,7 +353,7 @@ def page(*, title, desc, root, body, kind):
     if kind == "tracks":
         extra += f'<script src="{root}assets/map-data.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n<script src="{root}assets/mindmap.js" defer></script>\n'
     if kind == "brain":
-        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n'
+        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n<script src="{root}assets/world.js" defer></script>\n'
     if kind in APP_PAGES:
         extra += f'<script src="{root}assets/brain.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n'
     return f"""<!DOCTYPE html>
@@ -381,14 +392,16 @@ def header(root, kind):
     bar = '<div class="read-progress" aria-hidden="true"><span></span></div>' if kind in ("lesson", "be-chapter") else ""
     def item(label, href, icon, kinds):
         link = f'<a href="{root}{href}" title="{label}"{" aria-current=page class=is-active" if kind in kinds else ""}>{ICON[icon]}<span>{label}</span></a>'
-        if label != "Tracks" or not TRACKS:
+        if label != "Tracks" or not PROGRAM_NAV:
             return link
         rows = "".join(
-            f'<a class="nd-item" href="{root}{t["slug"]}/index.html" style="--c:{t["color"]}"><span class="nd-num">{t["num"]}</span>'
-            f'<span class="nd-title">{strip_tags(t["title"])}</span><span class="nd-bar" data-nd-track="{t["slug"]}/" data-nd-total="{t["n_lessons"]}"><span></span></span></a>'
-            for t in TRACKS)
-        return (f'<div class="nav-drop">{link}<div class="nd-panel" role="menu"><div class="nd-head"><span class="mono-label">/ {PROGRAMS[0]["name"]} · {len(TRACKS)} tracks</span>'
-                f'<a href="{root}tracks/index.html">Open skill map {ICON["right"]}</a></div><div class="nd-grid">{rows}</div></div></div>')
+            f'<a class="np-item{" soon" if pg["soon"] else ""}" href="{root}tracks/index.html#{pg["id"]}" data-tracks-link="{pg["id"]}" style="--c:{pg["color"]}">'
+            f'<span class="np-icon">{ICON[pg["icon"]]}</span><span class="np-text"><b>{pg["name"]}</b><em>{pg["meta"]}</em></span>'
+            + (f'<span class="np-bar" data-progress-prefix="{pg["prefix"]}" data-progress-total="{pg["total"]}"><span class="progress-bar"><span></span></span><i data-progress-pct>0%</i></span>'
+               if not pg["soon"] else '<span class="badge">soon</span>') + "</a>"
+            for pg in PROGRAM_NAV)
+        return (f'<div class="nav-drop">{link}<div class="nd-panel np-panel" role="menu"><div class="nd-head"><span class="mono-label">/ programs</span>'
+                f'<a href="{root}tracks/index.html">All tracks {ICON["right"]}</a></div><div class="np-list">{rows}</div></div></div>')
     nav = "".join(item(*n) for n in NAV)
     return f"""<header class="topbar">
   <div class="topbar-inner">
@@ -533,20 +546,20 @@ def render_home(tracks, sheets):
     for i, pg in enumerate(PROGRAMS, 1):
         sheet = sheets.get(pg["lobe"])
         if sheet:
-            programs.append(f"""<a class="program live" href="{sheet['href']}" style="--c:{pg['color']}">
+            programs.append(f"""<a class="program live" href="tracks/index.html#{pg['lobe']}" style="--c:{pg['color']}">
   <div class="program-top"><span class="mono-label">Program {i:02d}</span><span class="badge live-badge"><span class="rec live"></span>Live</span></div>
   <h3>{pg['name']}</h3><p>{pg['blurb']}</p>
   <p class="program-meta mono-label">{sheet['meta']}</p>
   {progress(sheet['prefix'], sheet['total'])}
 </a>""")
         elif pg.get("soon") or not tracks:
-            programs.append(f"""<div class="program soon" style="--c:{pg['color']}">
+            programs.append(f"""<{'div' if pg.get('soon') else 'a href="tracks/index.html#devops"'} class="program soon" style="--c:{pg['color']}">
   <div class="program-top"><span class="mono-label">Program {i:02d}</span><span class="badge">Coming soon</span></div>
   <h3>{pg['name']}</h3><p>{pg['blurb']}</p>
-  <p class="program-meta mono-label">{pg.get('region_note', 'Add lessons to wake this lobe')}</p>
-</div>""")
+  <p class="program-meta mono-label">{pg.get('region_note', 'Lessons not found — open Tracks to fix')}</p>
+</{'div' if pg.get('soon') else 'a'}>""")
         else:
-            programs.append(f"""<a class="program live" href="#path" style="--c:{pg['color']}">
+            programs.append(f"""<a class="program live" href="tracks/index.html#devops" style="--c:{pg['color']}">
   <div class="program-top"><span class="mono-label">Program {i:02d}</span><span class="badge live-badge"><span class="rec live"></span>Live</span></div>
   <h3>{pg['name']}</h3><p>{pg['blurb']}</p>
   <p class="program-meta mono-label">{len(tracks)} tracks · {n_lessons:,} lessons · {fmt_minutes(sum(t['minutes'] for t in tracks))}</p>
@@ -799,24 +812,19 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
                 root=root, body=body, kind="lesson")
 
 
-def render_tracks(tracks):
+def render_tracks(tracks, sheets, be):
     root = "../"
     n_lessons = sum(t["n_lessons"] for t in tracks)
-    def chip(i, pg):
-        if pg.get("soon"):
-            return f'<button class="prog-chip" disabled style="--c:{pg["color"]}"><i></i>{pg["name"]} <em>soon</em></button>'
-        if i == 0:
-            return f'<button class="prog-chip is-active" style="--c:{pg["color"]}"><i></i>{pg["name"]}</button>'
-        return f'<a class="prog-chip" href="{root}{LOBE_BY_ID[pg["lobe"]]["href"]}" style="--c:{pg["color"]}"><i></i>{pg["name"]}</a>'
-    progs = "".join(chip(i, pg) for i, pg in enumerate(PROGRAMS))
-    body = f"""<main id="main" class="app app-tracks">
-<section class="wrap tracks-head">
-  <div class="section-title"><div><span class="mono-label">/ tracks · program 01</span><h1>{PROGRAMS[0]['name']} skill map</h1>
-    <p class="section-sub">{len(tracks)} tracks, {n_lessons:,} lessons. Branches show what unlocks what — press + on a track to reveal its topics, click anything to open it.</p></div>
+    chips = "".join(
+        (f'<button class="prog-chip" disabled style="--c:{pg["color"]}"><i></i>{pg["name"]} <em>soon</em></button>' if pg["soon"] else
+         f'<a class="prog-chip" href="#{pg["id"]}" data-program="{pg["id"]}" style="--c:{pg["color"]}"><i></i>{pg["name"]}<em>{pg["meta"]}</em></a>')
+        for pg in PROGRAM_NAV)
+
+    # DevOps & SRE: the skill map, or a note on where the lessons should be
+    if tracks:
+        devops = f"""<div class="tp-head"><p class="section-sub">{len(tracks)} tracks, {n_lessons:,} lessons. Branches show what unlocks what — press + on a track to reveal its topics, click a lesson to start it.</p>
     <div class="seg" data-tracks-view><button data-v="map" class="is-active">{ICON['map']}Map</button><button data-v="list">{ICON['book']}List</button></div></div>
-  <div class="prog-chips">{progs}</div>
-</section>
-<section class="wrap-wide map-wrap" data-view-pane="map">
+  <div class="map-wrap" data-view-pane="map">
   <div class="mindmap" data-mindmap tabindex="0" aria-label="Skill map. Drag to pan, scroll or pinch to zoom.">
     <svg class="mm-edges" data-mm-edges aria-hidden="true"></svg>
     <div class="mm-layer" data-mm-layer></div>
@@ -828,14 +836,70 @@ def render_tracks(tracks):
     </div>
     <div class="mm-legend mono-label"><span><i class="s-done"></i>completed</span><span><i class="s-cur"></i>you are here</span><span><i class="s-start"></i>started</span><span><i class="s-new"></i>not started</span></div>
     <aside class="mm-panel" data-mm-panel hidden></aside>
-  </div>
+  </div></div>
+  <div class="library" data-view-pane="list" hidden>
+    <div class="path-status" data-path-status></div>
+    <ol class="path">{path_steps(tracks, root)}</ol>
+  </div>"""
+    else:
+        devops = f"""<div class="missing panel">
+    <h3>Your DevOps &amp; SRE lessons weren’t found</h3>
+    <p>They aren’t part of this repository — they come from your saved <code>learn</code> folder (one sub-folder per track).
+       This copy was built without it, so there’s nothing to show here yet.</p>
+    <ol><li>Put your <code>learn</code> folder <b>next to</b> this <code>learn-ui</code> folder, so the two sit side by side.</li>
+      <li>Stop the site (Ctrl+C) and start it again: <code>python3 run.py</code><br>…or point at it directly: <code>python3 run.py --learn /path/to/learn</code></li></ol>
+  </div>"""
+
+    # DSA: the roadmap; a topic expands in place to its problems
+    dsa = ""
+    if "dsa" in sheets:
+        sh = sheets["dsa"]
+        rows = "".join(f"""<tr class="rt-row" data-expand="{t['id']}" data-progress-prefix="{t['prefix']}" data-progress-total="{t['total']}">
+  <td class="pn">{int(t['num'])}</td>
+  <td><button class="rt-name" type="button" aria-expanded="false">{html.escape(t['name'])}</button>{f'<span class="rt-note">{html.escape(t["note"])}</span>' if t['note'] else ''}</td>
+  <td class="r">{t['total']}</td><td class="r"><b data-progress-count>0</b></td>
+  <td><div class="rt-bar"><div class="progress-bar"><span></span></div><em data-progress-pct>0%</em></div></td>
+  <td class="r"><span class="chev">{ICON['chev']}</span></td>
+</tr><tr class="rt-exp" data-expanded="{t['id']}" hidden><td colspan="6"><div class="rt-inner" data-inline-rows="{t['id']}"></div>
+  <a class="lk lk-open" href="{root}dsa/{t['slug']}/index.html">Open {html.escape(t['name'])} with filters {ICON['right']}</a></td></tr>""" for t in sh["topics"])
+        dsa = f"""<div class="tp-head"><p class="section-sub">Striver's A2Z sheet — {len(sh['topics'])} topics, {sh['total']} problems. Click a topic to see its problems right here.</p>
+    <div class="tp-links"><a class="lk" href="{root}dsa/index.html#r">Revision</a><a class="lk" href="{root}dsa/index.html#b">Bookmarks</a></div></div>
+  <div class="table-wrap"><table class="rt">
+    <thead><tr><th class="pn">#</th><th>Topic</th><th class="r">Problems</th><th class="r">Solved</th><th>Progress</th><th class="r"></th></tr></thead>
+    <tbody>{rows}</tbody></table></div>"""
+
+    # System Design: topics expand to their concepts
+    sd = ""
+    if "system-design" in sheets:
+        sh = sheets["system-design"]
+        cards = "".join(f"""<details class="topic-card" data-topic="{t['prefix']}">
+  <summary><span class="topic-num">{t['num']}</span><span class="topic-main"><span class="topic-title">{html.escape(t['name'])}</span><span class="meta">{t['total']} concepts</span></span>
+    {progress(t['prefix'], t['total'])}<span class="chev">{ICON['chev']}</span></summary>
+  <ol class="item-list flat">{''.join(item_row(sh, it, f"{root}system-design/{t['slug']}/index.html") for sb in t['subs'] for it in sb['items'])}</ol>
+</details>""" for t in sh["topics"])
+        sd = f'<div class="tp-head"><p class="section-sub">{len(sh["topics"])} topics, {sh["total"]} concepts. Open a topic and tick concepts off as you learn them.</p></div><div class="topic-list">{cards}</div>'
+
+    # Backend: chapters expand to their sections
+    bk = ""
+    if be:
+        cards = "".join(f"""<details class="topic-card" data-topic="{c['prefix']}">
+  <summary><span class="topic-num">{c['num']}</span><span class="topic-main"><span class="topic-title">{html.escape(c['title'])}</span><span class="meta">{len(c['sections'])} sections · {html.escape(c['reading'])}</span></span>
+    {progress(c['prefix'], max(1, len(c['sections'])))}<span class="chev">{ICON['chev']}</span></summary>
+  <ol class="item-list flat">{''.join(f'<li class="item" data-lesson="{x["id"]}"><button class="it-check" type="button" data-toggle-done aria-label="Mark section done">{ICON["check"]}</button><span class="it-main"><a class="it-title" href="{root}backend/{c["slug"]}/index.html#{x["anchor"]}">{html.escape(x["title"])}</a></span></li>' for x in c['sections'])}</ol>
+  <a class="topic-open" href="{root}backend/{c['slug']}/index.html">Read chapter {c['num']} {ICON['right']}</a>
+</details>""" for c in be["chapters"])
+        bk = f'<div class="tp-head"><p class="section-sub">Backend from First Principles — {len(be["chapters"])} chapters, {be["total"]} sections, by {SOURCES["backend"]["author"]}.</p></div><div class="topic-list">{cards}</div>'
+
+    panes = "".join(f'<section class="tp-pane" data-program-pane="{pid}" hidden>{body}</section>'
+                    for pid, body in (("devops", devops), ("dsa", dsa), ("system-design", sd), ("backend", bk)) if body)
+    body = f"""<main id="main" class="app app-tracks">
+<section class="wrap tracks-head">
+  <div class="section-title"><div><span class="mono-label">/ tracks</span><h1 data-program-title>Tracks</h1></div></div>
+  <div class="prog-chips">{chips}</div>
 </section>
-<section class="wrap library" data-view-pane="list" hidden>
-  <div class="path-status" data-path-status></div>
-  <ol class="path">{path_steps(tracks, root)}</ol>
-</section>
+<section class="wrap-wide tracks-body">{panes}</section>
 </main>"""
-    return page(title=f"Tracks · {SITE}", desc="Skill map of every track.", root=root, body=body, kind="tracks")
+    return page(title=f"Tracks · {SITE}", desc="Every program and track in one place.", root=root, body=body, kind="tracks")
 
 
 def render_404():
@@ -859,18 +923,24 @@ def render_brain():
    <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title" data-brain-path>cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
    <div class="console-screen brain-stage" data-brain-stage>
     <canvas data-brain="full" aria-label="Interactive 3D brain"></canvas>
+    <canvas class="world-canvas" data-world hidden aria-label="Program world: topics as stars"></canvas>
     <div class="stage-top">
-      <nav class="brain-crumbs" data-brain-crumbs aria-label="Brain level"></nav>
+      <nav class="brain-crumbs" data-brain-crumbs aria-label="Where you are"></nav>
       <h1 data-level-title>Your brain</h1>
-      <p class="stage-sub" data-level-sub>Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to go inside it.</p>
+      <p class="stage-sub" data-level-sub></p>
     </div>
     <dl class="stage-stats">
-      <div><dt>Neurons</dt><dd data-stat="neurons">0</dd></div>
-      <div><dt>Synapses</dt><dd data-stat="synapses">0</dd></div>
-      <div><dt data-regions-label>Lobes active</dt><dd data-stat="regions">0</dd></div>
+      <div><dt data-s1-label>Neurons</dt><dd data-s1>0</dd></div>
+      <div><dt data-s2-label>Synapses</dt><dd data-s2>0</dd></div>
+      <div><dt data-s3-label>Lobes active</dt><dd data-s3>0</dd></div>
     </dl>
-    <button class="stage-up" data-brain-up hidden>{ICON['left']}<span>Back out</span></button>
-    <p class="stage-tip mono-label">Drag to rotate · scroll to zoom · click to go inside</p>
+    <button class="stage-up" data-brain-up hidden>{ICON['left']}<span>Back</span></button>
+    <div class="world-tools" data-world-tools hidden>
+      <button class="icon-btn" data-wz="in" aria-label="Zoom in">{ICON['plus']}</button>
+      <button class="icon-btn" data-wz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+      <button class="icon-btn" data-wz="fit" aria-label="Show the whole world"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </div>
+    <p class="stage-tip mono-label" data-stage-tip>Click a lobe to see its connections · double-click to enter its world</p>
     <div class="stage-time mono-label" data-time-label hidden></div>
     <div class="brain-tooltip" data-brain-tooltip hidden></div>
    </div>
@@ -883,7 +953,7 @@ def render_brain():
      <div class="tl-meta"><span class="mono-label">Growth</span><b data-time-date>Today</b><span data-time-delta></span></div>
    </div>
   </section>
-  <aside class="region-panel" data-region-list aria-label="Brain regions"></aside>
+  <aside class="region-panel" data-region-list aria-label="Details"></aside>
 </div>""")
 
 
@@ -1034,7 +1104,7 @@ def sheet_banner(root, sh, num, crumb_items, kicker, title, meta, actions):
     return banner(root, dict(color=sh["color"], num=num), crumbs(root, crumb_items), kicker, title, meta, actions)
 
 
-def item_row(sh, it):
+def item_row(sh, it, base=""):
     if sh["lobe"] == "dsa":
         links = "".join(f'<a href="{html.escape(url)}" target="_blank" rel="noopener">{label}</a>' for label, url in it["links"])
         body = (f'<span class="it-main"><a class="it-title" href="#{it["anchor"]}">{html.escape(it["name"])}</a>'
@@ -1043,7 +1113,7 @@ def item_row(sh, it):
                 f'<span class="it-links">{links}</span>')
         level = f' data-level="{it["level"]}"'
     else:
-        body = (f'<span class="it-main"><a class="it-title" href="#{it["anchor"]}">{html.escape(it["name"])}</a>'
+        body = (f'<span class="it-main"><a class="it-title" href="{base}#{it["anchor"]}">{html.escape(it["name"])}</a>'
                 f'<span class="it-desc">{html.escape(it["desc"])}</span></span>')
         level = ""
     return (f'<li class="item" id="{it["anchor"]}" data-lesson="{it["id"]}"{level}>'
@@ -1056,7 +1126,7 @@ REV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
 
 
-def dsa_row(it, n, sol_prefix="../solution/"):
+def dsa_row(it, n, sol_prefix="../solution/", base=""):
     """One problem, laid out like the dsapractice roadmap: solved, bookmark, revision, pattern, practice links, notes."""
     name = html.escape(it["name"])
     links = "".join(f'<a class="lk {LINK_TONE[label]}" href="{html.escape(url)}" target="_blank" rel="noopener">{label}</a>'
@@ -1068,7 +1138,7 @@ def dsa_row(it, n, sol_prefix="../solution/"):
            + (f'<p class="mono-label">Brute force</p><p>{html.escape(h["brute"])}</p>' if h.get("brute") else "")
            + (f'<p class="mono-label">Approach</p><p>{html.escape(h["approach"])}</p>' if h.get("approach") else ""))
     return (f'<tr class="prob" id="{it["anchor"]}" data-lesson="{it["id"]}" data-level="{it["level"]}">'
-            f'<td class="pn">{n}</td><td class="pt"><a href="#{it["anchor"]}">{name}</a></td>'
+            f'<td class="pn">{n}</td><td class="pt"><a href="{base}#{it["anchor"]}">{name}</a></td>'
             f'<td><span class="diff {DIFF_CLASS.get(it["level"], "")}">{it["level"]}</span></td>'
             f'<td class="c"><button class="it-check" type="button" data-toggle-done aria-label="Solved: {name}">{ICON["check"]}</button></td>'
             f'<td class="c"><button class="mk mk-b" type="button" data-mark="b" aria-label="Bookmark: {name}" title="Bookmark">{STAR}</button></td>'
@@ -1465,6 +1535,14 @@ def main():
     if not tracks and not sheets and not be:
         sys.exit(f"nothing to build: no lessons in {SRC} and no data/ sheets")
     TRACKS[:] = tracks
+    info = {"devops": (devops_prefix(tracks), sum(t["n_lessons"] for t in tracks), f"{len(tracks)} tracks · {sum(t['n_lessons'] for t in tracks)} lessons" if tracks else "lessons not found", "map")}
+    for sh in sheets.values():
+        info[sh["lobe"]] = (sh["prefix"], sh["total"], sh["meta"], "code" if sh["lobe"] == "dsa" else "design")
+    if be:
+        info["backend"] = (be["prefix"], be["total"], f"{len(be['chapters'])} chapters · {be['total']} sections", "server")
+    PROGRAM_NAV[:] = [dict(id=l["id"], name=l["name"], color=l["color"], prefix=info[l["id"]][0], total=max(1, info[l["id"]][1]), meta=info[l["id"]][2],
+                           icon=info[l["id"]][3], soon=False) if l["id"] in info else
+                      dict(id=l["id"], name=l["name"], color=l["color"], meta="coming soon", icon="brain", soon=True) for l in LOBES]
     if OUT.exists():
         shutil.rmtree(OUT)
     shutil.copytree(HERE / "assets", OUT / "assets")
@@ -1512,7 +1590,7 @@ def main():
                     index.append([it["name"], f"{href}#{it['anchor']}", sh["short"] + " · " + t["name"], sb["name"] or t["name"], "l",
                                   " ".join(x for x in (it.get("level"), it.get("meta"), it.get("desc")) if x)])
     write(OUT / "brain" / "index.html", render_brain())
-    write(OUT / "tracks" / "index.html", render_tracks(tracks))
+    write(OUT / "tracks" / "index.html", render_tracks(tracks, sheets, be))
     idx = {t["slug"]: i for i, t in enumerate(tracks)}
     write(OUT / "assets" / "map-data.js", "window.BB_MAP=" + json.dumps({
         "tracks": [dict(slug=t["slug"], num=t["num"], title=strip_tags(t["title"]), q=QUESTIONS.get(t["slug"], ""), color=t["color"],
@@ -1547,7 +1625,8 @@ def main():
     tree = brain_tree(tracks, sheets, be)
     if "dsa" in sheets:
         write(OUT / "assets" / "dsa-rows.js", "window.BB_DSA_ROWS=" + json.dumps(
-            {it["id"]: [f"{t['slug']}/index.html", t["name"], dsa_row(it, 0, "solution/")] for t in sheets["dsa"]["topics"] for sb in t["subs"] for it in sb["items"]},
+            {it["id"]: [t["slug"], t["name"], sb["name"], dsa_row(it, 0, "{ROOT}dsa/solution/", "{ROOT}dsa/" + t["slug"] + "/index.html")]
+             for t in sheets["dsa"]["topics"] for sb in t["subs"] for it in sb["items"]},
             ensure_ascii=False, separators=(",", ":")) + ";")
 
     def count(node):
@@ -1562,6 +1641,7 @@ def main():
         "domains": [dict(id=d["id"], name=d["name"], short=d["short"], color=d["color"], anchor=d["anchor"], href=d.get("href", ""),
                          blurb=d["blurb"], soon=not lobe_totals.get(d["id"]), total=lobe_totals.get(d["id"], 0)) for d in LOBES],
         "aliases": DOMAIN_ALIASES,
+        "links": [list(l) for l in LOBE_LINKS],
         "tracks": tracks_map,
         "total": sum(lobe_totals.values()),
         "pathTotal": sum(t["n_lessons"] for t in tracks),

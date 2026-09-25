@@ -452,13 +452,23 @@
   // ({id: text}); like everything bb-*, they sync to your account.
   BB.marks = function () { return load("bb-dsa-marks", {}); };
   BB.notes = function () { return load("bb-dsa-notes", {}); };
-  if (PAGE === "dsa" || PAGE === "sd" || PAGE === "be-chapter") {
+  // Problem rows for the Revision/Bookmarks tabs and the Tracks page load on demand.
+  BB.dsaRows = function (cb) {
+    if (window.BB_DSA_ROWS) return cb(window.BB_DSA_ROWS);
+    var sc = document.createElement("script"); sc.src = ROOT + "assets/dsa-rows.js";
+    sc.onload = function () { cb(window.BB_DSA_ROWS || {}); };
+    document.head.appendChild(sc);
+  };
+  BB.dsaRowHtml = function (r, n) {
+    return r[3].split("{ROOT}").join(ROOT).replace('<td class="pn">0</td>', '<td class="pn">' + n + "</td>");
+  };
+  if (PAGE === "dsa" || PAGE === "sd" || PAGE === "be-chapter" || PAGE === "tracks") {
     var statusSel = $("[data-status-filter]"), levelSel = $("[data-level-filter]"), hideDone = $("[data-hide-done]");
     var paintSheet = function () {
       var marks = BB.marks(), notes = BB.notes();
       if (tab && tab !== "roadmap") renderCollection();
       var st = statusSel ? statusSel.value : "all", lv = levelSel ? levelSel.value : "all", hide = hideDone && hideDone.checked, shown = 0, all = 0;
-      $$(".sheet [data-lesson], [data-coll-body] [data-lesson]").forEach(function (row) {
+      $$(".prob[data-lesson], .item[data-lesson]").forEach(function (row) {
         var id = row.getAttribute("data-lesson"), done = BB.isDone(id), m = marks[id] || {};
         row.classList.toggle("is-done", done);
         $$("[data-mark]", row).forEach(function (b) { var on = !!m[b.getAttribute("data-mark")]; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
@@ -535,18 +545,20 @@
       if (!body) return;
       if (!rows) {
         body.innerHTML = '<tr><td colspan="8" class="coll-empty">Loading…</td></tr>';
-        var sc = document.createElement("script"); sc.src = ROOT + "assets/dsa-rows.js"; sc.onload = function () { renderCollection(); paintSheet(); };
-        document.head.appendChild(sc); return;
+        BB.dsaRows(function () { renderCollection(); paintSheet(); });
+        return;
       }
       var marks = BB.marks(), ids = Object.keys(rows).filter(function (id) { return (marks[id] || {})[tab]; }), last = null, html = "";
       ids.forEach(function (id, i) {
         var r = rows[id];
-        if (r[1] !== last) { html += '<tr class="coll-topic"><td colspan="8"><a href="' + esc(r[0]) + '">' + esc(r[1]) + " →</a></td></tr>"; last = r[1]; }
-        html += r[2].replace('<td class="pn">0</td>', '<td class="pn">' + (i + 1) + "</td>").replace(/href="#(p\d+)"/, 'href="' + esc(r[0]) + '#$1"');
+        if (r[1] !== last) { html += '<tr class="coll-topic"><td colspan="8"><a href="' + esc(r[0]) + '/index.html">' + esc(r[1]) + " →</a></td></tr>"; last = r[1]; }
+        html += BB.dsaRowHtml(r, i + 1);
       });
       body.innerHTML = html || '<tr><td colspan="8" class="coll-empty">' + (tab === "r" ? "Nothing to revise yet — press the ↻ button on a problem to add it here." : "No bookmarks yet — press ☆ on a problem to save it here.") + "</td></tr>";
       $("[data-coll-sub]").textContent = tab === "r" ? "Revisit these problems when you are ready." : "Your saved problems in one place.";
     };
+    if (location.hash === "#r" || location.hash === "#b") setTimeout(function () { var tb = $('[data-dsa-tabs] [data-tab="' + location.hash.slice(1) + '"]'); if (tb) tb.click(); }, 0);
+    BB.paintSheet = function () { paintSheet(); };
     $$("[data-dsa-tabs] button").forEach(function (b) {
       b.addEventListener("click", function () {
         tab = b.getAttribute("data-tab");

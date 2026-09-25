@@ -65,21 +65,34 @@ section list on the right, and the full text with diagrams, callouts, step diagr
 Go / Python / JavaScript / TypeScript / Java tabs (your language choice is remembered). Tick each
 section as you finish it — every section is a neuron in the Backend lobe.
 
+## Tracks
+
+The navbar has one **Tracks** item; hover it for every program (DevOps & SRE, DSA, System Design,
+Backend) with your progress. The Tracks page is the hub: the program chips switch the content in
+place — the DevOps skill map, the DSA roadmap (click a topic to see its problems right there), System
+Design topics and Backend chapters (expand to tick off concepts/sections). You only leave the page
+when you open a lesson, problem or chapter to learn it.
+
 ## The brain
 
 Every program is a lobe. Lessons, solved problems and learned concepts light neurons in their lobe;
-focus minutes wire the rest. The brain physically grows as more of it is wired.
+focus minutes wire the rest, and the brain physically grows as more of it is wired.
 
-On the Brain page, **click a lobe to go inside it** — its tracks/topics become the regions, click
-again for subtopics, and at the bottom each patch of neurons is a single lesson or problem you can
-tick off. Breadcrumbs, **Back out** or `Esc` go back up; the URL (`brain/index.html#dsa/t03`) links
-straight to any level. The timeline under the brain charts your growth — drag it to see your brain
-on any past day, or press ▶ to replay how it grew.
+- **Click a lobe** to see its connections: glowing arcs to the programs it feeds into (DSA → Backend:
+  "data structures behind caches, indexes and queues"…), listed in the side panel.
+- **Double-click** (or *Enter world*) to fly inside. Each program is its own **world**: a galaxy where
+  topics are stars strung along a spiral learning path, with subtopics and single lessons/problems
+  orbiting them. Learned stars shine; the path lights up as you complete topics.
+- In a world: drag to move, scroll/pinch to zoom, click a star for its connections, double-click to
+  fly into it (or open a lesson/problem). **Back**, the breadcrumbs or `Esc` take you out again.
+- Links such as `brain/index.html#dsa/t03` open straight into a world. The timeline under the stage
+  charts your growth — drag it to see any past day, or press ▶ to replay it.
 
 ## Quickest way to see it (no Docker)
 
 ```bash
 python3 run.py      # builds, starts the server and opens http://localhost:8765
+python3 run.py --learn /path/to/learn   # if your DevOps lessons folder isn't next to this one
 ```
 
 ## Develop without Docker
