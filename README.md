@@ -32,7 +32,7 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 
 ## Layout
 
-| Path | What it is |
+| Path | What it is ? |
 | --- | --- |
 | `build.py` | Parses `../learn` and generates every page; `DOMAINS` maps tracks to brain regions |
 | `assets/style.css` | Design system (dark + light themes) |
