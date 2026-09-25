@@ -1,0 +1,1281 @@
+
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X-Ray Architecture: The Daemon &amp; The UDP Sidecar - HamChops</title>
+    <meta name="description" content="You do not just &quot;turn on&quot; X-Ray with a checkbox. You must instrument your code — meaning you integrate the X-Ray SDK into your application so it can observe">
+    <link rel="canonical" href="index.html">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="X-Ray Architecture: The Daemon &amp; The UDP Sidecar — HamChops">
+    <meta property="og:description" content="You do not just &quot;turn on&quot; X-Ray with a checkbox. You must instrument your code — meaning you integrate the X-Ray SDK into your application so it can observe">
+    <meta property="og:image" content="https://hamchops.com/static/images/logo.png">
+    <meta property="og:url" content="https://hamchops.com/learn/aws-mastery-the-reference-implementation/deep-observability-xray/x-ray-architecture-the-daemon-the-udp-sidecar/">
+    <meta property="og:site_name" content="HamChops">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="X-Ray Architecture: The Daemon &amp; The UDP Sidecar — HamChops">
+    <meta name="twitter:description" content="You do not just &quot;turn on&quot; X-Ray with a checkbox. You must instrument your code — meaning you integrate the X-Ray SDK into your application so it can observe">
+    <meta name="twitter:image" content="https://hamchops.com/static/images/logo.png">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="https://hamchops.com/static/images/logo.svg">
+    <link rel="icon" type="image/png" href="https://hamchops.com/static/images/logo.png">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="https://hamchops.com/static/manifest.json">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HamChops">
+    <link rel="apple-touch-icon" href="https://hamchops.com/static/images/logo.png">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fef3e2',
+                            100: '#fde4bd',
+                            200: '#fbc878',
+                            300: '#f9a933',
+                            400: '#f59e0b',
+                            500: '#d97706',
+                            600: '#b45309',
+                            700: '#92400e',
+                            800: '#78350f',
+                            900: '#451a03',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4f46e5 100%);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+    </style>
+    
+    
+<style>
+    /* Readability: constrain line length and comfortable font size */
+    .lesson-content {
+        font-size: 1.0625rem;
+        line-height: 1.8;
+    }
+    /* Code highlighting */
+    .codehilite { position: relative; background: #1e293b; border-radius: 12px; padding: 1rem; overflow-x: visible; padding-top: 2.25rem; }
+    .codehilite pre { margin: 0; color: #e2e8f0; white-space: pre-wrap; word-break: break-all; }
+    .codehilite code { color: #e2e8f0; white-space: pre-wrap; word-break: break-all; }
+    .dark .codehilite { background: #0f172a; }
+    .dark .codehilite pre, .dark .codehilite code { color: #e2e8f0; }
+    /* Copy button on code blocks */
+    .lesson-content .codehilite .copy-code-btn {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: none;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.15);
+        color: #e2e8f0;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s, color 0.15s;
+    }
+    .lesson-content .codehilite .copy-code-btn:hover {
+        background: rgba(255, 255, 255, 0.25);
+        color: #fff;
+    }
+    .lesson-content .codehilite .copy-code-btn:active {
+        background: rgba(255, 255, 255, 0.2);
+    }
+    .lesson-content .codehilite .copy-code-btn.copied {
+        background: rgba(34, 197, 94, 0.4);
+        color: #86efac;
+    }
+
+    /* Prose styling for markdown content */
+    .lesson-content h1, .lesson-content h2, .lesson-content h3,
+    .lesson-content h4, .lesson-content h5, .lesson-content h6 {
+        color: #0f172a;
+        font-weight: 700;
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+    }
+    .lesson-content h1 { font-size: 1.875rem; }
+    .lesson-content h2 { font-size: 1.5rem; }
+    .lesson-content h3 { font-size: 1.25rem; }
+    .lesson-content p { margin: 1em 0; line-height: 1.8; color: #475569; }
+    .lesson-content ul, .lesson-content ol { margin: 1em 0; padding-left: 1.5em; }
+    .lesson-content li { margin: 0.5em 0; line-height: 1.8; color: #475569; }
+    .lesson-content code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 6px; font-size: 0.9em; color: #7c3aed; }
+    .lesson-content pre code { background: none; padding: 0; color: inherit; }
+    .lesson-content blockquote { border-left: 4px solid #6366f1; padding-left: 1em; margin: 1.5em 0; color: #64748b; font-style: italic; }
+    .lesson-content a { color: #6366f1; text-decoration: underline; }
+    .lesson-content a:hover { color: #4f46e5; }
+    .lesson-content img { max-width: 100%; border-radius: 12px; margin: 1.5em 0; transition: filter 0.2s, opacity 0.2s; }
+    .dark .lesson-content img { opacity: 0.9; filter: invert(1) hue-rotate(180deg); }
+    /* ── Table base ── */
+    .lesson-content .table-wrapper {
+        overflow-x: auto;
+        margin: 1.75em 0;
+        max-width: min(100vw - 3rem, 900px);
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.07), 0 0 0 1px #e2e8f0;
+        position: relative;
+        background:
+            linear-gradient(to right, #ffffff 30%, rgba(255,255,255,0)) 0 0,
+            linear-gradient(to left, #ffffff 30%, rgba(255,255,255,0)) 100% 0,
+            radial-gradient(farthest-side at 0 50%, rgba(15,23,42,0.18), rgba(15,23,42,0)) 0 0,
+            radial-gradient(farthest-side at 100% 50%, rgba(15,23,42,0.18), rgba(15,23,42,0)) 100% 0;
+        background-repeat: no-repeat;
+        background-color: #ffffff;
+        background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+        background-attachment: local, local, scroll, scroll;
+    }
+    .dark .lesson-content .table-wrapper {
+        background:
+            linear-gradient(to right, #0f172a 30%, rgba(15,23,42,0)) 0 0,
+            linear-gradient(to left, #0f172a 30%, rgba(15,23,42,0)) 100% 0,
+            radial-gradient(farthest-side at 0 50%, rgba(0,0,0,0.45), rgba(0,0,0,0)) 0 0,
+            radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,0.45), rgba(0,0,0,0)) 100% 0;
+        background-repeat: no-repeat;
+        background-color: #0f172a;
+        background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+        background-attachment: local, local, scroll, scroll;
+    }
+    /* Mobile: explicit "swipe →" hint above wide tables */
+    .lesson-content .table-scroll-hint { display: none; }
+    @media (max-width: 768px) {
+        .lesson-content .table-scroll-hint {
+            display: flex;
+            align-items: center;
+            gap: 0.35em;
+            font-size: 0.72rem;
+            color: #64748b;
+            margin: 0.5em 0 -0.75em 0.25em;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+        .dark .lesson-content .table-scroll-hint { color: #94a3b8; }
+    }
+    .lesson-content .table-wrapper table {
+        margin: 0;
+        width: max-content;
+        min-width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+    .lesson-content .table-wrapper th {
+        background: #f1f5f9;
+        font-weight: 600;
+        color: #374151;
+        padding: 0.6em 1em;
+        text-align: left;
+        white-space: nowrap;
+        border-bottom: 2px solid #cbd5e1;
+        letter-spacing: 0.02em;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+    }
+    .lesson-content .table-wrapper td {
+        padding: 0.55em 1em;
+        border-bottom: 1px solid #f1f5f9;
+        color: #374151;
+        vertical-align: top;
+        line-height: 1.55;
+    }
+    .lesson-content .table-wrapper tr:last-child td { border-bottom: none; }
+    .lesson-content .table-wrapper tbody tr:nth-child(even) td { background: #fafbff; }
+    .lesson-content .table-wrapper tbody tr:hover td { background: #eff6ff; transition: background 0.12s; }
+    /* Numeric-only cells: centered badge */
+    .lesson-content .table-wrapper td.num-cell {
+        text-align: center;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        width: 3rem;
+    }
+    /* Scale-row color classes (added by JS when first col is 1–5) */
+    .lesson-content .table-wrapper tr[data-scale="1"] td:first-child { color: #16a34a; }
+    .lesson-content .table-wrapper tr[data-scale="2"] td:first-child { color: #65a30d; }
+    .lesson-content .table-wrapper tr[data-scale="3"] td:first-child { color: #d97706; }
+    .lesson-content .table-wrapper tr[data-scale="4"] td:first-child { color: #ea580c; }
+    .lesson-content .table-wrapper tr[data-scale="5"] td:first-child { color: #dc2626; }
+    /* Dark mode tables */
+    .dark .lesson-content .table-wrapper {
+        box-shadow: 0 1px 4px rgba(0,0,0,0.3), 0 0 0 1px #334155;
+    }
+    .dark .lesson-content .table-wrapper th {
+        background: #1e293b;
+        color: #94a3b8;
+        border-bottom-color: #334155;
+    }
+    .dark .lesson-content .table-wrapper td {
+        border-bottom-color: #1e293b;
+        color: #cbd5e1;
+    }
+    .dark .lesson-content .table-wrapper tbody tr:nth-child(even) td { background: #0f172a; }
+    .dark .lesson-content .table-wrapper tbody tr:hover td { background: #1e3a5f; }
+    .dark .lesson-content .table-wrapper { scrollbar-color: #475569 #1e293b; }
+    .lesson-content strong { color: #0f172a; }
+
+    /* Dark mode: lesson content */
+    .dark .lesson-content h1, .dark .lesson-content h2, .dark .lesson-content h3,
+    .dark .lesson-content h4, .dark .lesson-content h5, .dark .lesson-content h6 { color: #f1f5f9; }
+    .dark .lesson-content p, .dark .lesson-content li { color: #cbd5e1; }
+    .dark .lesson-content code { background: #334155; color: #c4b5fd; }
+    .dark .lesson-content pre code { background: transparent; color: inherit; }
+    .dark .lesson-content blockquote { border-left-color: #818cf8; color: #94a3b8; }
+    .dark .lesson-content a { color: #a5b4fc; }
+    .dark .lesson-content a:hover { color: #c7d2fe; }
+    .dark .lesson-content strong { color: #f1f5f9; }
+
+    /* Interview Tip callout – distinctive, not just text */
+    .lesson-content .interview-tip.callout {
+        margin: 1.5em 0;
+        padding: 0;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid #c7d2fe;
+        background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+        box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+    }
+    .dark .lesson-content .interview-tip.callout {
+        border-color: #4338ca;
+        background: linear-gradient(135deg, #312e81 0%, #3730a3 100%);
+        box-shadow: 0 2px 8px rgba(67, 56, 202, 0.3);
+    }
+    .lesson-content .interview-tip .callout-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%);
+        color: white;
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+    .lesson-content .interview-tip .callout-icon { font-size: 1.25rem; }
+    .lesson-content .interview-tip .callout-body {
+        padding: 1rem 1.25rem;
+        color: #334155;
+        line-height: 1.7;
+        font-size: 0.9375rem;
+    }
+    .dark .lesson-content .interview-tip .callout-body { color: #e2e8f0; }
+    .lesson-content .interview-tip .callout-body p { margin: 0.5em 0; }
+    .lesson-content .interview-tip .callout-body p:first-child { margin-top: 0; }
+    .lesson-content .interview-tip .callout-body p:last-child { margin-bottom: 0; }
+    .quiz-text p { margin: 0.35em 0; color: #334155; line-height: 1.7; }
+    .dark .quiz-text p { color: #cbd5e1; }
+    .quiz-text p:first-child { margin-top: 0; }
+    .quiz-text p:last-child { margin-bottom: 0; }
+    .quiz-text strong { color: #0f172a; }
+    .dark .quiz-text strong { color: #f1f5f9; }
+
+    /* Image containers */
+    .lesson-content .lesson-img-container {
+        margin: 1.5em 0;
+        text-align: center;
+    }
+
+    /* SVG diagram containers */
+    .lesson-content .lesson-svg-container {
+        margin: 2em auto;
+        text-align: center;
+    }
+    .lesson-content .lesson-svg-container svg {
+        width: 100%;
+        height: auto;
+        display: block;
+    }
+    /* Below xl (no TOC sidebar): break out of the article padding so wide
+       diagrams fill the lesson card content area (article p-6 / lg:p-8). */
+    @media (max-width: 1023px) {
+        .lesson-content .lesson-svg-container {
+            margin-left: -1.5rem;   /* matches article p-6 */
+            margin-right: -1.5rem;
+            width: calc(100% + 3rem);
+            max-width: none;
+        }
+    }
+    @media (min-width: 1024px) and (max-width: 1279px) {
+        .lesson-content .lesson-svg-container {
+            margin-left: -2rem;     /* matches article lg:p-8 */
+            margin-right: -2rem;
+            width: calc(100% + 4rem);
+            max-width: none;
+        }
+    }
+
+    /* ── TOC sidebar ── */
+    #lesson-toc a {
+        display: block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 6px;
+        color: #64748b;
+        text-decoration: none;
+        line-height: 1.4;
+        transition: background 0.1s, color 0.1s;
+        border-left: 2px solid transparent;
+    }
+    #lesson-toc a:hover {
+        background: #f1f5f9;
+        color: #4f46e5;
+    }
+    #lesson-toc a.toc-active {
+        color: #4f46e5;
+        background: #eef2ff;
+        border-left-color: #6366f1;
+        font-weight: 500;
+    }
+    .dark #lesson-toc a { color: #64748b; }
+    .dark #lesson-toc a:hover { background: #1e293b; color: #a5b4fc; }
+    .dark #lesson-toc a.toc-active { color: #a5b4fc; background: #1e2d4a; border-left-color: #818cf8; }
+</style>
+
+
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": "https://hamchops.com/"}, {"@type": "ListItem", "position": 2, "name": "AWS Mastery (The Reference Implementation)", "item": "https://hamchops.com/learn/aws-mastery-the-reference-implementation/"}, {"@type": "ListItem", "position": 3, "name": "Deep Observability: AWS X-Ray & Distributed Tracing", "item": "https://hamchops.com/learn/aws-mastery-the-reference-implementation/deep-observability-xray/"}, {"@type": "ListItem", "position": 4, "name": "X-Ray Architecture: The Daemon & The UDP Sidecar", "item": "https://hamchops.com/learn/aws-mastery-the-reference-implementation/deep-observability-xray/x-ray-architecture-the-daemon-the-udp-sidecar/"}]}</script>
+
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "DefinedTerm", "name": "X-Ray Architecture: The Daemon & The UDP Sidecar", "description": "You do not just \"turn on\" X-Ray with a checkbox. You must instrument your code — meaning you integrate the X-Ray SDK into your application so it can observe", "inDefinedTermSet": {"@type": "DefinedTermSet", "name": "HamChops DevOps & SRE Glossary"}}</script>
+
+
+
+    
+    <!-- Umami Analytics -->
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="a7f766ef-680c-4975-8398-90998466fd08"></script>
+    
+
+    
+    <!-- Google Consent Mode v2 — set defaults BEFORE loading gtag.js -->
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        // Deny everything by default — accept/decline buttons update later.
+        gtag('consent', 'default', {
+            'ad_storage': 'denied',
+            'ad_user_data': 'denied',
+            'ad_personalization': 'denied',
+            'analytics_storage': 'denied',
+            'functionality_storage': 'granted',
+            'security_storage': 'granted',
+            'wait_for_update': 500
+        });
+        // If user previously accepted, restore that immediately so this page view counts.
+        try {
+            if (localStorage.getItem('cookie-consent') === 'accepted') {
+                gtag('consent', 'update', {
+                    'ad_storage': 'granted',
+                    'ad_user_data': 'granted',
+                    'ad_personalization': 'granted',
+                    'analytics_storage': 'granted'
+                });
+            }
+        } catch (e) { /* localStorage blocked — stay denied */ }
+    </script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-6DL3KF8Q9D"></script>
+    <script>
+        gtag('js', new Date());
+        gtag('config', 'G-6DL3KF8Q9D', { 'anonymize_ip': true });
+    </script>
+
+    <!-- Google tag (gtag.js) — Google Ads -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18219238612"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'AW-18219238612');
+    </script>
+    
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 min-h-screen flex flex-col text-slate-900 dark:text-slate-100" hx-headers='{"X-CSRFToken": "a8Ka9lbdgt0dK5rpBHcIVZYUPuOuR60pC1lD6JoFNZDPh4yv9DmfTGNZbRi7NGzY"}'>
+    <!-- HTMX progress bar -->
+    <div id="htmx-progress" class="fixed top-0 left-0 h-1 bg-gradient-to-r from-indigo-500 to-purple-500 z-50 transition-all duration-300 opacity-0" style="width:0%"></div>
+
+    <!-- Navbar -->
+    <nav class="bg-white/80 dark:bg-slate-800/90 backdrop-blur-md shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center">
+                    <a href="https://hamchops.com/" class="flex items-center space-x-2">
+                        <img src="https://hamchops.com/static/images/logo.svg" alt="HamChops" class="h-10 w-10 object-contain">
+                        <span class="text-xl font-bold bg-gradient-to-r from-amber-500 to-orange-600 bg-clip-text text-transparent">HamChops</span>
+                    </a>
+                </div>
+
+                <!-- Mobile right-side controls -->
+                <div class="md:hidden flex items-center gap-2">
+                    
+                    <button id="mobile-menu-btn" class="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700" aria-label="Menu">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="hidden md:flex items-center space-x-3">
+                    
+                        <!-- XP Counter (click for level tiers) -->
+                        <button type="button" id="xp-counter" class="hidden sm:flex items-center space-x-2 bg-gradient-to-r from-amber-400 to-orange-500 text-white px-3 py-1.5 rounded-full text-sm font-bold hover:from-amber-500 hover:to-orange-600 transition-all cursor-pointer" title="Levels explained">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"/></svg>
+                            <span id="xp-value">140</span>
+                            <span class="text-xs opacity-80">XP</span>
+                            <span class="ml-1 bg-white/20 px-2 py-0.5 rounded-full text-xs">
+                                Lv <span id="level-value">1</span>
+                            </span>
+                        </button>
+                        <button type="button" onclick="document.getElementById('search-overlay').classList.remove('hidden');document.getElementById('search-overlay-input').focus();" class="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title="Search (Ctrl+K)">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                            <kbd class="hidden sm:inline-block text-[10px] text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-600 rounded px-1 py-0.5 font-sans">⌘K</kbd>
+                        </button>
+                        <a href="https://hamchops.com/learn/" class="text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-sm font-medium transition-colors">
+                            Roadmap
+                        </a>
+                        <a href="https://hamchops.com/learn/workout/" class="hidden md:block text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-sm font-medium transition-colors">
+                            Workout
+                        </a>
+                        
+                        <span class="hidden md:inline-block w-px h-5 bg-slate-200 dark:bg-slate-700"></span>
+                        <a href="https://hamchops.com/learn/onboarding/" class="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title="Preferences" aria-label="Preferences">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            </svg>
+                        </a>
+                        <a href="https://hamchops.com/accounts/logout/"
+                           class="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm font-medium transition-colors">
+                            Logout
+                        </a>
+                    
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile menu panel -->
+    <div id="mobile-menu" class="hidden md:hidden fixed top-16 left-0 right-0 z-40 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-lg">
+        <div class="px-4 py-3 space-y-2">
+            
+            <a href="https://hamchops.com/learn/search/" class="block px-3 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 font-medium">Search</a>
+            <a href="https://hamchops.com/learn/" class="block px-3 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 font-medium">Roadmap</a>
+            <a href="https://hamchops.com/learn/workout/" class="block px-3 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 font-medium">Workout</a>
+            <a href="https://hamchops.com/learn/onboarding/" class="block px-3 py-2 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 font-medium">Preferences</a>
+            <a href="https://hamchops.com/accounts/logout/" class="block px-3 py-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 font-medium">Logout</a>
+            
+        </div>
+    </div>
+
+    
+    <!-- Search overlay (Cmd+K) -->
+    <div id="search-overlay" class="hidden fixed inset-0 z-50">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="document.getElementById('search-overlay').classList.add('hidden')"></div>
+        <div class="relative max-w-2xl mx-auto mt-[10vh] px-4">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div class="flex items-center px-4 border-b border-slate-200 dark:border-slate-700">
+                    <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    <input type="text"
+                           name="q"
+                           id="search-overlay-input"
+                           placeholder="Search lessons..."
+                           autocomplete="off"
+                           hx-get="/learn/htmx/search/"
+                           hx-trigger="keyup changed delay:300ms, search"
+                           hx-target="#search-overlay-results"
+                           hx-indicator="#search-overlay-spinner"
+                           class="w-full px-3 py-4 bg-transparent text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none text-base">
+                    <div id="search-overlay-spinner" class="htmx-indicator flex-shrink-0">
+                        <svg class="animate-spin h-5 w-5 text-indigo-500" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+                    <kbd class="text-xs text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-600 rounded px-1.5 py-0.5 ml-2 flex-shrink-0">ESC</kbd>
+                </div>
+                <div id="search-overlay-results" class="max-h-[60vh] overflow-y-auto p-2">
+                    <div class="text-center py-8">
+                        <p class="text-sm text-slate-400 dark:text-slate-500">Start typing to search across all lessons</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Level tiers popover (shown when clicking XP/Lv) -->
+    <div id="level-tiers-overlay" class="hidden fixed inset-0 z-50" aria-hidden="true">
+        <div class="absolute inset-0 bg-black/40" id="level-tiers-backdrop"></div>
+        <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 max-h-[85vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="font-bold text-slate-900 dark:text-white">The Engineering Reality</h3>
+                <button type="button" id="level-tiers-close" class="p-1 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700" aria-label="Close">×</button>
+            </div>
+            <ul id="level-tiers-list" class="space-y-1.5 text-sm">
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">1–10</span><span class="font-medium text-slate-800 dark:text-slate-200">The Villager</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">11–20</span><span class="font-medium text-slate-800 dark:text-slate-200">Squire of the Script</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">21–30</span><span class="font-medium text-slate-800 dark:text-slate-200">Apprentice Alchemist</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">31–40</span><span class="font-medium text-slate-800 dark:text-slate-200">The Scout</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">41–50</span><span class="font-medium text-slate-800 dark:text-slate-200">Mercenary</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">51–60</span><span class="font-medium text-slate-800 dark:text-slate-200">Runbook Knight</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">61–70</span><span class="font-medium text-slate-800 dark:text-slate-200">Battle Mage</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">71–80</span><span class="font-medium text-slate-800 dark:text-slate-200">The Guardian</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">81–90</span><span class="font-medium text-slate-800 dark:text-slate-200">Grand Architect</span></li>
+                <li class="flex justify-between gap-2 py-1"><span class="text-slate-500 dark:text-slate-400">91–99</span><span class="font-medium text-slate-800 dark:text-slate-200">The Ancient One</span></li>
+                <li class="flex justify-between gap-2 py-1 border-t border-slate-200 dark:border-slate-600 mt-2 pt-2"><span class="text-slate-500 dark:text-slate-400">100</span><span class="font-medium text-amber-600 dark:text-amber-400">The Ghost in the Machine</span></li>
+            </ul>
+        </div>
+    </div>
+    
+
+    <!-- Main Content -->
+    <main class="flex-grow dark:bg-slate-900">
+        
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    
+
+    <!-- Breadcrumb (nav links disabled during workout to keep user in session) -->
+    <nav class="mb-6">
+        <ol class="flex items-center space-x-2 text-sm text-slate-500 dark:text-slate-400 flex-wrap">
+            <li><a href="https://hamchops.com/learn/" class="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">Learn</a></li>
+            <li class="text-slate-300 dark:text-slate-500">/</li>
+            <li><a href="../../index.html" class="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors truncate max-w-[100px] sm:max-w-[200px] inline-block" title="AWS Mastery (The Reference Implementation)">AWS Mastery (The Reference Implementation)</a></li>
+            <li class="text-slate-300 dark:text-slate-500">/</li>
+            <li><a href="https://hamchops.com/learn/aws-mastery-the-reference-implementation/deep-observability-xray/" class="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors truncate max-w-[100px] sm:max-w-[200px] inline-block" title="Deep Observability: AWS X-Ray &amp; Distributed Tracing">Deep Observability: AWS X-Ray &amp; Distributed Tracing</a></li>
+            <li class="text-xs text-slate-400 dark:text-slate-500 ml-1">(2/6)</li>
+        </ol>
+    </nav>
+
+    <!-- Lesson card -->
+    <article class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 px-6 py-8 text-white rounded-t-2xl">
+            
+            <h1 class="text-2xl md:text-3xl font-bold">X-Ray Architecture: The Daemon &amp; The UDP Sidecar</h1>
+            <div class="flex items-center gap-3 mt-3">
+                <span class="text-sm px-3 py-0.5 rounded-full bg-white/20 font-medium">CONCEPT</span>
+                <span class="text-sm text-indigo-200">3 min read</span>
+                
+                <span class="text-sm text-indigo-200">· Updated Apr 26, 2026</span>
+                
+            </div>
+        </div>
+
+        <!-- Content -->
+        <div class="p-6 lg:p-8">
+          <div class="xl:flex xl:gap-10 xl:items-start">
+            <!-- Main content column -->
+            <div class="xl:flex-1 xl:min-w-0">
+            
+            <!-- Regular Lesson Content -->
+            <div class="lesson-content">
+                <h3>How Tracing Actually Works</h3>
+<p>You do not just "turn on" X-Ray with a checkbox. You must <strong>instrument</strong> your code — meaning you integrate the <strong>X-Ray SDK</strong> into your application so it can observe and record what your code is doing.</p>
+<p>Here is the full data flow, step by step:</p>
+<p><strong>1. Interception (The SDK Wraps Your Calls)</strong><br />
+The SDK patches standard libraries. When your code calls <code>dynamodb.putItem()</code> or makes an outbound HTTP request, the SDK intercepts that call transparently. You do not rewrite your business logic — the SDK wraps it.</p>
+<p><strong>2. Propagation (The Trace Header)</strong><br />
+When your service makes an outbound call to another service, the SDK injects a special HTTP header: <code>X-Amzn-Trace-Id</code>. This header carries the Trace ID and the current Segment ID. The receiving service's SDK reads this header and knows it is part of an existing trace rather than a new one. This is how a single Trace ID follows a request across service boundaries.</p>
+<p><strong>3. The Daemon (The Local Buffer)</strong><br />
+The SDK does <em>not</em> send data directly to the X-Ray API. Doing so would add network latency to every operation your code performs. Instead, the SDK sends small <strong>UDP packets</strong> to a local <strong>X-Ray Daemon</strong> process listening on <code>127.0.0.1:2000</code>. UDP is fire-and-forget — your application thread does not wait for an acknowledgment.</p>
+<p><strong>4. Batching (The Daemon Uploads)</strong><br />
+The Daemon collects these UDP packets, buffers them in memory, and uploads them to the X-Ray API in batches over HTTPS. This decouples your application's performance from the observability pipeline.</p>
+<p><strong>Where Does the Daemon Run?</strong></p>
+<div class="table-scroll-hint" aria-hidden="true">swipe&nbsp;→</div><div class="table-wrapper"><table>
+<thead>
+<tr>
+<th>Environment</th>
+<th>Daemon Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AWS Lambda</td>
+<td>Built-in, managed by AWS. You only need to enable Active Tracing.</td>
+</tr>
+<tr>
+<td>Amazon ECS</td>
+<td>Run as a <strong>sidecar container</strong> in the same task definition.</td>
+</tr>
+<tr>
+<td>Amazon EC2</td>
+<td>Install and run as a <strong>background process</strong> (systemd service).</td>
+</tr>
+<tr>
+<td>AWS Fargate</td>
+<td>Run as a <strong>sidecar container</strong> (same as ECS).</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Critical Detail for ECS/Fargate:</strong> The sidecar container must share the network namespace with your application container so that <code>127.0.0.1:2000</code> resolves correctly. In ECS task definitions, containers in the same task share a network namespace by default — this is why the sidecar pattern works without extra configuration.</p>
+<div class="interview-tip callout"><div class="callout-header"><svg class="callout-icon" width="20" height="20" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3a1 1 0 10-2 0v.586l-1.707-1.707a1 1 0 00-1.414 1.414L7.586 5H7a4 4 0 00-4 4v1a1 1 0 001 1h1v3a2 2 0 002 2h6a2 2 0 002-2v-3h1a1 1 0 001-1V9a4 4 0 00-4-4h-.586l1.707-1.707a1 1 0 00-1.414-1.414L11 3.586V3z"/></svg><span class="callout-title">Interview Tip</span></div><div class="callout-body"><p>Interviewers frequently ask: "Why does the X-Ray SDK use UDP to communicate with the daemon instead of HTTP?" The answer has two parts: (1) UDP is non-blocking — your application thread does not wait for acknowledgment, so tracing adds near-zero latency to your hot path. (2) If the daemon is unavailable, UDP packets are silently dropped rather than causing your application to throw exceptions. Observability infrastructure should never be a single point of failure for your application.</p></div></div>
+            </div>
+            
+
+            
+            
+            <!-- Report Issue Button -->
+            
+            <div class="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700">
+                <button onclick="document.getElementById('report-modal').classList.remove('hidden')"
+                        class="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-sm flex items-center gap-1 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"></path>
+                    </svg>
+                    Report an issue
+                </button>
+            </div>
+            
+            </div><!-- /main content column -->
+
+            <!-- TOC sidebar — xl+ only, auto-generated from h3 headings -->
+            <aside id="lesson-toc-sidebar" class="hidden xl:block w-52 flex-shrink-0 self-start sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto">
+                <p class="text-[0.65rem] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2 px-1">On this page</p>
+                <nav id="lesson-toc" class="space-y-0.5 text-[0.8rem]"></nav>
+            </aside>
+          </div><!-- /xl:flex wrapper -->
+        </div>
+
+        
+
+        
+
+        <!-- Footer with complete button OR review grade panel -->
+        <div class="border-t border-slate-200 dark:border-slate-700 px-6 py-4 bg-slate-50 dark:bg-slate-800/50">
+            
+            <div class="flex items-center justify-between">
+                <!-- Navigation - Previous only (hidden in workout sessions) -->
+                <div class="flex items-center gap-4">
+                    
+                    <a href="../introduction-the-distributed-needle-in-a-haystack/index.html"
+                       class="text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center text-sm font-medium transition-colors">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                        Previous
+                    </a>
+                    
+                </div>
+
+                <!-- Complete button (HTMX) - will navigate to next on complete -->
+                <div id="complete-button-container"
+                     data-complete-url="/learn/htmx/complete/2333/" data-is-completed="false"
+                     
+                         data-prev-url="/learn/aws-mastery-the-reference-implementation/deep-observability-xray/introduction-the-distributed-needle-in-a-haystack/"
+                         data-next-url="/learn/aws-mastery-the-reference-implementation/deep-observability-xray/sampling-rules-managing-cost-noise/"
+                         
+                     >
+                    
+
+    
+        <button hx-post="/learn/htmx/complete/2333/"
+                hx-target="#complete-button-container"
+                hx-swap="innerHTML"
+                hx-indicator="#complete-spinner"
+                class="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600
+                       text-white font-semibold px-6 py-2.5 rounded-xl shadow-lg shadow-emerald-200
+                       transition-all duration-200 flex items-center space-x-2 hover:scale-105 active:scale-95
+                       disabled:opacity-50">
+            <svg id="complete-spinner" class="w-5 h-5 htmx-indicator animate-spin hidden" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+            <span>Mark Complete</span>
+        </button>
+    
+
+
+                </div>
+            </div>
+            
+        </div>
+    </article>
+    
+    <!-- Report Issue Modal -->
+    
+    <div id="report-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-700">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-slate-900 dark:text-slate-100">Report an Issue</h3>
+                <button onclick="document.getElementById('report-modal').classList.add('hidden')"
+                        class="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <form hx-post="/learn/htmx/report/2333/"
+                  hx-target="#report-form-content"
+                  hx-swap="innerHTML">
+                <input type="hidden" name="csrfmiddlewaretoken" value="a8Ka9lbdgt0dK5rpBHcIVZYUPuOuR60pC1lD6JoFNZDPh4yv9DmfTGNZbRi7NGzY">
+                
+                <div id="report-form-content">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Issue Type</label>
+                        <select name="issue_type" class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="TYPO">Typo</option>
+                            <option value="WRONG_INFO">Wrong Information</option>
+                            <option value="BROKEN_IMAGE">Broken Image</option>
+                            <option value="OTHER">Other</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Description (optional)</label>
+                        <textarea name="description" rows="3" 
+                                  class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                  placeholder="Tell us more about the issue..."></textarea>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button type="submit"
+                                class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                            Submit Report
+                        </button>
+                        <button type="button"
+                                onclick="document.getElementById('report-modal').classList.add('hidden')"
+                                class="px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+</div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 dark:bg-slate-950 text-slate-400 mt-auto">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div>
+                    <div class="flex items-center space-x-2 mb-3">
+                        <img src="https://hamchops.com/static/images/logo.svg" alt="HamChops" class="h-8 w-8 object-contain">
+                        <span class="font-bold text-white">HamChops</span>
+                    </div>
+                    <p class="text-sm leading-relaxed">DevOps, SRE & Platform Engineering Learning Platform. Master your craft with spaced repetition.</p>
+                </div>
+                <div>
+                    <h3 class="text-white font-semibold text-sm mb-3">Learn</h3>
+                    <ul class="space-y-2 text-sm">
+                        
+                        <li><a href="https://hamchops.com/learn/" class="hover:text-white transition-colors">Roadmap</a></li>
+                        <li><a href="https://hamchops.com/learn/workout/" class="hover:text-white transition-colors">Daily Workout</a></li>
+                        
+                        
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-white font-semibold text-sm mb-3">Support</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="https://hamchops.com/help/" class="hover:text-white transition-colors">Help</a></li>
+                        <li><a href="https://hamchops.com/privacy/" class="hover:text-white transition-colors">Privacy Policy</a></li>
+                        <li><a href="https://hamchops.com/terms/" class="hover:text-white transition-colors">Terms of Service</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-slate-800 mt-8 pt-6 text-center text-sm">
+                <p>&copy; 2026 HamChops. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Toast notification container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+    <script>
+        // Level tiers popover (click XP/Lv)
+        (function() {
+            var overlay = document.getElementById('level-tiers-overlay');
+            var counter = document.getElementById('xp-counter');
+            var backdrop = document.getElementById('level-tiers-backdrop');
+            var closeBtn = document.getElementById('level-tiers-close');
+            if (!overlay || !counter) return;
+            function openLevelTiers() {
+                overlay.classList.remove('hidden');
+                var lv = parseInt(document.getElementById('level-value').textContent, 10) || 1;
+                overlay.querySelectorAll('#level-tiers-list li').forEach(function(li) {
+                    var rangeText = li.querySelector('span').textContent.trim();
+                    var parts = rangeText.split(/[\u2013-]/);
+                    var low = parts[0] ? parseInt(parts[0], 10) : 0;
+                    var high = parts[1] ? parseInt(parts[1], 10) : low;
+                    if (lv >= low && lv <= high) {
+                        li.classList.add('bg-amber-100', 'dark:bg-amber-900/30', 'rounded-lg', 'px-2', '-mx-2');
+                    } else {
+                        li.classList.remove('bg-amber-100', 'dark:bg-amber-900/30', 'rounded-lg', 'px-2', '-mx-2');
+                    }
+                });
+            }
+            function closeLevelTiers() { overlay.classList.add('hidden'); }
+            counter.addEventListener('click', openLevelTiers);
+            if (backdrop) backdrop.addEventListener('click', closeLevelTiers);
+            if (closeBtn) closeBtn.addEventListener('click', closeLevelTiers);
+        })();
+
+        // Listen for XP updates from HTMX
+        document.body.addEventListener('xpUpdated', function(event) {
+            const data = event.detail;
+            if (document.getElementById('xp-value')) {
+                document.getElementById('xp-value').textContent = data.xp;
+                document.getElementById('level-value').textContent = data.level;
+                
+                // Animate XP counter
+                const counter = document.getElementById('xp-counter');
+                counter.classList.add('scale-110');
+                setTimeout(() => counter.classList.remove('scale-110'), 200);
+            }
+        });
+        
+        // Debug HTMX errors
+        document.body.addEventListener('htmx:responseError', function(event) {
+            showToast('Error: ' + (event.detail.xhr.status || 'Unknown'), 'error');
+        });
+
+        // Toast notification function
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-3 rounded-lg shadow-lg text-white transform transition-all duration-300 translate-x-full ${
+                type === 'success' ? 'bg-emerald-500' : 'bg-red-500'
+            }`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => toast.classList.remove('translate-x-full'), 10);
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+    </script>
+
+    
+<script>
+    let startTime = Date.now();
+    window.lessonStartTime = startTime;
+
+    // ── Table enhancer ──────────────────────────────────────────────
+    (function () {
+        document.querySelectorAll('.lesson-content .table-wrapper table').forEach(function (tbl) {
+            var rows = tbl.querySelectorAll('tbody tr');
+            // Check if every body row's first cell is a single integer 1–9
+            var isScale = rows.length > 0 && Array.from(rows).every(function (r) {
+                return /^\s*\d\s*$/.test(r.cells[0] && r.cells[0].textContent);
+            });
+            rows.forEach(function (row) {
+                var cells = row.cells;
+                Array.from(cells).forEach(function (td) {
+                    if (/^\s*[\d.,]+\s*$/.test(td.textContent)) td.classList.add('num-cell');
+                });
+                if (isScale) {
+                    var rating = parseInt(row.cells[0].textContent.trim(), 10);
+                    if (rating >= 1 && rating <= 5) row.setAttribute('data-scale', rating);
+                }
+            });
+        });
+    })();
+
+    // ── TOC sidebar ─────────────────────────────────────────────────
+    (function () {
+        var toc = document.getElementById('lesson-toc');
+        var sidebar = document.getElementById('lesson-toc-sidebar');
+        if (!toc || !sidebar) return;
+        sidebar.style.display = 'none'; return; /* TOC disabled */
+        var content = document.querySelector('.lesson-content');
+        if (!content) return;
+        var headings = content.querySelectorAll('h3');
+        headings.forEach(function (h, i) {
+            if (!h.id) h.id = 'toc-h-' + i;
+            var a = document.createElement('a');
+            a.href = '#' + h.id;
+            a.textContent = h.textContent;
+            a.addEventListener('click', function (e) {
+                e.preventDefault();
+                h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                history.replaceState(null, '', '#' + h.id);
+            });
+            toc.appendChild(a);
+        });
+        // Highlight active section on scroll
+        var links = toc.querySelectorAll('a');
+        var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                    links.forEach(function (l) { l.classList.remove('toc-active'); });
+                    var active = toc.querySelector('a[href="#' + entry.target.id + '"]');
+                    if (active) active.classList.add('toc-active');
+                }
+            });
+        }, { rootMargin: '-10% 0px -80% 0px', threshold: 0 });
+        headings.forEach(function (h) { observer.observe(h); });
+    })();
+
+    // ── Copy-code buttons ───────────────────────────────────────────
+    (function () {
+        var copyIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        var checkIcon = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        document.querySelectorAll('.lesson-content .codehilite').forEach(function (block) {
+            var pre = block.querySelector('pre');
+            if (!pre) return;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'copy-code-btn';
+            btn.setAttribute('aria-label', 'Copy code');
+            btn.innerHTML = copyIcon;
+            btn.addEventListener('click', function () {
+                var text = pre.textContent || '';
+                navigator.clipboard.writeText(text).then(function () {
+                    btn.classList.add('copied');
+                    btn.innerHTML = checkIcon;
+                    setTimeout(function () {
+                        btn.classList.remove('copied');
+                        btn.innerHTML = copyIcon;
+                    }, 1800);
+                });
+            });
+            block.insertBefore(btn, block.firstChild);
+        });
+    })();
+
+    (function () {
+        var container = document.getElementById('complete-button-container');
+        if (!container) return;
+
+        function nextUrl() {
+            return container.getAttribute('data-next-url') || container.getAttribute('data-topic-url');
+        }
+        function prevUrl() {
+            return container.getAttribute('data-prev-url');
+        }
+
+        document.addEventListener('keydown', function (e) {
+            var active = document.activeElement;
+            var inInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+            if (inInput) return;
+
+            if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                var answerEl = document.getElementById('quiz-answer');
+                var btn = document.getElementById('reveal-answer-btn');
+                if (answerEl && btn && answerEl.classList.contains('hidden')) {
+                    e.preventDefault();
+                    answerEl.classList.remove('hidden');
+                    btn.classList.add('hidden');
+                }
+                return;
+            }
+
+            if (e.code === 'Space') {
+                var url = nextUrl();
+                if (url) {
+                    e.preventDefault();
+                    var completeUrl = container.getAttribute('data-complete-url');
+                    var isCompleted = container.getAttribute('data-is-completed') === 'true';
+                    if (completeUrl && !isCompleted) {
+                        var csrfToken = document.querySelector('input[name=csrfmiddlewaretoken]')?.value ||
+                            document.cookie.match(/csrftoken=([^;]+)/)?.[1]?.trim();
+                        if (csrfToken) {
+                            fetch(completeUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'X-CSRFToken': csrfToken,
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                    'Content-Type': 'application/x-www-form-urlencoded'
+                                },
+                                body: 'csrfmiddlewaretoken=' + encodeURIComponent(csrfToken),
+                                credentials: 'same-origin'
+                            }).then(function (r) {
+                                if (!r.ok) return;
+                                // Server signals navigation via HX-Redirect; otherwise it
+                                // wants us to render the partial (e.g. topic/chapter modal).
+                                var redirect = r.headers.get('HX-Redirect');
+                                if (redirect) { window.location.href = redirect; return; }
+                                return r.text().then(function (html) {
+                                    container.innerHTML = html;
+                                });
+                            }).catch(function () {});
+                        } else {
+                            window.location.href = url;
+                        }
+                    } else {
+                        window.location.href = url;
+                    }
+                }
+                return;
+            }
+            if (e.ctrlKey && e.code === 'ArrowLeft') {
+                var url = prevUrl();
+                if (url) {
+                    e.preventDefault();
+                    window.location.href = url;
+                }
+            }
+        });
+    })();
+
+    (function () {
+        var audio = document.getElementById('lesson-audio');
+        if (!audio || !audio.src) return;
+
+        // Fix M4A/AAC starting ~1s late on first play (browser/decoder quirk)
+        var hasCorrectedFirstPlay = false;
+        audio.addEventListener('playing', function () {
+            if (!hasCorrectedFirstPlay && audio.currentTime > 0.3) {
+                audio.currentTime = 0;
+                hasCorrectedFirstPlay = true;
+            }
+        });
+        audio.addEventListener('loadedmetadata', function () {
+            audio.currentTime = 0;
+        });
+
+        if (!navigator.mediaSession) return;
+
+        function updateMetadata() {
+            var title = audio.getAttribute('data-title') || 'Audio Deep Dive';
+            var topic = audio.getAttribute('data-topic') || 'HamChops';
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: title,
+                artist: topic,
+                album: 'HamChops'
+            });
+        }
+
+        audio.addEventListener('play', function () {
+            updateMetadata();
+        });
+
+        navigator.mediaSession.setActionHandler('play', function () { audio.play(); });
+        navigator.mediaSession.setActionHandler('pause', function () { audio.pause(); });
+        navigator.mediaSession.setActionHandler('seekbackward', function () {
+            audio.currentTime = Math.max(0, audio.currentTime - 10);
+        });
+        navigator.mediaSession.setActionHandler('seekforward', function () {
+            audio.currentTime = Math.min(audio.duration, audio.currentTime + 10);
+        });
+        audio.addEventListener('timeupdate', function () {
+            if ('setPositionState' in navigator.mediaSession && isFinite(audio.duration)) {
+                try {
+                    navigator.mediaSession.setPositionState({ duration: audio.duration, playbackRate: 1, position: audio.currentTime });
+                } catch (_) {}
+            }
+        });
+    })();
+</script>
+
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookie-banner" class="fixed bottom-0 left-0 right-0 bg-slate-900 text-white p-4 z-50 transform translate-y-full transition-transform duration-300" style="display: none;">
+        <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p class="text-sm text-slate-300">
+                We use cookies for authentication and to improve your experience. By continuing to use this site, you agree to our 
+                <a href="https://hamchops.com/privacy/" class="underline hover:text-white">Privacy Policy</a>.
+            </p>
+            <div class="flex gap-3 flex-shrink-0">
+                <button onclick="acceptCookies()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                    Accept
+                </button>
+                <button onclick="declineCookies()" class="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                    Decline
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Cookie consent management — show once per browser session to avoid
+        // re-flashing on every page nav until accepted/declined.
+        (function() {
+            const banner = document.getElementById('cookie-banner');
+            const consent = localStorage.getItem('cookie-consent');
+            const sessionShown = sessionStorage.getItem('cookie-banner-shown');
+            if (!consent && !sessionShown) {
+                sessionStorage.setItem('cookie-banner-shown', '1');
+                banner.style.display = 'block';
+                setTimeout(() => banner.classList.remove('translate-y-full'), 100);
+            }
+        })();
+        
+        function acceptCookies() {
+            localStorage.setItem('cookie-consent', 'accepted');
+            // Update Google Consent Mode v2 if gtag is present.
+            if (typeof gtag === 'function') {
+                gtag('consent', 'update', {
+                    'ad_storage': 'granted',
+                    'ad_user_data': 'granted',
+                    'ad_personalization': 'granted',
+                    'analytics_storage': 'granted'
+                });
+            }
+            hideBanner();
+        }
+
+        function declineCookies() {
+            localStorage.setItem('cookie-consent', 'declined');
+            // Keep all ad/analytics signals denied (already the default).
+            if (typeof gtag === 'function') {
+                gtag('consent', 'update', {
+                    'ad_storage': 'denied',
+                    'ad_user_data': 'denied',
+                    'ad_personalization': 'denied',
+                    'analytics_storage': 'denied'
+                });
+            }
+            hideBanner();
+            // Note: Essential cookies (session, CSRF) still work; only analytics would be disabled
+        }
+        
+        function hideBanner() {
+            const banner = document.getElementById('cookie-banner');
+            banner.classList.add('translate-y-full');
+            setTimeout(() => banner.style.display = 'none', 300);
+        }
+    </script>
+
+    
+    
+
+    <script>
+        // HTMX progress bar
+        (function() {
+            var bar = document.getElementById('htmx-progress');
+            if (!bar) return;
+            document.body.addEventListener('htmx:beforeRequest', function() {
+                bar.style.width = '0%';
+                bar.style.opacity = '1';
+                requestAnimationFrame(function() { bar.style.width = '70%'; });
+            });
+            document.body.addEventListener('htmx:afterRequest', function() {
+                bar.style.width = '100%';
+                setTimeout(function() { bar.style.opacity = '0'; bar.style.width = '0%'; }, 300);
+            });
+        })();
+
+        // Mobile menu toggle
+        (function() {
+            var btn = document.getElementById('mobile-menu-btn');
+            var menu = document.getElementById('mobile-menu');
+            if (btn && menu) {
+                btn.addEventListener('click', function() {
+                    menu.classList.toggle('hidden');
+                });
+            }
+        })();
+
+        // Close the open mobile menu panel as soon as the user starts scrolling
+        (function() {
+            var menu = document.getElementById('mobile-menu');
+            if (!menu) return;
+            window.addEventListener('scroll', function() {
+                if (!menu.classList.contains('hidden')) menu.classList.add('hidden');
+            }, { passive: true });
+        })();
+    </script>
+
+    <!-- Cmd+K / Ctrl+K search overlay toggle -->
+    <script>
+    (function() {
+        var overlay = document.getElementById('search-overlay');
+        if (!overlay) return;
+        var input = document.getElementById('search-overlay-input');
+        document.addEventListener('keydown', function(e) {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                if (overlay.classList.contains('hidden')) {
+                    overlay.classList.remove('hidden');
+                    input.value = '';
+                    input.focus();
+                } else {
+                    overlay.classList.add('hidden');
+                }
+            }
+            if (e.key === 'Escape' && !overlay.classList.contains('hidden')) {
+                overlay.classList.add('hidden');
+            }
+        });
+    })();
+    </script>
+
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js')
+                    .then(function() {})
+                    .catch(function() {});
+            });
+        }
+    </script>
+
+    
+    <!-- Auto-detect IANA timezone and persist if it differs from server.
+         Once-per-session (sessionStorage) to avoid extra POSTs on every page nav.
+         Day boundaries for SM-2 + daily quotas depend on this being correct. -->
+    <script>
+        (function() {
+            try {
+                if (sessionStorage.getItem('hc_tz_synced') === '1') return;
+                var detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                var stored = "Asia/Calcutta";
+                if (!detected || detected === stored) {
+                    sessionStorage.setItem('hc_tz_synced', '1');
+                    return;
+                }
+                fetch('/learn/api/timezone/', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': 'a8Ka9lbdgt0dK5rpBHcIVZYUPuOuR60pC1lD6JoFNZDPh4yv9DmfTGNZbRi7NGzY',
+                    },
+                    body: JSON.stringify({ timezone: detected }),
+                }).then(function(r) {
+                    if (r.ok) sessionStorage.setItem('hc_tz_synced', '1');
+                }).catch(function() {});
+            } catch (e) {}
+        })();
+    </script>
+    
+</body>
+</html>
