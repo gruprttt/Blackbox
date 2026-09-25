@@ -10,15 +10,48 @@ then list the track folder under the right entry in DOMAINS (or add a new domain
 """
 import html
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+import mdx
 
 HERE = Path(__file__).resolve().parent
 SRC = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (HERE.parent / "learn")
 OUT = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else (HERE / "dist")
 SITE = "BLACKBOX"
+
+# Open-source content pulled in at build time (cloned into ./vendor, which git ignores).
+# Set BLACKBOX_OFFLINE=1 to build without fetching; delete a folder under vendor/ to refresh it.
+VENDOR = HERE / "vendor"
+SOURCES = {
+    "backend": dict(repo="https://github.com/DsThakurRawat/Backend-from-first-Principle",
+                    site="https://backend-from-first-principle.vercel.app", author="@DsThakurRawat"),
+    "a2z": dict(repo="https://github.com/ashutosh-mishr/AtoZ-DSA-Practice",
+                site="https://dsapractice.indevs.in", author="@ashutosh-mishr"),
+}
+
+
+def vendor(name):
+    """Path to a cloned source, cloning it on first use. None if it can't be had."""
+    dest = VENDOR / name
+    if dest.is_dir() and any(dest.iterdir()):
+        return dest
+    if os.environ.get("BLACKBOX_OFFLINE") == "1":
+        return None
+    print(f"fetching {SOURCES[name]['repo']} → vendor/{name} …", file=sys.stderr)
+    try:
+        VENDOR.mkdir(exist_ok=True)
+        subprocess.run(["git", "clone", "--depth", "1", "--quiet", SOURCES[name]["repo"], str(dest)], check=True, timeout=300)
+        return dest
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"note: couldn't fetch {name} ({e}); building without it", file=sys.stderr)
+        shutil.rmtree(dest, ignore_errors=True)
+        return None
+
 TAGLINE = "Where engineers figure things out."
 
 # The brain is split into lobes, one per program. `anchor` is where that lobe sits on the brain
@@ -32,6 +65,8 @@ LOBES = [
          blurb="Striver's A2Z sheet — 474 problems from basics to DP."),
     dict(id="system-design", name="System Design", short="Design", color="#f472b6", anchor=(0, .5, -.4), href="system-design/index.html",
          blurb="Estimation, caching, storage, messaging and classic designs."),
+    dict(id="backend", name="Backend Engineering", short="Backend", color="#34d399", anchor=(0, .12, .88), href="backend/index.html",
+         blurb="Backend from First Principles — HTTP to AI agents, 26 chapters."),
     dict(id="cybersecurity", name="Cybersecurity", short="Security", color="#ff4d5e", anchor=(.45, -.2, -.5), soon=True,
          blurb="Offensive and defensive security beyond DevSecOps."),
     dict(id="ai-ml", name="AI & Machine Learning", short="AI/ML", color="#fbbf24", anchor=(-.45, -.2, -.5), soon=True,
@@ -40,7 +75,7 @@ LOBES = [
 LOBE_BY_ID = {d["id"]: d for d in LOBES}
 # Old per-area domain ids (focus history recorded before lobes existed) now belong to DevOps.
 DOMAIN_ALIASES = {"foundations": "devops", "code": "devops", "systems": "devops", "distributed": "devops",
-                  "infra": "devops", "reliability": "devops", "security": "devops", "ai": "devops", "design": "system-design"}
+                  "infra": "devops", "reliability": "devops", "security": "devops", "ai": "devops", "design": "system-design", "be": "backend"}
 
 # DevOps areas: colour and label for each track inside the DevOps lobe.
 DOMAINS = [
@@ -122,6 +157,8 @@ PROGRAMS = [
          blurb="Striver's A2Z sheet: 18 topics and 474 problems, from the basics through graphs and dynamic programming."),
     dict(id="system-design", lobe="system-design", name="System Design", color="#f472b6",
          blurb="Design large-scale systems end to end — estimation, caching, storage, messaging, failure modes and classic designs."),
+    dict(id="backend", lobe="backend", name="Backend Engineering", color="#34d399",
+         blurb="Backend from First Principles: HTTP, auth, APIs, databases, caching, queues, security, scaling and more — in Go, Python, JS/TS and Java."),
     dict(id="cybersecurity", lobe="cybersecurity", name="Cybersecurity", color="#ff4d5e", soon=True,
          blurb="Offensive and defensive security beyond DevSecOps: threat hunting, exploitation, hardening.",
          region_note="Wakes the Cybersecurity lobe"),
@@ -269,6 +306,7 @@ ICON = {
     "plus": svg('<path d="M12 5v14M5 12h14"/>'),
     "code": svg('<path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16"/>'),
     "design": svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/>'),
+    "server": svg('<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/>'),
     "user": svg('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
     "ext": svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
 }
@@ -277,6 +315,7 @@ NAV = [("Learn", "index.html", "learn", ("home",)),
        ("Tracks", "tracks/index.html", "map", ("tracks", "track", "topic", "lesson")),
        ("DSA", "dsa/index.html", "code", ("dsa",)),
        ("Design", "system-design/index.html", "design", ("sd",)),
+       ("Backend", "backend/index.html", "server", ("be", "be-chapter")),
        ("Brain", "brain/index.html", "brain", ("brain",)),
        ("Focus", "focus/index.html", "focus", ("focus",)),
        ("Tasks", "tasks/index.html", "tasks", ("tasks",)),
@@ -338,8 +377,8 @@ def page(*, title, desc, root, body, kind):
 
 def header(root, kind):
     drawer = (f'<button class="icon-btn drawer-btn" data-drawer-toggle aria-label="Open lesson list">{ICON["menu"]}</button>'
-              if kind == "lesson" else "")
-    bar = '<div class="read-progress" aria-hidden="true"><span></span></div>' if kind == "lesson" else ""
+              if kind in ("lesson", "be-chapter") else "")
+    bar = '<div class="read-progress" aria-hidden="true"><span></span></div>' if kind in ("lesson", "be-chapter") else ""
     def item(label, href, icon, kinds):
         link = f'<a href="{root}{href}" title="{label}"{" aria-current=page class=is-active" if kind in kinds else ""}>{ICON[icon]}<span>{label}</span></a>'
         if label != "Tracks" or not TRACKS:
@@ -953,6 +992,18 @@ def load_sheets():
                                       hint={k: pr[k] for k in ("pattern", "time", "space", "approach", "brute") if pr.get(k)}))
                 topic["subs"].append(dict(id=f"dsa/{t['id']}/{sub['id']}", anchor=f"{t['id']}-{sub['id']}", name=sub["name"], items=items))
             topics.append(topic)
+        src = vendor("a2z")
+        sol_path = src / "database" / "data" / "solutions.json" if src else None
+        if sol_path and sol_path.exists():
+            sols = {x["problem_id"].lower(): x for x in json.loads(sol_path.read_text(encoding="utf-8"))["solutions"] if x.get("code")}
+            for t in topics:
+                for sb in t["subs"]:
+                    for it in sb["items"]:
+                        x = sols.get(it["anchor"])
+                        if x:
+                            it["solution"] = dict(statement=(x.get("problem_statement") or "").strip(), examples=(x.get("examples") or "").strip(),
+                                                  approach=(x.get("optimal_approach") or "").strip(), code=x["code"].rstrip(),
+                                                  lang=(x.get("code_language") or "C++"), file=x.get("source_file", ""))
         sheets["dsa"] = dict(lobe="dsa", dir="dsa", prefix="dsa/", name="DSA · Striver's A2Z sheet", short="DSA", color=LOBE_BY_ID["dsa"]["color"],
                              noun="problem", done_label="Solved", todo_label="Mark solved", topics=topics,
                              lede="Every problem from Striver's A2Z DSA sheet, in order — 18 topics from language basics through graphs, "
@@ -1005,7 +1056,7 @@ REV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="
 INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
 
 
-def dsa_row(it, n):
+def dsa_row(it, n, sol_prefix="../solution/"):
     """One problem, laid out like the dsapractice roadmap: solved, bookmark, revision, pattern, practice links, notes."""
     name = html.escape(it["name"])
     links = "".join(f'<a class="lk {LINK_TONE[label]}" href="{html.escape(url)}" target="_blank" rel="noopener">{label}</a>'
@@ -1024,7 +1075,9 @@ def dsa_row(it, n):
             f'<td class="c"><button class="mk mk-r" type="button" data-mark="r" aria-label="Revision: {name}" title="Add to revision">{REV}</button></td>'
             f'<td class="c pat"><button class="mk" type="button" data-pattern aria-label="Pattern and hint: {name}" title="Pattern &amp; hint">{INFO}</button>'
             f'<div class="pat-pop" hidden>{pop}</div></td>'
-            f'<td><div class="links">{links}<button class="lk lk-note" type="button" data-note>Notes</button></div></td></tr>')
+            f'<td><div class="links">{links}'
+            + (f'<a class="lk lk-sol" href="{sol_prefix}{it["anchor"]}/index.html">Solution</a>' if it.get("solution") else "")
+            + '<button class="lk lk-note" type="button" data-note>Notes</button></div></td></tr>')
 
 
 PROB_HEAD = ('<thead><tr><th class="pn">#</th><th>Problem</th><th>Difficulty</th><th class="c">Solved</th><th class="c">Bookmark</th>'
@@ -1071,7 +1124,7 @@ def render_dsa_index(sh):
   </div>
 </section>
 </main>"""
-    return page(title=f"DSA Roadmap · {SITE}", desc=sh["lede"], root=root, body=body, kind="sheet")
+    return page(title=f"DSA Roadmap · {SITE}", desc=sh["lede"], root=root, body=body, kind="dsa")
 
 
 def render_dsa_topic(sh, ti):
@@ -1109,7 +1162,7 @@ def render_dsa_topic(sh, ti):
   {nav}
 </section>
 </main>"""
-    return page(title=f"{t['name']} · DSA · {SITE}", desc=f"{t['name']} — DSA roadmap", root=root, body=body, kind="sheet")
+    return page(title=f"{t['name']} · DSA · {SITE}", desc=f"{t['name']} — DSA roadmap", root=root, body=body, kind="dsa")
 
 
 def render_sheet_index(sh):
@@ -1146,7 +1199,7 @@ def render_sheet_index(sh):
   <div class="track-grid">{cards}</div>
 </section>
 </main>"""
-    return page(title=f"{sh['name']} · {SITE}", desc=sh["lede"], root=root, body=body, kind="sheet")
+    return page(title=f"{sh['name']} · {SITE}", desc=sh["lede"], root=root, body=body, kind="sd")
 
 
 def render_sheet_topic(sh, ti):
@@ -1181,7 +1234,171 @@ def render_sheet_topic(sh, ti):
   {nav}
 </section>
 </main>"""
-    return page(title=f"{t['name']} · {sh['short']} · {SITE}", desc=f"{t['name']} — {sh['name']}", root=root, body=body, kind="sheet")
+    return page(title=f"{t['name']} · {sh['short']} · {SITE}", desc=f"{t['name']} — {sh['name']}", root=root, body=body, kind="sd")
+
+
+def render_dsa_solution(sh, t, sb, it, prev, nxt):
+    root = "../../../"
+    sol, h = it["solution"], it["hint"]
+    name = html.escape(it["name"])
+    links = "".join(f'<a class="lk {LINK_TONE[label]}" href="{html.escape(url)}" target="_blank" rel="noopener">{label}</a>' for label, url in it["links"])
+    approach = sol["approach"] or h.get("approach", "")
+    cx = "".join(f'<span><em>{k}</em>{html.escape(h[v])}</span>' for k, v in (("Time", "time"), ("Space", "space")) if h.get(v))
+    blocks = []
+    if sol["statement"]:
+        blocks.append(f'<section class="sol-sec"><h2>Problem</h2><p>{html.escape(sol["statement"])}</p></section>')
+    if sol["examples"]:
+        blocks.append(f'<section class="sol-sec"><h2>Examples</h2><pre class="sol-ex">{html.escape(sol["examples"])}</pre></section>')
+    if h.get("pattern") or approach or h.get("brute") or cx:
+        blocks.append('<section class="sol-sec"><h2>Approach</h2>'
+                      + (f'<p><b>Pattern:</b> {html.escape(h["pattern"])}</p>' if h.get("pattern") else "")
+                      + (f'<p><b>Brute force:</b> {html.escape(h["brute"])}</p>' if h.get("brute") else "")
+                      + (f'<p><b>Optimal:</b> {html.escape(approach)}</p>' if approach else "")
+                      + (f'<div class="pp-cx">{cx}</div>' if cx else "") + "</section>")
+    lang = {"C++": "cpp", "Java": "java", "Python": "python"}.get(sol["lang"], "cpp")
+    blocks.append(f'<section class="sol-sec"><h2>Solution <em>{html.escape(sol["lang"])}</em></h2>'
+                  f'<div class="prose be-prose">{mdx.code_block(lang, sol["file"].split("/")[-1] if sol["file"] else "", sol["code"])}</div></section>')
+
+    def pcard(x, cls, label):
+        if not x:
+            return "<span></span>"
+        arrow = f'{ICON["left"]} {label}' if cls == "prev" else f'{label} {ICON["right"]}'
+        return f'<a class="pager-card {cls}" href="../{x["anchor"]}/index.html" data-nav-{cls}><span>{arrow}</span><strong>{html.escape(x["name"])}</strong></a>'
+    body = f"""<main id="main" style="--c:{sh['color']}">
+<section class="wrap narrow section sol-page sheet">
+  {crumbs(root, [('DSA Roadmap', 'dsa/index.html'), (html.escape(t['name']), f"dsa/{t['slug']}/index.html#{sb['anchor']}"), (name, None)])}
+  <div class="sol-head prob" data-lesson="{it['id']}" data-level="{it['level']}">
+    <p class="mono-label">{html.escape(t['name'])} · {html.escape(sb['name'])}</p>
+    <h1 class="pt"><a href="#">{name}</a></h1>
+    <div class="sol-meta"><span class="diff {DIFF_CLASS.get(it['level'], '')}">{it['level']}</span>
+      <button class="it-check" type="button" data-toggle-done aria-label="Solved: {name}">{ICON['check']}</button><span class="mono-label">Solved</span>
+      <button class="mk mk-b" type="button" data-mark="b" aria-label="Bookmark" title="Bookmark">{STAR}</button>
+      <button class="mk mk-r" type="button" data-mark="r" aria-label="Add to revision" title="Add to revision">{REV}</button>
+      <div class="links">{links}<button class="lk lk-note" type="button" data-note>Notes</button></div></div>
+  </div>
+  {''.join(blocks)}
+  <p class="credit">Solution from <a href="https://github.com/Codensity30/Strivers-A2Z-DSA-Sheet" target="_blank" rel="noopener">Codensity30/Strivers-A2Z-DSA-Sheet</a>, mapped by <a href="{SOURCES['a2z']['repo']}" target="_blank" rel="noopener">AtoZ-DSA-Practice</a>.</p>
+  <div class="pager">{pcard(prev, 'prev', 'Previous solution')}{pcard(nxt, 'next', 'Next solution')}</div>
+</section>
+</main>"""
+    return page(title=f"{it['name']} · Solution · {SITE}", desc=f"{it['name']} — solution and approach", root=root, body=body, kind="dsa")
+
+
+# ───────────────────────────── Backend from First Principles ─────────────────────────────
+
+def load_backend():
+    src = vendor("backend")
+    folder = src / "src" / "content" / "chapters" if src else None
+    if not folder or not folder.is_dir():
+        return None
+    chapters = []
+    for f in sorted(folder.glob("*.mdx")):
+        meta, body, sections = mdx.render(f)
+        if meta.get("draft"):
+            continue
+        slug = re.sub(r"^\d+-", "", f.stem)
+        # wrap each ## section so it can be ticked off on its own
+        parts = re.split(r'(?=<h2 id=")', body)
+        out, secs = [parts[0]], []
+        for part in parts[1:]:
+            sid = re.match(r'<h2 id="([^"]+)"', part).group(1)
+            title = next((t for i, t in sections if i == sid), sid)
+            lid = f"be/{slug}/{sid}"
+            secs.append(dict(id=lid, anchor=sid, title=title))
+            part = part.replace("</h2>", f'<button class="sec-check" type="button" data-toggle-done aria-label="Mark section done">{ICON["check"]}</button></h2>', 1)
+            out.append(f'<section class="be-sec" data-lesson="{lid}">{part}'
+                       f'<div class="sec-foot"><button class="chip-btn" type="button" data-toggle-done><span class="when-todo">{ICON["check"]}Mark “{html.escape(title)}” done</span>'
+                       f'<span class="when-done">{ICON["check"]}Section done</span></button></div></section>')
+        chapters.append(dict(order=meta.get("order", len(chapters) + 1), slug=slug, title=meta.get("title", slug), nav=meta.get("navTitle") or meta.get("title", slug),
+                             summary=meta.get("summary", ""), reading=meta.get("readingTime", ""), keywords=meta.get("keywords", []),
+                             html="".join(out), sections=secs))
+    chapters.sort(key=lambda c: c["order"])
+    for i, c in enumerate(chapters):
+        c["num"] = f"{i + 1:02d}"
+        c["prefix"] = f"be/{c['slug']}/"
+    return dict(lobe="backend", prefix="be/", name="Backend from First Principles", color=LOBE_BY_ID["backend"]["color"], chapters=chapters,
+                total=sum(len(c["sections"]) for c in chapters), href="backend/index.html")
+
+
+def render_backend_index(be):
+    root = "../"
+    cards = "".join(f"""<a class="track-card be-card" href="{c['slug']}/index.html" style="--c:{be['color']}">
+  <div class="tc-top"><span class="tc-num">{c['num']}</span><span class="mono-label">{html.escape(c['reading'])}</span><span class="tc-go">{ICON['right']}</span></div>
+  <h4>{html.escape(c['title'])}</h4>
+  <p class="be-sum">{html.escape(c['summary'])}</p>
+  {progress(c['prefix'], max(1, len(c['sections'])))}
+</a>""" for c in be["chapters"])
+    first = be["chapters"][0]
+    actions = (f'<a class="btn btn-primary" href="{first["slug"]}/index.html" data-be-next>{ICON["play"]}<span>Start with chapter 01</span></a>'
+               f'<button class="btn btn-ghost on-dark" data-focus-domain="backend"><span class="rec"></span>Focus on this</button>'
+               f'<a class="btn btn-ghost on-dark" href="{root}brain/index.html#backend">{ICON["brain"]}See it in your brain</a>'
+               f'<div class="banner-progress">{progress(be["prefix"], be["total"])}</div>')
+    lede = ("A first-principles series on backend engineering — what each piece does, why it exists and how it works underneath, "
+            "with implementations in Go, Python, JavaScript, TypeScript and Java. Tick off each section as you finish it.")
+    body = f"""<main id="main" style="--c:{be['color']}">
+{banner(root, dict(color=be['color'], num='BE'), crumbs(root, [('Learn', 'index.html#programs'), ('Backend', None)]),
+        f"Program · {len(be['chapters'])} chapters · {be['total']} sections", be['name'], lede, actions)}
+<section class="wrap section">
+  <div class="topic-tools"><h2>Chapters</h2><div><button class="link-btn danger" data-reset-prefix="be/" data-reset-label="Backend">Reset progress</button></div></div>
+  <div class="track-grid">{cards}</div>
+  <p class="credit">Content: <a href="{SOURCES['backend']['site']}" target="_blank" rel="noopener">Backend from First Principles</a> by
+    <a href="https://github.com/DsThakurRawat" target="_blank" rel="noopener">{SOURCES['backend']['author']}</a>
+    (<a href="{SOURCES['backend']['repo']}" target="_blank" rel="noopener">source</a>), fetched when this site is built.</p>
+</section>
+</main>"""
+    return page(title=f"Backend · {SITE}", desc=lede, root=root, body=body, kind="be")
+
+
+def render_backend_chapter(be, ci):
+    root = "../../"
+    c = be["chapters"][ci]
+    prev_c = be["chapters"][ci - 1] if ci > 0 else None
+    next_c = be["chapters"][ci + 1] if ci + 1 < len(be["chapters"]) else None
+    side = "".join(f'<li{" class=is-current" if x is c else ""}><a href="../{x["slug"]}/index.html"><span>{x["num"]}</span>{html.escape(x["nav"])}</a></li>'
+                   for x in be["chapters"])
+    toc = ('<aside class="toc be-toc" aria-label="Sections"><p class="mono-label">Sections</p><nav>'
+           + "".join(f'<a href="#{x["anchor"]}" data-toc-link="{x["anchor"]}" data-lesson="{x["id"]}"><i>{ICON["check"]}</i>{html.escape(x["title"])}</a>' for x in c["sections"])
+           + "</nav></aside>")
+
+    def pcard(x, cls):
+        if not x:
+            return "<span></span>"
+        arrow = f'{ICON["left"]} Chapter {x["num"]}' if cls == "prev" else f'Chapter {x["num"]} {ICON["right"]}'
+        return f'<a class="pager-card {cls}" href="../{x["slug"]}/index.html" data-nav-{cls}><span>{arrow}</span><strong>{html.escape(x["title"])}</strong></a>'
+    body = f"""<div class="drawer-backdrop" data-drawer-close></div>
+<div class="lesson-layout be-layout" style="--c:{be['color']}">
+  <aside class="sidebar" id="sidebar" aria-label="Chapters">
+    <div class="sidebar-inner">
+      <a class="side-track" href="../index.html"><span class="num-tile sm">BE</span><span><em class="mono-label">Backend</em>From First Principles</span></a>
+      <div class="side-topic"><p class="mono-label">Chapter {c['num']} / {len(be['chapters']):02d}</p>{progress(c['prefix'], max(1, len(c['sections'])))}</div>
+      <ol class="be-chapters">{side}</ol>
+    </div>
+  </aside>
+  <main id="main" class="lesson-main">
+    {crumbs(root, [('Backend', 'backend/index.html'), (f"Chapter {c['num']}", None)])}
+    <article class="lesson be-chapter" data-be-chapter="{c['prefix']}">
+      <header class="lesson-head">
+        <div class="lesson-meta"><span class="chip">Chapter {c['num']}</span><span>{ICON['clock']}{html.escape(c['reading'])}</span><span>{len(c['sections'])} sections</span></div>
+        <h1>{html.escape(c['title'])}</h1>
+        <p class="be-lede">{html.escape(c['summary'])}</p>
+        <div class="lesson-actions">
+          <button class="chip-btn" data-focus-domain="backend"><span class="rec"></span>Focus 25 min</button>
+          <span class="domain-tag" style="--c:{be['color']}"><i></i>Backend Engineering</span>
+        </div>
+      </header>
+      <div class="prose be-prose">{c['html']}</div>
+      <div class="lesson-foot">
+        <button class="btn btn-complete" data-be-complete><span class="when-todo">{ICON['check']}Mark whole chapter complete</span><span class="when-done">{ICON['check']}Chapter complete</span></button>
+        <span class="lesson-count mono-label">{progress(c['prefix'], max(1, len(c['sections'])))}</span>
+      </div>
+      <p class="credit">From <a href="{SOURCES['backend']['site']}" target="_blank" rel="noopener">Backend from First Principles</a> by {SOURCES['backend']['author']} ·
+        <a href="{SOURCES['backend']['repo']}" target="_blank" rel="noopener">source</a></p>
+      <div class="pager">{pcard(prev_c, 'prev')}{pcard(next_c, 'next')}</div>
+    </article>
+  </main>
+  {toc}
+</div>"""
+    return page(title=f"{c['title']} · Backend · {SITE}", desc=c["summary"], root=root, body=body, kind="be-chapter")
 
 
 def render_login():
@@ -1204,7 +1421,7 @@ def render_login():
     return page(title=f"Sign in · {SITE}", desc="Sign in to BLACKBOX", root=root, body=body, kind="login")
 
 
-def brain_tree(tracks, sheets):
+def brain_tree(tracks, sheets, be=None):
     """Nested regions for the Brain page. Inner nodes: {id, n (name), c (colour), h (href), k (children), soon};
     leaves: [progress id, name, href, tag]. Every node's progress is the share of its leaves that are done."""
     lobes = []
@@ -1216,6 +1433,10 @@ def brain_tree(tracks, sheets):
                     dict(id=f"{t['slug']}/{tp['slug']}", n=strip_tags(tp["title"]), h=f"{t['slug']}/{tp['slug']}/index.html",
                          k=[[lesson_id(t, tp, l), strip_tags(l["title"]), f"{lesson_id(t, tp, l)}/index.html", f"{l['minutes']}m"] for l in tp["lessons"]])
                     for tp in t["topics"]]))
+        elif lobe["id"] == "backend" and be:
+            for c in be["chapters"]:
+                node["k"].append(dict(id=c["prefix"].rstrip("/"), n=f"{c['num']} · {c['title']}", h=f"backend/{c['slug']}/index.html",
+                                      k=[[x["id"], x["title"], f"backend/{c['slug']}/index.html#{x['anchor']}", ""] for x in c["sections"]]))
         elif lobe["id"] in sheets:
             sh = sheets[lobe["id"]]
             for t in sh["topics"]:
@@ -1240,7 +1461,8 @@ def write(path, text):
 def main():
     tracks = load()
     sheets = load_sheets()
-    if not tracks and not sheets:
+    be = load_backend()
+    if not tracks and not sheets and not be:
         sys.exit(f"nothing to build: no lessons in {SRC} and no data/ sheets")
     TRACKS[:] = tracks
     if OUT.exists():
@@ -1258,7 +1480,19 @@ def main():
              ["Tasks", "tasks/index.html", "", "", "p", "todo list matrix week planner"],
              ["Habits & streaks", "habits/index.html", "", "", "p", "heatmap streak"]]
     index.append(["Sign in", "login/index.html", "", "", "p", "login account register password"])
-    write(OUT / "index.html", render_home(tracks, sheets))
+    home_programs = dict(sheets)
+    if be:
+        home_programs["backend"] = dict(href=be["href"], prefix=be["prefix"], total=be["total"],
+                                        meta=f"{len(be['chapters'])} chapters · {be['total']} sections")
+        write(OUT / "backend" / "index.html", render_backend_index(be))
+        index.append(["Backend from First Principles", "backend/index.html", "", "", "k", "backend server api chapters"])
+        for ci, c in enumerate(be["chapters"]):
+            href = f"backend/{c['slug']}/index.html"
+            write(OUT / "backend" / c["slug"] / "index.html", render_backend_chapter(be, ci))
+            index.append([c["title"], href, "Backend", "", "t", " ".join(map(str, c["keywords"]))])
+            for x in c["sections"]:
+                index.append([x["title"], f"{href}#{x['anchor']}", "Backend", c["title"], "l", ""])
+    write(OUT / "index.html", render_home(tracks, home_programs))
     write(OUT / "login" / "index.html", render_login())
     for sh in sheets.values():
         index.append([sh["name"], sh["href"], "", "", "k", "sheet practice " + sh["noun"]])
@@ -1268,6 +1502,11 @@ def main():
             href = f"{sh['dir']}/{t['slug']}/index.html"
             index.append([t["name"], href, sh["name"], "", "t", t["note"]])
             write(OUT / sh["dir"] / t["slug"] / "index.html", render_dsa_topic(sh, ti) if dsa else render_sheet_topic(sh, ti))
+            if dsa:
+                solved = [(sb, it) for sb in t["subs"] for it in sb["items"] if it.get("solution")]
+                for k, (sb, it) in enumerate(solved):
+                    write(OUT / "dsa" / "solution" / it["anchor"] / "index.html",
+                          render_dsa_solution(sh, t, sb, it, solved[k - 1][1] if k else None, solved[k + 1][1] if k + 1 < len(solved) else None))
             for sb in t["subs"]:
                 for it in sb["items"]:
                     index.append([it["name"], f"{href}#{it['anchor']}", sh["short"] + " · " + t["name"], sb["name"] or t["name"], "l",
@@ -1305,10 +1544,10 @@ def main():
             index.append([strip_tags(l["title"]), f"{lid}/index.html", tt, strip_tags(tp["title"]), "l",
                           " ".join(h for _, h in l["toc"])])
 
-    tree = brain_tree(tracks, sheets)
+    tree = brain_tree(tracks, sheets, be)
     if "dsa" in sheets:
         write(OUT / "assets" / "dsa-rows.js", "window.BB_DSA_ROWS=" + json.dumps(
-            {it["id"]: [f"{t['slug']}/index.html", t["name"], dsa_row(it, 0)] for t in sheets["dsa"]["topics"] for sb in t["subs"] for it in sb["items"]},
+            {it["id"]: [f"{t['slug']}/index.html", t["name"], dsa_row(it, 0, "solution/")] for t in sheets["dsa"]["topics"] for sb in t["subs"] for it in sb["items"]},
             ensure_ascii=False, separators=(",", ":")) + ";")
 
     def count(node):
@@ -1317,6 +1556,8 @@ def main():
     tracks_map = {t["slug"]: dict(t=strip_tags(t["title"]), d="devops", n=t["n_lessons"], num=t["num"]) for t in tracks}
     for sh in sheets.values():
         tracks_map[sh["prefix"].rstrip("/")] = dict(t=sh["name"], d=sh["lobe"], n=sh["total"], num="")
+    if be:
+        tracks_map["be"] = dict(t=be["name"], d="backend", n=be["total"], num="")
     data = {
         "domains": [dict(id=d["id"], name=d["name"], short=d["short"], color=d["color"], anchor=d["anchor"], href=d.get("href", ""),
                          blurb=d["blurb"], soon=not lobe_totals.get(d["id"]), total=lobe_totals.get(d["id"], 0)) for d in LOBES],
@@ -1331,7 +1572,9 @@ def main():
           "window.SEARCH_INDEX=" + json.dumps(index, ensure_ascii=False, separators=(",", ":")) + ";")
 
     print(f"built {len(tracks)} tracks, {sum(t['n_lessons'] for t in tracks)} lessons, "
-          + ", ".join(f"{sh['total']} {sh['short']} {sh['noun']}s" for sh in sheets.values()) + f" → {OUT}")
+          + ", ".join(f"{sh['total']} {sh['short']} {sh['noun']}s" for sh in sheets.values())
+          + (f", {sum(1 for t in sheets['dsa']['topics'] for sb in t['subs'] for it in sb['items'] if it.get('solution'))} DSA solutions" if "dsa" in sheets else "")
+          + (f", {len(be['chapters'])} backend chapters" if be else "") + f" → {OUT}")
 
 
 if __name__ == "__main__":

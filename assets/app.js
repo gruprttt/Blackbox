@@ -362,6 +362,7 @@
 
   if (article) {
     var lid = article.getAttribute("data-lesson-id");
+    if (lid) {   // HamChops lessons; Backend chapters share the reading features below
     var ltitle = article.getAttribute("data-lesson-title");
     var dom = BB.domain(article.getAttribute("data-domain"));
     save("bb-last", { id: lid, title: ltitle, sub: article.getAttribute("data-lesson-sub") });
@@ -389,8 +390,9 @@
       F.start({ min: 25, domain: dom.id, label: ltitle, task: t ? t.id : null });
       toast("25-minute focus started — neurons growing in " + dom.short, "var(--red)");
     });
+    }
 
-    $$(".prose .codehilite").forEach(function (block) {
+    $$(".prose .codehilite, .prose .cb").forEach(function (block) {
       var btn = document.createElement("button");
       btn.className = "copy-btn"; btn.type = "button";
       btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span>';
@@ -450,7 +452,7 @@
   // ({id: text}); like everything bb-*, they sync to your account.
   BB.marks = function () { return load("bb-dsa-marks", {}); };
   BB.notes = function () { return load("bb-dsa-notes", {}); };
-  if (PAGE === "sheet") {
+  if (PAGE === "dsa" || PAGE === "sd" || PAGE === "be-chapter") {
     var statusSel = $("[data-status-filter]"), levelSel = $("[data-level-filter]"), hideDone = $("[data-hide-done]");
     var paintSheet = function () {
       var marks = BB.marks(), notes = BB.notes();
@@ -580,6 +582,55 @@
     window.addEventListener("storage", function (e) { if (e.key === "bb-dsa-marks" || e.key === "bb-dsa-notes") paintSheet(); });
     paintSheet();
     openTarget();
+  }
+
+  // ── Backend chapters: whole-chapter complete, language tabs, diagrams ──
+  var beChapter = $("[data-be-chapter]");
+  if (beChapter) {
+    var beIds = $$(".be-sec[data-lesson]").map(function (x) { return x.getAttribute("data-lesson"); });
+    var beBtn = $("[data-be-complete]");
+    var paintBe = function () { beBtn.classList.toggle("is-done", beIds.length > 0 && beIds.every(BB.isDone)); };
+    beBtn.addEventListener("click", function () {
+      var all = beIds.every(BB.isDone);
+      beIds.forEach(function (id) { if (all ? BB.isDone(id) : !BB.isDone(id)) { if (all) delete doneAt[id]; else doneAt[id] = Date.now(); } });
+      save("bb-done-at", doneAt); emit("progress");
+      toast(all ? "Chapter marked not complete" : "Chapter complete · " + beIds.length + " neurons wired in Backend", all ? undefined : BB.domain("backend").color);
+    });
+    BB.on(function (w) { if (w === "progress") paintBe(); });
+    paintBe();
+    save("bb-last", { id: location.pathname.replace(/^.*?(backend\/[^/]+)\/.*$/, "$1"), title: $("h1").textContent, sub: "Backend" });
+  }
+  var setLang = function (lang, persist) {
+    $$(".code-tabs").forEach(function (g) {
+      if (!$('[data-tab-lang="' + lang + '"]', g)) return;
+      $$("[data-tab-lang]", g).forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-tab-lang") === lang); });
+      $$("[data-pane-lang]", g).forEach(function (p) { p.hidden = p.getAttribute("data-pane-lang") !== lang; });
+    });
+    if (persist) save("bb-code-lang", lang);
+  };
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-tab-lang]");
+    if (!b) return;
+    var y = b.getBoundingClientRect().top;
+    setLang(b.getAttribute("data-tab-lang"), true);
+    window.scrollBy(0, b.getBoundingClientRect().top - y);   // keep the clicked tab still while other groups resize
+  });
+  if ($(".code-tabs") && load("bb-code-lang", null)) setLang(load("bb-code-lang", null), false);
+  // Some inherited diagrams draw outside their viewBox; grow it to fit what the browser actually lays out.
+  if ($(".diagram-frame svg")) {
+    var fitDiagrams = function () {
+      $$(".diagram-frame svg").forEach(function (svg) {
+        var raw = svg.getAttribute("viewBox"); if (!raw) return;
+        var v = raw.trim().split(/[\s,]+/).map(Number), box;
+        try { box = svg.getBBox(); } catch (err) { return; }
+        if (!box || !box.width) return;
+        var nx = Math.min(v[0], Math.floor(box.x)), ny = Math.min(v[1], Math.floor(box.y));
+        var nw = Math.max(v[0] + v[2], Math.ceil(box.x + box.width)) - nx, nh = Math.max(v[1] + v[3], Math.ceil(box.y + box.height)) - ny;
+        if (nw - v[2] < 4 && nh - v[3] < 4 && v[0] - nx < 4 && v[1] - ny < 4) return;
+        svg.setAttribute("viewBox", nx + " " + ny + " " + nw + " " + nh);
+      });
+    };
+    (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(fitDiagrams, fitDiagrams);
   }
 
   // ── search palette ─────────────────────────────────────────────

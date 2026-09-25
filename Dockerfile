@@ -4,10 +4,11 @@
 
 # ── site: generate static pages ─────────────────────────────────────────────
 FROM python:3.12-alpine AS build
+# git fetches the open-source DSA solutions and Backend course into learn-ui/vendor
+# (skipped when that folder already has them — see README).
+RUN apk add --no-cache git
 WORKDIR /src
-COPY learn-ui/build.py learn-ui/build.py
-COPY learn-ui/assets learn-ui/assets
-COPY learn-ui/data learn-ui/data
+COPY learn-ui learn-ui
 COPY learn learn
 RUN python3 learn-ui/build.py learn /site
 

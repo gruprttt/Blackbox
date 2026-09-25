@@ -2,9 +2,24 @@
 
 *Where engineers figure things out.*
 
-A learning site with three live programs — **DevOps & SRE** (built from the saved lesson pages in
-`../learn`), **DSA** (Striver's A2Z sheet, 474 problems) and **System Design** — plus a focus timer,
+A learning site with four live programs — **DevOps & SRE** (built from the saved lesson pages in
+`../learn`), **DSA** (Striver's A2Z sheet: 474 problems, 297 with solutions), **System Design** and
+**Backend Engineering** (the full *Backend from First Principles* course) — plus a focus timer,
 tasks, habits, accounts, and a 3D brain that grows as you learn.
+
+## Open-source content it pulls in
+
+The first build clones these into `vendor/` (git-ignored) and builds pages from them:
+
+| Source | Used for |
+| --- | --- |
+| [DsThakurRawat/Backend-from-first-Principle](https://github.com/DsThakurRawat/Backend-from-first-Principle) ([site](https://backend-from-first-principle.vercel.app)) | All 26 Backend chapters: text, diagrams, callouts, multi-language code tabs |
+| [ashutosh-mishr/AtoZ-DSA-Practice](https://github.com/ashutosh-mishr/AtoZ-DSA-Practice) ([site](https://dsapractice.indevs.in/roadmap)) | DSA solutions (problem statement, examples, C++ code) — originally from [Codensity30/Strivers-A2Z-DSA-Sheet](https://github.com/Codensity30/Strivers-A2Z-DSA-Sheet) |
+
+Needs `git` and internet on the first build. To pick up their latest changes, delete the folder
+under `vendor/` and rebuild. `BLACKBOX_OFFLINE=1 python3 build.py` builds without fetching (those
+pages are then skipped). These repos don't state a licence — credit and links stay on every page;
+ask the authors before hosting it publicly.
 
 ## Study (one command)
 
@@ -40,7 +55,15 @@ a topic table with solved counts and progress, then each topic's subtopics as co
 sections. Every problem row has **Solved**, **Bookmark**, **Revision**, a **Pattern** hint (pattern,
 time/space, approach where known), **LeetCode / GFG / TUF / YouTube** links and personal **Notes**.
 Filter by status or difficulty; the Revision and Bookmarks tabs collect what you've marked.
-All of it saves to your account.
+Problems with a solution get a **Solution** page (`dsa/solution/p062/`) with the problem statement,
+examples, approach and the C++ solution. All of it saves to your account.
+
+## Backend
+
+`backend/index.html` lists the 26 chapters. Each chapter page has the chapter list on the left, the
+section list on the right, and the full text with diagrams, callouts, step diagrams and code in
+Go / Python / JavaScript / TypeScript / Java tabs (your language choice is remembered). Tick each
+section as you finish it — every section is a neuron in the Backend lobe.
 
 ## The brain
 
@@ -67,6 +90,7 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `build.py` | Parses `../learn` and generates every page; `LOBES` are the brain's top-level regions |
 | `data/dsa-a2z.json` | Striver's A2Z sheet (18 topics, 62 subtopics, 474 problems with links) |
 | `data/system-design.json` | System Design curriculum (topics → concepts) |
+| `mdx.py` | Dependency-free MDX → HTML converter for the Backend chapters |
 | `assets/style.css` | Design system (dark + light themes) |
 | `assets/app.js` | Core: progress, focus engine, tasks store, search, theme |
 | `assets/brain.js` | Canvas 3D brain renderer (levels, dive transitions, growth) |
