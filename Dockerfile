@@ -7,10 +7,11 @@ FROM python:3.12-alpine AS build
 WORKDIR /src
 COPY learn-ui/build.py learn-ui/build.py
 COPY learn-ui/assets learn-ui/assets
+COPY learn-ui/data learn-ui/data
 COPY learn learn
 RUN python3 learn-ui/build.py learn /site
 
-# ── api: progress sync (stdlib only, runs as non-root) ───────────────────────
+# ── api: accounts + progress sync (stdlib only, runs as non-root) ────────────
 FROM python:3.12-alpine AS api
 RUN adduser -D -H -u 10001 blackbox && mkdir /data && chown blackbox /data
 COPY learn-ui/server/server.py /app/server.py

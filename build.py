@@ -21,38 +21,46 @@ OUT = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else (HERE / "dist")
 SITE = "BLACKBOX"
 TAGLINE = "Where engineers figure things out."
 
-# Each domain is one region of the brain. `anchor` is where that region sits on the brain
+# The brain is split into lobes, one per program. `anchor` is where that lobe sits on the brain
 # (x: left→right, y: down→up, z: back→front); neurons are assigned to the nearest anchor.
+# Click a lobe on the Brain page to go inside it: its tracks/topics become the regions, and so on
+# down to single lessons and problems. Lobes marked `soon` show up dormant.
+LOBES = [
+    dict(id="devops", name="DevOps & SRE", short="DevOps", color="#5b8cff", anchor=(.5, .3, .3), href="index.html#path",
+         blurb="Linux, networking, IaC, Kubernetes, CI/CD, observability, databases and security."),
+    dict(id="dsa", name="Data Structures & Algorithms", short="DSA", color="#22d3ee", anchor=(-.5, .22, .3), href="dsa/index.html",
+         blurb="Striver's A2Z sheet — 474 problems from basics to DP."),
+    dict(id="system-design", name="System Design", short="Design", color="#f472b6", anchor=(0, .5, -.4), href="system-design/index.html",
+         blurb="Estimation, caching, storage, messaging and classic designs."),
+    dict(id="cybersecurity", name="Cybersecurity", short="Security", color="#ff4d5e", anchor=(.45, -.2, -.5), soon=True,
+         blurb="Offensive and defensive security beyond DevSecOps."),
+    dict(id="ai-ml", name="AI & Machine Learning", short="AI/ML", color="#fbbf24", anchor=(-.45, -.2, -.5), soon=True,
+         blurb="ML foundations, LLMs, training and serving."),
+]
+LOBE_BY_ID = {d["id"]: d for d in LOBES}
+# Old per-area domain ids (focus history recorded before lobes existed) now belong to DevOps.
+DOMAIN_ALIASES = {"foundations": "devops", "code": "devops", "systems": "devops", "distributed": "devops",
+                  "infra": "devops", "reliability": "devops", "security": "devops", "ai": "devops", "design": "system-design"}
+
+# DevOps areas: colour and label for each track inside the DevOps lobe.
 DOMAINS = [
-    dict(id="foundations", name="Thinking & Leadership", short="Thinking", color="#a78bfa", anchor=(0, .32, .9),
-         blurb="Mental models, systems thinking and influence.",
+    dict(id="foundations", name="Thinking & Leadership", short="Thinking", color="#a78bfa",
          tracks=["the-foundation-systems-thinking", "organizational-design-influence"]),
-    dict(id="code", name="Code & Craft", short="Code", color="#5b8cff", anchor=(-.62, .1, .45),
-         blurb="Scripting, version control and interview craft.",
+    dict(id="code", name="Code & Craft", short="Code", color="#5b8cff",
          tracks=["code-scripting-version-control", "algorithmic-interviews-career-strategy"]),
-    dict(id="systems", name="Systems & Networks", short="Systems", color="#38bdf8", anchor=(.25, .62, .15),
-         blurb="Kernels, hardware sympathy and the internet's plumbing.",
+    dict(id="systems", name="Systems & Networks", short="Systems", color="#38bdf8",
          tracks=["operating-systems-kernel-hardware-sympathy", "networking-internet-governance"]),
-    dict(id="distributed", name="Distributed Systems", short="Distributed", color="#2dd4bf", anchor=(-.4, .5, -.35),
-         blurb="Consensus, replication and algorithms at scale.",
+    dict(id="distributed", name="Distributed Systems", short="Distributed", color="#2dd4bf",
          tracks=["distributed-systems-algorithms-at-scale"]),
-    dict(id="infra", name="Cloud & Platform", short="Cloud", color="#a3e635", anchor=(.62, .15, .35),
-         blurb="IaC, containers, AWS, delivery pipelines and cost.",
+    dict(id="infra", name="Cloud & Platform", short="Cloud", color="#a3e635",
          tracks=["infrastructure-as-code-iac", "containerization-wasm-kubernetes", "aws-mastery-the-reference-implementation",
                  "ci-cd-release-engineering", "platform-engineering-strategy", "finops-greenops"]),
-    dict(id="reliability", name="Reliability & Data", short="Reliability", color="#fb923c", anchor=(.62, -.2, -.25),
-         blurb="Observability, incidents and database reliability.",
+    dict(id="reliability", name="Reliability & Data", short="Reliability", color="#fb923c",
          tracks=["observability-sre", "incident-command-resilience", "database-reliability-engineering-dbre"]),
-    dict(id="security", name="Cybersecurity", short="Security", color="#ff4d5e", anchor=(0, .15, -.95),
-         blurb="DevSecOps today — offensive & defensive security next.",
+    dict(id="security", name="Security Engineering", short="Security", color="#ff4d5e",
          tracks=["security-engineering-devsecops"]),
-    dict(id="ai", name="AI & Data", short="AI", color="#fbbf24", anchor=(-.62, -.2, -.2),
-         blurb="AI infrastructure and DataOps — ML & LLMs next.",
+    dict(id="ai", name="AI & Data", short="AI", color="#fbbf24",
          tracks=["ai-infrastructure-dataops"]),
-    dict(id="dsa", name="Data Structures & Algorithms", short="DSA", color="#22d3ee", anchor=(0, -.45, -.7),
-         blurb="Arrays to graphs, patterns to proofs.", tracks=[], soon=True),
-    dict(id="system-design", name="System Design", short="Design", color="#f472b6", anchor=(.4, .45, -.45),
-         blurb="Designing large-scale systems end to end.", tracks=[], soon=True),
 ]
 DOMAIN_BY_ID = {d["id"]: d for d in DOMAINS}
 
@@ -108,20 +116,18 @@ TRACKS = []  # filled in main(); used by the header's Tracks dropdown
 # Programs are the top-level curricula. Each has its own numbered path of tracks.
 # Tracks not listed in a later program belong to the first (live) one.
 PROGRAMS = [
-    dict(id="devops-sre", name="DevOps & SRE", color="#5b8cff",
+    dict(id="devops-sre", lobe="devops", name="DevOps & SRE", color="#5b8cff",
          blurb="Foundations to incident command: Linux, networking, IaC, Kubernetes, CI/CD, observability, databases, security and platform strategy."),
-    dict(id="system-design", name="System Design", color="#f472b6", soon=True,
-         blurb="Design large-scale systems end to end — capacity math, failure modes and trade-offs.",
-         region_note="Wires the System Design region"),
-    dict(id="dsa", name="Data Structures & Algorithms", color="#22d3ee", soon=True,
-         blurb="From arrays to graphs — patterns, complexity and interview-grade problem solving.",
-         region_note="Wires the DSA region"),
-    dict(id="cybersecurity", name="Cybersecurity", color="#ff4d5e", soon=True,
+    dict(id="dsa", lobe="dsa", name="Data Structures & Algorithms", color="#22d3ee",
+         blurb="Striver's A2Z sheet: 18 topics and 474 problems, from the basics through graphs and dynamic programming."),
+    dict(id="system-design", lobe="system-design", name="System Design", color="#f472b6",
+         blurb="Design large-scale systems end to end — estimation, caching, storage, messaging, failure modes and classic designs."),
+    dict(id="cybersecurity", lobe="cybersecurity", name="Cybersecurity", color="#ff4d5e", soon=True,
          blurb="Offensive and defensive security beyond DevSecOps: threat hunting, exploitation, hardening.",
-         region_note="Expands the Cybersecurity region"),
-    dict(id="ai-ml", name="AI & Machine Learning", color="#fbbf24", soon=True,
+         region_note="Wakes the Cybersecurity lobe"),
+    dict(id="ai-ml", lobe="ai-ml", name="AI & Machine Learning", color="#fbbf24", soon=True,
          blurb="ML foundations, LLMs, training and serving — the systems behind modern AI.",
-         region_note="Expands the AI & Data region"),
+         region_note="Wakes the AI & ML lobe"),
 ]
 TRACK_DOMAIN = {slug: d["id"] for d in DOMAINS for slug in d["tracks"]}
 
@@ -207,6 +213,9 @@ def parse_lesson(path):
 
 def load():
     tracks = []
+    if not SRC.is_dir():
+        print(f"note: no lesson source at {SRC} — building DSA and System Design only", file=sys.stderr)
+        return tracks
     for d in sorted(p for p in SRC.iterdir() if p.is_dir() and (p / "index.html").exists()):
         track = parse_track(d)
         for topic in track["topics"]:
@@ -222,6 +231,7 @@ def load():
         t["prev"] = tracks[i - 1] if i > 0 else None
         t["next"] = tracks[i + 1] if i + 1 < len(tracks) else None
         t["domain"] = DOMAIN_BY_ID[TRACK_DOMAIN.get(t["slug"], "foundations")]
+        t["lobe"] = "devops"
         t["color"] = t["domain"]["color"]
         t["n_lessons"] = sum(len(tp["lessons"]) for tp in t["topics"])
         t["minutes"] = sum(l["minutes"] for tp in t["topics"] for l in tp["lessons"])
@@ -257,10 +267,16 @@ ICON = {
     "map": svg('<path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>'),
     "gear": svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
     "plus": svg('<path d="M12 5v14M5 12h14"/>'),
+    "code": svg('<path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16"/>'),
+    "design": svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/>'),
+    "user": svg('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
+    "ext": svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
 }
 
 NAV = [("Learn", "index.html", "learn", ("home",)),
        ("Tracks", "tracks/index.html", "map", ("tracks", "track", "topic", "lesson")),
+       ("DSA", "dsa/index.html", "code", ("dsa",)),
+       ("Design", "system-design/index.html", "design", ("sd",)),
        ("Brain", "brain/index.html", "brain", ("brain",)),
        ("Focus", "focus/index.html", "focus", ("focus",)),
        ("Tasks", "tasks/index.html", "tasks", ("tasks",)),
@@ -273,6 +289,7 @@ THEME_BOOT = (
 )
 
 APP_PAGES = ("home", "brain", "focus", "tasks", "habits")
+TABBAR = ("Learn", "DSA", "Brain", "Focus", "Tasks")
 
 
 def logo(size=""):
@@ -285,6 +302,8 @@ def page(*, title, desc, root, body, kind):
         extra = f'<script src="{root}assets/path.js" defer></script>\n'
     if kind == "tracks":
         extra += f'<script src="{root}assets/map-data.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n<script src="{root}assets/mindmap.js" defer></script>\n'
+    if kind == "brain":
+        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n'
     if kind in APP_PAGES:
         extra += f'<script src="{root}assets/brain.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n'
     return f"""<!DOCTYPE html>
@@ -322,7 +341,7 @@ def header(root, kind):
               if kind == "lesson" else "")
     bar = '<div class="read-progress" aria-hidden="true"><span></span></div>' if kind == "lesson" else ""
     def item(label, href, icon, kinds):
-        link = f'<a href="{root}{href}"{" aria-current=page class=is-active" if kind in kinds else ""}>{ICON[icon]}<span>{label}</span></a>'
+        link = f'<a href="{root}{href}" title="{label}"{" aria-current=page class=is-active" if kind in kinds else ""}>{ICON[icon]}<span>{label}</span></a>'
         if label != "Tracks" or not TRACKS:
             return link
         rows = "".join(
@@ -342,6 +361,14 @@ def header(root, kind):
       <button class="search-trigger" data-open-search aria-label="Search">{ICON["search"]}<span>Search</span><kbd data-mod-key>⌘K</kbd></button>
       <button class="icon-btn" data-open-settings aria-label="Settings" title="Settings &amp; data">{ICON["gear"]}</button>
       <button class="icon-btn theme-toggle" data-theme-toggle aria-label="Toggle dark mode" title="Toggle theme (D)">{ICON["sun"]}{ICON["moon"]}</button>
+      <div class="acct" data-account>
+        <a class="acct-btn" href="{root}login/index.html" data-account-btn>{ICON["user"]}<span data-account-name>Sign in</span></a>
+        <div class="acct-menu" data-account-menu hidden>
+          <p class="mono-label">Signed in as</p><b data-account-user></b>
+          <button data-open-settings>{ICON["gear"]}Settings &amp; password</button>
+          <button data-sign-out>{ICON["left"]}Sign out</button>
+        </div>
+      </div>
     </div>
   </div>
   {bar}
@@ -349,19 +376,19 @@ def header(root, kind):
 
 
 def footer(root):
-    domains = "".join(f'<li><a href="{root}index.html#path"><i style="--c:{d["color"]}"></i>{d["name"]}</a></li>'
-                      for d in DOMAINS if not d.get("soon"))
+    domains = "".join(f'<li><a href="{root}{d["href"]}"><i style="--c:{d["color"]}"></i>{d["name"]}</a></li>'
+                      for d in LOBES if not d.get("soon"))
     app = "".join(f'<li><a href="{root}{href}">{label}</a></li>' for label, href, _, _ in NAV[1:])
     return f"""<footer class="footer">
   <div class="wrap footer-top">
     <div class="footer-brand">
       <a href="{root}index.html">{logo("lg")}</a>
       <p class="tagline">{TAGLINE}</p>
-      <p class="fine">Lesson content © HamChops. Progress, tasks and focus history are saved to your BLACKBOX server.</p>
+      <p class="fine">Lesson content © HamChops. DSA problem list from Striver's A2Z sheet. Sign in and your progress, tasks and focus history are saved to your BLACKBOX account.</p>
       <p class="fine"><span class="sync-status" data-sync-status></span></p>
     </div>
     <div class="footer-cols">
-      <div><h4>Domains</h4><ul>{domains}</ul></div>
+      <div><h4>Programs</h4><ul>{domains}</ul></div>
       <div><h4>Toolkit</h4><ul>{app}</ul></div>
       <div class="kbd-hints"><h4>Shortcuts</h4><ul>
         <li><kbd>⌘</kbd><kbd>K</kbd> Search</li><li><kbd>←</kbd><kbd>→</kbd> Prev / next</li>
@@ -374,7 +401,7 @@ def footer(root):
 def tabbar(root, kind):
     items = "".join(
         f'<a href="{root}{href}"{" class=is-active" if kind in kinds else ""}>{ICON[icon]}<span>{label}</span></a>'
-        for label, href, icon, kinds in NAV
+        for label, href, icon, kinds in NAV if label in TABBAR
     )
     return f'<nav class="tabbar" aria-label="Quick navigation">{items}</nav>'
 
@@ -449,27 +476,42 @@ def path_steps(tracks, root=""):
     return "".join(steps)
 
 
-def render_home(tracks):
+def devops_prefix(tracks):
+    return "|".join(t["slug"] + "/" for t in tracks) or "devops-none/"
+
+
+def render_home(tracks, sheets):
     root = ""
     prog = PROGRAMS[0]
     n_lessons = sum(t["n_lessons"] for t in tracks)
-    first = tracks[0]["topics"][0]["lessons"][0]
-    first_href = f"{lesson_id(tracks[0], tracks[0]['topics'][0], first)}/index.html"
+    if tracks:
+        first = tracks[0]["topics"][0]["lessons"][0]
+        first_href = f"{lesson_id(tracks[0], tracks[0]['topics'][0], first)}/index.html"
+    else:
+        first_href = "dsa/index.html"
     steps = path_steps(tracks)
     programs = []
     for i, pg in enumerate(PROGRAMS, 1):
-        if pg.get("soon"):
+        sheet = sheets.get(pg["lobe"])
+        if sheet:
+            programs.append(f"""<a class="program live" href="{sheet['href']}" style="--c:{pg['color']}">
+  <div class="program-top"><span class="mono-label">Program {i:02d}</span><span class="badge live-badge"><span class="rec live"></span>Live</span></div>
+  <h3>{pg['name']}</h3><p>{pg['blurb']}</p>
+  <p class="program-meta mono-label">{sheet['meta']}</p>
+  {progress(sheet['prefix'], sheet['total'])}
+</a>""")
+        elif pg.get("soon") or not tracks:
             programs.append(f"""<div class="program soon" style="--c:{pg['color']}">
   <div class="program-top"><span class="mono-label">Program {i:02d}</span><span class="badge">Coming soon</span></div>
   <h3>{pg['name']}</h3><p>{pg['blurb']}</p>
-  <p class="program-meta mono-label">{pg['region_note']}</p>
+  <p class="program-meta mono-label">{pg.get('region_note', 'Add lessons to wake this lobe')}</p>
 </div>""")
         else:
             programs.append(f"""<a class="program live" href="#path" style="--c:{pg['color']}">
   <div class="program-top"><span class="mono-label">Program {i:02d}</span><span class="badge live-badge"><span class="rec live"></span>Live</span></div>
   <h3>{pg['name']}</h3><p>{pg['blurb']}</p>
   <p class="program-meta mono-label">{len(tracks)} tracks · {n_lessons:,} lessons · {fmt_minutes(sum(t['minutes'] for t in tracks))}</p>
-  {progress('', n_lessons)}
+  {progress(devops_prefix(tracks), n_lessons)}
 </a>""")
     brain_inner = f"""<canvas data-brain="hero" aria-label="Your knowledge brain"></canvas>
       <div class="brain-hud">
@@ -484,9 +526,9 @@ def render_home(tracks):
   <div class="hero-bg" aria-hidden="true"></div>
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <p class="kicker"><span class="rec live"></span>{prog['name']} · {n_lessons:,} lessons · {len(tracks)} tracks</p>
+      <p class="kicker"><span class="rec live"></span>{1 + len(sheets) if tracks else len(sheets)} programs live · {n_lessons + sum(sh['total'] for sh in sheets.values()):,} lessons, problems &amp; concepts</p>
       <h1>Where engineers<br><span class="grad">figure things out.</span></h1>
-      <p class="lede">Deep, bite-sized lessons on systems, infrastructure and reliability — with focus sessions, tasks, habits and a brain that visibly rewires itself as you learn.</p>
+      <p class="lede">DevOps &amp; SRE lessons, Striver's A2Z DSA sheet and a System Design track — with focus sessions, tasks, habits and a brain that visibly grows as you learn.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="{first_href}" data-continue-link data-path-next>{ICON['play']}<span data-continue-label>Start learning</span></a>
         <a class="btn btn-ghost" href="focus/index.html"><span class="rec"></span>Start a focus session</a>
@@ -532,15 +574,15 @@ def render_home(tracks):
 </section>
 
 <section class="wrap programs-sec" id="programs">
-  <div class="section-title"><div><span class="mono-label">/ programs</span><h2>One program live. More on the way.</h2>
-    <p class="section-sub">Each program is its own numbered path. DevOps &amp; SRE is live; the others will light up new regions of your brain when they land.</p></div></div>
+  <div class="section-title"><div><span class="mono-label">/ programs</span><h2>Every program is a lobe of your brain.</h2>
+    <p class="section-sub">DevOps &amp; SRE, DSA and System Design are live — each one wires its own lobe. Open the Brain and click a lobe to go inside it.</p></div></div>
   <div class="program-grid">{''.join(programs)}</div>
 </section>
 
 <section class="wrap library" id="path">
   <div class="section-title"><div><span class="mono-label">/ program 01 · {prog['name']}</span><h2>{len(tracks)} tracks, in order</h2>
     <p class="section-sub">Work from Track 01 to Track {len(tracks):02d}. Next and Previous carry you straight into the next track.</p></div>
-    <div class="overall">{progress('', n_lessons)}</div></div>
+    <div class="overall">{progress(devops_prefix(tracks), n_lessons)}</div></div>
   <div class="path-status" data-path-status></div>
   <ol class="path">{steps}</ol>
 </section>
@@ -601,7 +643,7 @@ def render_track(track):
 </details>""")
     first = f"{lesson_id(track, track['topics'][0], track['topics'][0]['lessons'][0])}/index.html"
     actions = (f'<a class="btn btn-primary" href="{root}{first}" data-resume="{track["slug"]}/">{ICON["play"]}<span>Start track</span></a>'
-               f'<button class="btn btn-ghost on-dark" data-focus-domain="{track["domain"]["id"]}"><span class="rec"></span>Focus on this</button>'
+               f'<button class="btn btn-ghost on-dark" data-focus-domain="{track["lobe"]}"><span class="rec"></span>Focus on this</button>'
                f'<div class="banner-progress">{progress(track["slug"] + "/", track["n_lessons"])}</div>')
     body = f"""<main id="main" style="--c:{track['color']}">
 {banner(root, track, crumbs(root, [(PROGRAMS[0]['name'], 'index.html#path'), (f"Track {track['num']}", None)]),
@@ -683,7 +725,7 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
   </aside>
   <main id="main" class="lesson-main">
     {crumbs(root, [(track['title'], track['slug'] + '/index.html'), (topic['title'], f"{track['slug']}/{topic['slug']}/index.html")])}
-    <article class="lesson" data-lesson-id="{lid}" data-domain="{track['domain']['id']}" data-lesson-title="{html.escape(strip_tags(lesson['title']))}" data-lesson-sub="{html.escape(strip_tags(topic['title']))}">
+    <article class="lesson" data-lesson-id="{lid}" data-domain="{track['lobe']}" data-lesson-title="{html.escape(strip_tags(lesson['title']))}" data-lesson-sub="{html.escape(strip_tags(topic['title']))}">
       <header class="lesson-head">
         <div class="lesson-meta">
           <span class="chip">{lesson['kind']}</span>
@@ -721,9 +763,13 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
 def render_tracks(tracks):
     root = "../"
     n_lessons = sum(t["n_lessons"] for t in tracks)
-    progs = "".join(
-        f'<button class="prog-chip{" is-active" if not pg.get("soon") else ""}" {"disabled" if pg.get("soon") else ""} style="--c:{pg["color"]}">'
-        f'<i></i>{pg["name"]}{" <em>soon</em>" if pg.get("soon") else ""}</button>' for pg in PROGRAMS)
+    def chip(i, pg):
+        if pg.get("soon"):
+            return f'<button class="prog-chip" disabled style="--c:{pg["color"]}"><i></i>{pg["name"]} <em>soon</em></button>'
+        if i == 0:
+            return f'<button class="prog-chip is-active" style="--c:{pg["color"]}"><i></i>{pg["name"]}</button>'
+        return f'<a class="prog-chip" href="{root}{LOBE_BY_ID[pg["lobe"]]["href"]}" style="--c:{pg["color"]}"><i></i>{pg["name"]}</a>'
+    progs = "".join(chip(i, pg) for i, pg in enumerate(PROGRAMS))
     body = f"""<main id="main" class="app app-tracks">
 <section class="wrap tracks-head">
   <div class="section-title"><div><span class="mono-label">/ tracks · program 01</span><h1>{PROGRAMS[0]['name']} skill map</h1>
@@ -768,24 +814,34 @@ def app_page(kind, title, desc, inner):
 
 
 def render_brain():
-    return app_page("brain", "Your brain", "Your knowledge, visualised as a growing neural network.", """
+    return app_page("brain", "Your brain", "Your knowledge, visualised as a growing neural network.", f"""
 <div class="brain-page">
   <section class="console console-stage">
-   <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title">cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
-   <div class="console-screen brain-stage">
+   <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title" data-brain-path>cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
+   <div class="console-screen brain-stage" data-brain-stage>
     <canvas data-brain="full" aria-label="Interactive 3D brain"></canvas>
     <div class="stage-top">
-      <p class="mono-label">Neural map</p>
-      <h1>Your brain</h1>
-      <p class="stage-sub">Every lesson you finish and every focus minute wires new neurons into the region it belongs to.</p>
+      <nav class="brain-crumbs" data-brain-crumbs aria-label="Brain level"></nav>
+      <h1 data-level-title>Your brain</h1>
+      <p class="stage-sub" data-level-sub>Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to go inside it.</p>
     </div>
     <dl class="stage-stats">
       <div><dt>Neurons</dt><dd data-stat="neurons">0</dd></div>
       <div><dt>Synapses</dt><dd data-stat="synapses">0</dd></div>
-      <div><dt>Regions active</dt><dd data-stat="regions">0</dd></div>
+      <div><dt data-regions-label>Lobes active</dt><dd data-stat="regions">0</dd></div>
     </dl>
-    <p class="stage-tip mono-label">Drag to rotate · scroll to zoom · click a region</p>
+    <button class="stage-up" data-brain-up hidden>{ICON['left']}<span>Back out</span></button>
+    <p class="stage-tip mono-label">Drag to rotate · scroll to zoom · click to go inside</p>
+    <div class="stage-time mono-label" data-time-label hidden></div>
     <div class="brain-tooltip" data-brain-tooltip hidden></div>
+   </div>
+   <div class="timeline" data-timeline>
+     <button class="icon-btn" data-time-play aria-label="Replay how your brain grew">{ICON['play']}</button>
+     <div class="tl-track">
+       <canvas data-growth-chart aria-hidden="true"></canvas>
+       <input type="range" min="0" max="100" value="100" step="1" data-time-range aria-label="Time travel through your brain's growth">
+     </div>
+     <div class="tl-meta"><span class="mono-label">Growth</span><b data-time-date>Today</b><span data-time-delta></span></div>
    </div>
   </section>
   <aside class="region-panel" data-region-list aria-label="Brain regions"></aside>
@@ -870,6 +926,196 @@ def render_habits():
 </div>""")
 
 
+# ───────────────────────────── DSA & System Design sheets ─────────────────────────────
+
+DIFF_CLASS = {"Easy": "d-easy", "Medium": "d-med", "Hard": "d-hard"}
+LINK_LABELS = [("lc", "LeetCode"), ("gfg", "GFG"), ("yt", "Video"), ("article", "Article")]
+
+
+def load_sheets():
+    """Normalise both sheets to: topics → subs → items, each item with a stable progress id."""
+    sheets = {}
+    dsa_path, sd_path = HERE / "data" / "dsa-a2z.json", HERE / "data" / "system-design.json"
+    if dsa_path.exists():
+        raw = json.loads(dsa_path.read_text(encoding="utf-8"))
+        topics = []
+        for t in raw["topics"]:
+            short, _, note = t["name"].partition("[")
+            topic = dict(id=t["id"], slug=f"{t['id']}-{slugify(short)}", name=short.strip(), note=note.rstrip("]").strip(), subs=[])
+            for sub in t["subtopics"]:
+                items = []
+                for pr in sub["problems"]:
+                    meta = " · ".join(x for x in (pr.get("pattern"), pr.get("time") and f"{pr['time']} time",
+                                                  pr.get("space") and f"{pr['space']} space") if x)
+                    items.append(dict(id=f"dsa/{t['id']}/{sub['id']}/{pr['id']}", anchor=pr["id"], name=pr["name"], level=pr["level"],
+                                      meta=meta, links=[(label, pr[k]) for k, label in LINK_LABELS if pr.get(k)]))
+                topic["subs"].append(dict(id=f"dsa/{t['id']}/{sub['id']}", anchor=f"{t['id']}-{sub['id']}", name=sub["name"], items=items))
+            topics.append(topic)
+        sheets["dsa"] = dict(lobe="dsa", dir="dsa", prefix="dsa/", name="DSA · Striver's A2Z sheet", short="DSA", color=LOBE_BY_ID["dsa"]["color"],
+                             noun="problem", done_label="Solved", todo_label="Mark solved", topics=topics,
+                             lede="Every problem from Striver's A2Z DSA sheet, in order — 18 topics from language basics through graphs, "
+                                  "dynamic programming and tries. Tick a problem when you've solved it and it wires a neuron in your DSA lobe.")
+    if sd_path.exists():
+        raw = json.loads(sd_path.read_text(encoding="utf-8"))
+        topics = []
+        for t in raw["topics"]:
+            items = [dict(id=f"sd/{t['id']}/{c['id']}", anchor=c["id"], name=c["name"], desc=c["desc"]) for c in t["concepts"]]
+            topics.append(dict(id=t["id"], slug=t["id"], name=t["name"], note="", subs=[dict(id=f"sd/{t['id']}", anchor="", name="", items=items)]))
+        sheets["system-design"] = dict(lobe="system-design", dir="system-design", prefix="sd/", name="System Design", short="Design",
+                                       color=LOBE_BY_ID["system-design"]["color"], noun="concept", done_label="Learned", todo_label="Mark learned",
+                                       topics=topics,
+                                       lede="From estimation and caching to consensus and classic interview designs. Work through each concept, "
+                                            "mark it learned and watch your System Design lobe light up.")
+    for sh in sheets.values():
+        for i, t in enumerate(sh["topics"]):
+            t["num"] = f"{i + 1:02d}"
+            t["prefix"] = f"{sh['prefix']}{t['id']}/"
+            t["total"] = sum(len(sb["items"]) for sb in t["subs"])
+        sh["total"] = sum(t["total"] for t in sh["topics"])
+        sh["href"] = f"{sh['dir']}/index.html"
+        sh["meta"] = f"{len(sh['topics'])} topics · {sh['total']:,} {sh['noun']}s"
+    return sheets
+
+
+def sheet_banner(root, sh, num, crumb_items, kicker, title, meta, actions):
+    return banner(root, dict(color=sh["color"], num=num), crumbs(root, crumb_items), kicker, title, meta, actions)
+
+
+def item_row(sh, it):
+    if sh["lobe"] == "dsa":
+        links = "".join(f'<a href="{html.escape(url)}" target="_blank" rel="noopener">{label}</a>' for label, url in it["links"])
+        body = (f'<span class="it-main"><a class="it-title" href="#{it["anchor"]}">{html.escape(it["name"])}</a>'
+                + (f'<span class="it-meta">{html.escape(it["meta"])}</span>' if it["meta"] else "") + "</span>"
+                f'<span class="diff {DIFF_CLASS.get(it["level"], "")}">{it["level"]}</span>'
+                f'<span class="it-links">{links}</span>')
+        level = f' data-level="{it["level"]}"'
+    else:
+        body = (f'<span class="it-main"><a class="it-title" href="#{it["anchor"]}">{html.escape(it["name"])}</a>'
+                f'<span class="it-desc">{html.escape(it["desc"])}</span></span>')
+        level = ""
+    return (f'<li class="item" id="{it["anchor"]}" data-lesson="{it["id"]}"{level}>'
+            f'<button class="it-check" type="button" data-toggle-done aria-label="{sh["todo_label"]}: {html.escape(it["name"])}">{ICON["check"]}</button>'
+            f"{body}</li>")
+
+
+def render_sheet_index(sh):
+    root = "../"
+    cards = "".join(f"""<a class="track-card" href="{t['slug']}/index.html" style="--c:{sh['color']}">
+  <div class="tc-top"><span class="tc-num">{t['num']}</span><span class="tc-go">{ICON['right']}</span></div>
+  <h4>{html.escape(t['name'])}</h4>
+  <p class="tc-meta">{html.escape(t['note']) + ' · ' if t['note'] else ''}{t['total']} {sh['noun']}s</p>
+  {progress(t['prefix'], t['total'])}
+</a>""" for t in sh["topics"])
+    levels = ""
+    if sh["lobe"] == "dsa":
+        counts = {}
+        for t in sh["topics"]:
+            for sb in t["subs"]:
+                for it in sb["items"]:
+                    counts[it["level"]] = counts.get(it["level"], 0) + 1
+        levels = '<div class="level-stats">' + "".join(
+            f'<div class="stat {DIFF_CLASS[k]}"><span class="mono-label">{k}</span><b><span data-level-done="{k}">0</span><small>/ {counts.get(k, 0)}</small></b></div>'
+            for k in ("Easy", "Medium", "Hard")) + "</div>"
+        levels += "<script>window.BB_LEVELS=" + json.dumps({it["id"]: it["level"][0] for t in sh["topics"] for sb in t["subs"] for it in sb["items"]},
+                                                          separators=(",", ":")) + ";</script>"
+    first = sh["topics"][0]
+    actions = (f'<a class="btn btn-primary" href="{first["slug"]}/index.html" data-sheet-next="{sh["prefix"]}">{ICON["play"]}<span>Start</span></a>'
+               f'<button class="btn btn-ghost on-dark" data-focus-domain="{sh["lobe"]}"><span class="rec"></span>Focus on this</button>'
+               f'<a class="btn btn-ghost on-dark" href="{root}brain/index.html#{sh["lobe"]}">{ICON["brain"]}See it in your brain</a>'
+               f'<div class="banner-progress">{progress(sh["prefix"], sh["total"])}</div>')
+    body = f"""<main id="main" style="--c:{sh['color']}">
+{sheet_banner(root, sh, sh['short'][:3].upper() if sh['lobe'] == 'dsa' else 'SD', [('Learn', 'index.html#programs'), (sh['name'], None)],
+              f"Program · {len(sh['topics'])} topics", sh['name'], sh['lede'], actions)}
+<section class="wrap section">
+  {levels}
+  <div class="topic-tools"><h2>Topics</h2><div><button class="link-btn danger" data-reset-prefix="{sh['prefix']}" data-reset-label="{sh['short']}">Reset progress</button></div></div>
+  <div class="track-grid">{cards}</div>
+</section>
+</main>"""
+    return page(title=f"{sh['name']} · {SITE}", desc=sh["lede"], root=root, body=body, kind="sheet")
+
+
+def render_sheet_topic(sh, ti):
+    root = "../../"
+    t = sh["topics"][ti]
+    prev_t = sh["topics"][ti - 1] if ti > 0 else None
+    next_t = sh["topics"][ti + 1] if ti + 1 < len(sh["topics"]) else None
+    nav = '<div class="pager">'
+    nav += (f'<a class="pager-card prev" href="../{prev_t["slug"]}/index.html" data-nav-prev><span>{ICON["left"]} Previous topic</span><strong>{html.escape(prev_t["name"])}</strong></a>' if prev_t else "<span></span>")
+    nav += (f'<a class="pager-card next" href="../{next_t["slug"]}/index.html" data-nav-next><span>Next topic {ICON["right"]}</span><strong>{html.escape(next_t["name"])}</strong></a>' if next_t else "<span></span>")
+    nav += "</div>"
+    subs = []
+    for sb in t["subs"]:
+        head = (f'<header class="sub-head" id="{sb["anchor"]}"><h2>{html.escape(sb["name"])}</h2>{progress(sb["id"] + "/", len(sb["items"]))}</header>'
+                if sb["name"] else "")
+        subs.append(f'<section class="sheet-sub">{head}<ol class="item-list">{"".join(item_row(sh, it) for it in sb["items"])}</ol></section>')
+    filters = ""
+    if sh["lobe"] == "dsa":
+        filters = ('<div class="seg" data-sheet-filter><button data-f="all" class="is-active">All</button><button data-f="Easy">Easy</button>'
+                   '<button data-f="Medium">Medium</button><button data-f="Hard">Hard</button></div>')
+    actions = (f'<a class="btn btn-primary" href="#{t["subs"][0]["items"][0]["anchor"]}" data-resume="{t["prefix"]}">{ICON["play"]}<span>Start topic</span></a>'
+               f'<button class="btn btn-ghost on-dark" data-focus-domain="{sh["lobe"]}"><span class="rec"></span>Focus on this</button>'
+               f'<a class="btn btn-ghost on-dark" href="{root}brain/index.html#{sh["prefix"]}{t["id"]}">{ICON["brain"]}In your brain</a>'
+               f'<div class="banner-progress">{progress(t["prefix"], t["total"])}</div>')
+    body = f"""<main id="main" style="--c:{sh['color']}">
+{sheet_banner(root, sh, t['num'], [(sh['name'], sh['dir'] + '/index.html'), (f"Topic {t['num']}", None)],
+              f"{sh['short']} · Topic {t['num']} of {len(sh['topics']):02d}" + (f" · {html.escape(t['note'])}" if t['note'] else ""),
+              html.escape(t['name']), f"{t['total']} {sh['noun']}s" + (f" in {len(t['subs'])} sections" if len(t['subs']) > 1 else ""), actions)}
+<section class="wrap section sheet">
+  <div class="sheet-tools">{filters}<label class="switch sm"><input type="checkbox" data-hide-done><span class="switch-ui"></span><span><b>Hide {sh['done_label'].lower()}</b></span></label></div>
+  {''.join(subs)}
+  {nav}
+</section>
+</main>"""
+    return page(title=f"{t['name']} · {sh['short']} · {SITE}", desc=f"{t['name']} — {sh['name']}", root=root, body=body, kind="sheet")
+
+
+def render_login():
+    root = "../"
+    body = f"""<main id="main" class="login-page">
+  <div class="login-card panel" data-login>
+    <a class="brand" href="{root}index.html">{logo("lg")}</a>
+    <p class="login-sub">Sign in to save your progress, tasks, habits and your growing brain — on every device.</p>
+    <div class="seg" data-login-tabs><button data-mode="login" class="is-active" type="button">Sign in</button><button data-mode="register" type="button">Create account</button></div>
+    <form data-login-form autocomplete="on" novalidate>
+      <label class="field"><span class="mono-label">Username</span><input name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required minlength="3" maxlength="32"></label>
+      <label class="field"><span class="mono-label">Password</span><input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="256"></label>
+      <label class="field" data-register-only hidden><span class="mono-label">Confirm password</span><input name="confirm" type="password" autocomplete="new-password" maxlength="256"></label>
+      <p class="login-error" data-login-error role="alert" hidden></p>
+      <button class="btn btn-primary" type="submit" data-login-submit>Sign in</button>
+    </form>
+    <p class="login-note" data-login-note>Progress already in this browser is added to your account the first time you sign in.</p>
+  </div>
+</main>"""
+    return page(title=f"Sign in · {SITE}", desc="Sign in to BLACKBOX", root=root, body=body, kind="login")
+
+
+def brain_tree(tracks, sheets):
+    """Nested regions for the Brain page. Inner nodes: {id, n (name), c (colour), h (href), k (children), soon};
+    leaves: [progress id, name, href, tag]. Every node's progress is the share of its leaves that are done."""
+    lobes = []
+    for lobe in LOBES:
+        node = dict(id=lobe["id"], n=lobe["name"], c=lobe["color"], h=lobe.get("href", ""), b=lobe["blurb"], k=[])
+        if lobe["id"] == "devops":
+            for t in tracks:
+                node["k"].append(dict(id=t["slug"], n=f"{t['num']} · {strip_tags(t['title'])}", c=t["color"], h=f"{t['slug']}/index.html", k=[
+                    dict(id=f"{t['slug']}/{tp['slug']}", n=strip_tags(tp["title"]), h=f"{t['slug']}/{tp['slug']}/index.html",
+                         k=[[lesson_id(t, tp, l), strip_tags(l["title"]), f"{lesson_id(t, tp, l)}/index.html", f"{l['minutes']}m"] for l in tp["lessons"]])
+                    for tp in t["topics"]]))
+        elif lobe["id"] in sheets:
+            sh = sheets[lobe["id"]]
+            for t in sh["topics"]:
+                base = f"{sh['dir']}/{t['slug']}/index.html"
+                leaves = lambda sb: [[it["id"], it["name"], f"{base}#{it['anchor']}", it.get("level", "")] for it in sb["items"]]
+                kids = ([dict(id=sb["id"], n=sb["name"], h=f"{base}#{sb['anchor']}", k=leaves(sb)) for sb in t["subs"]]
+                        if len(t["subs"]) > 1 else leaves(t["subs"][0]))
+                node["k"].append(dict(id=t["prefix"].rstrip("/"), n=f"{t['num']} · {t['name']}", h=base, k=kids))
+        if not node["k"]:
+            node["soon"] = True
+        lobes.append(node)
+    return dict(id="", n="Your brain", k=lobes)
+
+
 # ───────────────────────────── build ─────────────────────────────
 
 def write(path, text):
@@ -878,9 +1124,10 @@ def write(path, text):
 
 
 def main():
-    if not SRC.is_dir():
-        sys.exit(f"source not found: {SRC}")
     tracks = load()
+    sheets = load_sheets()
+    if not tracks and not sheets:
+        sys.exit(f"nothing to build: no lessons in {SRC} and no data/ sheets")
     TRACKS[:] = tracks
     if OUT.exists():
         shutil.rmtree(OUT)
@@ -896,7 +1143,20 @@ def main():
              ["Focus timer", "focus/index.html", "", "", "p", "pomodoro timer deep focus"],
              ["Tasks", "tasks/index.html", "", "", "p", "todo list matrix week planner"],
              ["Habits & streaks", "habits/index.html", "", "", "p", "heatmap streak"]]
-    write(OUT / "index.html", render_home(tracks))
+    index.append(["Sign in", "login/index.html", "", "", "p", "login account register password"])
+    write(OUT / "index.html", render_home(tracks, sheets))
+    write(OUT / "login" / "index.html", render_login())
+    for sh in sheets.values():
+        index.append([sh["name"], sh["href"], "", "", "k", "sheet practice " + sh["noun"]])
+        write(OUT / sh["dir"] / "index.html", render_sheet_index(sh))
+        for ti, t in enumerate(sh["topics"]):
+            href = f"{sh['dir']}/{t['slug']}/index.html"
+            index.append([t["name"], href, sh["name"], "", "t", t["note"]])
+            write(OUT / sh["dir"] / t["slug"] / "index.html", render_sheet_topic(sh, ti))
+            for sb in t["subs"]:
+                for it in sb["items"]:
+                    index.append([it["name"], f"{href}#{it['anchor']}", sh["short"] + " · " + t["name"], sb["name"] or t["name"], "l",
+                                  " ".join(x for x in (it.get("level"), it.get("meta"), it.get("desc")) if x)])
     write(OUT / "brain" / "index.html", render_brain())
     write(OUT / "tracks" / "index.html", render_tracks(tracks))
     idx = {t["slug"]: i for i, t in enumerate(tracks)}
@@ -930,19 +1190,29 @@ def main():
             index.append([strip_tags(l["title"]), f"{lid}/index.html", tt, strip_tags(tp["title"]), "l",
                           " ".join(h for _, h in l["toc"])])
 
+    tree = brain_tree(tracks, sheets)
+
+    def count(node):
+        return sum(count(k) if isinstance(k, dict) else 1 for k in node.get("k", []))
+    lobe_totals = {n["id"]: count(n) for n in tree["k"]}
+    tracks_map = {t["slug"]: dict(t=strip_tags(t["title"]), d="devops", n=t["n_lessons"], num=t["num"]) for t in tracks}
+    for sh in sheets.values():
+        tracks_map[sh["prefix"].rstrip("/")] = dict(t=sh["name"], d=sh["lobe"], n=sh["total"], num="")
     data = {
-        "domains": [dict(id=d["id"], name=d["name"], short=d["short"], color=d["color"], anchor=d["anchor"],
-                         blurb=d["blurb"], soon=bool(d.get("soon")),
-                         total=sum(t["n_lessons"] for t in tracks if t["domain"] is d)) for d in DOMAINS],
-        "tracks": {t["slug"]: dict(t=strip_tags(t["title"]), d=t["domain"]["id"], n=t["n_lessons"], num=t["num"]) for t in tracks},
-        "total": sum(t["n_lessons"] for t in tracks),
+        "domains": [dict(id=d["id"], name=d["name"], short=d["short"], color=d["color"], anchor=d["anchor"], href=d.get("href", ""),
+                         blurb=d["blurb"], soon=not lobe_totals.get(d["id"]), total=lobe_totals.get(d["id"], 0)) for d in LOBES],
+        "aliases": DOMAIN_ALIASES,
+        "tracks": tracks_map,
+        "total": sum(lobe_totals.values()),
+        "pathTotal": sum(t["n_lessons"] for t in tracks),
     }
+    write(OUT / "assets" / "brain-tree.js", "window.BB_TREE=" + json.dumps(tree, ensure_ascii=False, separators=(",", ":")) + ";")
     write(OUT / "assets" / "data.js", "window.BB_DATA=" + json.dumps(data, separators=(",", ":")) + ";")
     write(OUT / "assets" / "search-index.js",
           "window.SEARCH_INDEX=" + json.dumps(index, ensure_ascii=False, separators=(",", ":")) + ";")
 
-    n_lessons = sum(1 for r in index if r[4] == "l")
-    print(f"built {len(tracks)} tracks, {sum(len(t['topics']) for t in tracks)} topics, {n_lessons} lessons → {OUT}")
+    print(f"built {len(tracks)} tracks, {sum(t['n_lessons'] for t in tracks)} lessons, "
+          + ", ".join(f"{sh['total']} {sh['short']} {sh['noun']}s" for sh in sheets.values()) + f" → {OUT}")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
   var doc = document.documentElement;
   var ROOT = doc.getAttribute("data-root") || "";
   var PAGE = doc.getAttribute("data-page");
-  var DATA = window.BB_DATA || { domains: [], tracks: {}, total: 0 };
+  var DATA = window.BB_DATA || { domains: [], tracks: {}, total: 0, aliases: {} };
   var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
   var BB = (window.BB = { ROOT: ROOT, PAGE: PAGE, DATA: DATA });
 
@@ -39,8 +39,8 @@
   // ── domains ────────────────────────────────────────────────────
   var domainMap = {};
   DATA.domains.forEach(function (d) { domainMap[d.id] = d; });
-  BB.domain = function (id) { return domainMap[id] || DATA.domains[0]; };
-  BB.domainOfLesson = function (lid) { var t = DATA.tracks[(lid || "").split("/")[0]]; return t ? t.d : "foundations"; };
+  BB.domain = function (id) { return domainMap[id] || domainMap[(DATA.aliases || {})[id]] || DATA.domains[0]; };
+  BB.domainOfLesson = function (lid) { var t = DATA.tracks[(lid || "").split("/")[0]]; return t ? t.d : "devops"; };
 
   // ── toast & sound ──────────────────────────────────────────────
   function toast(msg, color) {
@@ -233,14 +233,25 @@
   };
 
   // ── brain state (consumed by brain.js) ─────────────────────────
-  BB.brainState = function () {
+  // `at` (ms) rewinds to how the brain looked then; omitted means now, including a running session.
+  BB.brainState = function (at) {
     var st = {};
     DATA.domains.forEach(function (d) { st[d.id] = { total: d.total, done: 0, focusMin: 0, pendingMin: 0, soon: d.soon }; });
-    Object.keys(doneAt).forEach(function (id) { var d = st[BB.domainOfLesson(id)]; if (d) d.done++; });
-    BB.sessions().forEach(function (s) { if (s.status === "done" && st[s.domain]) st[s.domain].focusMin += s.min; });
+    Object.keys(doneAt).forEach(function (id) { if (at != null && doneAt[id] > at) return; var d = st[BB.domainOfLesson(id)]; if (d) d.done++; });
+    BB.sessions().forEach(function (s) {
+      var d = st[BB.domain(s.domain).id];
+      if (s.status === "done" && d && (at == null || s.start <= at)) d.focusMin += s.min;
+    });
     var a = F.get();
-    if (a && a.mode === "focus" && st[a.domain]) st[a.domain].pendingMin = F.elapsed(a) / 60000;
+    if (at == null && a && a.mode === "focus" && st[BB.domain(a.domain).id]) st[BB.domain(a.domain).id].pendingMin = F.elapsed(a) / 60000;
     return st;
+  };
+  // When you started: the first completion or focus session (legacy completions have no time).
+  BB.firstActivity = function () {
+    var t = Infinity;
+    Object.keys(doneAt).forEach(function (id) { if (doneAt[id]) t = Math.min(t, doneAt[id]); });
+    BB.sessions().forEach(function (s) { if (s.status === "done") t = Math.min(t, s.start); });
+    return t === Infinity ? null : t;
   };
 
   // ── theme ──────────────────────────────────────────────────────
@@ -432,6 +443,48 @@
     if (cur && sideInner && sideInner.scrollHeight > sideInner.clientHeight) sideInner.scrollTop = cur.offsetTop - sideInner.clientHeight / 2;
   }
 
+  // ── DSA / System Design sheets: tick items, filter, per-difficulty counts ──
+  if (PAGE === "sheet") {
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-toggle-done]");
+      if (!b) return;
+      var row = b.closest("[data-lesson]"), id = row.getAttribute("data-lesson"), on = !BB.isDone(id);
+      BB.setDone(id, on);
+      var dom = BB.domain(BB.domainOfLesson(id));
+      if (on) { b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); toast("Neuron wired in " + dom.name, dom.color); }
+      paintSheet();
+    });
+    var filter = "all", hideDone = $("[data-hide-done]");
+    var paintSheet = function () {
+      var hide = hideDone && hideDone.checked;
+      $$(".item[data-lesson]").forEach(function (li) {
+        var lvl = li.getAttribute("data-level");
+        li.hidden = (filter !== "all" && lvl !== filter) || (hide && BB.isDone(li.getAttribute("data-lesson")));
+      });
+      $$(".sheet-sub").forEach(function (sec) { sec.hidden = !$$(".item", sec).some(function (li) { return !li.hidden; }); });
+      var levels = window.BB_LEVELS;
+      if (levels) $$("[data-level-done]").forEach(function (el) {
+        var k = el.getAttribute("data-level-done").charAt(0), n = 0;
+        Object.keys(levels).forEach(function (id) { if (levels[id] === k && BB.isDone(id)) n++; });
+        el.textContent = n;
+      });
+    };
+    $$("[data-sheet-filter] button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        filter = b.getAttribute("data-f");
+        $$("[data-sheet-filter] button").forEach(function (x) { x.classList.toggle("is-active", x === b); });
+        paintSheet();
+      });
+    });
+    if (hideDone) {
+      hideDone.checked = !!load("bb-sheet-hide-done", false);
+      hideDone.addEventListener("change", function () { save("bb-sheet-hide-done", hideDone.checked); paintSheet(); });
+    }
+    BB.on(function (w) { if (w === "progress") paintSheet(); });
+    paintSheet();
+    if (location.hash) { var target = document.getElementById(location.hash.slice(1)); if (target) { target.hidden = false; target.classList.add("is-target"); } }
+  }
+
   // ── search palette ─────────────────────────────────────────────
   var palette = null, input, results, items = [], activeIdx = 0, lastFocus = null, prepared = null, indexLoading = false;
   var SVG = function (p) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + p + "</svg>"; };
@@ -551,11 +604,11 @@
 
   // ── settings: theme, backup, restore, reset ────────────────────
   var DATA_KEYS = {
-    progress: { label: "Lesson progress & brain", desc: "Completed lessons, neurons and last position", keys: ["bb-done-at", "bb-last", "hc-done", "hc-last"] },
+    progress: { label: "Progress & brain", desc: "Completed lessons, solved problems, learned concepts, neurons", keys: ["bb-done-at", "bb-last", "hc-done", "hc-last"] },
     focus: { label: "Focus history", desc: "Sessions, running timer and withered history", keys: ["bb-sessions", "bb-focus"] },
     tasks: { label: "Tasks & lists", desc: "All tasks, subtasks and custom lists", keys: ["bb-tasks", "bb-lists"] },
     habits: { label: "Habits", desc: "Custom habits and check-ins", keys: ["bb-habits"] },
-    prefs: { label: "Preferences", desc: "Timer lengths, deep focus, views, theme", keys: ["bb-dur-focus", "bb-dur-short", "bb-dur-long", "bb-strict", "bb-focus-domain", "bb-tasks-view", "bb-tasks-list", "bb-term-hist", "theme"] }
+    prefs: { label: "Preferences", desc: "Timer lengths, deep focus, views, theme", keys: ["bb-dur-focus", "bb-dur-short", "bb-dur-long", "bb-strict", "bb-focus-domain", "bb-tasks-view", "bb-tasks-list", "bb-term-hist", "bb-sheet-hide-done", "theme"] }
   };
   function allKeys() { var k = []; Object.keys(DATA_KEYS).forEach(function (g) { k = k.concat(DATA_KEYS[g].keys); }); return k; }
   function exportData() {
@@ -598,9 +651,12 @@
       settings.innerHTML = '<div class="modal-backdrop" data-close></div><div class="modal-box">' +
         '<div class="modal-head"><div><p class="mono-label">/ settings</p><h2>Settings &amp; data</h2></div><button class="icon-btn" data-close aria-label="Close">✕</button></div>' +
         '<section class="modal-sec"><h3>Appearance</h3><div class="seg" data-theme-seg><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="system">System</button></div></section>' +
-        '<section class="modal-sec"><h3>Sync</h3><div class="sync-row"><span class="sync-status" data-sync-status></span><button class="btn btn-ghost sm" data-sync-now>Sync now</button></div>' +
-        '<p class="modal-note">Progress, tasks, habits and focus history are saved on your BLACKBOX server (a Docker volume) and kept in sync across browsers.</p></section>' +
-        '<section class="modal-sec"><h3>Backup</h3><p class="modal-note">Everything lives in this browser. Export a backup before resetting or switching browsers.</p>' +
+        '<section class="modal-sec"><h3>Account &amp; sync</h3><div class="sync-row"><span class="sync-status" data-sync-status></span><button class="btn btn-ghost sm" data-sync-now>Sync now</button></div>' +
+        '<p class="modal-note" data-account-note></p>' +
+        '<form class="pw-form" data-pw-form hidden><input type="password" name="current" placeholder="Current password" autocomplete="current-password" aria-label="Current password">' +
+        '<input type="password" name="password" placeholder="New password (8+ characters)" autocomplete="new-password" aria-label="New password">' +
+        '<button class="btn btn-ghost sm" type="submit">Change password</button></form></section>' +
+        '<section class="modal-sec"><h3>Backup</h3><p class="modal-note">Export a JSON copy of everything, or restore one into this browser.</p>' +
         '<div class="modal-row"><button class="btn btn-ghost sm" data-export>Export backup</button><label class="btn btn-ghost sm">Import backup<input type="file" accept="application/json" data-import hidden></label></div></section>' +
         '<section class="modal-sec danger-zone"><h3>Reset</h3><p class="modal-note">Choose what to wipe. This can’t be undone (unless you exported a backup).</p><div class="reset-list">' +
         Object.keys(DATA_KEYS).map(function (g) {
@@ -618,6 +674,14 @@
         });
       });
       $("[data-export]", settings).addEventListener("click", exportData);
+      var pw = $("[data-pw-form]", settings);
+      pw.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (pw.password.value.length < 8) { toast("New password must be at least 8 characters", "var(--red)"); return; }
+        BB.api("auth/password", { current: pw.current.value, password: pw.password.value }).then(function () {
+          pw.reset(); toast("Password changed · other devices signed out", "var(--ok)");
+        }).catch(function (err) { toast(err.message, "var(--red)"); });
+      });
       $("[data-sync-now]", settings).addEventListener("click", function () { BB.syncNow().then(function () { toast(BB.sync.mode === "synced" ? "Synced" : "Server not reachable", BB.sync.mode === "synced" ? "var(--ok)" : "var(--red)"); }); });
       $("[data-import]", settings).addEventListener("change", function (e) { if (e.target.files[0]) importData(e.target.files[0]); });
       var confirmIn = $("[data-reset-confirm]", settings), resetBtn = $("[data-reset]", settings);
@@ -636,6 +700,11 @@
     }
     paintSeg();
     paintSync();
+    var signedIn = !!BB.account() && BB.sync.mode !== "signedout" && BB.sync.mode !== "local";
+    $("[data-pw-form]", settings).hidden = !signedIn;
+    $("[data-account-note]", settings).innerHTML = BB.sync.mode === "local" ? "This copy has no BLACKBOX server, so everything stays in this browser."
+      : signedIn ? "Signed in as <b>" + esc(BB.account()) + "</b>. Progress, tasks, habits and focus history are saved to your account and synced across devices."
+      : 'Not signed in — your progress is only in this browser. <a href="' + ROOT + 'login/index.html">Sign in or create an account</a> to save it.';
     $("[data-reset-confirm]", settings).value = "";
     $("[data-reset]", settings).disabled = true;
     settings.hidden = false; document.body.style.overflow = "hidden";
@@ -648,8 +717,9 @@
     $$("[data-sync-status]").forEach(function (el) {
       var m = BB.sync.mode, ago = BB.sync.last ? Math.max(0, Math.round((Date.now() - BB.sync.last) / 1000)) : null;
       el.className = "sync-status s-" + m;
-      el.innerHTML = "<i></i>" + (m === "synced" ? "Saved to server · " + (ago < 5 ? "just now" : ago < 60 ? ago + "s ago" : Math.round(ago / 60) + "m ago")
-        : m === "local" ? "This browser only — no sync server" : m === "error" ? "Server unreachable — will retry" : "Connecting…");
+      el.innerHTML = "<i></i>" + (m === "synced" ? "Saved to " + esc(BB.account() || "server") + " · " + (ago < 5 ? "just now" : ago < 60 ? ago + "s ago" : Math.round(ago / 60) + "m ago")
+        : m === "local" ? "This browser only — no sync server" : m === "signedout" ? 'Not signed in — <a href="' + ROOT + 'login/index.html">sign in</a> to save progress'
+        : m === "error" ? "Server unreachable — will retry" : "Connecting…");
     });
   }
   BB.on(function (w) { if (w === "sync") paintSync(); });
@@ -686,11 +756,15 @@
   });
 
   // ── server sync ────────────────────────────────────────────────
-  // localStorage stays the source of truth while you work (offline-first). Every bb-* key
-  // is mirrored to /api/state with a timestamp; the newer write wins on either side.
-  var SYNC_URL = ROOT + "api/state";
-  var syncMeta = load("bb-sync-meta", {}), snapshot = {}, dirty = {}, pushTimer = 0, syncing = false;
+  // localStorage stays the source of truth while you work (offline-first). Once you're signed
+  // in, every bb-* key is mirrored to your account at /api/state with a timestamp; the newer
+  // write wins on either side. Signed out, everything keeps working in this browser only.
+  var SYNC_URL = ROOT + "api/state", ACCOUNT_KEY = "blackbox-account";
+  var syncMeta = load("bb-sync-meta", {}), snapshot = {}, dirty = {}, pushTimer = 0, syncing = false, pulled = false;
+  var account = null;
+  try { account = localStorage.getItem(ACCOUNT_KEY); } catch (e) {}
   BB.sync = { mode: "connecting", last: 0, error: "" };
+  BB.account = function () { return account; };
   var MERGE_BY_ID = { "bb-tasks": 1, "bb-sessions": 1, "bb-habits": 1, "bb-lists": 1 };
   function syncable(k) { return k && k.indexOf("bb-") === 0 && k !== "bb-sync-meta"; }
   function localKeys() {
@@ -708,6 +782,27 @@
   // except collections, which are unioned on that first contact so nothing is lost.
   localKeys().forEach(function (k) { snapshot[k] = raw(k); if (!syncMeta[k]) { syncMeta[k] = 1; dirty[k] = true; } });
   save("bb-sync-meta", syncMeta);
+
+  // Another person's data must never leak into (or be pushed to) the account signing in.
+  function wipeLocal() {
+    localKeys().forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+    snapshot = {}; syncMeta = {}; dirty = {};
+    save("bb-sync-meta", syncMeta);
+    doneAt = {};
+  }
+  // Browsing signed out and then signing in: treat local data as first contact, so it is
+  // unioned into the account instead of overwriting it with whatever is newest.
+  function markFirstContact() {
+    localKeys().forEach(function (k) { syncMeta[k] = 1; });
+    save("bb-sync-meta", syncMeta);
+  }
+  function setAccount(user) {
+    if (user === account) return;
+    if (account && user && user !== account) { wipeLocal(); rehydrate(); }
+    account = user || null;
+    try { account ? localStorage.setItem(ACCOUNT_KEY, account) : localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
+    emit("account");
+  }
 
   function scan() {
     // Storage wiped outside the app (DevTools, "clear site data"): never propagate that as
@@ -746,6 +841,7 @@
     return serverV;
   }
   function apply(state) {
+    setAccount(state && state.user);
     var keys = (state && state.keys) || {}, changed = false;
     Object.keys(keys).forEach(function (k) {
       if (!syncable(k)) return;
@@ -772,16 +868,21 @@
     ["progress", "tasks", "habits", "focus"].forEach(function (w) { emit(w); });
     emit("session", {});
   }
-  function request(method, body, keepalive) {
-    return fetch(SYNC_URL, {
+  function api(url, method, body, keepalive) {
+    return fetch(url, {
       method: method, keepalive: !!keepalive, cache: "no-store", credentials: "same-origin",
       headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined
     }).then(function (r) {
       if (r.status === 404 || r.status === 405 || r.status === 501) { var e = new Error("no server"); e.local = true; throw e; }
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (r.status === 401 && url === SYNC_URL) { var ea = new Error("signed out"); ea.auth = true; throw ea; }
+        if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+        return j;
+      });
     });
   }
+  BB.api = function (path, body) { return api(ROOT + "api/" + path, body ? "POST" : "GET", body); };
+  function failed(e) { setSyncStatus(e.local ? "local" : e.auth ? "signedout" : "error", e.message); }
   function payload() {
     var out = {};
     Object.keys(dirty).forEach(function (k) { out[k] = { v: raw(k), t: syncMeta[k] || Date.now() }; });
@@ -789,30 +890,110 @@
   }
   function push(keepalive) {
     clearTimeout(pushTimer);
-    if (BB.sync.mode === "local" || !Object.keys(dirty).length) return Promise.resolve();
+    // Never push before the first pull has told us whose account this is.
+    if (!pulled || BB.sync.mode === "local" || BB.sync.mode === "signedout" || !Object.keys(dirty).length) return Promise.resolve();
     var body = payload(), sent = Object.keys(body.keys);
     if (keepalive && JSON.stringify(body).length > 60000) keepalive = false;   // keepalive bodies are size-capped
-    return request("PUT", body, keepalive).then(function (state) {
+    return api(SYNC_URL, "PUT", body, keepalive).then(function (state) {
       sent.forEach(function (k) { if (syncMeta[k] <= body.keys[k].t) delete dirty[k]; });
       apply(state); setSyncStatus("synced");
-    }).catch(function (e) { setSyncStatus(e.local ? "local" : "error", e.message); });
+    }).catch(failed);
   }
   function schedulePush() { clearTimeout(pushTimer); pushTimer = setTimeout(push, 800); }
   function pull() {
     if (syncing) return Promise.resolve();
     syncing = true;
-    return request("GET").then(function (state) { apply(state); setSyncStatus("synced"); })
-      .catch(function (e) { setSyncStatus(e.local ? "local" : "error", e.message); })
+    return api(SYNC_URL, "GET").then(function (state) { pulled = true; apply(state); setSyncStatus("synced"); })
+      .catch(failed)
       .then(function () { syncing = false; });
   }
   BB.syncNow = function () { scan(); return pull().then(function () { return push(); }); };
+  BB.signOut = function () {
+    scan();
+    return push().then(function () { return api(ROOT + "api/auth/logout", "POST", {}); }).catch(function () {}).then(function () {
+      wipeLocal();
+      try { localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
+      location.href = ROOT + "login/index.html";
+    });
+  };
+  // Called by the sign-in page before it redirects.
+  BB.onSignedIn = function (user) {
+    if (account && account !== user) wipeLocal();
+    else if (!account) markFirstContact();
+    account = user;
+    try { localStorage.setItem(ACCOUNT_KEY, user); } catch (e) {}
+  };
   if (location.protocol !== "file:") {
     pull();
     setInterval(scan, 1500);
-    setInterval(function () { if (BB.sync.mode !== "local" && !document.hidden) pull(); }, 30000);
+    setInterval(function () { if (BB.sync.mode !== "local" && BB.sync.mode !== "signedout" && !document.hidden) pull(); }, 30000);
     document.addEventListener("visibilitychange", function () { if (!document.hidden && BB.sync.mode !== "local") pull(); });
     window.addEventListener("pagehide", function () { scan(); push(true); });
   } else setSyncStatus("local");
+
+  // ── account: header button, sign-in page ───────────────────────
+  var acct = $("[data-account]");
+  function paintAccount() {
+    if (!acct) return;
+    var m = BB.sync.mode, signedIn = !!account && m !== "signedout";
+    acct.hidden = m === "local";
+    acct.classList.toggle("is-in", signedIn);
+    acct.classList.toggle("is-out", m === "signedout");
+    $("[data-account-name]", acct).textContent = signedIn ? account : "Sign in";
+    $("[data-account-user]", acct).textContent = account || "";
+    var btn = $("[data-account-btn]", acct);
+    btn.href = ROOT + "login/index.html" + (PAGE === "login" ? "" : "?next=" + encodeURIComponent(location.pathname + location.hash));
+  }
+  if (acct) {
+    var menu = $("[data-account-menu]", acct);
+    $("[data-account-btn]", acct).addEventListener("click", function (e) {
+      if (!acct.classList.contains("is-in")) return;
+      e.preventDefault(); menu.hidden = !menu.hidden;
+    });
+    document.addEventListener("click", function (e) { if (!acct.contains(e.target)) menu.hidden = true; });
+    $("[data-sign-out]", acct).addEventListener("click", function () { menu.hidden = true; BB.signOut(); });
+    $("[data-open-settings]", acct).addEventListener("click", function () { menu.hidden = true; });
+    BB.on(function (w) { if (w === "sync" || w === "account") paintAccount(); });
+    paintAccount();
+  }
+
+  if (PAGE === "login") {
+    var form = $("[data-login-form]"), mode = "login", errEl = $("[data-login-error]"), submit = $("[data-login-submit]");
+    var nextUrl = new URLSearchParams(location.search).get("next");
+    if (!nextUrl || !/^\/(?![\/\\])/.test(nextUrl)) nextUrl = ROOT + "index.html";  // same-site paths only
+    var setMode = function (m) {
+      mode = m;
+      $$("[data-login-tabs] button").forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-mode") === m); });
+      $$("[data-register-only]").forEach(function (el) { el.hidden = m !== "register"; });
+      form.password.setAttribute("autocomplete", m === "register" ? "new-password" : "current-password");
+      submit.textContent = m === "register" ? "Create account" : "Sign in";
+      errEl.hidden = true;
+    };
+    $$("[data-login-tabs] button").forEach(function (b) { b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); }); });
+    var showErr = function (msg) { errEl.textContent = msg; errEl.hidden = false; };
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var u = form.username.value.trim().toLowerCase(), p = form.password.value;
+      if (u.length < 3) return showErr("Username must be at least 3 characters");
+      if (p.length < 8) return showErr("Password must be at least 8 characters");
+      if (mode === "register" && p !== form.confirm.value) return showErr("Passwords don’t match");
+      submit.disabled = true; errEl.hidden = true;
+      BB.api("auth/" + mode, { username: u, password: p }).then(function (r) {
+        BB.onSignedIn(r.user);
+        toast(mode === "register" ? "Account created — welcome, " + r.user : "Welcome back, " + r.user, "var(--ok)");
+        setTimeout(function () { location.href = nextUrl; }, 400);
+      }).catch(function (err) {
+        submit.disabled = false;
+        showErr(err.local ? "This copy of BLACKBOX has no server, so accounts aren’t available." : err.message);
+      });
+    });
+    BB.api("auth/me").then(function (r) {
+      if (r.user) $("[data-login-note]").textContent = "You’re signed in as " + r.user + ". Signing in as someone else replaces this browser’s data with theirs.";
+      if (!r.signup) $$("[data-login-tabs] button")[1].hidden = true;
+    }).catch(function () {});
+    setMode(location.hash === "#register" ? "register" : "login");
+    setTimeout(function () { form.username.focus(); }, 50);
+  }
 
   checkHidden();
   paintPill();
