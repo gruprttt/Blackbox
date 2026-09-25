@@ -43,10 +43,37 @@ rebuilds, restarts and clearing your browser, and follow you to any device you s
 - Signed out, everything still works but is saved in that browser only. The first time you sign in,
   that browser's progress is merged into your account.
 - The first account created on a server adopts any progress saved before accounts existed.
-- Passwords are stored as salted PBKDF2 hashes; sessions are HttpOnly cookies. Repeated wrong
-  passwords are throttled. Change your password from Settings (it signs out your other devices).
-- To stop strangers registering once you've made your account, set `BLACKBOX_SIGNUP=0` on the `api`
-  service. If you serve it over HTTPS, nginx forwards the scheme and the cookie is marked `Secure`.
+- Sign in with a username or email and password, or with **Google** (see below). Accounts, sessions
+  and progress live in SQLite (`.data/blackbox.db`); old `users.json` data is migrated automatically.
+- **Forgot password?** If your account has an email and SMTP is configured, you get a reset link
+  (valid 30 minutes, single use). Without email, use one of the 8 **recovery codes** shown when you
+  registered (Settings → Account can make new ones). An admin can also make a link:
+  `python3 server/server.py --data .data reset-link USERNAME`. A reset signs out every device.
+- Settings → Account: add/change email, change password, link Google, new recovery codes, delete account.
+- To stop strangers registering once you've made your account, set `BLACKBOX_SIGNUP=0`.
+
+### Configuration (`.env`)
+
+Copy `.env.example` to `.env` (used by `run.py` and `docker compose`):
+
+- `BLACKBOX_BASE_URL` — the public URL of the site (e.g. `https://learn.example.com`).
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — create an OAuth client (Web application) in Google
+  Cloud Console with redirect URI `<BLACKBOX_BASE_URL>/api/auth/google/callback`. The Google button
+  appears only when these are set.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TLS` — for reset emails.
+- `BLACKBOX_SECURE_COOKIES=1` when served over HTTPS (also enable the HSTS line in `deploy/nginx.conf`).
+
+### Security & scaling
+
+- Passwords: salted PBKDF2-SHA256. Session, reset and recovery tokens are stored only as hashes;
+  sessions are `HttpOnly; SameSite=Lax` cookies (`Secure` over HTTPS) and expire after 30 days.
+- Google sign-in uses the authorization-code flow with PKCE, `state` and `nonce`.
+- Writes require a same-origin `Origin` header and a JSON body (CSRF); login, reset and recovery are
+  rate-limited in the API and by nginx (`limit_req`); responses never reveal whether an account exists.
+- Strict Content-Security-Policy (no inline scripts), `X-Frame-Options`, `nosniff`, `Referrer-Policy`.
+- SQLite in WAL mode (many concurrent readers, one serialized writer) behind a threaded server and
+  nginx, which serves all static files. Fine for thousands of users on one box; for more, run the
+  API behind a shared database.
 
 ## DSA roadmap
 
@@ -70,8 +97,9 @@ section as you finish it — every section is a neuron in the Backend lobe.
 The navbar has one **Tracks** item; hover it for every program (DevOps & SRE, DSA, System Design,
 Backend) with your progress. The Tracks page is the hub: the program chips switch the content in
 place — the DevOps skill map, the DSA roadmap (click a topic to see its problems right there), System
-Design topics and Backend chapters (expand to tick off concepts/sections). You only leave the page
-when you open a lesson, problem or chapter to learn it.
+Design topics and Backend chapters (expand to tick off concepts/sections). Every program has a **Map / List**
+switch: the map is a pannable skill map of its topics (click to expand, double-click to open). You
+only leave the page when you open a lesson, problem or chapter to learn it.
 
 ## The brain
 
@@ -79,7 +107,11 @@ Every program is a lobe. Lessons, solved problems and learned concepts light neu
 focus minutes wire the rest, and the brain physically grows as more of it is wired.
 
 - **Click a lobe** to see what's inside it: its topics or chapters with your progress in each.
-- **Double-click** (or *Open in Tracks*) to go to that program on the Tracks page.
+- **Double-click** a lobe (or *Zoom into …*) to fly into it: the brain dissolves into a **galaxy**
+  where every topic is a star, sized by its content and glowing with your progress. Click a star to
+  inspect it, double-click (or *Open topic*) to study it; drag/scroll/pinch to explore, **Back** or
+  `Esc` returns to the brain. `brain/#dsa` and `brain/#dsa/t03` link straight in.
+- *Open in Tracks* goes to that program on the Tracks page.
 - The timeline under the brain charts your growth — drag it to see any past day, or press ▶ to replay it.
 
 ## Home
@@ -112,11 +144,12 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `mdx.py` | Dependency-free MDX → HTML converter for the Backend chapters |
 | `assets/style.css` | Design system (dark + light themes) |
 | `assets/app.js` | Core: progress, focus engine, tasks store, search, theme |
-| `assets/brain.js` | Canvas 3D brain renderer (levels, dive transitions, growth) |
+| `assets/brain.js` | Canvas 3D brain renderer (levels, dive transitions, growth, zoom-in) |
+| `assets/galaxy.js` | Galaxy view: a program's topics as stars you zoom into |
 | `assets/views.js` | Home, Brain explorer, Focus, Tasks and Habits pages |
-| `assets/mindmap.js` | Tracks page skill map (pan, zoom, expand topics) |
-| `server/server.py` | Accounts + per-user progress sync API (Python stdlib, JSON file storage) |
-| `Dockerfile`, `deploy/nginx.conf`, `docker-compose.yml` | `web` (nginx) + `api` services and the data volume |
+| `assets/mindmap.js` | Tracks page skill maps for every program (pan, zoom, expand topics) |
+| `server/server.py` | Accounts, password reset, Google sign-in and progress sync API (Python stdlib, SQLite) |
+| `Dockerfile`, `deploy/nginx.conf`, `deploy/api-proxy.inc`, `docker-compose.yml`, `.env.example` | `web` (nginx) + `api` services and the data volume |
 
 `python3 build.py` also works without `../learn`: it then builds only DSA and System Design.
 

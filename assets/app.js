@@ -812,10 +812,25 @@
         '<div class="modal-head"><div><p class="mono-label">/ settings</p><h2>Settings &amp; data</h2></div><button class="icon-btn" data-close aria-label="Close">✕</button></div>' +
         '<section class="modal-sec"><h3>Appearance</h3><div class="seg" data-theme-seg><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="system">System</button></div></section>' +
         '<section class="modal-sec"><h3>Account &amp; sync</h3><div class="sync-row"><span class="sync-status" data-sync-status></span><button class="btn btn-ghost sm" data-sync-now>Sync now</button></div>' +
-        '<p class="modal-note" data-account-note></p>' +
-        '<form class="pw-form" data-pw-form hidden><input type="password" name="current" placeholder="Current password" autocomplete="current-password" aria-label="Current password">' +
+        '<p class="modal-note" data-account-note></p></section>' +
+        '<section class="modal-sec" data-acct-sec hidden><h3>Account</h3>' +
+        '<form class="acct-form" data-email-form><span class="mono-label">Email <em>— for password-reset links</em></span><div class="acct-row">' +
+        '<input type="email" name="email" placeholder="you@example.com" autocomplete="email" aria-label="Email">' +
+        '<input type="password" name="password" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
+        '<button class="btn btn-ghost sm" type="submit">Save</button></div></form>' +
+        '<form class="acct-form" data-pw-form><span class="mono-label" data-pw-title>Password</span><div class="acct-row">' +
+        '<input type="password" name="current" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
         '<input type="password" name="password" placeholder="New password (8+ characters)" autocomplete="new-password" aria-label="New password">' +
-        '<button class="btn btn-ghost sm" type="submit">Change password</button></form></section>' +
+        '<button class="btn btn-ghost sm" type="submit" data-pw-btn>Change password</button></div></form>' +
+        '<div class="acct-form" data-google-row hidden><span class="mono-label">Google</span><div class="acct-row"><span class="acct-state" data-google-state></span>' +
+        '<a class="btn btn-ghost sm" data-google-link href="#">Link Google account</a></div></div>' +
+        '<form class="acct-form" data-codes-form><span class="mono-label">Recovery codes <em>— sign in if you forget your password</em></span><div class="acct-row">' +
+        '<input type="password" name="password" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
+        '<button class="btn btn-ghost sm" type="submit">Make new codes</button></div><ol class="codes" data-new-codes hidden></ol></form>' +
+        '<form class="acct-form danger" data-delete-form><span class="mono-label">Delete account <em>— removes your account and all its saved data</em></span><div class="acct-row">' +
+        '<input type="text" name="confirm" placeholder="Type your username" autocomplete="off" aria-label="Type your username to confirm">' +
+        '<input type="password" name="password" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
+        '<button class="btn btn-red sm" type="submit">Delete</button></div></form></section>' +
         '<section class="modal-sec"><h3>Backup</h3><p class="modal-note">Export a JSON copy of everything, or restore one into this browser.</p>' +
         '<div class="modal-row"><button class="btn btn-ghost sm" data-export>Export backup</button><label class="btn btn-ghost sm">Import backup<input type="file" accept="application/json" data-import hidden></label></div></section>' +
         '<section class="modal-sec danger-zone"><h3>Reset</h3><p class="modal-note">Choose what to wipe. This can’t be undone (unless you exported a backup).</p><div class="reset-list">' +
@@ -834,13 +849,42 @@
         });
       });
       $("[data-export]", settings).addEventListener("click", exportData);
-      var pw = $("[data-pw-form]", settings);
-      pw.addEventListener("submit", function (e) {
-        e.preventDefault();
-        if (pw.password.value.length < 8) { toast("New password must be at least 8 characters", "var(--red)"); return; }
-        BB.api("auth/password", { current: pw.current.value, password: pw.password.value }).then(function () {
-          pw.reset(); toast("Password changed · other devices signed out", "var(--ok)");
-        }).catch(function (err) { toast(err.message, "var(--red)"); });
+      var acctForm = function (sel, fn) {
+        var f = $(sel, settings);
+        f.addEventListener("submit", function (e) {
+          e.preventDefault();
+          var btns = $$("button", f); btns.forEach(function (b) { b.disabled = true; });
+          Promise.resolve().then(function () { return fn(f); }).catch(function (err) { toast(err.message, "var(--red)"); })
+            .then(function () { btns.forEach(function (b) { b.disabled = false; }); });
+        });
+      };
+      acctForm("[data-pw-form]", function (f) {
+        if (f.password.value.length < 8) throw new Error("New password must be at least 8 characters");
+        return BB.api("auth/password", { current: f.current.value, password: f.password.value }).then(function () {
+          f.reset(); toast("Password saved · other devices signed out", "var(--ok)"); loadAccount();
+        });
+      });
+      acctForm("[data-email-form]", function (f) {
+        return BB.api("auth/email", { email: f.email.value.trim(), password: f.password.value }).then(function () {
+          f.password.value = ""; toast("Email saved — reset links will go there", "var(--ok)");
+        });
+      });
+      acctForm("[data-codes-form]", function (f) {
+        return BB.api("auth/recovery-codes", { password: f.password.value }).then(function (r) {
+          f.password.value = "";
+          var ol = $("[data-new-codes]", settings);
+          ol.innerHTML = r.recoveryCodes.map(function (c) { return "<li><code>" + esc(c) + "</code></li>"; }).join("");
+          ol.hidden = false; toast("New codes made — the old ones no longer work. Save these now.", "var(--ok)");
+        });
+      });
+      acctForm("[data-delete-form]", function (f) {
+        if (f.confirm.value.trim().toLowerCase() !== (BB.account() || "")) throw new Error("Type your username to confirm");
+        if (!confirm("Delete your account and all of its saved progress? This can’t be undone.")) return;
+        return BB.api("auth/delete", { confirm: f.confirm.value.trim(), password: f.password.value }).then(function () {
+          wipeLocal(); try { localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
+          toast("Account deleted", "var(--red)");
+          setTimeout(function () { location.href = ROOT + "index.html"; }, 700);
+        });
       });
       $("[data-sync-now]", settings).addEventListener("click", function () { BB.syncNow().then(function () { toast(BB.sync.mode === "synced" ? "Synced" : "Server not reachable", BB.sync.mode === "synced" ? "var(--ok)" : "var(--red)"); }); });
       $("[data-import]", settings).addEventListener("change", function (e) { if (e.target.files[0]) importData(e.target.files[0]); });
@@ -861,7 +905,9 @@
     paintSeg();
     paintSync();
     var signedIn = !!BB.account() && BB.sync.mode !== "signedout" && BB.sync.mode !== "local";
-    $("[data-pw-form]", settings).hidden = !signedIn;
+    $("[data-acct-sec]", settings).hidden = !signedIn;
+    $("[data-new-codes]", settings).hidden = true;
+    if (signedIn) loadAccount();
     $("[data-account-note]", settings).innerHTML = BB.sync.mode === "local" ? "This copy has no BLACKBOX server, so everything stays in this browser."
       : signedIn ? "Signed in as <b>" + esc(BB.account()) + "</b>. Progress, tasks, habits and focus history are saved to your account and synced across devices."
       : 'Not signed in — your progress is only in this browser. <a href="' + ROOT + 'login/index.html">Sign in or create an account</a> to save it.';
@@ -869,6 +915,23 @@
     $("[data-reset]", settings).disabled = true;
     settings.hidden = false; document.body.style.overflow = "hidden";
   }
+  // What the account has (email, password, Google) decides which fields the Account section shows.
+  function loadAccount() {
+    BB.api("auth/me").then(function (r) {
+      if (!settings || !r.user) return;
+      $("[data-email-form]", settings).email.value = r.email || "";
+      $$("[data-needs-pw]", settings).forEach(function (i) { i.hidden = !r.hasPassword; i.value = ""; });
+      $("[data-pw-title]", settings).textContent = r.hasPassword ? "Password" : "Password — none yet (you sign in with Google); set one to also sign in with it";
+      $("[data-pw-btn]", settings).textContent = r.hasPassword ? "Change password" : "Set password";
+      var gr = $("[data-google-row]", settings), gp = r.providers && r.providers.google;
+      gr.hidden = !gp && !r.google;
+      $("[data-google-state]", settings).textContent = r.google ? "Linked — you can sign in with Google" : "Not linked";
+      var gl = $("[data-google-link]", settings);
+      gl.hidden = !!r.google || !gp;
+      gl.href = ROOT + "api/auth/google/start?link=1&next=" + encodeURIComponent(location.pathname);
+    }).catch(function () {});
+  }
+  if (location.hash === "#google=linked") { setTimeout(function () { toast("Google account linked", "var(--ok)"); }, 300); history.replaceState(null, "", location.pathname + location.search); }
   function paintSeg() {
     var stored = null; try { stored = localStorage.getItem("theme"); } catch (e) {}
     $$("[data-t]", settings).forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-t") === (stored || "system")); });
@@ -959,6 +1022,7 @@
   function setAccount(user) {
     if (user === account) return;
     if (account && user && user !== account) { wipeLocal(); rehydrate(); }
+    else if (!account && user) markFirstContact();   // e.g. back from Google sign-in: merge, don't overwrite
     account = user || null;
     try { account ? localStorage.setItem(ACCOUNT_KEY, account) : localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
     emit("account");
@@ -1118,41 +1182,115 @@
   }
 
   if (PAGE === "login") {
-    var form = $("[data-login-form]"), mode = "login", errEl = $("[data-login-error]"), submit = $("[data-login-submit]");
     var nextUrl = new URLSearchParams(location.search).get("next");
     if (!nextUrl || !/^\/(?![\/\\])/.test(nextUrl)) nextUrl = ROOT + "index.html";  // same-site paths only
+    var views = $$("[data-view]"), mode = "login", pendingCodes = null, afterCodes = null;
+    var show = function (v) { views.forEach(function (x) { x.hidden = x.getAttribute("data-view") !== v; }); var f = $('[data-view="' + v + '"] input'); if (f) setTimeout(function () { f.focus(); }, 30); };
+    var err = function (sel, msg) { var el = $(sel); el.textContent = msg; el.hidden = !msg; };
+    var busy = function (form, on) { $$("button, input", form).forEach(function (x) { x.disabled = on; }); };
+    var noServer = function (e) { return e.local ? "This copy of BLACKBOX has no server, so accounts aren’t available." : e.message; };
+    var done = function (user, msg) {
+      BB.onSignedIn(user);
+      toast(msg, "var(--ok)");
+      setTimeout(function () { location.href = nextUrl; }, 450);
+    };
+    $$("[data-show]").forEach(function (b) { b.addEventListener("click", function () { show(b.getAttribute("data-show")); }); });
+
+    // sign in / create account
+    var form = $("[data-login-form]"), submit = $("[data-login-submit]");
     var setMode = function (m) {
       mode = m;
-      $$("[data-login-tabs] button").forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-mode") === m); });
+      $$("[data-login-tabs] button").forEach(function (b) { var on = b.getAttribute("data-mode") === m; b.classList.toggle("is-active", on); b.setAttribute("aria-selected", on); });
       $$("[data-register-only]").forEach(function (el) { el.hidden = m !== "register"; });
+      $("[data-login-label]").textContent = m === "register" ? "Username" : "Username or email";
       form.password.setAttribute("autocomplete", m === "register" ? "new-password" : "current-password");
       submit.textContent = m === "register" ? "Create account" : "Sign in";
-      errEl.hidden = true;
+      $(".forgot").hidden = m === "register";
+      err("[data-login-error]", "");
     };
     $$("[data-login-tabs] button").forEach(function (b) { b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); }); });
-    var showErr = function (msg) { errEl.textContent = msg; errEl.hidden = false; };
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var u = form.username.value.trim().toLowerCase(), p = form.password.value;
-      if (u.length < 3) return showErr("Username must be at least 3 characters");
-      if (p.length < 8) return showErr("Password must be at least 8 characters");
-      if (mode === "register" && p !== form.confirm.value) return showErr("Passwords don’t match");
-      submit.disabled = true; errEl.hidden = true;
-      BB.api("auth/" + mode, { username: u, password: p }).then(function (r) {
-        BB.onSignedIn(r.user);
-        toast(mode === "register" ? "Account created — welcome, " + r.user : "Welcome back, " + r.user, "var(--ok)");
-        setTimeout(function () { location.href = nextUrl; }, 400);
-      }).catch(function (err) {
-        submit.disabled = false;
-        showErr(err.local ? "This copy of BLACKBOX has no server, so accounts aren’t available." : err.message);
-      });
+      if (mode === "register") {
+        if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(u)) return err("[data-login-error]", "Username: 3–32 characters — letters, numbers, . _ -");
+        if (p.length < 8) return err("[data-login-error]", "Password must be at least 8 characters");
+        if (p !== form.confirm.value) return err("[data-login-error]", "Passwords don’t match");
+      } else if (!u || !p) return err("[data-login-error]", "Enter your username (or email) and password");
+      busy(form, true); err("[data-login-error]", "");
+      var body = mode === "register" ? { username: u, password: p, email: form.email.value.trim() } : { login: u, password: p };
+      BB.api("auth/" + mode, body).then(function (r) {
+        if (r.recoveryCodes) {
+          pendingCodes = r.recoveryCodes; afterCodes = function () { done(r.user, "Account created — welcome, " + r.user); };
+          $("[data-codes]").innerHTML = r.recoveryCodes.map(function (c) { return "<li><code>" + esc(c) + "</code></li>"; }).join("");
+          BB.onSignedIn(r.user);
+          show("codes");
+        } else done(r.user, "Welcome back, " + r.user);
+      }).catch(function (x) { busy(form, false); err("[data-login-error]", noServer(x)); });
     });
+
+    // forgot → email link, or recovery code
+    var ff = $("[data-forgot-form]");
+    ff.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var login = ff.login.value.trim();
+      if (!login) return err("[data-forgot-error]", "Enter your username or email");
+      busy(ff, true); err("[data-forgot-error]", ""); err("[data-forgot-ok]", "");
+      BB.api("auth/forgot", { login: login }).then(function (r) {
+        busy(ff, false);
+        err("[data-forgot-ok]", r.email ? "If that account has an email address, a reset link is on its way. It works for 30 minutes."
+          : "Email isn’t set up on this server, so we can’t send a link. Use a recovery code instead, or ask the site’s admin for a reset link.");
+      }).catch(function (x) { busy(ff, false); err("[data-forgot-error]", noServer(x)); });
+    });
+    var rf = $("[data-recover-form]");
+    rf.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (rf.password.value.length < 8) return err("[data-recover-error]", "Password must be at least 8 characters");
+      busy(rf, true); err("[data-recover-error]", "");
+      BB.api("auth/recover", { username: rf.username.value.trim().toLowerCase(), code: rf.code.value, password: rf.password.value })
+        .then(function (r) { done(r.user, "Password changed — that recovery code is now used up"); })
+        .catch(function (x) { busy(rf, false); err("[data-recover-error]", noServer(x)); });
+    });
+
+    // reset link: /login/#reset=TOKEN
+    var hash = new URLSearchParams(location.hash.slice(1)), token = hash.get("reset");
+    var sf = $("[data-reset-form]");
+    sf.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (sf.password.value.length < 8) return err("[data-reset-error]", "Password must be at least 8 characters");
+      if (sf.password.value !== sf.confirm.value) return err("[data-reset-error]", "Passwords don’t match");
+      busy(sf, true); err("[data-reset-error]", "");
+      BB.api("auth/reset", { token: token, password: sf.password.value })
+        .then(function (r) { done(r.user, "Password changed — you’re signed in"); })
+        .catch(function (x) { busy(sf, false); err("[data-reset-error]", noServer(x)); });
+    });
+
+    // recovery codes shown once after sign-up
+    var codeText = function () { return "BLACKBOX recovery codes (each works once)\n\n" + (pendingCodes || []).join("\n") + "\n"; };
+    $("[data-codes-copy]").addEventListener("click", function () {
+      (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(codeText()) : Promise.reject()).then(function () { toast("Copied", "var(--ok)"); }, function () { toast("Select the codes and copy them"); });
+    });
+    $("[data-codes-download]").addEventListener("click", function () {
+      var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([codeText()], { type: "text/plain" }));
+      a.download = "blackbox-recovery-codes.txt"; document.body.appendChild(a); a.click(); a.remove();
+    });
+    $("[data-codes-done]").addEventListener("click", function () { if (afterCodes) afterCodes(); });
+
+    // Google button + what the server supports
+    var g = $("[data-google]");
+    g.href = ROOT + "api/auth/google/start?next=" + encodeURIComponent(nextUrl.charAt(0) === "/" ? nextUrl : "/");
     BB.api("auth/me").then(function (r) {
       if (r.user) $("[data-login-note]").textContent = "You’re signed in as " + r.user + ". Signing in as someone else replaces this browser’s data with theirs.";
-      if (!r.signup) $$("[data-login-tabs] button")[1].hidden = true;
+      if (!r.signup) $('[data-login-tabs] [data-mode="register"]').hidden = true;
+      var hasG = !!(r.providers && r.providers.google);
+      g.hidden = !hasG; $("[data-google-or]").hidden = !hasG;
+      if (r.providers && !r.providers.email) $("[data-forgot-intro]").textContent = "Enter your username or email. (Email isn’t set up on this server yet — if no link arrives, use a recovery code.)";
     }).catch(function () {});
+
+    if (token) show("reset");
+    else if (hash.get("error")) { show("auth"); err("[data-login-error]", hash.get("error")); }
+    else show("auth");
     setMode(location.hash === "#register" ? "register" : "login");
-    setTimeout(function () { form.username.focus(); }, 50);
   }
 
   checkHidden();

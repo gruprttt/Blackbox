@@ -8,6 +8,7 @@
 Needs only Python 3. Your accounts and progress are kept in ./.data. Press Ctrl+C to stop.
 """
 import argparse
+import os
 import subprocess
 import sys
 import threading
@@ -41,12 +42,23 @@ else:
 print("Building the site…", flush=True)
 subprocess.run([sys.executable, str(HERE / "build.py"), str(learn or HERE / ".no-learn"), str(HERE / "dist")], check=True, cwd=HERE)
 
+# Optional settings (Google sign-in, reset emails) from a .env file next to this script.
+env = dict(os.environ)
+dotenv = HERE / ".env"
+if dotenv.exists():
+    for line in dotenv.read_text(encoding="utf-8").splitlines():
+        key, eq, val = line.strip().partition("=")
+        if eq and key and not key.startswith("#") and key not in os.environ:
+            env[key.strip()] = val.strip().strip('"').strip("'")
+if not env.get("BLACKBOX_BASE_URL") or env["BLACKBOX_BASE_URL"] == "http://localhost:8080":
+    env["BLACKBOX_BASE_URL"] = f"http://localhost:{args.port}"
+
 url = f"http://localhost:{args.port}/"
 if not args.no_browser:
     threading.Thread(target=lambda: (time.sleep(1.2), webbrowser.open(url)), daemon=True).start()
 print(f"\nBLACKBOX is running at {url}  (Ctrl+C to stop)\n", flush=True)
 try:
     subprocess.run([sys.executable, str(HERE / "server" / "server.py"), "--static", str(HERE / "dist"),
-                    "--data", str(HERE / ".data"), "--host", "127.0.0.1", "--port", str(args.port)], cwd=HERE)
+                    "--data", str(HERE / ".data"), "--host", "127.0.0.1", "--port", str(args.port)], cwd=HERE, env=env)
 except KeyboardInterrupt:
     pass

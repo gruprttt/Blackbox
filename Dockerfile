@@ -25,6 +25,7 @@ CMD ["python3", "-u", "/app/server.py", "--port", "8000", "--data", "/data"]
 # ── web: nginx serves the site and proxies /api to the api service ───────────
 FROM nginx:1.27-alpine AS web
 COPY learn-ui/deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY learn-ui/deploy/api-proxy.inc /etc/nginx/conf.d/api-proxy.inc
 COPY --from=build /site /usr/share/nginx/html
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD wget -qO- http://127.0.0.1/healthz >/dev/null || exit 1

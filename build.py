@@ -146,6 +146,15 @@ MAP_EDGES = [
     ("organizational-design-influence", "algorithmic-interviews-career-strategy"),
 ]
 
+# What unlocks what, for the skill maps (0-based topic indexes; ignored if a program's size changes).
+DSA_EDGES = [(0, 1), (1, 2), (2, 3), (2, 4), (2, 5), (0, 6), (6, 7), (2, 8), (2, 9), (8, 10), (1, 11), (6, 12), (8, 12),
+             (12, 13), (12, 14), (6, 15), (14, 15), (12, 16), (4, 16), (16, 17), (4, 17)]
+SD_EDGES = [(0, 1), (0, 2), (1, 2), (2, 3), (2, 4), (4, 5), (4, 6), (5, 6), (6, 7), (2, 7), (5, 8), (7, 8), (8, 9),
+            (3, 10), (4, 10), (6, 10), (10, 11), (8, 11), (9, 11)]
+BACKEND_EDGES = [(1, 2), (1, 3), (1, 4), (2, 6), (3, 5), (5, 6), (4, 17), (6, 7), (6, 8), (6, 12), (6, 14), (6, 22), (7, 25), (7, 13),
+                 (3, 13), (8, 9), (8, 10), (8, 11), (9, 18), (18, 19), (12, 15), (12, 20), (20, 19), (15, 16), (14, 16), (16, 21),
+                 (21, 22), (10, 23), (13, 24), (23, 26), (25, 26), (7, 26)]   # by chapter number
+
 TRACKS = []  # filled in main(); used by the header's Tracks dropdown
 PROGRAM_NAV = []  # filled in main(): one row per program for the Tracks dropdown
 
@@ -319,11 +328,11 @@ NAV = [("Learn", "index.html", "learn", ("home",)),
        ("Tasks", "tasks/index.html", "tasks", ("tasks",)),
        ("Habits", "habits/index.html", "habits", ("habits",))]
 
-THEME_BOOT = (
-    "<script>(function(){var t;try{t=localStorage.getItem('theme')}catch(e){}"
-    "if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}"
-    "document.documentElement.setAttribute('data-theme',t)})()</script>"
-)
+# Runs before first paint (blocking, in <head>) so the page never flashes the wrong theme. It's a
+# file rather than inline so the Content-Security-Policy can forbid inline scripts entirely.
+BOOT_JS = ("(function(){var t;try{t=localStorage.getItem('theme')}catch(e){}"
+           "if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}"
+           "document.documentElement.setAttribute('data-theme',t)})();\n")
 
 APP_PAGES = ("home", "brain", "focus", "tasks", "habits")
 TABBAR = ("Learn", "Tracks", "Brain", "Focus", "Tasks")
@@ -342,7 +351,7 @@ def page(*, title, desc, root, body, kind):
     if kind == "tracks":
         extra += f'<script src="{root}assets/map-data.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n<script src="{root}assets/mindmap.js" defer></script>\n'
     if kind == "brain":
-        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n'
+        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n<script src="{root}assets/galaxy.js" defer></script>\n'
     if kind in APP_PAGES:
         extra += f'<script src="{root}assets/brain.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n'
     return f"""<!DOCTYPE html>
@@ -353,7 +362,7 @@ def page(*, title, desc, root, body, kind):
 <title>{title}</title>
 <meta name="description" content="{html.escape(desc)}">
 <meta name="color-scheme" content="dark light">
-{THEME_BOOT}
+<script src="{root}assets/boot.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..700&display=swap">
@@ -611,7 +620,7 @@ def render_home(tracks, sheets, be=None, full=None):
     <div class="hero-copy">
       <p class="kicker"><span class="rec live"></span>{1 + len(sheets) if tracks else len(sheets)} programs live · {n_lessons + sum(sh['total'] for sh in sheets.values()):,} lessons, problems &amp; concepts</p>
       <h1>Where engineers<br><span class="grad">figure things out.</span></h1>
-      <p class="lede">DevOps &amp; SRE lessons, Striver's A2Z DSA sheet and a System Design track — with focus sessions, tasks, habits and a brain that visibly grows as you learn.</p>
+      <p class="lede">DevOps &amp; SRE, Striver's A2Z DSA sheet, System Design and Backend Engineering — with focus sessions, tasks, habits and a brain that visibly grows as you learn.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="{first_href}" data-continue-link>{ICON['play']}<span data-continue-label>Start learning</span></a>
         <a class="btn btn-ghost" href="focus/index.html"><span class="rec"></span>Start a focus session</a>
@@ -850,23 +859,30 @@ def render_tracks(tracks, sheets, be):
          f'<a class="prog-chip" href="#{pg["id"]}" data-program="{pg["id"]}" style="--c:{pg["color"]}"><i></i>{pg["name"]}<em>{pg["meta"]}</em></a>')
         for pg in PROGRAM_NAV)
 
-    # DevOps & SRE: the skill map, or a note on where the lessons should be
-    if tracks:
-        devops = f"""<div class="tp-head"><p class="section-sub">{len(tracks)} tracks, {n_lessons:,} lessons. Branches show what unlocks what — press + on a track to reveal its topics, click a lesson to start it.</p>
-    <div class="seg" data-tracks-view><button data-v="map" class="is-active">{ICON['map']}Map</button><button data-v="list">{ICON['book']}List</button></div></div>
-  <div class="map-wrap" data-view-pane="map">
-  <div class="mindmap" data-mindmap tabindex="0" aria-label="Skill map. Drag to pan, scroll or pinch to zoom.">
+    def seg(pid):
+        return (f'<div class="seg" data-tracks-view="{pid}"><button data-v="map" class="is-active">{ICON["map"]}Map</button>'
+                f'<button data-v="list">{ICON["book"]}List</button></div>')
+
+    def skill_map(pid):
+        return f"""<div class="map-wrap" data-view-pane="map">
+  <div class="mindmap" data-mindmap="{pid}" tabindex="0" aria-label="Skill map. Drag to pan, scroll or pinch to zoom.">
     <svg class="mm-edges" data-mm-edges aria-hidden="true"></svg>
     <div class="mm-layer" data-mm-layer></div>
     <div class="mm-tools">
       <button class="icon-btn" data-mm="in" aria-label="Zoom in">{ICON['plus']}</button>
       <button class="icon-btn" data-mm="out" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
       <button class="icon-btn" data-mm="fit" aria-label="Fit map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-      <button class="icon-btn" data-mm="here" aria-label="Go to my current track"><span class="rec"></span></button>
+      <button class="icon-btn" data-mm="here" aria-label="Go to where you are"><span class="rec"></span></button>
     </div>
     <div class="mm-legend mono-label"><span><i class="s-done"></i>completed</span><span><i class="s-cur"></i>you are here</span><span><i class="s-start"></i>started</span><span><i class="s-new"></i>not started</span></div>
     <aside class="mm-panel" data-mm-panel hidden></aside>
-  </div></div>
+  </div></div>"""
+
+    # DevOps & SRE: the skill map, or a note on where the lessons should be
+    if tracks:
+        devops = f"""<div class="tp-head"><p class="section-sub">{len(tracks)} tracks, {n_lessons:,} lessons. Branches show what unlocks what — press + on a track to reveal its topics, click a lesson to start it.</p>
+    {seg('devops')}</div>
+  {skill_map('devops')}
   <div class="library" data-view-pane="list" hidden>
     <div class="path-status" data-path-status></div>
     <ol class="path">{path_steps(tracks, root)}</ol>
@@ -892,11 +908,12 @@ def render_tracks(tracks, sheets, be):
   <td class="r"><span class="chev">{ICON['chev']}</span></td>
 </tr><tr class="rt-exp" data-expanded="{t['id']}" hidden><td colspan="6"><div class="rt-inner" data-inline-rows="{t['id']}"></div>
   <a class="lk lk-open" href="{root}dsa/{t['slug']}/index.html">Open {html.escape(t['name'])} with filters {ICON['right']}</a></td></tr>""" for t in sh["topics"])
-        dsa = f"""<div class="tp-head"><p class="section-sub">Striver's A2Z sheet — {len(sh['topics'])} topics, {sh['total']} problems. Click a topic to see its problems right here.</p>
-    <div class="tp-links"><a class="lk" href="{root}dsa/index.html#r">Revision</a><a class="lk" href="{root}dsa/index.html#b">Bookmarks</a></div></div>
-  <div class="table-wrap"><table class="rt">
+        dsa = f"""<div class="tp-head"><p class="section-sub">Striver's A2Z sheet — {len(sh['topics'])} topics, {sh['total']} problems. In the list, click a topic to see its problems right here.</p>
+    <div class="tp-links"><a class="lk" href="{root}dsa/index.html#r">Revision</a><a class="lk" href="{root}dsa/index.html#b">Bookmarks</a>{seg('dsa')}</div></div>
+  {skill_map('dsa')}
+  <div data-view-pane="list" hidden><div class="table-wrap"><table class="rt">
     <thead><tr><th class="pn">#</th><th>Topic</th><th class="r">Problems</th><th class="r">Solved</th><th>Progress</th><th class="r"></th></tr></thead>
-    <tbody>{rows}</tbody></table></div>"""
+    <tbody>{rows}</tbody></table></div></div>"""
 
     # System Design: topics expand to their concepts
     sd = ""
@@ -907,7 +924,8 @@ def render_tracks(tracks, sheets, be):
     {progress(t['prefix'], t['total'])}<span class="chev">{ICON['chev']}</span></summary>
   <ol class="item-list flat">{''.join(item_row(sh, it, f"{root}system-design/{t['slug']}/index.html") for sb in t['subs'] for it in sb['items'])}</ol>
 </details>""" for t in sh["topics"])
-        sd = f'<div class="tp-head"><p class="section-sub">{len(sh["topics"])} topics, {sh["total"]} concepts. Open a topic and tick concepts off as you learn them.</p></div><div class="topic-list">{cards}</div>'
+        sd = (f'<div class="tp-head"><p class="section-sub">{len(sh["topics"])} topics, {sh["total"]} concepts. Open a topic and tick concepts off as you learn them.</p>{seg("system-design")}</div>'
+              + skill_map("system-design") + f'<div data-view-pane="list" hidden><div class="topic-list">{cards}</div></div>')
 
     # Backend: chapters expand to their sections
     bk = ""
@@ -918,7 +936,8 @@ def render_tracks(tracks, sheets, be):
   <ol class="item-list flat">{''.join(f'<li class="item" data-lesson="{x["id"]}"><button class="it-check" type="button" data-toggle-done aria-label="Mark section done">{ICON["check"]}</button><span class="it-main"><a class="it-title" href="{root}backend/{c["slug"]}/index.html#{x["anchor"]}">{html.escape(x["title"])}</a></span></li>' for x in c['sections'])}</ol>
   <a class="topic-open" href="{root}backend/{c['slug']}/index.html">Read chapter {c['num']} {ICON['right']}</a>
 </details>""" for c in be["chapters"])
-        bk = f'<div class="tp-head"><p class="section-sub">Backend from First Principles — {len(be["chapters"])} chapters, {be["total"]} sections, by {SOURCES["backend"]["author"]}.</p></div><div class="topic-list">{cards}</div>'
+        bk = (f'<div class="tp-head"><p class="section-sub">Backend from First Principles — {len(be["chapters"])} chapters, {be["total"]} sections, by {SOURCES["backend"]["author"]}.</p>{seg("backend")}</div>'
+              + skill_map("backend") + f'<div data-view-pane="list" hidden><div class="topic-list">{cards}</div></div>')
 
     panes = "".join(f'<section class="tp-pane" data-program-pane="{pid}" hidden>{body}</section>'
                     for pid, body in (("devops", devops), ("dsa", dsa), ("system-design", sd), ("backend", bk)) if body)
@@ -953,17 +972,24 @@ def render_brain():
    <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title">cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
    <div class="console-screen brain-stage" data-brain-stage>
     <canvas data-brain="full" aria-label="Interactive 3D brain"></canvas>
+    <canvas class="galaxy-canvas" data-galaxy hidden aria-label="Program galaxy: one star per topic"></canvas>
     <div class="stage-top">
       <p class="mono-label">Neural map</p>
       <h1 data-level-title>Your brain</h1>
       <p class="stage-sub" data-level-sub></p>
     </div>
     <dl class="stage-stats">
-      <div><dt>Neurons</dt><dd data-s1>0</dd></div>
-      <div><dt>Synapses</dt><dd data-s2>0</dd></div>
-      <div><dt>Lobes active</dt><dd data-s3>0</dd></div>
+      <div><dt data-s1-label>Neurons</dt><dd data-s1>0</dd></div>
+      <div><dt data-s2-label>Synapses</dt><dd data-s2>0</dd></div>
+      <div><dt data-s3-label>Lobes active</dt><dd data-s3>0</dd></div>
     </dl>
-    <p class="stage-tip mono-label">Drag to rotate · scroll to zoom · click a lobe · double-click to open it</p>
+    <button class="stage-up" data-galaxy-back hidden>{ICON['left']}<span>Back to brain</span></button>
+    <div class="galaxy-tools" data-galaxy-tools hidden>
+      <button class="icon-btn" data-gz="in" aria-label="Zoom in">{ICON['plus']}</button>
+      <button class="icon-btn" data-gz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+      <button class="icon-btn" data-gz="home" aria-label="Recentre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </div>
+    <p class="stage-tip mono-label" data-stage-tip>Drag to rotate · scroll to zoom · click a lobe · double-click to zoom in</p>
     <div class="stage-time mono-label" data-time-label hidden></div>
     <div class="brain-tooltip" data-brain-tooltip hidden></div>
    </div>
@@ -1194,8 +1220,7 @@ def render_dsa_index(sh):
     levels = ('<div class="level-stats">' + "".join(
         f'<div class="stat {DIFF_CLASS[k]}"><span class="mono-label">{k}</span><b><span data-level-done="{k}">0</span><small>/ {counts.get(k, 0)}</small></b></div>'
         for k in ("Easy", "Medium", "Hard")) + "</div>"
-        + "<script>window.BB_LEVELS=" + json.dumps({it["id"]: it["level"][0] for t in sh["topics"] for sb in t["subs"] for it in sb["items"]},
-                                                    separators=(",", ":")) + ";</script>")
+        + f'<script src="{root}assets/dsa-levels.js" defer></script>')
     actions = (f'<a class="btn btn-primary" href="{sh["topics"][0]["slug"]}/index.html">{ICON["play"]}<span>Start</span></a>'
                f'<button class="btn btn-ghost on-dark" data-focus-domain="dsa"><span class="rec"></span>Focus on this</button>'
                f'<a class="btn btn-ghost on-dark" href="{root}brain/index.html#dsa">{ICON["brain"]}See it in your brain</a>'
@@ -1276,8 +1301,7 @@ def render_sheet_index(sh):
         levels = '<div class="level-stats">' + "".join(
             f'<div class="stat {DIFF_CLASS[k]}"><span class="mono-label">{k}</span><b><span data-level-done="{k}">0</span><small>/ {counts.get(k, 0)}</small></b></div>'
             for k in ("Easy", "Medium", "Hard")) + "</div>"
-        levels += "<script>window.BB_LEVELS=" + json.dumps({it["id"]: it["level"][0] for t in sh["topics"] for sb in t["subs"] for it in sb["items"]},
-                                                          separators=(",", ":")) + ";</script>"
+        levels += f'<script src="{root}assets/dsa-levels.js" defer></script>'
     first = sh["topics"][0]
     actions = (f'<a class="btn btn-primary" href="{first["slug"]}/index.html" data-sheet-next="{sh["prefix"]}">{ICON["play"]}<span>Start</span></a>'
                f'<button class="btn btn-ghost on-dark" data-focus-domain="{sh["lobe"]}"><span class="rec"></span>Focus on this</button>'
@@ -1496,19 +1520,74 @@ def render_backend_chapter(be, ci):
 
 def render_login():
     root = "../"
+    g = ('<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z"/>'
+         '<path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z"/>'
+         '<path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8z"/>'
+         '<path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z"/></svg>')
     body = f"""<main id="main" class="login-page">
   <div class="login-card panel" data-login>
     <a class="brand" href="{root}index.html">{logo("lg")}</a>
-    <p class="login-sub">Sign in to save your progress, tasks, habits and your growing brain — on every device.</p>
-    <div class="seg" data-login-tabs><button data-mode="login" class="is-active" type="button">Sign in</button><button data-mode="register" type="button">Create account</button></div>
-    <form data-login-form autocomplete="on" novalidate>
-      <label class="field"><span class="mono-label">Username</span><input name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required minlength="3" maxlength="32"></label>
-      <label class="field"><span class="mono-label">Password</span><input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="256"></label>
-      <label class="field" data-register-only hidden><span class="mono-label">Confirm password</span><input name="confirm" type="password" autocomplete="new-password" maxlength="256"></label>
-      <p class="login-error" data-login-error role="alert" hidden></p>
-      <button class="btn btn-primary" type="submit" data-login-submit>Sign in</button>
-    </form>
-    <p class="login-note" data-login-note>Progress already in this browser is added to your account the first time you sign in.</p>
+
+    <section data-view="auth">
+      <p class="login-sub">Sign in to save your progress, tasks, habits and brain — on every device.</p>
+      <div class="seg" data-login-tabs role="tablist"><button data-mode="login" class="is-active" type="button" role="tab">Sign in</button><button data-mode="register" type="button" role="tab">Create account</button></div>
+      <a class="btn btn-google" data-google hidden href="#">{g}<span>Continue with Google</span></a>
+      <p class="or" data-google-or hidden><span>or</span></p>
+      <form data-login-form novalidate>
+        <label class="field"><span class="mono-label" data-login-label>Username or email</span><input name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required maxlength="190"></label>
+        <label class="field" data-register-only hidden><span class="mono-label">Email <em>(optional — for password resets)</em></span><input name="email" type="email" autocomplete="email" maxlength="190"></label>
+        <label class="field"><span class="mono-label">Password</span><input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="256"></label>
+        <label class="field" data-register-only hidden><span class="mono-label">Confirm password</span><input name="confirm" type="password" autocomplete="new-password" maxlength="256"></label>
+        <p class="login-error" data-login-error role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit" data-login-submit>Sign in</button>
+      </form>
+      <button class="link-btn forgot" type="button" data-show="forgot">Forgot password?</button>
+      <p class="login-note" data-login-note>Progress already in this browser is added to your account the first time you sign in.</p>
+    </section>
+
+    <section data-view="forgot" hidden>
+      <h2>Reset your password</h2>
+      <p class="login-sub" data-forgot-intro>Enter your username or email. If the account has an email address, we'll send it a reset link.</p>
+      <form data-forgot-form novalidate>
+        <label class="field"><span class="mono-label">Username or email</span><input name="login" autocomplete="username" autocapitalize="off" spellcheck="false" required maxlength="190"></label>
+        <p class="login-error" data-forgot-error role="alert" hidden></p>
+        <p class="login-ok" data-forgot-ok role="status" hidden></p>
+        <button class="btn btn-primary" type="submit">Send reset link</button>
+      </form>
+      <p class="login-note">No email on your account? <button class="link-btn" type="button" data-show="recover">Use a recovery code</button></p>
+      <button class="link-btn" type="button" data-show="auth">← Back to sign in</button>
+    </section>
+
+    <section data-view="recover" hidden>
+      <h2>Use a recovery code</h2>
+      <p class="login-sub">Each account gets 8 one-time recovery codes when it's created (and you can make new ones in Settings).</p>
+      <form data-recover-form novalidate>
+        <label class="field"><span class="mono-label">Username</span><input name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required maxlength="32"></label>
+        <label class="field"><span class="mono-label">Recovery code</span><input name="code" autocomplete="one-time-code" spellcheck="false" placeholder="xxxx-xxxx-xxxx" required maxlength="20"></label>
+        <label class="field"><span class="mono-label">New password</span><input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="256"></label>
+        <p class="login-error" data-recover-error role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit">Set new password</button>
+      </form>
+      <button class="link-btn" type="button" data-show="auth">← Back to sign in</button>
+    </section>
+
+    <section data-view="reset" hidden>
+      <h2>Choose a new password</h2>
+      <form data-reset-form novalidate>
+        <label class="field"><span class="mono-label">New password</span><input name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="256"></label>
+        <label class="field"><span class="mono-label">Confirm password</span><input name="confirm" type="password" autocomplete="new-password" required maxlength="256"></label>
+        <p class="login-error" data-reset-error role="alert" hidden></p>
+        <button class="btn btn-primary" type="submit">Save password &amp; sign in</button>
+      </form>
+    </section>
+
+    <section data-view="codes" hidden>
+      <h2>Save your recovery codes</h2>
+      <p class="login-sub">If you ever forget your password, one of these gets you back in. Each works once. Keep them somewhere safe — this is the only time they're shown.</p>
+      <ol class="codes" data-codes></ol>
+      <div class="modal-row"><button class="btn btn-ghost sm" type="button" data-codes-copy>Copy</button><button class="btn btn-ghost sm" type="button" data-codes-download>Download</button></div>
+      <button class="btn btn-primary" type="button" data-codes-done>I've saved them — continue</button>
+    </section>
   </div>
 </main>"""
     return page(title=f"Sign in · {SITE}", desc="Sign in to BLACKBOX", root=root, body=body, kind="login")
@@ -1603,6 +1682,10 @@ def main():
     if be:
         progs["backend"] = [[c["prefix"], [[x["id"], f"backend/{c['slug']}/index.html#{x['anchor']}"] for x in c["sections"]]] for c in be["chapters"]]
     write(OUT / "assets" / "programs.js", "window.BB_PROGRAMS=" + json.dumps(progs, separators=(",", ":")) + ";")
+    write(OUT / "assets" / "boot.js", BOOT_JS)
+    if "dsa" in sheets:
+        write(OUT / "assets" / "dsa-levels.js", "window.BB_LEVELS=" + json.dumps(
+            {it["id"]: it["level"][0] for t in sheets["dsa"]["topics"] for sb in t["subs"] for it in sb["items"]}, separators=(",", ":")) + ";")
     write(OUT / "login" / "index.html", render_login())
     for sh in sheets.values():
         index.append([sh["name"], sh["href"], "", "", "k", "sheet practice " + sh["noun"]])
@@ -1624,14 +1707,38 @@ def main():
     write(OUT / "brain" / "index.html", render_brain())
     write(OUT / "tracks" / "index.html", render_tracks(tracks, sheets, be))
     idx = {t["slug"]: i for i, t in enumerate(tracks)}
-    write(OUT / "assets" / "map-data.js", "window.BB_MAP=" + json.dumps({
-        "tracks": [dict(slug=t["slug"], num=t["num"], title=strip_tags(t["title"]), q=QUESTIONS.get(t["slug"], ""), color=t["color"],
-                        domain=t["domain"]["name"], minutes=t["minutes"],
-                        topics=[dict(slug=tp["slug"], title=strip_tags(tp["title"]),
-                                     lessons=[[l["slug"], strip_tags(l["title"]), l["minutes"]] for l in tp["lessons"]]) for tp in t["topics"]])
-                   for t in tracks],
-        "edges": [[idx[a], idx[b]] for a, b in MAP_EDGES if a in idx and b in idx],
-    }, ensure_ascii=False, separators=(",", ":")) + ";")
+    maps = {"devops": {
+        "words": {"node": "Track", "groups": "topics", "items": "lessons"},
+        "nodes": [dict(slug=t["slug"], num=t["num"], title=strip_tags(t["title"]), q=QUESTIONS.get(t["slug"], ""), color=t["color"],
+                       domain=t["domain"]["name"], href=f"{t['slug']}/index.html",
+                       groups=[dict(title=strip_tags(tp["title"]), href=f"{t['slug']}/{tp['slug']}/index.html",
+                                    items=[[lesson_id(t, tp, l), strip_tags(l["title"]), f"{l['minutes']}m", f"{lesson_id(t, tp, l)}/index.html"] for l in tp["lessons"]])
+                               for tp in t["topics"]])
+                  for t in tracks],
+        "edges": [[idx[a], idx[b]] for a, b in MAP_EDGES if a in idx and b in idx]}}
+
+    def chain_or(edges, n):
+        ok = [e for e in edges if e[0] < n and e[1] < n]
+        return [list(e) for e in ok] if ok and n in (18, 12, 26) else [[i, i + 1] for i in range(n - 1)]
+    for pid, words, edges in (("dsa", {"node": "Topic", "groups": "sections", "items": "problems"}, DSA_EDGES),
+                              ("system-design", {"node": "Topic", "groups": "sections", "items": "concepts"}, SD_EDGES)):
+        if pid not in sheets:
+            continue
+        sh = sheets[pid]
+        maps[pid] = {"words": words, "edges": chain_or(edges, len(sh["topics"])), "nodes": [
+            dict(slug=t["slug"], num=t["num"], title=t["name"], q=t["note"], color=sh["color"], domain="", href=f"{sh['dir']}/{t['slug']}/index.html",
+                 groups=[dict(title=sb["name"] or t["name"], href=f"{sh['dir']}/{t['slug']}/index.html" + (f"#{sb['anchor']}" if sb["anchor"] else ""),
+                              items=[[it["id"], it["name"], it.get("level", ""), f"{sh['dir']}/{t['slug']}/index.html#{it['anchor']}"] for it in sb["items"]])
+                         for sb in t["subs"]])
+            for t in sh["topics"]]}
+    if be:
+        maps["backend"] = {"words": {"node": "Chapter", "groups": "parts", "items": "sections"},
+                           "edges": chain_or([(a - 1, b - 1) for a, b in BACKEND_EDGES], len(be["chapters"])), "nodes": [
+            dict(slug=c["slug"], num=c["num"], title=c["title"], q=c["reading"], color=be["color"], domain="", href=f"backend/{c['slug']}/index.html",
+                 groups=[dict(title="Sections", href=f"backend/{c['slug']}/index.html",
+                              items=[[x["id"], x["title"], "", f"backend/{c['slug']}/index.html#{x['anchor']}"] for x in c["sections"]])])
+            for c in be["chapters"]]}
+    write(OUT / "assets" / "map-data.js", "window.BB_MAPS=" + json.dumps(maps, ensure_ascii=False, separators=(",", ":")) + ";")
     write(OUT / "focus" / "index.html", render_focus())
     write(OUT / "tasks" / "index.html", render_tasks())
     write(OUT / "habits" / "index.html", render_habits())
