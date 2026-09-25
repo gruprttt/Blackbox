@@ -328,12 +328,6 @@ NAV = [("Learn", "index.html", "learn", ("home",)),
        ("Tasks", "tasks/index.html", "tasks", ("tasks",)),
        ("Habits", "habits/index.html", "habits", ("habits",))]
 
-# Runs before first paint (blocking, in <head>) so the page never flashes the wrong theme. It's a
-# file rather than inline so the Content-Security-Policy can forbid inline scripts entirely.
-BOOT_JS = ("(function(){var t;try{t=localStorage.getItem('theme')}catch(e){}"
-           "if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}"
-           "document.documentElement.setAttribute('data-theme',t)})();\n")
-
 APP_PAGES = ("home", "brain", "focus", "tasks", "habits")
 TABBAR = ("Learn", "Tracks", "Brain", "Focus", "Tasks")
 
@@ -355,20 +349,18 @@ def page(*, title, desc, root, body, kind):
     if kind in APP_PAGES:
         extra += f'<script src="{root}assets/brain.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n'
     return f"""<!DOCTYPE html>
-<html lang="en" data-root="{root}" data-page="{kind}">
+<html lang="en" data-theme="dark" data-root="{root}" data-page="{kind}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{title}</title>
 <meta name="description" content="{html.escape(desc)}">
-<meta name="color-scheme" content="dark light">
-<script src="{root}assets/boot.js"></script>
+<meta name="color-scheme" content="dark">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..700&display=swap">
 <link rel="icon" href="{root}assets/favicon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#07080c" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f4f5f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#07080c">
 <link rel="stylesheet" href="{root}assets/style.css">
 </head>
 <body>
@@ -410,7 +402,6 @@ def header(root, kind):
       <a class="focus-pill" href="{root}focus/index.html" data-focus-pill hidden><span class="rec"></span><b data-focus-pill-time>25:00</b><span data-focus-pill-label>Focus</span></a>
       <button class="search-trigger" data-open-search aria-label="Search">{ICON["search"]}<span>Search</span><kbd data-mod-key>⌘K</kbd></button>
       <button class="icon-btn" data-open-settings aria-label="Settings" title="Settings &amp; data">{ICON["gear"]}</button>
-      <button class="icon-btn theme-toggle" data-theme-toggle aria-label="Toggle dark mode" title="Toggle theme (D)">{ICON["sun"]}{ICON["moon"]}</button>
       <div class="acct" data-account>
         <a class="acct-btn" href="{root}login/index.html" data-account-btn>{ICON["user"]}<span data-account-name>Sign in</span></a>
         <div class="acct-menu" data-account-menu hidden>
@@ -442,7 +433,7 @@ def footer(root):
       <div><h4>Toolkit</h4><ul>{app}</ul></div>
       <div class="kbd-hints"><h4>Shortcuts</h4><ul>
         <li><kbd>⌘</kbd><kbd>K</kbd> Search</li><li><kbd>←</kbd><kbd>→</kbd> Prev / next</li>
-        <li><kbd>D</kbd> Theme</li><li><kbd>F</kbd> Focus page</li></ul></div>
+        <li><kbd>F</kbd> Focus page</li></ul></div>
     </div>
   </div>
 </footer>"""
@@ -989,7 +980,7 @@ def render_brain():
       <button class="icon-btn" data-gz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
       <button class="icon-btn" data-gz="home" aria-label="Recentre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
-    <p class="stage-tip mono-label" data-stage-tip>Drag to rotate · scroll to zoom · click a lobe · double-click to zoom in</p>
+    <p class="stage-tip mono-label" data-stage-tip>Drag to rotate · scroll to zoom · click a lobe to select it</p>
     <div class="stage-time mono-label" data-time-label hidden></div>
     <div class="brain-tooltip" data-brain-tooltip hidden></div>
    </div>
@@ -1682,7 +1673,6 @@ def main():
     if be:
         progs["backend"] = [[c["prefix"], [[x["id"], f"backend/{c['slug']}/index.html#{x['anchor']}"] for x in c["sections"]]] for c in be["chapters"]]
     write(OUT / "assets" / "programs.js", "window.BB_PROGRAMS=" + json.dumps(progs, separators=(",", ":")) + ";")
-    write(OUT / "assets" / "boot.js", BOOT_JS)
     if "dsa" in sheets:
         write(OUT / "assets" / "dsa-levels.js", "window.BB_LEVELS=" + json.dumps(
             {it["id"]: it["level"][0] for t in sheets["dsa"]["topics"] for sb in t["subs"] for it in sb["items"]}, separators=(",", ":")) + ";")

@@ -45,6 +45,9 @@ subprocess.run([sys.executable, str(HERE / "build.py"), str(learn or HERE / ".no
 # Optional settings (Google sign-in, reset emails) from a .env file next to this script.
 env = dict(os.environ)
 dotenv = HERE / ".env"
+if not dotenv.exists() and (HERE / ".env.example").exists():
+    dotenv.write_text((HERE / ".env.example").read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"Created {dotenv} — put your Google / email settings there.", flush=True)
 if dotenv.exists():
     for line in dotenv.read_text(encoding="utf-8").splitlines():
         key, eq, val = line.strip().partition("=")
@@ -52,6 +55,13 @@ if dotenv.exists():
             env[key.strip()] = val.strip().strip('"').strip("'")
 if not env.get("BLACKBOX_BASE_URL") or env["BLACKBOX_BASE_URL"] == "http://localhost:8080":
     env["BLACKBOX_BASE_URL"] = f"http://localhost:{args.port}"
+
+if not (env.get("GOOGLE_CLIENT_ID") and env.get("GOOGLE_CLIENT_SECRET")):
+    print("\nGoogle sign-in is off. To turn it on:\n"
+          "  1. https://console.cloud.google.com/apis/credentials → Create credentials → OAuth client ID → Web application\n"
+          f"  2. Authorized redirect URI:  {env['BLACKBOX_BASE_URL']}/api/auth/google/callback\n"
+          f"  3. Paste the Client ID and Client secret into {dotenv} (GOOGLE_CLIENT_ID=..., GOOGLE_CLIENT_SECRET=...)\n"
+          "  4. Restart:  python3 run.py\n", flush=True)
 
 url = f"http://localhost:{args.port}/"
 if not args.no_browser:

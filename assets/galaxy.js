@@ -2,7 +2,7 @@
    One big star per topic (or chapter), laid out on a slowly turning spiral in the order you learn
    them. A star is as large as the topic and as bright as how much of it you've learned; a ring
    round it shows the exact share. Drag to pan, scroll or pinch to zoom, click a star to see it in
-   the side panel, double-click to open the topic. */
+   the side panel, whose Open topic button opens it. */
 (function () {
   "use strict";
   var BB = window.BB;
@@ -198,7 +198,6 @@
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
     canvas.addEventListener("pointerleave", function () { if (hover) { hover = null; if (opts.onHover) opts.onHover(null); } });
-    canvas.addEventListener("dblclick", function (e) { var s = pick(e.clientX, e.clientY); if (s && opts.onOpen) opts.onOpen(s.node); });
     canvas.addEventListener("wheel", function (e) {
       e.preventDefault();
       var rect = canvas.getBoundingClientRect(), before = toWorld(e.clientX - rect.left, e.clientY - rect.top);

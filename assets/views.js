@@ -595,7 +595,7 @@
       mirror.scrollLeft = mirror.scrollWidth;
     }
     var hist = BB.load("bb-term-hist", []), hi = hist.length, lastList = [];
-    var CMDS = ["help", "status", "next", "path", "track", "focus", "stop", "tasks", "add", "done", "search", "goto", "theme", "reset", "clear", "whoami", "uptime", "date"];
+    var CMDS = ["help", "status", "next", "path", "track", "focus", "stop", "tasks", "add", "done", "search", "goto", "reset", "clear", "whoami", "uptime", "date"];
     function out(html, cls) {
       var line = document.createElement("div");
       line.className = "tl" + (cls ? " " + cls : "");
@@ -611,7 +611,7 @@
         [["status", "progress, streak, focus, brain"], ["next", "open the next lesson on the path"], ["path", "all tracks with progress"], ["track &lt;n&gt;", "open track n"],
          ["focus [min]", "start a focus session (default 25)"], ["stop", "give up the running session"], ["tasks", "tasks due today"], ["add &lt;text&gt;", "add a task due today"],
          ["done &lt;n&gt;", "complete task n from the last list"], ["search &lt;q&gt;", "search all lessons"], ["goto &lt;page&gt;", "brain · focus · tasks · habits"],
-         ["theme", "toggle light/dark"], ["reset", "open reset & backup settings"], ["clear", "clear the screen"]
+         ["reset", "open reset & backup settings"], ["clear", "clear the screen"]
         ].forEach(function (r) { out('<span class="t-cmd">' + r[0] + '</span><span class="t-dim">' + r[1] + "</span>", "row"); });
       },
       status: function () {
@@ -672,7 +672,6 @@
         if (!pgs[a[0]]) { out('<span class="t-err">usage: goto brain|focus|tasks|habits</span>'); return; }
         nav(ROOT + a[0] + "/index.html", a[0]);
       },
-      theme: function () { var b = $("[data-theme-toggle]"); if (b) b.click(); out('<span class="t-dim">theme → ' + document.documentElement.getAttribute("data-theme") + "</span>"); },
       reset: function () { BB.openSettings(); out('<span class="t-dim">opened settings → reset</span>'); },
       clear: function () { termOut.innerHTML = ""; },
       whoami: function () { out("an engineer, figuring things out."); },
@@ -729,10 +728,10 @@
   // ═════════════════════════════ BRAIN ═════════════════════════════
   function brainPage() {
     // The brain shows each program as a lobe. Click a lobe to see what's inside it (its topics and your
-    // progress in each); double-click, or press Open, to go to that program on the Tracks page.
+    // progress in each); press Zoom in to fly into its galaxy of topics.
     var TREE = window.BB_TREE || { id: "", n: "Your brain", k: [] };
     var list = $("[data-region-list]"), stage = $("[data-brain-stage]");
-    var lobeOf = {}, lobeNode = {}, at = null, selLobe = null, brain, lastClick = {};
+    var lobeOf = {}, lobeNode = {}, at = null, selLobe = null, brain;
     var galaxy = null, inGalaxy = null, selTopic = null, pendingTopic = null, gCanvas = $("[data-galaxy]"), bCanvas = $('[data-brain="full"]');
     DATA.domains.forEach(function (d) { lobeOf[d.id] = d; });
     (TREE.k || []).forEach(function (k) { lobeNode[k.id] = k; });
@@ -745,7 +744,6 @@
       return r;
     }
     function pct(x) { return x.total ? Math.round(x.done / x.total * 100) : 0; }
-    function open(id) { zoomIn(id); }
 
     // ── galaxy: zoom into a lobe ──
     function zoomIn(id) {
@@ -762,7 +760,6 @@
           return out;
         },
         onSelect: function (t) { selTopic = t; paint(); },
-        onOpen: function (t) { if (t.h) location.href = ROOT + t.h; },
         onHover: function (t, s) {
           var tip = $("[data-brain-tooltip]");
           if (!tip) return;
@@ -771,7 +768,7 @@
           tip.className = "brain-tooltip docked card"; tip.style.setProperty("--c", s.color);
           tip.innerHTML = '<div class="bt-head"><i style="background:' + s.color + ";box-shadow:0 0 10px " + s.color + '"></i><b>' + esc(t.n) + "</b></div>" +
             '<div class="bt-bar"><span style="width:' + pct(x) + "%;background:" + s.color + '"></span></div><p class="bt-meta"><span>' + pct(x) + "% learned</span><span>" + x.done + "/" + x.total +
-            '</span></p><p class="bt-hint">Click to inspect · double-click to open</p>';
+            '</span></p><p class="bt-hint">Click to inspect</p>';
           tip.hidden = false; stage.classList.add("hovering");
         }
       });
@@ -779,7 +776,7 @@
         inGalaxy = id; selTopic = null; selLobe = id;
         bCanvas.hidden = true; gCanvas.hidden = false; stage.classList.add("in-galaxy");
         $("[data-galaxy-back]").hidden = false; $("[data-galaxy-tools]").hidden = false;
-        $("[data-stage-tip]").textContent = "Drag to move · scroll to zoom · click a star · double-click to open the topic";
+        $("[data-stage-tip]").textContent = "Drag to move · scroll to zoom · click a star to inspect it";
         galaxy.open(node, d.color);
         if (pendingTopic) { selTopic = pendingTopic; galaxy.select(pendingTopic); pendingTopic = null; }
         history.replaceState(null, "", location.pathname + location.search + "#" + id);
@@ -793,7 +790,7 @@
       gCanvas.hidden = true; bCanvas.hidden = false; stage.classList.remove("in-galaxy");
       if (brain.reset) brain.reset();
       $("[data-galaxy-back]").hidden = true; $("[data-galaxy-tools]").hidden = true;
-      $("[data-stage-tip]").textContent = "Drag to rotate · scroll to zoom · click a lobe · double-click to zoom in";
+      $("[data-stage-tip]").textContent = "Drag to rotate · scroll to zoom · click a lobe to select it";
       paint();
     }
 
@@ -802,7 +799,7 @@
       var st = BB.brainState(at == null ? undefined : at), by = (brain && brain.stats().byRegion) || {}, html = "";
       var d = selLobe && lobeOf[selLobe];
       $("[data-level-title]").textContent = d ? d.name : "Your brain";
-      $("[data-level-sub]").textContent = d ? "Double-click the lobe (or press Zoom in) to fly into its galaxy — one star per topic."
+      $("[data-level-sub]").textContent = d ? "Press Zoom in to fly into its galaxy — one star per topic."
         : "Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to see what's inside it.";
       if (d) {
         var s = st[d.id] || { done: 0, total: 0, focusMin: 0 }, node = lobeNode[d.id];
@@ -827,14 +824,8 @@
                   : '<span class="region-meta"><span>' + s2.done + "/" + s2.total + " learned</span><span>" + BB.fmtMin(s2.focusMin) + " focus</span></span>") + "</button>";
       }).join("") + '<p class="region-note">Learning wires up to 75% of a lobe; focus sessions wire the rest (one neuron per 2 focused minutes).</p>';
       list.innerHTML = html;
-      // The panel re-renders on select (rows move), so a double-click is detected by lobe, not by element.
       $$("[data-lobe]", list).forEach(function (b) {
-        b.addEventListener("click", function () {
-          var id = b.getAttribute("data-lobe"), now = Date.now();
-          if (lastClick.id === id && now - lastClick.t < 450) { open(id); return; }
-          lastClick = { id: id, t: now };
-          if (id !== selLobe) select(id);
-        });
+        b.addEventListener("click", function () { var id = b.getAttribute("data-lobe"); if (id !== selLobe) select(id); });
       });
       $$("[data-zoom]", list).forEach(function (b) { b.addEventListener("click", function () { zoomIn(b.getAttribute("data-zoom")); }); });
       var s3 = brain ? brain.stats() : { neurons: 0, synapses: 0, regions: 0 };
@@ -847,7 +838,7 @@
     function paintGalaxy() {
       var d = lobeOf[inGalaxy], node = lobeNode[inGalaxy], all = tally(node), t = selTopic, html = "";
       $("[data-level-title]").textContent = t ? t.n.replace(/^\d+ · /, "") : d.name;
-      $("[data-level-sub]").textContent = t ? "Double-click the star (or press Open) to start this topic." :
+      $("[data-level-sub]").textContent = t ? "Press Open topic to start learning it." :
         "Each star is a topic, in the order you learn them. Bigger stars hold more; brighter ones you've learned more of.";
       if (t) {
         var x = tally(t), kids = (t.k || []).filter(function (k) { return !Array.isArray(k); });
@@ -872,9 +863,7 @@
       list.innerHTML = html;
       $$("[data-star]", list).forEach(function (b) {
         b.addEventListener("click", function () {
-          var k = node.k[+b.getAttribute("data-star")], now = Date.now();
-          if (lastClick.id === "s" + b.getAttribute("data-star") && now - lastClick.t < 450 && k.h) { location.href = ROOT + k.h; return; }
-          lastClick = { id: "s" + b.getAttribute("data-star"), t: now };
+          var k = node.k[+b.getAttribute("data-star")];
           selTopic = k; galaxy.select(k); paint();
         });
       });
@@ -898,8 +887,7 @@
       interactive: true, zoomable: true, fill: 0.95, speed: 0.08, offsetY: window.innerWidth < 640 ? 0.05 : 0.02,
       tipMode: "card", selected: function () { return selLobe; },
       onStats: function () { if (brain && list) paint(); },
-      onSelect: function (d) { if (d && d.id !== selLobe) select(d.id); else if (!d) select(null); },
-      onEnter: function (d) { if (d) open(d.id); }
+      onSelect: function (d) { if (d && d.id !== selLobe) select(d.id); else if (!d) select(null); }
     });
     document.addEventListener("keydown", function (e) {
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;

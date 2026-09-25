@@ -482,7 +482,6 @@
         dragging = false;
         if (moved < 6 && opts.onSelect) opts.onSelect(nearest(e.clientX, e.clientY));
       });
-      canvas.addEventListener("dblclick", function (e) { if (opts.onEnter) opts.onEnter(nearest(e.clientX, e.clientY)); });
       canvas.addEventListener("pointerleave", function () { aimX = aimY = 0; if (!dragging && opts.onHover) opts.onHover(null); });
       if (opts.zoomable) canvas.addEventListener("wheel", function (e) {
         e.preventDefault();

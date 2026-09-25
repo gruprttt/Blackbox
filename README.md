@@ -57,9 +57,14 @@ rebuilds, restarts and clearing your browser, and follow you to any device you s
 Copy `.env.example` to `.env` (used by `run.py` and `docker compose`):
 
 - `BLACKBOX_BASE_URL` — the public URL of the site (e.g. `https://learn.example.com`).
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — create an OAuth client (Web application) in Google
-  Cloud Console with redirect URI `<BLACKBOX_BASE_URL>/api/auth/google/callback`. The Google button
-  appears only when these are set.
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — turns on **Continue with Google**:
+  1. Open https://console.cloud.google.com/apis/credentials (set up the OAuth consent screen first
+     if asked: External, app name BLACKBOX, your email).
+  2. *Create credentials → OAuth client ID → Web application*.
+  3. Add the Authorized redirect URI `<BLACKBOX_BASE_URL>/api/auth/google/callback`
+     (locally: `http://localhost:8765/api/auth/google/callback`).
+  4. Paste the Client ID and secret into `.env` and restart. `run.py` creates `.env` for you and
+     prints these steps while Google is still off.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TLS` — for reset emails.
 - `BLACKBOX_SECURE_COOKIES=1` when served over HTTPS (also enable the HSTS line in `deploy/nginx.conf`).
 
@@ -98,7 +103,7 @@ The navbar has one **Tracks** item; hover it for every program (DevOps & SRE, DS
 Backend) with your progress. The Tracks page is the hub: the program chips switch the content in
 place — the DevOps skill map, the DSA roadmap (click a topic to see its problems right there), System
 Design topics and Backend chapters (expand to tick off concepts/sections). Every program has a **Map / List**
-switch: the map is a pannable skill map of its topics (click to expand, double-click to open). You
+switch: the map is a pannable skill map of its topics (click a topic to expand it). You
 only leave the page when you open a lesson, problem or chapter to learn it.
 
 ## The brain
@@ -107,9 +112,9 @@ Every program is a lobe. Lessons, solved problems and learned concepts light neu
 focus minutes wire the rest, and the brain physically grows as more of it is wired.
 
 - **Click a lobe** to see what's inside it: its topics or chapters with your progress in each.
-- **Double-click** a lobe (or *Zoom into …*) to fly into it: the brain dissolves into a **galaxy**
+- Press **Zoom into …** on a selected lobe (or `Enter`) to fly into it: the brain dissolves into a **galaxy**
   where every topic is a star, sized by its content and glowing with your progress. Click a star to
-  inspect it, double-click (or *Open topic*) to study it; drag/scroll/pinch to explore, **Back** or
+  inspect it, *Open topic* to study it; drag/scroll/pinch to explore, **Back** or
   `Esc` returns to the brain. `brain/#dsa` and `brain/#dsa/t03` link straight in.
 - *Open in Tracks* goes to that program on the Tracks page.
 - The timeline under the brain charts your growth — drag it to see any past day, or press ▶ to replay it.
@@ -142,8 +147,8 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `data/dsa-a2z.json` | Striver's A2Z sheet (18 topics, 62 subtopics, 474 problems with links) |
 | `data/system-design.json` | System Design curriculum (topics → concepts) |
 | `mdx.py` | Dependency-free MDX → HTML converter for the Backend chapters |
-| `assets/style.css` | Design system (dark + light themes) |
-| `assets/app.js` | Core: progress, focus engine, tasks store, search, theme |
+| `assets/style.css` | Design system (dark theme) |
+| `assets/app.js` | Core: progress, focus engine, tasks store, search |
 | `assets/brain.js` | Canvas 3D brain renderer (levels, dive transitions, growth, zoom-in) |
 | `assets/galaxy.js` | Galaxy view: a program's topics as stars you zoom into |
 | `assets/views.js` | Home, Brain explorer, Focus, Tasks and Habits pages |

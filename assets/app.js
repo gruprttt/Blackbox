@@ -1,4 +1,4 @@
-/* BLACKBOX core: storage, progress, focus engine, tasks store, search, theme, lesson page. */
+/* BLACKBOX core: storage, progress, focus engine, tasks store, search, lesson page. */
 (function () {
   "use strict";
 
@@ -254,20 +254,6 @@
     return t === Infinity ? null : t;
   };
 
-  // ── theme ──────────────────────────────────────────────────────
-  function setTheme(t, persist) {
-    doc.setAttribute("data-theme", t);
-    if (persist) { try { localStorage.setItem("theme", t); } catch (e) {} }
-    emit("theme");
-  }
-  function toggleTheme() { setTheme(doc.getAttribute("data-theme") === "dark" ? "light" : "dark", true); }
-  $$("[data-theme-toggle]").forEach(function (b) { b.addEventListener("click", toggleTheme); });
-  try {
-    matchMedia("(prefers-color-scheme: light)").addEventListener("change", function (e) {
-      var stored = null; try { stored = localStorage.getItem("theme"); } catch (err) {}
-      if (!stored) setTheme(e.matches ? "light" : "dark", false);
-    });
-  } catch (e) {}
   if (!isMac) $$("[data-mod-key]").forEach(function (k) { k.textContent = "Ctrl K"; });
 
   // ── progress painting ──────────────────────────────────────────
@@ -316,7 +302,6 @@
     else if (e.key === "bb-tasks" || e.key === "bb-lists") emit("tasks");
     else if (e.key === "bb-sessions") emit("session", {});
     else if (e.key === "bb-habits") emit("habits");
-    else if (e.key === "theme" && e.newValue) setTheme(e.newValue, false);
   });
 
   // ── home: continue card ────────────────────────────────────────
@@ -762,13 +747,13 @@
   BB.openSearch = openSearch;
   $$("[data-open-search]").forEach(function (b) { b.addEventListener("click", function () { openSearch(); }); b.addEventListener("pointerenter", ensureIndex, { once: true }); });
 
-  // ── settings: theme, backup, restore, reset ────────────────────
+  // ── settings: account, backup, restore, reset ────────────────────
   var DATA_KEYS = {
     progress: { label: "Progress & brain", desc: "Completed lessons, solved problems, learned concepts, neurons", keys: ["bb-done-at", "bb-last", "hc-done", "hc-last", "bb-dsa-marks", "bb-dsa-notes"] },
     focus: { label: "Focus history", desc: "Sessions, running timer and withered history", keys: ["bb-sessions", "bb-focus"] },
     tasks: { label: "Tasks & lists", desc: "All tasks, subtasks and custom lists", keys: ["bb-tasks", "bb-lists"] },
     habits: { label: "Habits", desc: "Custom habits and check-ins", keys: ["bb-habits"] },
-    prefs: { label: "Preferences", desc: "Timer lengths, deep focus, views, theme", keys: ["bb-dur-focus", "bb-dur-short", "bb-dur-long", "bb-strict", "bb-focus-domain", "bb-tasks-view", "bb-tasks-list", "bb-term-hist", "bb-sheet-hide-done", "theme"] }
+    prefs: { label: "Preferences", desc: "Timer lengths, deep focus, views", keys: ["bb-dur-focus", "bb-dur-short", "bb-dur-long", "bb-strict", "bb-focus-domain", "bb-tasks-view", "bb-tasks-list", "bb-term-hist", "bb-sheet-hide-done"] }
   };
   function allKeys() { var k = []; Object.keys(DATA_KEYS).forEach(function (g) { k = k.concat(DATA_KEYS[g].keys); }); return k; }
   function exportData() {
@@ -810,7 +795,6 @@
       settings.setAttribute("role", "dialog"); settings.setAttribute("aria-modal", "true"); settings.setAttribute("aria-label", "Settings");
       settings.innerHTML = '<div class="modal-backdrop" data-close></div><div class="modal-box">' +
         '<div class="modal-head"><div><p class="mono-label">/ settings</p><h2>Settings &amp; data</h2></div><button class="icon-btn" data-close aria-label="Close">✕</button></div>' +
-        '<section class="modal-sec"><h3>Appearance</h3><div class="seg" data-theme-seg><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="system">System</button></div></section>' +
         '<section class="modal-sec"><h3>Account &amp; sync</h3><div class="sync-row"><span class="sync-status" data-sync-status></span><button class="btn btn-ghost sm" data-sync-now>Sync now</button></div>' +
         '<p class="modal-note" data-account-note></p></section>' +
         '<section class="modal-sec" data-acct-sec hidden><h3>Account</h3>' +
@@ -840,14 +824,6 @@
         '<button class="btn btn-red" data-reset disabled>Reset selected data</button></section></div>';
       document.body.appendChild(settings);
       $$("[data-close]", settings).forEach(function (b) { b.addEventListener("click", closeSettings); });
-      $$("[data-t]", settings).forEach(function (b) {
-        b.addEventListener("click", function () {
-          var t = b.getAttribute("data-t");
-          if (t === "system") { try { localStorage.removeItem("theme"); } catch (e) {} setTheme(matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark", false); }
-          else setTheme(t, true);
-          paintSeg();
-        });
-      });
       $("[data-export]", settings).addEventListener("click", exportData);
       var acctForm = function (sel, fn) {
         var f = $(sel, settings);
@@ -902,7 +878,6 @@
         setTimeout(function () { location.href = ROOT + "index.html"; }, 600);
       });
     }
-    paintSeg();
     paintSync();
     var signedIn = !!BB.account() && BB.sync.mode !== "signedout" && BB.sync.mode !== "local";
     $("[data-acct-sec]", settings).hidden = !signedIn;
@@ -932,10 +907,6 @@
     }).catch(function () {});
   }
   if (location.hash === "#google=linked") { setTimeout(function () { toast("Google account linked", "var(--ok)"); }, 300); history.replaceState(null, "", location.pathname + location.search); }
-  function paintSeg() {
-    var stored = null; try { stored = localStorage.getItem("theme"); } catch (e) {}
-    $$("[data-t]", settings).forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-t") === (stored || "system")); });
-  }
   function paintSync() {
     $$("[data-sync-status]").forEach(function (el) {
       var m = BB.sync.mode, ago = BB.sync.last ? Math.max(0, Math.round((Date.now() - BB.sync.last) / 1000)) : null;
@@ -972,7 +943,6 @@
     if (e.key === "Escape") { closeSearch(); closeSettings(); document.body.classList.remove("drawer-open"); return; }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "/") { e.preventDefault(); openSearch(); }
-    else if (e.key === "d" || e.key === "D") toggleTheme();
     else if ((e.key === "f" || e.key === "F") && PAGE !== "focus") location.href = ROOT + "focus/index.html";
     else if (e.key === "ArrowRight") { var n = $("[data-nav-next]"); if (n) location.href = n.href; }
     else if (e.key === "ArrowLeft") { var p = $("[data-nav-prev]"); if (p) location.href = p.href; }
