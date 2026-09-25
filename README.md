@@ -76,6 +76,12 @@ tick off. Breadcrumbs, **Back out** or `Esc` go back up; the URL (`brain/index.h
 straight to any level. The timeline under the brain charts your growth — drag it to see your brain
 on any past day, or press ▶ to replay how it grew.
 
+## Quickest way to see it (no Docker)
+
+```bash
+python3 run.py      # builds, starts the server and opens http://localhost:8765
+```
+
 ## Develop without Docker
 
 ```bash
