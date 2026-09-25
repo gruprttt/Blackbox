@@ -26,17 +26,69 @@ args = ap.parse_args()
 
 
 def is_learn(p):
-    return p.is_dir() and any((d / "index.html").exists() for d in p.iterdir() if d.is_dir())
+    """A lessons folder: sub-folders (one per track) that each have an index.html from hamchops.com/learn."""
+    try:
+        subs = [d for d in p.iterdir() if d.is_dir() and (d / "index.html").is_file()]
+    except OSError:
+        return False
+    if not subs:
+        return False
+    if p.name == "learn":
+        return True
+    try:
+        return any("/learn/" in (d / "index.html").read_text(encoding="utf-8", errors="ignore")[:200000] for d in subs[:3])
+    except OSError:
+        return False
 
 
-# The DevOps & SRE lessons aren't in this repo: they're the saved pages in a `learn` folder.
-candidates = [Path(args.learn).expanduser()] if args.learn else [HERE.parent / "learn", HERE / "learn", HERE.parent.parent / "learn"]
+def search(root, depth):
+    """Breadth-first look for a lessons folder under root (skips hidden and heavy folders)."""
+    level = [root]
+    for _ in range(depth):
+        nxt = []
+        for d in level:
+            try:
+                kids = sorted(k for k in d.iterdir() if k.is_dir() and not k.name.startswith(".")
+                              and k.name not in ("node_modules", "snap", "go", "venv", ".venv", "dist", "vendor"))
+            except OSError:
+                continue
+            for k in kids:
+                if k.name == "learn" and is_learn(k):
+                    return k
+            nxt += kids
+        level = nxt
+    return None
+
+
+def dotenv_value(key):
+    f = HERE / ".env"
+    if f.exists():
+        for line in f.read_text(encoding="utf-8").splitlines():
+            k, eq, v = line.strip().partition("=")
+            if eq and k.strip() == key:
+                return v.strip().strip('"').strip("'")
+    return os.environ.get(key, "")
+
+
+# The DevOps & SRE lessons aren't in this repo: they're your saved hamchops.com/learn pages in a
+# `learn` folder. Use --learn, BLACKBOX_LEARN in .env, or let us look in the usual places.
+home = Path.home()
+given = args.learn or dotenv_value("BLACKBOX_LEARN")
+candidates = [Path(given).expanduser()] if given else [
+    HERE / "learn", HERE.parent / "learn", home / "learn", home / "hamchops" / "learn", home / "hamchops"]
 learn = next((p.resolve() for p in candidates if is_learn(p)), None)
+if not learn and not given:
+    print("Looking for your DevOps & SRE lessons…", flush=True)
+    for root, depth in ((home / "hamchops", 4), (HERE.parent, 3), (home, 3)):
+        learn = search(root, depth) if root.is_dir() else None
+        if learn:
+            learn = learn.resolve()
+            break
 if learn:
     print(f"DevOps & SRE lessons: {learn}", flush=True)
 else:
     print("\n!! DevOps & SRE lessons not found — looked in:\n   " + "\n   ".join(str(p.resolve()) for p in candidates) +
-          "\n   Put your `learn` folder next to this folder, or run:  python3 run.py --learn /path/to/learn"
+          "\n   Tell us where it is:  python3 run.py --learn /path/to/learn   (or BLACKBOX_LEARN=/path/to/learn in .env)"
           "\n   (Building DSA, System Design and Backend only.)\n", flush=True)
 
 print("Building the site…", flush=True)

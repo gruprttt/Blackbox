@@ -33,8 +33,9 @@ docker compose up -d
 
 Open http://localhost:8080. Stop with `docker compose down`.
 
-Your saved DevOps & SRE lessons are optional: copy your `learn` folder into the repo as `./learn`
-(git ignores it) and they're built in. Every `up` rebuilds the site, so new or edited lessons show up.
+**DevOps & SRE lessons** are your saved hamchops.com/learn pages, which aren't in this repo. For
+Docker, copy that `learn` folder into the repo (`cp -r ~/path/to/learn ./learn` — git ignores it);
+without it you get DSA, System Design and Backend only. Every `up` rebuilds the site, so new or edited lessons show up.
 Use a different port with `BLACKBOX_PORT=9000 docker compose up -d`.
 
 Create an account from **Sign in** (top right). Each account's progress, tasks, habits and focus
@@ -105,7 +106,8 @@ The navbar has one **Tracks** item; hover it for every program (DevOps & SRE, DS
 Backend) with your progress. The Tracks page is the hub: the program chips switch the content in
 place — the DevOps skill map, the DSA roadmap (click a topic to see its problems right there), System
 Design topics and Backend chapters (expand to tick off concepts/sections). Every program has a **Map / List**
-switch: the map is a pannable skill map of its topics (click a topic to expand it). You
+switch: the map is a pannable skill map; click a card to see all of its sections (and every
+problem, concept or lesson in them) in the side panel. You
 only leave the page when you open a lesson, problem or chapter to learn it.
 
 ## The brain
@@ -131,7 +133,7 @@ program you pick, and the choice is saved to your account.
 
 ```bash
 python3 run.py      # builds, starts the server and opens http://localhost:8765
-python3 run.py --learn /path/to/learn   # if your DevOps lessons folder isn't next to this one
+python3 run.py --learn /path/to/learn   # only if it can't find your DevOps lessons by itself
 ```
 
 ## Develop without Docker
