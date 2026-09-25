@@ -337,10 +337,12 @@ def page(*, title, desc, root, body, kind):
     extra = ""
     if kind in ("home", "tracks"):
         extra = f'<script src="{root}assets/path.js" defer></script>\n'
+    if kind == "home":
+        extra += f'<script src="{root}assets/programs.js" defer></script>\n'
     if kind == "tracks":
         extra += f'<script src="{root}assets/map-data.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n<script src="{root}assets/mindmap.js" defer></script>\n'
     if kind == "brain":
-        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n<script src="{root}assets/world.js" defer></script>\n'
+        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n'
     if kind in APP_PAGES:
         extra += f'<script src="{root}assets/brain.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n'
     return f"""<!DOCTYPE html>
@@ -515,11 +517,26 @@ def path_steps(tracks, root=""):
     return "".join(steps)
 
 
+def program_steps(steps, color):
+    """Path cards for a program's topics/chapters: number, title, meta, progress, Start/Continue."""
+    return "".join(f"""<li class="path-step" data-step="{st['prefix']}" data-step-total="{st['total']}" style="--c:{color}">
+  <div class="path-rail" aria-hidden="true"><span class="path-node">{st['num']}</span></div>
+  <a class="path-card" href="{st['href']}" data-step-link>
+    <div class="path-main">
+      <div class="path-kicker"><i class="path-dot" data-path-dot></i><span class="mono-label">{st['kicker']}</span><span class="path-state" data-path-state></span></div>
+      <h3>{html.escape(st['title'])}</h3>
+      <p class="tc-meta">{html.escape(st['meta'])}</p>
+    </div>
+    <div class="path-side">{progress(st['prefix'], st['total'])}<span class="path-cta" data-path-cta>Start {ICON['right']}</span></div>
+  </a>
+</li>""" for st in steps)
+
+
 def devops_prefix(tracks):
     return "|".join(t["slug"] + "/" for t in tracks) or "devops-none/"
 
 
-def render_home(tracks, sheets):
+def render_home(tracks, sheets, be=None, full=None):
     root = ""
     prog = PROGRAMS[0]
     n_lessons = sum(t["n_lessons"] for t in tracks)
@@ -552,6 +569,33 @@ def render_home(tracks, sheets):
   <p class="program-meta mono-label">{len(tracks)} tracks · {n_lessons:,} lessons · {fmt_minutes(sum(t['minutes'] for t in tracks))}</p>
   {progress(devops_prefix(tracks), n_lessons)}
 </a>""")
+    # one pane per program for the "your path" picker
+    panes, chips = [], []
+    for pg in PROGRAM_NAV:
+        if pg["soon"]:
+            continue
+        pid = pg["id"]
+        if pid == "devops":
+            body = (f'<div class="path-status" data-path-status></div><ol class="path">{steps}</ol>' if tracks else
+                    '<div class="missing panel"><h3>Your DevOps &amp; SRE lessons weren’t found</h3><p>Put your <code>learn</code> folder next to this '
+                    '<code>learn-ui</code> folder and restart with <code>python3 run.py</code> (or <code>python3 run.py --learn /path/to/learn</code>).</p></div>')
+        elif pid == "backend" and be:
+            body = '<ol class="path">' + program_steps([dict(num=c["num"], prefix=c["prefix"], total=max(1, len(c["sections"])), href=f"backend/{c['slug']}/index.html",
+                                                               kicker=f"Chapter {c['num']} · {c['reading']}", title=c["title"], meta=f"{len(c['sections'])} sections")
+                                                          for c in be["chapters"]], pg["color"]) + "</ol>"
+        elif pid in sheets:
+            sh = sheets[pid]
+            body = '<ol class="path">' + program_steps([dict(num=t["num"], prefix=t["prefix"], total=t["total"], href=f"{sh['dir']}/{t['slug']}/index.html",
+                                                               kicker=f"Topic {t['num']}" + (f" · {t['note']}" if t["note"] else ""), title=t["name"], meta=f"{t['total']} {sh['noun']}s")
+                                                          for t in sh["topics"]], pg["color"]) + "</ol>"
+        else:
+            continue
+        chips.append(f'<button class="prog-chip" type="button" role="tab" data-home-program="{pid}" style="--c:{pg["color"]}"><i></i>{pg["name"]}'
+                     f'<span class="chip-bar" data-progress-prefix="{pg["prefix"]}" data-progress-total="{pg["total"]}"><span class="progress-bar"><span></span></span><em data-progress-pct>0%</em></span></button>')
+        panes.append(f'<div class="path-pane" data-home-pane="{pid}" hidden>'
+                     f'<div class="pane-head"><div class="overall">{progress(pg["prefix"], pg["total"])}</div>'
+                     f'<a class="lk" href="tracks/index.html#{pid}">Open in Tracks {ICON["right"]}</a></div>{body}</div>')
+    path_chips, path_panes = "".join(chips), "".join(panes)
     brain_inner = f"""<canvas data-brain="hero" aria-label="Your knowledge brain"></canvas>
       <div class="brain-hud">
         <span><b data-stat="neurons">0</b> neurons</span><span><b data-stat="synapses">0</b> synapses</span>
@@ -569,7 +613,7 @@ def render_home(tracks, sheets):
       <h1>Where engineers<br><span class="grad">figure things out.</span></h1>
       <p class="lede">DevOps &amp; SRE lessons, Striver's A2Z DSA sheet and a System Design track — with focus sessions, tasks, habits and a brain that visibly grows as you learn.</p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="{first_href}" data-continue-link data-path-next>{ICON['play']}<span data-continue-label>Start learning</span></a>
+        <a class="btn btn-primary" href="{first_href}" data-continue-link>{ICON['play']}<span data-continue-label>Start learning</span></a>
         <a class="btn btn-ghost" href="focus/index.html"><span class="rec"></span>Start a focus session</a>
       </div>
       <div class="continue-card" data-continue hidden>
@@ -619,11 +663,10 @@ def render_home(tracks, sheets):
 </section>
 
 <section class="wrap library" id="path">
-  <div class="section-title"><div><span class="mono-label">/ program 01 · {prog['name']}</span><h2>{len(tracks)} tracks, in order</h2>
-    <p class="section-sub">Work from Track 01 to Track {len(tracks):02d}. Next and Previous carry you straight into the next track.</p></div>
-    <div class="overall">{progress(devops_prefix(tracks), n_lessons)}</div></div>
-  <div class="path-status" data-path-status></div>
-  <ol class="path">{steps}</ol>
+  <div class="section-title"><div><span class="mono-label">/ your path</span><h2>Pick what you're learning</h2>
+    <p class="section-sub">Choose a program — your path, the Continue button and your progress follow it. You can switch any time.</p></div></div>
+  <div class="prog-chips" role="tablist" aria-label="Program">{path_chips}</div>
+  {path_panes}
 </section>
 
 <section class="wrap dash" aria-label="Today">
@@ -907,27 +950,20 @@ def render_brain():
     return app_page("brain", "Your brain", "Your knowledge, visualised as a growing neural network.", f"""
 <div class="brain-page">
   <section class="console console-stage">
-   <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title" data-brain-path>cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
+   <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title">cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
    <div class="console-screen brain-stage" data-brain-stage>
     <canvas data-brain="full" aria-label="Interactive 3D brain"></canvas>
-    <canvas class="world-canvas" data-world hidden aria-label="Your learning in this program, drawn as a growing tree"></canvas>
     <div class="stage-top">
-      <nav class="brain-crumbs" data-brain-crumbs aria-label="Where you are"></nav>
+      <p class="mono-label">Neural map</p>
       <h1 data-level-title>Your brain</h1>
       <p class="stage-sub" data-level-sub></p>
     </div>
     <dl class="stage-stats">
-      <div><dt data-s1-label>Neurons</dt><dd data-s1>0</dd></div>
-      <div><dt data-s2-label>Synapses</dt><dd data-s2>0</dd></div>
-      <div><dt data-s3-label>Lobes active</dt><dd data-s3>0</dd></div>
+      <div><dt>Neurons</dt><dd data-s1>0</dd></div>
+      <div><dt>Synapses</dt><dd data-s2>0</dd></div>
+      <div><dt>Lobes active</dt><dd data-s3>0</dd></div>
     </dl>
-    <button class="stage-up" data-brain-up hidden>{ICON['left']}<span>Back</span></button>
-    <div class="world-tools" data-world-tools hidden>
-      <button class="icon-btn" data-wz="in" aria-label="Zoom in">{ICON['plus']}</button>
-      <button class="icon-btn" data-wz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
-      <button class="icon-btn" data-wz="fit" aria-label="Show the whole world"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-    </div>
-    <p class="stage-tip mono-label" data-stage-tip>Click a lobe to select it · double-click to step inside</p>
+    <p class="stage-tip mono-label">Drag to rotate · scroll to zoom · click a lobe · double-click to open it</p>
     <div class="stage-time mono-label" data-time-label hidden></div>
     <div class="brain-tooltip" data-brain-tooltip hidden></div>
    </div>
@@ -1557,7 +1593,16 @@ def main():
             index.append([c["title"], href, "Backend", "", "t", " ".join(map(str, c["keywords"]))])
             for x in c["sections"]:
                 index.append([x["title"], f"{href}#{x['anchor']}", "Backend", c["title"], "l", ""])
-    write(OUT / "index.html", render_home(tracks, home_programs))
+    write(OUT / "index.html", render_home(tracks, home_programs, be))
+    # ordered items per program, for "continue where you left off" on the home page
+    progs = {}
+    if tracks:
+        progs["devops"] = [[t["slug"] + "/", [[lesson_id(t, tp, l), f"{lesson_id(t, tp, l)}/index.html"] for tp in t["topics"] for l in tp["lessons"]]] for t in tracks]
+    for sh in sheets.values():
+        progs[sh["lobe"]] = [[t["prefix"], [[it["id"], f"{sh['dir']}/{t['slug']}/index.html#{it['anchor']}"] for sb in t["subs"] for it in sb["items"]]] for t in sh["topics"]]
+    if be:
+        progs["backend"] = [[c["prefix"], [[x["id"], f"backend/{c['slug']}/index.html#{x['anchor']}"] for x in c["sections"]]] for c in be["chapters"]]
+    write(OUT / "assets" / "programs.js", "window.BB_PROGRAMS=" + json.dumps(progs, separators=(",", ":")) + ";")
     write(OUT / "login" / "index.html", render_login())
     for sh in sheets.values():
         index.append([sh["name"], sh["href"], "", "", "k", "sheet practice " + sh["noun"]])

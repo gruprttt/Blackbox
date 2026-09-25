@@ -278,8 +278,7 @@
         var k = Math.min(1, tr.t), ease = k * k * (3 - 2 * k);
         if (tr.phase === "out") {
           trZoom = tr.dir === "in" ? 1 + ease * 3.4 : 1 - ease * 0.55; trShift = tr.dir === "in" ? ease : 0; trAlpha = 1 - ease;
-          if (k >= 1 && tr.keep) { var cbk = tr.ready; tr = null; if (cbk) cbk(); canvas.style.opacity = "0"; }
-          else if (k >= 1) {
+          if (k >= 1) {
             useRegions(tr.list);
             nodes.forEach(function (n) { n.g = n.t = 0; n.grow = false; n.flash = 0; n.dead = 0; });
             first = true;
@@ -500,10 +499,6 @@
     return {
       setState: setState,
       setLevel: setLevel,
-      zoomTo: function (id, done) {                                    // fly into a region (used before leaving the brain)
-        var c = A.centroid[id] || [0, 0, 0];
-        tr = { phase: "out", t: 0, dir: "in", focus: c, list: domains, ready: done, keep: true };
-      },
       busy: function () { return !!tr; },
       highlight: function (id) { highlight = id || null; },
       stats: function () { return stats; },

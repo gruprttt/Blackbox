@@ -230,8 +230,50 @@
     }
   }
 
+  // ── home: "your path" program picker ──
+  function homePrograms() {
+    var P = window.BB_PROGRAMS || {}, chips = $$("[data-home-program]"), panes = $$("[data-home-pane]");
+    if (!panes.length) return;
+    var ids = panes.map(function (p) { return p.getAttribute("data-home-pane"); });
+    var cur = BB.load("bb-home-program", null);
+    if (ids.indexOf(cur) < 0) cur = ids.indexOf("devops") >= 0 && P.devops ? "devops" : ids[0];
+    function nextIn(pid) {
+      var steps = P[pid] || [];
+      for (var i = 0; i < steps.length; i++) for (var j = 0; j < steps[i][1].length; j++) if (!BB.isDone(steps[i][1][j][0])) return { href: steps[i][1][j][1], step: i };
+      return null;
+    }
+    function paint() {
+      chips.forEach(function (c) { var on = c.getAttribute("data-home-program") === cur; c.classList.toggle("is-active", on); c.setAttribute("aria-selected", on); });
+      panes.forEach(function (p) { p.hidden = p.getAttribute("data-home-pane") !== cur; });
+      var d = BB.domain(cur), steps = P[cur] || [], started = steps.some(function (st) { return st[1].some(function (it) { return BB.isDone(it[0]); }); });
+      var nx = nextIn(cur), btn = $("[data-continue-link]"), label = $("[data-continue-label]");
+      if (btn && label) {
+        if (!steps.length) { btn.href = ROOT + "tracks/index.html#" + cur; label.textContent = "Open " + d.short; }
+        else if (!nx) { btn.href = ROOT + "tracks/index.html#" + cur; label.textContent = "Review " + d.short; }
+        else { btn.href = ROOT + nx.href; label.textContent = (started ? "Continue " : "Start ") + d.short + " · " + ("0" + (nx.step + 1)).slice(-2); }
+      }
+      // generic step cards (DSA, System Design, Backend)
+      var pane = $('[data-home-pane="' + cur + '"]'), current = nx ? nx.step : -1;
+      $$("[data-step]", pane).forEach(function (li, i) {
+        var st = steps[i]; if (!st) return;
+        var done = st[1].filter(function (it) { return BB.isDone(it[0]); }).length, all = done >= st[1].length, open = st[1].filter(function (it) { return !BB.isDone(it[0]); })[0];
+        li.classList.toggle("done", all); li.classList.toggle("is-current", i === current); li.classList.toggle("started", done > 0 && !all);
+        $("[data-path-state]", li).textContent = all ? "Completed" : i === current ? (done ? "In progress" : "Up next") : done ? "Started" : "";
+        $("[data-path-cta]", li).firstChild.nodeValue = all ? "Review " : done ? "Continue " : "Start ";
+        $("[data-path-dot]", li).className = "path-dot s-" + (all ? "ok" : done ? "warn" : "idle");
+        if (open && done) $("[data-step-link]", li).href = ROOT + open[1];
+      });
+    }
+    chips.forEach(function (c) {
+      c.addEventListener("click", function () { cur = c.getAttribute("data-home-program"); BB.save("bb-home-program", cur); paint(); });
+    });
+    BB.on(function (w) { if (w === "progress") paint(); });
+    paint();
+  }
+
   // ═════════════════════════════ HOME ═════════════════════════════
   function home() {
+    homePrograms();
     var brain = mountBrain($('[data-brain="hero"]'), { interactive: true, fill: 0.92,
       onSelect: function (d) { if (d) location.href = ROOT + "brain/index.html#" + d.id; }, onStats: function (s) {
       paintStats(s);
@@ -686,17 +728,14 @@
 
   // ═════════════════════════════ BRAIN ═════════════════════════════
   function brainPage() {
-    // Two views of the same progress. The BRAIN shows your programs as lobes: click one to light up
-    // how it connects to the others, double-click to fly inside. Inside is a WORLD — the program as a
-    // galaxy of topic stars along a learning path, with subtopics and single lessons/problems in orbit.
+    // The brain shows each program as a lobe. Click a lobe to see what's inside it (its topics and your
+    // progress in each); double-click, or press Open, to go to that program on the Tracks page.
     var TREE = window.BB_TREE || { id: "", n: "Your brain", k: [] };
-    var list = $("[data-region-list]"), stage = $("[data-brain-stage]"), tip = $("[data-brain-tooltip]");
-    var brainCanvas = $('[data-brain="full"]'), worldCanvas = $("[data-world]");
-    var parent = {}, byId = {}, lobeOf = {}, at = null, mode = "brain", selLobe = null, lobeNode = null, brain, world;
-    var isLeaf = function (x) { return Array.isArray(x); };
-    var idOf = function (x) { return isLeaf(x) ? x[0] : x.id; };
-    (function index(node) { (node.k || []).forEach(function (k) { byId[idOf(k)] = k; parent[idOf(k)] = node; if (!isLeaf(k)) index(k); }); })(TREE);
+    var list = $("[data-region-list]"), stage = $("[data-brain-stage]");
+    var lobeOf = {}, lobeNode = {}, at = null, selLobe = null, brain, lastClick = {};
     DATA.domains.forEach(function (d) { lobeOf[d.id] = d; });
+    (TREE.k || []).forEach(function (k) { lobeNode[k.id] = k; });
+    var isLeaf = function (x) { return Array.isArray(x); };
     function doneAt(id) { var m = BB.doneMap(); return Object.prototype.hasOwnProperty.call(m, id) && (at == null || m[id] <= at); }
     function tally(node) {
       if (isLeaf(node)) return { done: doneAt(node[0]) ? 1 : 0, total: 1 };
@@ -705,244 +744,80 @@
       return r;
     }
     function pct(x) { return x.total ? Math.round(x.done / x.total * 100) : 0; }
-    function lobeFor(id) { var n = byId[id]; while (n && parent[idOf(n)] !== TREE) n = parent[idOf(n)]; return n; }
-    function stats(a, b, c, la, lb, lc) {
-      $("[data-s1]").textContent = a; $("[data-s2]").textContent = b; $("[data-s3]").textContent = c;
-      $("[data-s1-label]").textContent = la; $("[data-s2-label]").textContent = lb; $("[data-s3-label]").textContent = lc;
+    function open(id) {
+      var d = lobeOf[id];
+      if (!d || d.soon) { BB.toast((d ? d.name : "This lobe") + " is coming soon"); return; }
+      location.href = ROOT + "tracks/index.html#" + id;
     }
 
-    // ── header, crumbs, panel ──
-    function crumbs(items) {
-      $("[data-brain-crumbs]").innerHTML = items.map(function (it, i) {
-        return i === items.length - 1 ? "<span>" + esc(it[0]) + "</span>" : '<a href="' + it[1] + '">' + esc(it[0]) + "</a>";
-      }).join("<i>/</i>");
-    }
-    function header() {
-      var up = $("[data-brain-up]"), tools = $("[data-world-tools]");
-      if (mode === "brain") {
-        crumbs([["Brain", "#"]]);
-        $("[data-level-title]").textContent = selLobe ? lobeOf[selLobe].name : "Your brain";
-        $("[data-level-sub]").textContent = selLobe ? "Double-click the lobe (or press Enter) to step inside and watch what you've learned grow."
-          : "Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to select it; double-click to step inside.";
-        $("[data-stage-tip]").textContent = "Click a lobe to select it · double-click to step inside";
-        up.hidden = true; tools.hidden = true;
-        $("[data-brain-path]").textContent = "cortex@blackbox:~ — neural map";
-        document.title = "Your brain · BLACKBOX";
-        return;
-      }
-      var foc = world.focused() || world.root(), path = [], n = foc;
-      while (n) { path.unshift(n); n = n.parent; }
-      crumbs([["Brain", "#"]].concat(path.map(function (x, i) { return [i === 0 ? lobeOf[lobeNode.id].short : x.name, "#" + x.id]; })));
-      $("[data-level-title]").textContent = foc.depth === 0 ? lobeOf[lobeNode.id].name : foc.name;
-      var t = tally(byId[foc.id] || lobeNode);
-      $("[data-level-sub]").textContent = t.done + " of " + t.total + " learned. Every leaf is something to learn — open, glowing leaves are the ones you know. Learn more and watch the tree fill out.";
-      $("[data-stage-tip]").textContent = "Drag to move · scroll to zoom · click a branch or leaf · double-click to fly to it";
-      up.hidden = false; tools.hidden = false;
-      $("[data-brain-path]").textContent = "cortex@blackbox:~/" + lobeNode.id + " — growing";
-      document.title = (foc.depth === 0 ? lobeOf[lobeNode.id].name : foc.name) + " · Brain · BLACKBOX";
-    }
-    function lobeRow(d, st, by) {
-      var r = by[d.id] || { lit: 0, size: 1 }, s = st[d.id] || { done: 0, total: 0, focusMin: 0 }, p = Math.round(r.lit / r.size * 100);
-      return '<button class="region' + (d.soon ? " soon" : "") + (selLobe === d.id ? " is-active" : "") + '" data-lobe="' + d.id + '" style="--c:' + d.color + '">' +
-        '<span class="region-top"><i></i><b>' + esc(d.name) + "</b><span>" + (d.soon ? "soon" : p + "%") + "</span></span>" +
-        '<div class="progress"><div class="progress-bar"><span style="--p:' + (r.lit / r.size) + '"></span></div></div>' +
-        (d.soon ? '<span class="region-meta">Dormant — ' + esc(d.blurb) + "</span>"
-                : '<span class="region-meta"><span>' + s.done + "/" + s.total + " learned</span><span>" + BB.fmtMin(s.focusMin) + " focus</span></span>") + "</button>";
-    }
-    function panelBrain() {
-      var st = BB.brainState(at == null ? undefined : at), by = (brain && brain.stats().byRegion) || {}, html = "";
-      if (selLobe) {
-        var d = lobeOf[selLobe], s = st[selLobe] || { done: 0, total: 0 };
-        html += '<div class="lobe-card" style="--c:' + d.color + '"><p class="mono-label">Selected lobe</p><h3>' + esc(d.name) + "</h3><p>" + esc(d.blurb) + "</p>" +
-          '<div class="rp-sum"><b>' + pct(s) + "%</b><span>" + s.done + " / " + s.total + " learned</span></div>" +
-          (d.soon ? '<p class="region-meta">Coming soon — nothing to grow yet.</p>' : '<button class="btn btn-primary sm" data-enter="' + d.id + '">Step inside ' + esc(d.short) + " →</button>") +
-"</div>";
-      }
-      html += '<p class="mono-label rp-label">Lobes</p>' + DATA.domains.map(function (d) { return lobeRow(d, st, by); }).join("") +
-        '<p class="region-note">Learning wires up to 75% of a lobe; focus sessions wire the rest (one neuron per 2 focused minutes).</p>';
-      list.innerHTML = html;
-      $$("[data-lobe]", list).forEach(function (b) {
-        b.addEventListener("click", function () { selectLobe(b.getAttribute("data-lobe")); });
-        b.addEventListener("dblclick", function () { enter(b.getAttribute("data-lobe")); });
-      });
-      $$("[data-enter]", list).forEach(function (b) { b.addEventListener("click", function () { enter(b.getAttribute("data-enter")); }); });
-    }
-    function panelWorld() {
-      var sel = world.selected() || world.focused() || world.root(), src = byId[sel.id] || lobeNode, t = tally(src), html = "";
-      var kind = sel.leaf ? (lobeNode.id === "dsa" ? "Problem" : lobeNode.id === "devops" ? "Lesson" : lobeNode.id === "backend" ? "Section" : "Concept")
-        : sel.depth === 0 ? "Tree" : sel.depth === 1 ? "Branch · topic" : "Twig · subtopic";
-      html += '<div class="lobe-card" style="--c:' + sel.color + '"><p class="mono-label">' + kind + "</p><h3>" + esc(sel.name) + "</h3>";
-      if (sel.leaf) {
-        var done = doneAt(sel.id);
-        html += '<div class="leaf-actions">' + (at == null ? '<button class="btn ' + (done ? "btn-ghost" : "btn-primary") + ' sm" data-toggle="' + esc(sel.id) + '">' + (done ? "✓ Learned — undo" : "Mark learned") + "</button>" : "") +
-          (sel.href ? '<a class="btn btn-ghost sm" href="' + ROOT + esc(sel.href) + '">Open →</a>' : "") + "</div>" + (sel.tag ? '<p class="region-meta">' + esc(sel.tag) + "</p>" : "");
-      } else {
-        html += '<div class="rp-sum"><b>' + pct(t) + "%</b><span>" + t.done + " / " + t.total + " learned</span>" + (sel.href ? '<a href="' + ROOT + esc(sel.href) + '">Open page →</a>' : "") + "</div>" +
-          (sel !== world.focused() ? '<button class="btn btn-primary sm" data-fly="' + esc(sel.id) + '">Fly in →</button>' : "");
-      }
-      // connections: where it sits and what it links to
-      var conns = [];
-      if (sel.parent) conns.push(["Part of", sel.parent]);
-      var sib = sel.parent ? sel.parent.kids : [], i = sib.indexOf(sel);
-      if (sel.depth === 1) { if (sib[i - 1]) conns.push(["Comes after", sib[i - 1]]); if (sib[i + 1]) conns.push(["Leads to", sib[i + 1]]); }
-      if (conns.length) html += '<p class="mono-label" style="margin-top:14px">On the tree</p><div class="conn-list">' + conns.map(function (c) {
-        var tt = tally(byId[c[1].id] || lobeNode);
-        return '<button class="conn" data-node="' + esc(c[1].id) + '" style="--c:' + c[1].color + '"><i></i><span><b>' + esc(c[1].depth === 0 ? lobeOf[lobeNode.id].name : c[1].name) + "</b><em>" + c[0] + "</em></span><small>" + pct(tt) + "%</small></button>";
-      }).join("") + "</div>";
-      html += "</div>";
-      if (!sel.leaf && sel.kids.length) {
-        html += '<p class="mono-label rp-label">' + (sel.kids[0].leaf ? "Leaves on this branch" : "Branches") + " · " + sel.kids.length + "</p>" + sel.kids.map(function (k) {
-          if (k.leaf) {
-            var dn = doneAt(k.id);
-            return '<div class="region leaf' + (dn ? " is-done" : "") + '" data-node="' + esc(k.id) + '" style="--c:' + k.color + '"><button class="leaf-check" data-toggle="' + esc(k.id) + '"' + (at != null ? " disabled" : "") +
-              ' aria-label="' + (dn ? "Mark not learned" : "Mark learned") + '">' + I.check + '</button><a class="leaf-name" href="' + ROOT + esc(k.href) + '">' + esc(k.name) + "</a>" +
-              (k.tag ? '<span class="leaf-tag t-' + esc(String(k.tag).toLowerCase()) + '">' + esc(k.tag) + "</span>" : "") + "</div>";
-          }
-          var kt = tally(byId[k.id]);
-          return '<button class="region" data-node="' + esc(k.id) + '" style="--c:' + k.color + '"><span class="region-top"><i></i><b>' + esc((k.num ? k.num + " · " : "") + k.name) + "</b><span>" + pct(kt) + "%</span></span>" +
-            '<div class="progress"><div class="progress-bar"><span style="--p:' + (kt.total ? kt.done / kt.total : 0) + '"></span></div></div><span class="region-meta"><span>' + kt.done + "/" + kt.total + ' learned</span><span class="go-in">Fly in →</span></span></button>';
-        }).join("");
-      }
-      list.innerHTML = html;
-      $$("[data-node]", list).forEach(function (b) {
-        b.addEventListener("click", function (e) {
-          if (e.target.closest("a, [data-toggle]")) return;
-          var n = world.node(b.getAttribute("data-node"));
-          if (!n) return;
-          if (n.leaf) { world.select(n.id); panelWorld(); } else go(n.id);
-        });
-      });
-      $$("[data-fly]", list).forEach(function (b) { b.addEventListener("click", function () { go(b.getAttribute("data-fly")); }); });
-      $$("[data-toggle]", list).forEach(function (b) {
-        b.addEventListener("click", function () {
-          var id = b.getAttribute("data-toggle"), on = !BB.isDone(id);
-          BB.setDone(id, on);
-          if (on) BB.toast("A new leaf opened in " + lobeOf[lobeNode.id].name, lobeOf[lobeNode.id].color);
-        });
-      });
-    }
-    function worldStats() {
-      var r = world.root(), topicsDone = r.kids.filter(function (k) { return k.done >= k.total; }).length;
-      stats(r.done.toLocaleString(), pct({ done: r.done, total: r.total }) + "%", topicsDone + " / " + r.kids.length, "Leaves open", "Grown", "Branches full");
-    }
     function paint() {
-      header();
-      if (mode === "brain") { panelBrain(); var s = brain.stats(); stats(s.neurons.toLocaleString(), s.synapses.toLocaleString(), s.regions + " / " + DATA.domains.filter(function (d) { return !d.soon; }).length, "Neurons", "Synapses", "Lobes active"); }
-      else { worldStats(); panelWorld(); }
+      var st = BB.brainState(at == null ? undefined : at), by = (brain && brain.stats().byRegion) || {}, html = "";
+      var d = selLobe && lobeOf[selLobe];
+      $("[data-level-title]").textContent = d ? d.name : "Your brain";
+      $("[data-level-sub]").textContent = d ? "Double-click the lobe (or press Open) to go to it in Tracks."
+        : "Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to see what's inside it.";
+      if (d) {
+        var s = st[d.id] || { done: 0, total: 0, focusMin: 0 }, node = lobeNode[d.id];
+        html += '<div class="lobe-card" style="--c:' + d.color + '"><p class="mono-label">Selected lobe</p><h3>' + esc(d.name) + "</h3><p>" + esc(d.blurb) + "</p>" +
+          '<div class="rp-sum"><b>' + pct(s) + "%</b><span>" + s.done + " / " + s.total + " learned · " + BB.fmtMin(s.focusMin) + " focus</span></div>" +
+          (d.soon ? '<p class="region-meta">Coming soon.</p>' : '<a class="btn btn-primary sm" href="' + ROOT + "tracks/index.html#" + d.id + '">Open ' + esc(d.short) + " in Tracks →</a>") + "</div>";
+        if (node && (node.k || []).length) {
+          html += '<p class="mono-label rp-label">Inside · ' + node.k.length + "</p>" + node.k.map(function (k) {
+            var t = tally(k), p = t.total ? t.done / t.total : 0;
+            return '<a class="region topic-row" href="' + ROOT + esc(k.h || "") + '" style="--c:' + d.color + '"><span class="region-top"><i></i><b>' + esc(k.n) + "</b><span>" + pct(t) + "%</span></span>" +
+              '<div class="progress"><div class="progress-bar"><span style="--p:' + p + '"></span></div></div><span class="region-meta"><span>' + t.done + "/" + t.total + " learned</span></span></a>";
+          }).join("");
+        }
+      }
+      html += '<p class="mono-label rp-label">Lobes</p>' + DATA.domains.map(function (x) {
+        var r = by[x.id] || { lit: 0, size: 1 }, s2 = st[x.id] || { done: 0, total: 0, focusMin: 0 }, p2 = Math.round(r.lit / r.size * 100);
+        return '<button class="region' + (x.soon ? " soon" : "") + (selLobe === x.id ? " is-active" : "") + '" data-lobe="' + x.id + '" style="--c:' + x.color + '">' +
+          '<span class="region-top"><i></i><b>' + esc(x.name) + "</b><span>" + (x.soon ? "soon" : p2 + "%") + "</span></span>" +
+          '<div class="progress"><div class="progress-bar"><span style="--p:' + (r.lit / r.size) + '"></span></div></div>' +
+          (x.soon ? '<span class="region-meta">Coming soon — ' + esc(x.blurb) + "</span>"
+                  : '<span class="region-meta"><span>' + s2.done + "/" + s2.total + " learned</span><span>" + BB.fmtMin(s2.focusMin) + " focus</span></span>") + "</button>";
+      }).join("") + '<p class="region-note">Learning wires up to 75% of a lobe; focus sessions wire the rest (one neuron per 2 focused minutes).</p>';
+      list.innerHTML = html;
+      // The panel re-renders on select (rows move), so a double-click is detected by lobe, not by element.
+      $$("[data-lobe]", list).forEach(function (b) {
+        b.addEventListener("click", function () {
+          var id = b.getAttribute("data-lobe"), now = Date.now();
+          if (lastClick.id === id && now - lastClick.t < 450) { open(id); return; }
+          lastClick = { id: id, t: now };
+          if (id !== selLobe) select(id);
+        });
+      });
+      var s3 = brain ? brain.stats() : { neurons: 0, synapses: 0, regions: 0 };
+      $("[data-s1]").textContent = s3.neurons.toLocaleString();
+      $("[data-s2]").textContent = s3.synapses.toLocaleString();
+      $("[data-s3]").textContent = s3.regions + " / " + DATA.domains.filter(function (x) { return !x.soon; }).length;
       drawGrowth();
     }
-
-    // ── brain mode ──
-    function selectLobe(id) {
-      selLobe = id || null;
-      brain.highlight(selLobe);
+    function select(id) {
+      selLobe = selLobe === id ? null : id || null;
+      if (brain) brain.highlight(selLobe);
+      var h = selLobe ? "#" + selLobe : "";
+      if (location.hash !== h) history.replaceState(null, "", location.pathname + location.search + h);
       paint();
     }
-    function enter(id, focusId) {
-      var d = lobeOf[id], node = (TREE.k || []).filter(function (k) { return k.id === id; })[0];
-      if (!d || d.soon || !node || !(node.k || []).length) { BB.toast((d ? d.name : "This lobe") + " is dormant — coming soon"); return; }
-      var open = function () {
-        mode = "world"; lobeNode = node; selLobe = id;
-        brainCanvas.hidden = true; worldCanvas.hidden = false; stage.classList.add("in-world");
-        world.open(node, d.color, focusId);
-        var h = "#" + (focusId || id);
-        if (location.hash !== h) history.replaceState(null, "", h);
-        paint();
-      };
-      if (mode === "brain" && !brainCanvas.hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) brain.zoomTo(id, open);
-      else open();
-    }
-    function exitWorld() {
-      if (world) world.close();
-      mode = "brain"; worldCanvas.hidden = true; brainCanvas.hidden = false; stage.classList.remove("in-world");
-      history.replaceState(null, "", location.pathname + location.search);
-      selectLobe(selLobe);
-    }
-    function go(id) {                                  // fly to a node inside the current world
-      world.focus(id);
-      var h = "#" + id;
-      if (location.hash !== h) history.replaceState(null, "", h);
-      paint();
-    }
-    function back() {
-      if (mode !== "world") return;
-      var f = world.focused();
-      if (f && f.parent) go(f.parent.depth === 0 ? f.parent.id : f.parent.id); else exitWorld();
-    }
-    function fromHash() {
-      var id = decodeURIComponent(location.hash.slice(1));
-      if (!id) { if (mode === "world") exitWorld(); return; }
-      var lobe = lobeOf[id] ? (TREE.k || []).filter(function (k) { return k.id === id; })[0] : lobeFor(id);
-      if (!lobe) return;
-      if (mode === "world" && lobeNode === lobe) { go(id); return; }
-      if (mode === "world") world.close();
-      mode = "brain"; brainCanvas.hidden = true;           // skip the fly-in animation for deep links
-      enter(lobe.id, id === lobe.id ? null : id);
-    }
 
-    brain = mountBrain(brainCanvas, {
+    brain = mountBrain($('[data-brain="full"]'), {
       interactive: true, zoomable: true, fill: 0.95, speed: 0.08, offsetY: window.innerWidth < 640 ? 0.05 : 0.02,
       tipMode: "card", selected: function () { return selLobe; },
-      onStats: function () { if (brain && mode === "brain" && list) paint(); },
-      onSelect: function (d) { if (d) selectLobe(d.id); else selectLobe(null); },
-      onEnter: function (d) { if (d) enter(d.id); }
-    });
-    world = BB.World(worldCanvas, {
-      isDone: doneAt,
-      reserve: function () {                          // keep labels out from under the overlaid title and stats
-        var c = worldCanvas.getBoundingClientRect(), out = [];
-        [".stage-top", ".stage-stats", "[data-world-tools]", "[data-brain-up]"].forEach(function (sel) {
-          var el = $(sel, stage); if (!el || el.hidden) return;
-          var r = el.getBoundingClientRect(); out.push([r.left - c.left, r.top - c.top, r.width, r.height]);
-        });
-        return out;
-      },
-      onSelect: function (n) { if (n && !n.leaf && n.depth === 0) world.select(null); paint(); },
-      onFocus: function () {},
-      onEnter: function (n) {
-        if (n.leaf) { if (n.href) location.href = ROOT + n.href; return; }
-        if (n.depth === 0) return;
-        go(n.id);
-      },
-      onHover: function (n) {
-        if (!tip) return;
-        if (!n) { tip.hidden = true; stage.classList.remove("hovering"); return; }
-        var t = n.leaf ? null : tally(byId[n.id] || lobeNode);
-        tip.className = "brain-tooltip docked card"; tip.style.setProperty("--c", n.color);
-        tip.innerHTML = '<div class="bt-head"><i style="background:' + n.color + ";box-shadow:0 0 10px " + n.color + '"></i><b>' + esc(n.depth === 0 ? lobeOf[lobeNode.id].name : n.name) + "</b></div>" +
-          (n.leaf ? '<p class="bt-meta"><span>' + (n.done ? "✓ learned — leaf open" : "bud — not learned yet") + "</span>" + (n.tag ? "<span>" + esc(n.tag) + "</span>" : "") + '</p><p class="bt-hint">Click for details · double-click to open</p>'
-                  : '<div class="bt-bar"><span style="width:' + pct(t) + "%;background:" + n.color + '"></span></div><p class="bt-meta"><span>' + pct(t) + "% grown</span><span>" + t.done + "/" + t.total + '</span></p><p class="bt-hint">Double-click to fly to this branch</p>');
-        tip.hidden = false; stage.classList.add("hovering");
-      }
-    });
-
-    $("[data-brain-up]").addEventListener("click", back);
-    $("[data-brain-crumbs]").addEventListener("click", function (e) {
-      var a = e.target.closest("a"); if (!a) return;
-      e.preventDefault();
-      var id = a.getAttribute("href").slice(1);
-      if (!id) exitWorld(); else go(id);
-    });
-    $$("[data-wz]").forEach(function (b) {
-      b.addEventListener("click", function () { var v = b.getAttribute("data-wz"); if (v === "fit") go(lobeNode.id); else world.zoom(v === "in" ? 1.5 : 1 / 1.5); });
+      onStats: function () { if (brain && list) paint(); },
+      onSelect: function (d) { if (d && d.id !== selLobe) select(d.id); else if (!d) select(null); },
+      onEnter: function (d) { if (d) open(d.id); }
     });
     document.addEventListener("keydown", function (e) {
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-      if (e.key === "Escape" || e.key === "Backspace") { if (mode === "world") { e.preventDefault(); back(); } else if (selLobe) selectLobe(null); }
-      if (e.key === "Enter" && mode === "brain" && selLobe) enter(selLobe);
+      if (e.key === "Escape" && selLobe) select(null);
+      if (e.key === "Enter" && selLobe) open(selLobe);
     });
-    window.addEventListener("hashchange", fromHash);
-    BB.on(function (w) {
-      if (w !== "progress") return;
-      brain.refresh();
-      if (mode === "world") world.refresh();
-      paint();
-    });
+    BB.on(function (w) { if (w === "progress") paint(); });
 
     // ── growth over time: chart + time travel ──
     var range = $("[data-time-range]"), chart = $("[data-growth-chart]"), playing = 0;
     function span() { var s0 = BB.firstActivity(), now = Date.now(); return [Math.min(s0 || now - 864e5, now - 864e5), now]; }
-    function curNode() { if (mode !== "world") return TREE; var f = world.focused(); return f && byId[f.id] || lobeNode; }
     function leafTimes(node) {
       var out = [], m = BB.doneMap();
       (function walk(n) { (n.k || []).forEach(function (k) { if (isLeaf(k)) { if (m[k[0]]) out.push(m[k[0]]); else if (k[0] in m) out.push(0); } else walk(k); }); })(node);
@@ -953,8 +828,8 @@
       var DPR = Math.min(2, window.devicePixelRatio || 1), w = chart.clientWidth * DPR, h = chart.clientHeight * DPR;
       if (!w || !h) return;
       chart.width = w; chart.height = h;
-      var g = chart.getContext("2d"), sp = span(), node = curNode(), times = leafTimes(node), total = Math.max(1, tally(node).total);
-      var color = mode === "world" ? lobeOf[lobeNode.id].color : "#5b8cff", N = 90, pts = [], j = 0, c = 0;
+      var node = selLobe && lobeNode[selLobe] || TREE, g = chart.getContext("2d"), sp = span(), times = leafTimes(node), total = Math.max(1, tally(node).total);
+      var color = selLobe ? lobeOf[selLobe].color : "#5b8cff", N = 90, pts = [], j = 0, c = 0;
       for (var i = 0; i <= N; i++) {
         var tt = sp[0] + (sp[1] - sp[0]) * i / N;
         while (j < times.length && times[j] <= tt) { j++; c++; }
@@ -975,7 +850,7 @@
       var tl = $("[data-time-label]");
       tl.hidden = at == null; tl.textContent = "⟲ Your brain on " + label;
       stage.classList.toggle("rewound", at != null);
-      if (mode === "world") world.refresh(); else brain.refresh({ quick: quick });
+      if (at != null) brain.setState(BB.brainState(at), { quick: quick }); else brain.refresh({ quick: quick });
       paint();
     }
     if (range) range.addEventListener("input", function () { cancelAnimationFrame(playing); playing = 0; setTime(+range.value, true); });
@@ -992,9 +867,11 @@
       playing = requestAnimationFrame(step);
     });
     window.addEventListener("resize", drawGrowth);
-    brain.refresh = (function (orig) { return function (o) { if (at != null) { brain.setState(BB.brainState(at), o); return; } orig(o); }; })(brain.refresh);
 
-    if (location.hash.length > 1) fromHash(); else paint();
+    // #dsa (or a deeper id such as #dsa/t03) selects that lobe
+    var h0 = decodeURIComponent(location.hash.slice(1)), first = h0.split("/")[0];
+    var hit = lobeOf[h0] ? h0 : lobeOf[first] ? first : first === "sd" ? "system-design" : first === "be" ? "backend" : (DATA.tracks[first] && DATA.tracks[first].d) || null;
+    if (hit) select(hit); else paint();
   }
 
   // ═════════════════════════════ FOCUS ═════════════════════════════
