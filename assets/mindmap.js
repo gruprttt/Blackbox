@@ -242,11 +242,19 @@
       '<div class="mp-prog"><div class="progress-bar"><span style="--p:' + (pct / 100) + '"></span></div><span class="mono-label">' + s.done + "/" + s.total + " · " + pct + "%</span></div>" +
       '<div class="mp-actions"><a class="btn btn-primary sm" href="' + ROOT + (s.open || t.topics[0].lessons[0][3]) + '">' +
       (s.done >= s.total ? "Review" : s.done ? "Continue" : "Start") + '</a><a class="btn btn-ghost sm" href="' + ROOT + t.href + '">Open ' + WORD.node.toLowerCase() + ' page</a></div>' +
-      '<p class="mono-label mp-sub">' + (t.topics.length > 1 ? WORD.groups : WORD.items) + '</p><ul class="mp-list">' + t.topics.map(function (tp, j) {
-        var d = topicProgress(t, tp), tot = tp.lessons.length;
-        return '<li><button data-topic="' + i + ":" + j + '" class="' + (d >= tot ? "done" : "") + '"><span class="mm-ring" style="--p:' + (d / tot) + '"></span><span>' + esc(tp.title) + "</span><em>" + d + "/" + tot + "</em></button></li>";
-      }).join("") + "</ul>";
+      // Everything inside the card at once: each group's heading, then all of its items.
+      t.topics.map(function (tp) {
+        var d = topicProgress(t, tp), tot = tp.lessons.length, multi = t.topics.length > 1;
+        return '<div class="mp-group"><p class="mono-label mp-sub"><span>' + esc(multi ? tp.title : WORD.items) + "</span><em>" + d + "/" + tot + "</em></p>" + lessonList(tp) + "</div>";
+      }).join("");
     wirePanel();
+  }
+  function lessonList(tp) {
+    return '<ol class="mp-lessons">' + tp.lessons.map(function (l, k) {
+      var done = BB.isDone(l[0]);
+      return '<li class="' + (done ? "done" : "") + '"><a href="' + ROOT + l[3] + '"><span class="lnum"><b>' + (k + 1) + '</b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><span>' +
+        esc(l[1]) + "</span><em>" + esc(l[2] || "") + "</em></a></li>";
+    }).join("") + "</ol>";
   }
   function showTopic(i, j) {
     var t = M.tracks[i], tp = t.topics[j], d = topicProgress(t, tp), tot = tp.lessons.length;
@@ -256,11 +264,7 @@
     panel.innerHTML = '<div class="mp-head"><button class="link-btn" data-back="' + i + '">← ' + WORD.node + " " + t.num + '</button><button class="icon-btn" data-close aria-label="Close">✕</button></div>' +
       (t.topics.length > 1 ? '<span class="mono-label">' + (j + 1) + " of " + t.topics.length + "</span>" : "") + "<h2>" + esc(tp.title || t.title) + "</h2>" +
       '<div class="mp-prog"><div class="progress-bar"><span style="--p:' + (d / tot) + '"></span></div><span class="mono-label">' + d + "/" + tot + " " + WORD.items + "</span></div>" +
-      '<ol class="mp-lessons">' + tp.lessons.map(function (l, k) {
-        var done = BB.isDone(l[0]);
-        return '<li class="' + (done ? "done" : "") + '"><a href="' + ROOT + l[3] + '"><span class="lnum"><b>' + (k + 1) + '</b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><span>' +
-          esc(l[1]) + "</span><em>" + esc(l[2] || "") + "</em></a></li>";
-      }).join("") + "</ol>" +
+      lessonList(tp) +
       '<a class="btn btn-ghost sm" href="' + ROOT + (tp.href || t.href) + '">Open page</a>';
     wirePanel();
   }
