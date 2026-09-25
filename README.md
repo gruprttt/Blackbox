@@ -78,13 +78,13 @@ when you open a lesson, problem or chapter to learn it.
 Every program is a lobe. Lessons, solved problems and learned concepts light neurons in their lobe;
 focus minutes wire the rest, and the brain physically grows as more of it is wired.
 
-- **Click a lobe** to see its connections: glowing arcs to the programs it feeds into (DSA → Backend:
-  "data structures behind caches, indexes and queues"…), listed in the side panel.
-- **Double-click** (or *Enter world*) to fly inside. Each program is its own **world**: a galaxy where
-  topics are stars strung along a spiral learning path, with subtopics and single lessons/problems
-  orbiting them. Learned stars shine; the path lights up as you complete topics.
-- In a world: drag to move, scroll/pinch to zoom, click a star for its connections, double-click to
-  fly into it (or open a lesson/problem). **Back**, the breadcrumbs or `Esc` take you out again.
+- **Click a lobe** to select it; **double-click** (or *Step inside*) to fly in.
+- Inside, the program is a **living tree that grows in front of you**: a seed sprouts the trunk,
+  topics grow out as branches in learning order, subtopics as twigs, and every lesson / problem /
+  section is a leaf. Learned leaves are open and glowing, the rest are buds; sap pulses climb toward
+  what you've learned, fireflies gather as the tree fills out, and a leaf blooms the moment you learn it.
+- Drag to move, scroll/pinch to zoom, click a branch or leaf for details, double-click a branch to fly
+  to it (or a leaf to open it). **Back**, the breadcrumbs or `Esc` take you out again.
 - Links such as `brain/index.html#dsa/t03` open straight into a world. The timeline under the stage
   charts your growth — drag it to see any past day, or press ▶ to replay it.
 

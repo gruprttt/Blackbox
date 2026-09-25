@@ -710,14 +710,6 @@
       $("[data-s1]").textContent = a; $("[data-s2]").textContent = b; $("[data-s3]").textContent = c;
       $("[data-s1-label]").textContent = la; $("[data-s2-label]").textContent = lb; $("[data-s3-label]").textContent = lc;
     }
-    function linksFor(id) {
-      var st = BB.brainState(at == null ? undefined : at);
-      return (DATA.links || []).filter(function (l) { return l[0] === id || l[1] === id; }).map(function (l) {
-        var other = l[0] === id ? l[1] : l[0], a = lobeOf[id], b = lobeOf[other], sa = st[id] || {}, sb = st[other] || {};
-        var w = ((sa.total ? sa.done / sa.total : 0) + (sb.total ? sb.done / sb.total : 0)) / 2;
-        return { a: id, b: other, ca: a.color, cb: b.color, w: Math.min(1, w * 3), label: l[2], soon: b.soon };
-      });
-    }
 
     // ── header, crumbs, panel ──
     function crumbs(items) {
@@ -730,9 +722,9 @@
       if (mode === "brain") {
         crumbs([["Brain", "#"]]);
         $("[data-level-title]").textContent = selLobe ? lobeOf[selLobe].name : "Your brain";
-        $("[data-level-sub]").textContent = selLobe ? "Glowing arcs show how it connects to your other programs. Double-click the lobe (or press Enter world) to go inside."
-          : "Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to see its connections; double-click to enter its world.";
-        $("[data-stage-tip]").textContent = "Click a lobe to see its connections · double-click to enter its world";
+        $("[data-level-sub]").textContent = selLobe ? "Double-click the lobe (or press Enter) to step inside and watch what you've learned grow."
+          : "Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to select it; double-click to step inside.";
+        $("[data-stage-tip]").textContent = "Click a lobe to select it · double-click to step inside";
         up.hidden = true; tools.hidden = true;
         $("[data-brain-path]").textContent = "cortex@blackbox:~ — neural map";
         document.title = "Your brain · BLACKBOX";
@@ -740,13 +732,13 @@
       }
       var foc = world.focused() || world.root(), path = [], n = foc;
       while (n) { path.unshift(n); n = n.parent; }
-      crumbs([["Brain", "#"]].concat(path.map(function (x, i) { return [i === 0 ? lobeOf[lobeNode.id].short + " world" : x.name, "#" + x.id]; })));
-      $("[data-level-title]").textContent = foc.depth === 0 ? lobeOf[lobeNode.id].name + " world" : foc.name;
+      crumbs([["Brain", "#"]].concat(path.map(function (x, i) { return [i === 0 ? lobeOf[lobeNode.id].short : x.name, "#" + x.id]; })));
+      $("[data-level-title]").textContent = foc.depth === 0 ? lobeOf[lobeNode.id].name : foc.name;
       var t = tally(byId[foc.id] || lobeNode);
-      $("[data-level-sub]").textContent = t.done + " of " + t.total + " learned. Each star is something to learn — bright ones you've done. Follow the glowing path; double-click a star to fly in.";
-      $("[data-stage-tip]").textContent = "Drag to move · scroll to zoom · click a star for its connections · double-click to go in";
+      $("[data-level-sub]").textContent = t.done + " of " + t.total + " learned. Every leaf is something to learn — open, glowing leaves are the ones you know. Learn more and watch the tree fill out.";
+      $("[data-stage-tip]").textContent = "Drag to move · scroll to zoom · click a branch or leaf · double-click to fly to it";
       up.hidden = false; tools.hidden = false;
-      $("[data-brain-path]").textContent = "cortex@blackbox:~/" + lobeNode.id + " — world";
+      $("[data-brain-path]").textContent = "cortex@blackbox:~/" + lobeNode.id + " — growing";
       document.title = (foc.depth === 0 ? lobeOf[lobeNode.id].name : foc.name) + " · Brain · BLACKBOX";
     }
     function lobeRow(d, st, by) {
@@ -763,12 +755,8 @@
         var d = lobeOf[selLobe], s = st[selLobe] || { done: 0, total: 0 };
         html += '<div class="lobe-card" style="--c:' + d.color + '"><p class="mono-label">Selected lobe</p><h3>' + esc(d.name) + "</h3><p>" + esc(d.blurb) + "</p>" +
           '<div class="rp-sum"><b>' + pct(s) + "%</b><span>" + s.done + " / " + s.total + " learned</span></div>" +
-          (d.soon ? '<p class="region-meta">Coming soon — nothing to enter yet.</p>' : '<button class="btn btn-primary sm" data-enter="' + d.id + '">Enter ' + esc(d.short) + " world →</button>") +
-          '<p class="mono-label" style="margin-top:14px">Connections</p><div class="conn-list">' +
-          linksFor(selLobe).map(function (l) {
-            var o = lobeOf[l.b], so = st[l.b] || { done: 0, total: 0 };
-            return '<button class="conn" data-lobe="' + l.b + '" style="--c:' + o.color + '"><i></i><span><b>' + esc(o.name) + "</b><em>" + esc(l.label) + "</em></span><small>" + (o.soon ? "soon" : pct(so) + "%") + "</small></button>";
-          }).join("") + "</div></div>";
+          (d.soon ? '<p class="region-meta">Coming soon — nothing to grow yet.</p>' : '<button class="btn btn-primary sm" data-enter="' + d.id + '">Step inside ' + esc(d.short) + " →</button>") +
+"</div>";
       }
       html += '<p class="mono-label rp-label">Lobes</p>' + DATA.domains.map(function (d) { return lobeRow(d, st, by); }).join("") +
         '<p class="region-note">Learning wires up to 75% of a lobe; focus sessions wire the rest (one neuron per 2 focused minutes).</p>';
@@ -782,7 +770,7 @@
     function panelWorld() {
       var sel = world.selected() || world.focused() || world.root(), src = byId[sel.id] || lobeNode, t = tally(src), html = "";
       var kind = sel.leaf ? (lobeNode.id === "dsa" ? "Problem" : lobeNode.id === "devops" ? "Lesson" : lobeNode.id === "backend" ? "Section" : "Concept")
-        : sel.depth === 0 ? "World" : sel.depth === 1 ? "Topic" : "Subtopic";
+        : sel.depth === 0 ? "Tree" : sel.depth === 1 ? "Branch · topic" : "Twig · subtopic";
       html += '<div class="lobe-card" style="--c:' + sel.color + '"><p class="mono-label">' + kind + "</p><h3>" + esc(sel.name) + "</h3>";
       if (sel.leaf) {
         var done = doneAt(sel.id);
@@ -797,13 +785,13 @@
       if (sel.parent) conns.push(["Part of", sel.parent]);
       var sib = sel.parent ? sel.parent.kids : [], i = sib.indexOf(sel);
       if (sel.depth === 1) { if (sib[i - 1]) conns.push(["Comes after", sib[i - 1]]); if (sib[i + 1]) conns.push(["Leads to", sib[i + 1]]); }
-      if (conns.length) html += '<p class="mono-label" style="margin-top:14px">Connections</p><div class="conn-list">' + conns.map(function (c) {
+      if (conns.length) html += '<p class="mono-label" style="margin-top:14px">On the tree</p><div class="conn-list">' + conns.map(function (c) {
         var tt = tally(byId[c[1].id] || lobeNode);
         return '<button class="conn" data-node="' + esc(c[1].id) + '" style="--c:' + c[1].color + '"><i></i><span><b>' + esc(c[1].depth === 0 ? lobeOf[lobeNode.id].name : c[1].name) + "</b><em>" + c[0] + "</em></span><small>" + pct(tt) + "%</small></button>";
       }).join("") + "</div>";
       html += "</div>";
       if (!sel.leaf && sel.kids.length) {
-        html += '<p class="mono-label rp-label">' + (sel.kids[0].leaf ? "Stars in this cluster" : "Inside") + " · " + sel.kids.length + "</p>" + sel.kids.map(function (k) {
+        html += '<p class="mono-label rp-label">' + (sel.kids[0].leaf ? "Leaves on this branch" : "Branches") + " · " + sel.kids.length + "</p>" + sel.kids.map(function (k) {
           if (k.leaf) {
             var dn = doneAt(k.id);
             return '<div class="region leaf' + (dn ? " is-done" : "") + '" data-node="' + esc(k.id) + '" style="--c:' + k.color + '"><button class="leaf-check" data-toggle="' + esc(k.id) + '"' + (at != null ? " disabled" : "") +
@@ -829,13 +817,13 @@
         b.addEventListener("click", function () {
           var id = b.getAttribute("data-toggle"), on = !BB.isDone(id);
           BB.setDone(id, on);
-          if (on) BB.toast("Star lit in " + lobeOf[lobeNode.id].name, lobeOf[lobeNode.id].color);
+          if (on) BB.toast("A new leaf opened in " + lobeOf[lobeNode.id].name, lobeOf[lobeNode.id].color);
         });
       });
     }
     function worldStats() {
       var r = world.root(), topicsDone = r.kids.filter(function (k) { return k.done >= k.total; }).length;
-      stats(r.done.toLocaleString(), pct({ done: r.done, total: r.total }) + "%", topicsDone + " / " + r.kids.length, "Stars lit", "Learned", "Topics complete");
+      stats(r.done.toLocaleString(), pct({ done: r.done, total: r.total }) + "%", topicsDone + " / " + r.kids.length, "Leaves open", "Grown", "Branches full");
     }
     function paint() {
       header();
@@ -848,7 +836,6 @@
     function selectLobe(id) {
       selLobe = id || null;
       brain.highlight(selLobe);
-      brain.setLinks(selLobe ? linksFor(selLobe) : []);
       paint();
     }
     function enter(id, focusId) {
@@ -856,14 +843,13 @@
       if (!d || d.soon || !node || !(node.k || []).length) { BB.toast((d ? d.name : "This lobe") + " is dormant — coming soon"); return; }
       var open = function () {
         mode = "world"; lobeNode = node; selLobe = id;
-        brain.setLinks([]);
         brainCanvas.hidden = true; worldCanvas.hidden = false; stage.classList.add("in-world");
         world.open(node, d.color, focusId);
         var h = "#" + (focusId || id);
         if (location.hash !== h) history.replaceState(null, "", h);
         paint();
       };
-      if (mode === "brain" && !brainCanvas.hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) { brain.setLinks([]); brain.zoomTo(id, open); }
+      if (mode === "brain" && !brainCanvas.hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) brain.zoomTo(id, open);
       else open();
     }
     function exitWorld() {
@@ -924,8 +910,8 @@
         var t = n.leaf ? null : tally(byId[n.id] || lobeNode);
         tip.className = "brain-tooltip docked card"; tip.style.setProperty("--c", n.color);
         tip.innerHTML = '<div class="bt-head"><i style="background:' + n.color + ";box-shadow:0 0 10px " + n.color + '"></i><b>' + esc(n.depth === 0 ? lobeOf[lobeNode.id].name : n.name) + "</b></div>" +
-          (n.leaf ? '<p class="bt-meta"><span>' + (n.done ? "✓ learned" : "not yet") + "</span>" + (n.tag ? "<span>" + esc(n.tag) + "</span>" : "") + '</p><p class="bt-hint">Click for details · double-click to open</p>'
-                  : '<div class="bt-bar"><span style="width:' + pct(t) + "%;background:" + n.color + '"></span></div><p class="bt-meta"><span>' + pct(t) + "% learned</span><span>" + t.done + "/" + t.total + '</span></p><p class="bt-hint">Double-click to fly in</p>');
+          (n.leaf ? '<p class="bt-meta"><span>' + (n.done ? "✓ learned — leaf open" : "bud — not learned yet") + "</span>" + (n.tag ? "<span>" + esc(n.tag) + "</span>" : "") + '</p><p class="bt-hint">Click for details · double-click to open</p>'
+                  : '<div class="bt-bar"><span style="width:' + pct(t) + "%;background:" + n.color + '"></span></div><p class="bt-meta"><span>' + pct(t) + "% grown</span><span>" + t.done + "/" + t.total + '</span></p><p class="bt-hint">Double-click to fly to this branch</p>');
         tip.hidden = false; stage.classList.add("hovering");
       }
     });
@@ -989,7 +975,7 @@
       var tl = $("[data-time-label]");
       tl.hidden = at == null; tl.textContent = "⟲ Your brain on " + label;
       stage.classList.toggle("rewound", at != null);
-      if (mode === "world") world.refresh(); else { brain.refresh({ quick: quick }); if (selLobe) brain.setLinks(linksFor(selLobe)); }
+      if (mode === "world") world.refresh(); else brain.refresh({ quick: quick });
       paint();
     }
     if (range) range.addEventListener("input", function () { cancelAnimationFrame(playing); playing = 0; setTime(+range.value, true); });

@@ -73,19 +73,6 @@ LOBES = [
          blurb="ML foundations, LLMs, training and serving."),
 ]
 LOBE_BY_ID = {d["id"]: d for d in LOBES}
-# How the lobes feed each other — drawn as connections when you click a lobe on the Brain page.
-LOBE_LINKS = [
-    ("dsa", "backend", "Data structures behind caches, indexes and queues"),
-    ("dsa", "system-design", "Complexity decides what scales"),
-    ("backend", "system-design", "Services grow into systems"),
-    ("backend", "devops", "Ship and run what you build"),
-    ("system-design", "devops", "Designs meet production"),
-    ("devops", "cybersecurity", "Secure the pipeline and the platform"),
-    ("backend", "cybersecurity", "Auth, validation and hardening"),
-    ("backend", "ai-ml", "Serving models behind APIs"),
-    ("dsa", "ai-ml", "The maths and algorithms under ML"),
-    ("devops", "ai-ml", "Infrastructure for training and inference"),
-]
 # Old per-area domain ids (focus history recorded before lobes existed) now belong to DevOps.
 DOMAIN_ALIASES = {"foundations": "devops", "code": "devops", "systems": "devops", "distributed": "devops",
                   "infra": "devops", "reliability": "devops", "security": "devops", "ai": "devops", "design": "system-design", "be": "backend"}
@@ -923,7 +910,7 @@ def render_brain():
    <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title" data-brain-path>cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
    <div class="console-screen brain-stage" data-brain-stage>
     <canvas data-brain="full" aria-label="Interactive 3D brain"></canvas>
-    <canvas class="world-canvas" data-world hidden aria-label="Program world: topics as stars"></canvas>
+    <canvas class="world-canvas" data-world hidden aria-label="Your learning in this program, drawn as a growing tree"></canvas>
     <div class="stage-top">
       <nav class="brain-crumbs" data-brain-crumbs aria-label="Where you are"></nav>
       <h1 data-level-title>Your brain</h1>
@@ -940,7 +927,7 @@ def render_brain():
       <button class="icon-btn" data-wz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
       <button class="icon-btn" data-wz="fit" aria-label="Show the whole world"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
-    <p class="stage-tip mono-label" data-stage-tip>Click a lobe to see its connections · double-click to enter its world</p>
+    <p class="stage-tip mono-label" data-stage-tip>Click a lobe to select it · double-click to step inside</p>
     <div class="stage-time mono-label" data-time-label hidden></div>
     <div class="brain-tooltip" data-brain-tooltip hidden></div>
    </div>
@@ -1641,7 +1628,6 @@ def main():
         "domains": [dict(id=d["id"], name=d["name"], short=d["short"], color=d["color"], anchor=d["anchor"], href=d.get("href", ""),
                          blurb=d["blurb"], soon=not lobe_totals.get(d["id"]), total=lobe_totals.get(d["id"], 0)) for d in LOBES],
         "aliases": DOMAIN_ALIASES,
-        "links": [list(l) for l in LOBE_LINKS],
         "tracks": tracks_map,
         "total": sum(lobe_totals.values()),
         "pathTotal": sum(t["n_lessons"] for t in tracks),

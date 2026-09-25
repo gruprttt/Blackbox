@@ -173,7 +173,6 @@
     var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     var growth = 0.84, growthAim = 0.84;                                // the brain physically grows as it's wired
     var tr = null;                                                      // level transition in flight
-    var links = [], linkT = 0;                                          // connection arcs between regions
 
     function useRegions(list) {
       domains = list;
@@ -435,50 +434,6 @@
           ctx.drawImage(sprites[nodes[ga].d], gx - gs2 / 2, gy - gs2 / 2, gs2, gs2);
         }
       }
-      // connection arcs: bowed curves between region centres with signals running along them
-      if (links.length && !tr) {
-        linkT += dt;
-        var P2 = function (c) {
-          var x1 = c[0] * cyw + c[2] * syw, z1 = -c[0] * syw + c[2] * cyw, y1 = c[1] * cp - z1 * sp, z2 = c[1] * sp + z1 * cp, f = D / (D - z2);
-          return [cx + x1 * scale * f, cy - y1 * scale * f];
-        };
-        ctx.globalCompositeOperation = "lighter";
-        links.forEach(function (ln, li) {
-          var ca = A.centroid[ln.a], cb = A.centroid[ln.b];
-          if (!ca || !cb) return;
-          var pa = P2(ca), pb = P2(cb), mx = (pa[0] + pb[0]) / 2, my = (pa[1] + pb[1]) / 2;
-          var dx = mx - cx, dy = my - cy, dl = Math.sqrt(dx * dx + dy * dy) || 1, bow = scale * 0.35;
-          var qx = mx + dx / dl * bow, qy = my + dy / dl * bow - scale * 0.12;
-          var appear = Math.min(1, linkT * 2.2 - li * 0.15);
-          if (appear <= 0) return;
-          var g = ctx.createLinearGradient(pa[0], pa[1], pb[0], pb[1]);
-          g.addColorStop(0, rgba(ln.ca, 0.85 * appear)); g.addColorStop(1, rgba(ln.cb, 0.85 * appear));
-          ctx.strokeStyle = g; ctx.lineWidth = (1.4 + ln.w * 2.2) * DPR;
-          ctx.setLineDash([6 * DPR, 7 * DPR]); ctx.lineDashOffset = -linkT * 30 * DPR;
-          ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.quadraticCurveTo(qx, qy, pb[0], pb[1]); ctx.stroke();
-          ctx.setLineDash([]);
-          for (var k2 = 0; k2 < 3; k2++) {                              // travelling signals
-            var u = ((linkT * 0.35 + k2 / 3 + li * 0.13) % 1) * appear, iu = 1 - u;
-            var px2 = iu * iu * pa[0] + 2 * iu * u * qx + u * u * pb[0], py2 = iu * iu * pa[1] + 2 * iu * u * qy + u * u * pb[1];
-            ctx.globalAlpha = 0.9 * appear;
-            var ss = 16 * DPR;
-            ctx.drawImage(spriteWhite, px2 - ss / 2, py2 - ss / 2, ss, ss);
-          }
-          ctx.globalAlpha = appear;
-          ctx.fillStyle = rgba(ln.cb, 1);
-          ctx.beginPath(); ctx.arc(pb[0], pb[1], 4 * DPR, 0, 6.2832); ctx.fill();
-          ctx.globalAlpha = 1;
-          if (ln.label) {
-            ctx.font = "600 " + Math.round(11 * DPR) + "px ui-sans-serif, system-ui, sans-serif";
-            ctx.textAlign = "center"; ctx.globalCompositeOperation = "source-over";
-            var lx = 0.25 * mx + 0.75 * qx, ly = 0.25 * my + 0.75 * qy, tw = ctx.measureText(ln.label).width + 14 * DPR;
-            ctx.globalAlpha = appear;
-            ctx.fillStyle = "rgba(8,10,16,.82)"; ctx.fillRect(lx - tw / 2, ly - 11 * DPR, tw, 20 * DPR);
-            ctx.fillStyle = "#e8ecf6"; ctx.fillText(ln.label, lx, ly + 3 * DPR);
-            ctx.globalAlpha = 1; ctx.globalCompositeOperation = "lighter";
-          }
-        });
-      }
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
       schedule();
@@ -545,8 +500,6 @@
     return {
       setState: setState,
       setLevel: setLevel,
-      // [{a, b, ca, cb, w, label}] — region ids, colours, weight 0..1, optional label; [] clears
-      setLinks: function (list) { links = list || []; linkT = 0; },
       zoomTo: function (id, done) {                                    // fly into a region (used before leaving the brain)
         var c = A.centroid[id] || [0, 0, 0];
         tr = { phase: "out", t: 0, dir: "in", focus: c, list: domains, ready: done, keep: true };
