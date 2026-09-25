@@ -2,8 +2,8 @@
 
 *Where engineers figure things out.*
 
-A learning site with four live programs — **DevOps & SRE** (built from the saved lesson pages in
-`../learn`), **DSA** (Striver's A2Z sheet: 474 problems, 297 with solutions), **System Design** and
+A learning site with four live programs — **DevOps & SRE** (built from your saved lesson pages in
+`learn/`), **DSA** (Striver's A2Z sheet: 474 problems, 297 with solutions), **System Design** and
 **Backend Engineering** (the full *Backend from First Principles* course) — plus a focus timer,
 tasks, habits, accounts, and a 3D brain that grows as you learn.
 
@@ -23,16 +23,18 @@ ask the authors before hosting it publicly.
 
 ## Study (one command)
 
-Requires Docker Desktop to be running.
+Requires Docker (Docker Desktop on Mac/Windows; Docker Engine + the compose plugin on Linux).
 
 ```bash
-cd learn-ui
+git clone git@github.com:gruprttt/Blackbox.git
+cd Blackbox
 docker compose up -d
 ```
 
 Open http://localhost:8080. Stop with `docker compose down`.
 
-Every `up` rebuilds the site, so new or edited lessons in `../learn` show up automatically.
+Your saved DevOps & SRE lessons are optional: copy your `learn` folder into the repo as `./learn`
+(git ignores it) and they're built in. Every `up` rebuilds the site, so new or edited lessons show up.
 Use a different port with `BLACKBOX_PORT=9000 docker compose up -d`.
 
 Create an account from **Sign in** (top right). Each account's progress, tasks, habits and focus
@@ -143,7 +145,7 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 
 | Path | What it is ? |
 | --- | --- |
-| `build.py` | Parses `../learn` and generates every page; `LOBES` are the brain's top-level regions |
+| `build.py` | Parses `learn/` and generates every page; `LOBES` are the brain's top-level regions |
 | `data/dsa-a2z.json` | Striver's A2Z sheet (18 topics, 62 subtopics, 474 problems with links) |
 | `data/system-design.json` | System Design curriculum (topics → concepts) |
 | `mdx.py` | Dependency-free MDX → HTML converter for the Backend chapters |
@@ -156,11 +158,11 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `server/server.py` | Accounts, password reset, Google sign-in and progress sync API (Python stdlib, SQLite) |
 | `Dockerfile`, `deploy/nginx.conf`, `deploy/api-proxy.inc`, `docker-compose.yml`, `.env.example` | `web` (nginx) + `api` services and the data volume |
 
-`python3 build.py` also works without `../learn`: it then builds only DSA and System Design.
+`python3 build.py` also works without `learn/`: it then builds only DSA and System Design.
 
 ## Adding a new subject
 
-- **More DevOps lessons:** save the pages into `../learn/<track-slug>/` (same structure as the others)
+- **More DevOps lessons:** save the pages into `learn/<track-slug>/` (same structure as the others)
   and add the slug to an area's `tracks` in `DOMAINS` in `build.py` (that sets its colour).
 - **A new program / lobe:** add an entry to `LOBES` (with an `anchor` on the brain) and `PROGRAMS`
   in `build.py`. Lobes with no content yet show up dormant ("coming soon").

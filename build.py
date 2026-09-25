@@ -2,7 +2,7 @@
 """Build BLACKBOX — a standalone learning site — from the saved HamChops /learn pages.
 
 Usage:  python3 build.py [SOURCE_DIR] [OUT_DIR]
-Defaults: SOURCE_DIR=../learn  OUT_DIR=./dist
+Defaults: SOURCE_DIR=./learn (or ../learn)  OUT_DIR=./dist
 
 Adding a new subject later (DSA, System Design, …): drop its saved pages into SOURCE_DIR,
 then list the track folder under the right entry in DOMAINS (or add a new domain with an
@@ -20,7 +20,7 @@ from pathlib import Path
 import mdx
 
 HERE = Path(__file__).resolve().parent
-SRC = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (HERE.parent / "learn")
+SRC = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else next((p for p in (HERE / "learn", HERE.parent / "learn") if p.is_dir()), HERE / "learn")
 OUT = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else (HERE / "dist")
 SITE = "BLACKBOX"
 
