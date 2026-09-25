@@ -929,7 +929,8 @@ def render_habits():
 # ───────────────────────────── DSA & System Design sheets ─────────────────────────────
 
 DIFF_CLASS = {"Easy": "d-easy", "Medium": "d-med", "Hard": "d-hard"}
-LINK_LABELS = [("lc", "LeetCode"), ("gfg", "GFG"), ("yt", "Video"), ("article", "Article")]
+LINK_LABELS = [("lc", "LeetCode"), ("gfg", "GFG"), ("article", "TUF"), ("yt", "YouTube")]
+LINK_TONE = {"LeetCode": "lk-lc", "GFG": "lk-gfg", "TUF": "lk-tuf", "YouTube": "lk-yt"}
 
 
 def load_sheets():
@@ -948,7 +949,8 @@ def load_sheets():
                     meta = " · ".join(x for x in (pr.get("pattern"), pr.get("time") and f"{pr['time']} time",
                                                   pr.get("space") and f"{pr['space']} space") if x)
                     items.append(dict(id=f"dsa/{t['id']}/{sub['id']}/{pr['id']}", anchor=pr["id"], name=pr["name"], level=pr["level"],
-                                      meta=meta, links=[(label, pr[k]) for k, label in LINK_LABELS if pr.get(k)]))
+                                      meta=meta, links=[(label, pr[k]) for k, label in LINK_LABELS if pr.get(k)],
+                                      hint={k: pr[k] for k in ("pattern", "time", "space", "approach", "brute") if pr.get(k)}))
                 topic["subs"].append(dict(id=f"dsa/{t['id']}/{sub['id']}", anchor=f"{t['id']}-{sub['id']}", name=sub["name"], items=items))
             topics.append(topic)
         sheets["dsa"] = dict(lobe="dsa", dir="dsa", prefix="dsa/", name="DSA · Striver's A2Z sheet", short="DSA", color=LOBE_BY_ID["dsa"]["color"],
@@ -996,6 +998,118 @@ def item_row(sh, it):
     return (f'<li class="item" id="{it["anchor"]}" data-lesson="{it["id"]}"{level}>'
             f'<button class="it-check" type="button" data-toggle-done aria-label="{sh["todo_label"]}: {html.escape(it["name"])}">{ICON["check"]}</button>'
             f"{body}</li>")
+
+
+STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg>'
+REV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>'
+INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
+
+
+def dsa_row(it, n):
+    """One problem, laid out like the dsapractice roadmap: solved, bookmark, revision, pattern, practice links, notes."""
+    name = html.escape(it["name"])
+    links = "".join(f'<a class="lk {LINK_TONE[label]}" href="{html.escape(url)}" target="_blank" rel="noopener">{label}</a>'
+                    for label, url in it["links"])
+    h = it["hint"]
+    pop = (f'<p class="mono-label">Pattern / hint</p><b>{html.escape(h.get("pattern", "No pattern added yet."))}</b>'
+           + (f'<div class="pp-cx"><span><em>Time</em>{html.escape(h.get("time", "—"))}</span><span><em>Space</em>{html.escape(h.get("space", "—"))}</span></div>'
+              if h.get("time") or h.get("space") else "")
+           + (f'<p class="mono-label">Brute force</p><p>{html.escape(h["brute"])}</p>' if h.get("brute") else "")
+           + (f'<p class="mono-label">Approach</p><p>{html.escape(h["approach"])}</p>' if h.get("approach") else ""))
+    return (f'<tr class="prob" id="{it["anchor"]}" data-lesson="{it["id"]}" data-level="{it["level"]}">'
+            f'<td class="pn">{n}</td><td class="pt"><a href="#{it["anchor"]}">{name}</a></td>'
+            f'<td><span class="diff {DIFF_CLASS.get(it["level"], "")}">{it["level"]}</span></td>'
+            f'<td class="c"><button class="it-check" type="button" data-toggle-done aria-label="Solved: {name}">{ICON["check"]}</button></td>'
+            f'<td class="c"><button class="mk mk-b" type="button" data-mark="b" aria-label="Bookmark: {name}" title="Bookmark">{STAR}</button></td>'
+            f'<td class="c"><button class="mk mk-r" type="button" data-mark="r" aria-label="Revision: {name}" title="Add to revision">{REV}</button></td>'
+            f'<td class="c pat"><button class="mk" type="button" data-pattern aria-label="Pattern and hint: {name}" title="Pattern &amp; hint">{INFO}</button>'
+            f'<div class="pat-pop" hidden>{pop}</div></td>'
+            f'<td><div class="links">{links}<button class="lk lk-note" type="button" data-note>Notes</button></div></td></tr>')
+
+
+PROB_HEAD = ('<thead><tr><th class="pn">#</th><th>Problem</th><th>Difficulty</th><th class="c">Solved</th><th class="c">Bookmark</th>'
+             '<th class="c">Revision</th><th class="c">Pattern</th><th>Practice</th></tr></thead>')
+
+
+def render_dsa_index(sh):
+    root = "../"
+    rows = "".join(f"""<tr data-progress-prefix="{t['prefix']}" data-progress-total="{t['total']}">
+  <td class="pn">{int(t['num'])}</td>
+  <td><a class="rt-name" href="{t['slug']}/index.html">{html.escape(t['name'])}</a>{f'<span class="rt-note">{html.escape(t["note"])}</span>' if t['note'] else ''}</td>
+  <td class="r">{t['total']}</td><td class="r"><b data-progress-count>0</b></td>
+  <td><div class="rt-bar"><div class="progress-bar"><span></span></div><em data-progress-pct>0%</em></div></td>
+  <td class="r"><a class="lk lk-open" href="{t['slug']}/index.html">View problems</a></td>
+</tr>""" for t in sh["topics"])
+    counts = {}
+    for t in sh["topics"]:
+        for sb in t["subs"]:
+            for it in sb["items"]:
+                counts[it["level"]] = counts.get(it["level"], 0) + 1
+    levels = ('<div class="level-stats">' + "".join(
+        f'<div class="stat {DIFF_CLASS[k]}"><span class="mono-label">{k}</span><b><span data-level-done="{k}">0</span><small>/ {counts.get(k, 0)}</small></b></div>'
+        for k in ("Easy", "Medium", "Hard")) + "</div>"
+        + "<script>window.BB_LEVELS=" + json.dumps({it["id"]: it["level"][0] for t in sh["topics"] for sb in t["subs"] for it in sb["items"]},
+                                                    separators=(",", ":")) + ";</script>")
+    actions = (f'<a class="btn btn-primary" href="{sh["topics"][0]["slug"]}/index.html">{ICON["play"]}<span>Start</span></a>'
+               f'<button class="btn btn-ghost on-dark" data-focus-domain="dsa"><span class="rec"></span>Focus on this</button>'
+               f'<a class="btn btn-ghost on-dark" href="{root}brain/index.html#dsa">{ICON["brain"]}See it in your brain</a>'
+               f'<div class="banner-progress">{progress(sh["prefix"], sh["total"])}</div>')
+    body = f"""<main id="main" style="--c:{sh['color']}">
+{sheet_banner(root, sh, "DSA", [('Learn', 'index.html#programs'), ('DSA Roadmap', None)], f"Roadmap · {len(sh['topics'])} topics · {sh['total']} problems", "DSA Roadmap", sh['lede'], actions)}
+<section class="wrap section">
+  {levels}
+  <div class="seg dsa-tabs" data-dsa-tabs><button data-tab="roadmap" class="is-active">Roadmap</button><button data-tab="r">Revision <b data-mark-count="r">0</b></button><button data-tab="b">Bookmarks <b data-mark-count="b">0</b></button></div>
+  <div data-tab-pane="roadmap">
+    <div class="table-wrap"><table class="rt">
+      <thead><tr><th class="pn">#</th><th>Topic</th><th class="r">Problems</th><th class="r">Solved</th><th>Progress</th><th class="r">Open</th></tr></thead>
+      <tbody>{rows}</tbody></table></div>
+    <div class="topic-tools"><span></span><button class="link-btn danger" data-reset-prefix="{sh['prefix']}" data-reset-label="DSA">Reset DSA progress</button></div>
+  </div>
+  <div data-tab-pane="collection" hidden>
+    <p class="coll-sub" data-coll-sub></p>
+    <div class="table-wrap"><table class="pt-table">{PROB_HEAD}<tbody data-coll-body></tbody></table></div>
+  </div>
+</section>
+</main>"""
+    return page(title=f"DSA Roadmap · {SITE}", desc=sh["lede"], root=root, body=body, kind="sheet")
+
+
+def render_dsa_topic(sh, ti):
+    root = "../../"
+    t = sh["topics"][ti]
+    prev_t = sh["topics"][ti - 1] if ti > 0 else None
+    next_t = sh["topics"][ti + 1] if ti + 1 < len(sh["topics"]) else None
+    nav = '<div class="pager">'
+    nav += (f'<a class="pager-card prev" href="../{prev_t["slug"]}/index.html" data-nav-prev><span>{ICON["left"]} Previous topic</span><strong>{html.escape(prev_t["name"])}</strong></a>' if prev_t else "<span></span>")
+    nav += (f'<a class="pager-card next" href="../{next_t["slug"]}/index.html" data-nav-next><span>Next topic {ICON["right"]}</span><strong>{html.escape(next_t["name"])}</strong></a>' if next_t else "<span></span>")
+    nav += "</div>"
+    subs = []
+    for sb in t["subs"]:
+        rows = "".join(dsa_row(it, i) for i, it in enumerate(sb["items"], 1))
+        subs.append(f"""<details class="sheet-sub dsa-sub" id="{sb['anchor']}">
+  <summary><span class="chev">{ICON['chev']}</span><h2>{html.escape(sb['name'])}</h2>
+    <span class="ds-prog" data-progress-prefix="{sb['id']}/" data-progress-total="{len(sb['items'])}"><span class="ds-lab"><span><b data-progress-count>0</b>/{len(sb['items'])} solved</span><em data-progress-pct>0%</em></span><span class="progress-bar"><span></span></span></span>
+    <span class="ds-n">{len(sb['items'])} problems</span></summary>
+  <div class="table-wrap"><table class="pt-table">{PROB_HEAD}<tbody>{rows}</tbody></table></div>
+</details>""")
+    actions = (f'<a class="btn btn-primary" href="#{t["subs"][0]["items"][0]["anchor"]}" data-resume="{t["prefix"]}">{ICON["play"]}<span>Start topic</span></a>'
+               f'<button class="btn btn-ghost on-dark" data-focus-domain="dsa"><span class="rec"></span>Focus on this</button>'
+               f'<a class="btn btn-ghost on-dark" href="{root}brain/index.html#{sh["prefix"]}{t["id"]}">{ICON["brain"]}In your brain</a>'
+               f'<div class="banner-progress">{progress(t["prefix"], t["total"])}</div>')
+    body = f"""<main id="main" style="--c:{sh['color']}">
+{sheet_banner(root, sh, t['num'], [('DSA Roadmap', 'dsa/index.html'), (html.escape(t['name']), None)],
+              f"DSA · Topic {t['num']} of {len(sh['topics']):02d}" + (f" · {html.escape(t['note'])}" if t['note'] else ""),
+              html.escape(t['name']), f"{t['total']} problems in {len(t['subs'])} section{'s' if len(t['subs']) > 1 else ''}", actions)}
+<section class="wrap section sheet">
+  <div class="filter-bar"><p data-filter-count>Showing {t['total']} of {t['total']} problems</p>
+    <div><select data-status-filter aria-label="Problem status"><option value="all">All problems</option><option value="solved">Solved</option><option value="unsolved">Unsolved</option></select>
+    <select data-level-filter aria-label="Difficulty"><option value="all">Difficulty</option><option>Easy</option><option>Medium</option><option>Hard</option></select>
+    <button class="lk" type="button" data-expand-subs>Expand all</button></div></div>
+  <div class="dsa-subs">{''.join(subs)}</div>
+  {nav}
+</section>
+</main>"""
+    return page(title=f"{t['name']} · DSA · {SITE}", desc=f"{t['name']} — DSA roadmap", root=root, body=body, kind="sheet")
 
 
 def render_sheet_index(sh):
@@ -1148,11 +1262,12 @@ def main():
     write(OUT / "login" / "index.html", render_login())
     for sh in sheets.values():
         index.append([sh["name"], sh["href"], "", "", "k", "sheet practice " + sh["noun"]])
-        write(OUT / sh["dir"] / "index.html", render_sheet_index(sh))
+        dsa = sh["lobe"] == "dsa"
+        write(OUT / sh["dir"] / "index.html", render_dsa_index(sh) if dsa else render_sheet_index(sh))
         for ti, t in enumerate(sh["topics"]):
             href = f"{sh['dir']}/{t['slug']}/index.html"
             index.append([t["name"], href, sh["name"], "", "t", t["note"]])
-            write(OUT / sh["dir"] / t["slug"] / "index.html", render_sheet_topic(sh, ti))
+            write(OUT / sh["dir"] / t["slug"] / "index.html", render_dsa_topic(sh, ti) if dsa else render_sheet_topic(sh, ti))
             for sb in t["subs"]:
                 for it in sb["items"]:
                     index.append([it["name"], f"{href}#{it['anchor']}", sh["short"] + " · " + t["name"], sb["name"] or t["name"], "l",
@@ -1191,6 +1306,10 @@ def main():
                           " ".join(h for _, h in l["toc"])])
 
     tree = brain_tree(tracks, sheets)
+    if "dsa" in sheets:
+        write(OUT / "assets" / "dsa-rows.js", "window.BB_DSA_ROWS=" + json.dumps(
+            {it["id"]: [f"{t['slug']}/index.html", t["name"], dsa_row(it, 0)] for t in sheets["dsa"]["topics"] for sb in t["subs"] for it in sb["items"]},
+            ensure_ascii=False, separators=(",", ":")) + ";")
 
     def count(node):
         return sum(count(k) if isinstance(k, dict) else 1 for k in node.get("k", []))

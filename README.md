@@ -33,6 +33,15 @@ rebuilds, restarts and clearing your browser, and follow you to any device you s
 - To stop strangers registering once you've made your account, set `BLACKBOX_SIGNUP=0` on the `api`
   service. If you serve it over HTTPS, nginx forwards the scheme and the cookie is marked `Secure`.
 
+## DSA roadmap
+
+`dsa/index.html` is laid out like the [DSA Practice](https://dsapractice.indevs.in/roadmap) roadmap:
+a topic table with solved counts and progress, then each topic's subtopics as collapsible
+sections. Every problem row has **Solved**, **Bookmark**, **Revision**, a **Pattern** hint (pattern,
+time/space, approach where known), **LeetCode / GFG / TUF / YouTube** links and personal **Notes**.
+Filter by status or difficulty; the Revision and Bookmarks tabs collect what you've marked.
+All of it saves to your account.
+
 ## The brain
 
 Every program is a lobe. Lessons, solved problems and learned concepts light neurons in their lobe;

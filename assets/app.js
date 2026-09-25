@@ -284,6 +284,8 @@
       if (bar) bar.style.setProperty("--p", n / total);
       var c = $("[data-progress-count]", el);
       if (c) c.textContent = n;
+      var pc = $("[data-progress-pct]", el);
+      if (pc) pc.textContent = Math.round(n / total * 100) + "%";
       el.classList.toggle("is-complete", n >= total);
     });
     $$("[data-nd-track]").forEach(function (el) {
@@ -443,46 +445,141 @@
     if (cur && sideInner && sideInner.scrollHeight > sideInner.clientHeight) sideInner.scrollTop = cur.offsetTop - sideInner.clientHeight / 2;
   }
 
-  // ── DSA / System Design sheets: tick items, filter, per-difficulty counts ──
+  // ── DSA / System Design sheets: tick items, bookmarks, revision, notes, filters ──
+  // Bookmarks/revision live in bb-dsa-marks ({id: {b: 1, r: 1}}) and notes in bb-dsa-notes
+  // ({id: text}); like everything bb-*, they sync to your account.
+  BB.marks = function () { return load("bb-dsa-marks", {}); };
+  BB.notes = function () { return load("bb-dsa-notes", {}); };
   if (PAGE === "sheet") {
-    document.addEventListener("click", function (e) {
-      var b = e.target.closest("[data-toggle-done]");
-      if (!b) return;
-      var row = b.closest("[data-lesson]"), id = row.getAttribute("data-lesson"), on = !BB.isDone(id);
-      BB.setDone(id, on);
-      var dom = BB.domain(BB.domainOfLesson(id));
-      if (on) { b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); toast("Neuron wired in " + dom.name, dom.color); }
-      paintSheet();
-    });
-    var filter = "all", hideDone = $("[data-hide-done]");
+    var statusSel = $("[data-status-filter]"), levelSel = $("[data-level-filter]"), hideDone = $("[data-hide-done]");
     var paintSheet = function () {
-      var hide = hideDone && hideDone.checked;
-      $$(".item[data-lesson]").forEach(function (li) {
-        var lvl = li.getAttribute("data-level");
-        li.hidden = (filter !== "all" && lvl !== filter) || (hide && BB.isDone(li.getAttribute("data-lesson")));
+      var marks = BB.marks(), notes = BB.notes();
+      if (tab && tab !== "roadmap") renderCollection();
+      var st = statusSel ? statusSel.value : "all", lv = levelSel ? levelSel.value : "all", hide = hideDone && hideDone.checked, shown = 0, all = 0;
+      $$(".sheet [data-lesson], [data-coll-body] [data-lesson]").forEach(function (row) {
+        var id = row.getAttribute("data-lesson"), done = BB.isDone(id), m = marks[id] || {};
+        row.classList.toggle("is-done", done);
+        $$("[data-mark]", row).forEach(function (b) { var on = !!m[b.getAttribute("data-mark")]; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
+        var nb = $("[data-note]", row); if (nb) nb.classList.toggle("on", !!notes[id]);
+        if (!row.closest(".sheet")) return;
+        all++;
+        row.hidden = (st === "solved" && !done) || (st === "unsolved" && done) || (lv !== "all" && row.getAttribute("data-level") !== lv) || (hide && done);
+        if (!row.hidden) shown++;
       });
-      $$(".sheet-sub").forEach(function (sec) { sec.hidden = !$$(".item", sec).some(function (li) { return !li.hidden; }); });
+      $$(".sheet-sub").forEach(function (sec) { sec.hidden = !$$("[data-lesson]", sec).some(function (r) { return !r.hidden; }); });
+      var fc = $("[data-filter-count]"); if (fc) fc.textContent = "Showing " + shown + " of " + all + " problems";
       var levels = window.BB_LEVELS;
       if (levels) $$("[data-level-done]").forEach(function (el) {
         var k = el.getAttribute("data-level-done").charAt(0), n = 0;
         Object.keys(levels).forEach(function (id) { if (levels[id] === k && BB.isDone(id)) n++; });
         el.textContent = n;
       });
+      $$("[data-mark-count]").forEach(function (el) {
+        var k = el.getAttribute("data-mark-count"); el.textContent = Object.keys(marks).filter(function (id) { return marks[id][k]; }).length;
+      });
     };
-    $$("[data-sheet-filter] button").forEach(function (b) {
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-toggle-done], [data-mark], [data-pattern], [data-note]");
+      if (!b) { $$(".pat-pop").forEach(function (p) { if (!p.contains(e.target)) p.hidden = true; }); return; }
+      var row = b.closest("[data-lesson]"), id = row.getAttribute("data-lesson"), name = ($(".pt a, .it-title", row) || {}).textContent || "";
+      if (b.hasAttribute("data-toggle-done")) {
+        var on = !BB.isDone(id), dom = BB.domain(BB.domainOfLesson(id));
+        BB.setDone(id, on);
+        if (on) { b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); toast("Neuron wired in " + dom.name, dom.color); }
+      } else if (b.hasAttribute("data-mark")) {
+        var k = b.getAttribute("data-mark"), marks = BB.marks(), m = marks[id] || {};
+        if (m[k]) delete m[k]; else m[k] = 1;
+        if (Object.keys(m).length) marks[id] = m; else delete marks[id];
+        save("bb-dsa-marks", marks);
+        toast(k === "b" ? (m.b ? "Bookmarked" : "Bookmark removed") : (m.r ? "Added to revision" : "Removed from revision"), m[k] ? "var(--warn)" : undefined);
+      } else if (b.hasAttribute("data-pattern")) {
+        var pop = b.nextElementSibling, open = pop.hidden;
+        $$(".pat-pop").forEach(function (p) { p.hidden = true; });
+        pop.hidden = !open;
+        if (open) {   // fixed to the viewport so the scrolling table can't clip it
+          var r = b.getBoundingClientRect(), w = Math.min(320, window.innerWidth - 32);
+          pop.style.left = Math.max(16, Math.min(window.innerWidth - w - 16, r.right - w)) + "px";
+          pop.style.top = (r.bottom + pop.offsetHeight + 8 > window.innerHeight ? Math.max(8, r.top - pop.offsetHeight - 6) : r.bottom + 6) + "px";
+        }
+      } else openNote(id, name);
+      paintSheet();
+    });
+    var noteModal = null;
+    var openNote = function (id, name) {
+      if (!noteModal) {
+        noteModal = document.createElement("div");
+        noteModal.className = "modal"; noteModal.setAttribute("role", "dialog"); noteModal.setAttribute("aria-modal", "true");
+        noteModal.innerHTML = '<div class="modal-backdrop" data-close></div><div class="modal-box note-box"><div class="modal-head"><div><p class="mono-label">/ notes</p><h2 data-note-title></h2></div>' +
+          '<button class="icon-btn" data-close aria-label="Close">✕</button></div><textarea data-note-text rows="10" placeholder="Approach, edge cases, mistakes to remember…"></textarea>' +
+          '<div class="modal-row"><button class="btn btn-primary sm" data-note-save>Save note</button><button class="btn btn-ghost sm" data-close>Cancel</button></div></div>';
+        document.body.appendChild(noteModal);
+        $$("[data-close]", noteModal).forEach(function (x) { x.addEventListener("click", function () { noteModal.hidden = true; }); });
+        $("[data-note-save]", noteModal).addEventListener("click", function () {
+          var notes = BB.notes(), v = $("[data-note-text]", noteModal).value.trim(), nid = noteModal.getAttribute("data-id");
+          if (v) notes[nid] = v.slice(0, 20000); else delete notes[nid];
+          save("bb-dsa-notes", notes); noteModal.hidden = true; toast(v ? "Note saved" : "Note removed", "var(--ok)"); paintSheet();
+        });
+      }
+      noteModal.setAttribute("data-id", id);
+      $("[data-note-title]", noteModal).textContent = name;
+      $("[data-note-text]", noteModal).value = BB.notes()[id] || "";
+      noteModal.hidden = false;
+      setTimeout(function () { $("[data-note-text]", noteModal).focus(); }, 30);
+    };
+    // Revision / Bookmarks tabs on the roadmap page
+    var tab = "roadmap";
+    var renderCollection = function () {
+      var body = $("[data-coll-body]"), rows = window.BB_DSA_ROWS;
+      if (!body) return;
+      if (!rows) {
+        body.innerHTML = '<tr><td colspan="8" class="coll-empty">Loading…</td></tr>';
+        var sc = document.createElement("script"); sc.src = ROOT + "assets/dsa-rows.js"; sc.onload = function () { renderCollection(); paintSheet(); };
+        document.head.appendChild(sc); return;
+      }
+      var marks = BB.marks(), ids = Object.keys(rows).filter(function (id) { return (marks[id] || {})[tab]; }), last = null, html = "";
+      ids.forEach(function (id, i) {
+        var r = rows[id];
+        if (r[1] !== last) { html += '<tr class="coll-topic"><td colspan="8"><a href="' + esc(r[0]) + '">' + esc(r[1]) + " →</a></td></tr>"; last = r[1]; }
+        html += r[2].replace('<td class="pn">0</td>', '<td class="pn">' + (i + 1) + "</td>").replace(/href="#(p\d+)"/, 'href="' + esc(r[0]) + '#$1"');
+      });
+      body.innerHTML = html || '<tr><td colspan="8" class="coll-empty">' + (tab === "r" ? "Nothing to revise yet — press the ↻ button on a problem to add it here." : "No bookmarks yet — press ☆ on a problem to save it here.") + "</td></tr>";
+      $("[data-coll-sub]").textContent = tab === "r" ? "Revisit these problems when you are ready." : "Your saved problems in one place.";
+    };
+    $$("[data-dsa-tabs] button").forEach(function (b) {
       b.addEventListener("click", function () {
-        filter = b.getAttribute("data-f");
-        $$("[data-sheet-filter] button").forEach(function (x) { x.classList.toggle("is-active", x === b); });
+        tab = b.getAttribute("data-tab");
+        $$("[data-dsa-tabs] button").forEach(function (x) { x.classList.toggle("is-active", x === b); });
+        $("[data-tab-pane=roadmap]").hidden = tab !== "roadmap";
+        $("[data-tab-pane=collection]").hidden = tab === "roadmap";
         paintSheet();
       });
     });
+    [statusSel, levelSel].forEach(function (sel) { if (sel) sel.addEventListener("change", function () {
+      if (sel.value !== "all") $$(".dsa-sub").forEach(function (d) { d.open = true; });
+      paintSheet();
+    }); });
     if (hideDone) {
       hideDone.checked = !!load("bb-sheet-hide-done", false);
       hideDone.addEventListener("change", function () { save("bb-sheet-hide-done", hideDone.checked); paintSheet(); });
     }
+    var expandSubs = $("[data-expand-subs]");
+    if (expandSubs) expandSubs.addEventListener("click", function () {
+      var subs = $$(".dsa-sub"), open = subs.some(function (d) { return !d.open; });
+      subs.forEach(function (d) { d.open = open; }); expandSubs.textContent = open ? "Collapse all" : "Expand all";
+    });
+    var openTarget = function () {
+      var target = location.hash && document.getElementById(location.hash.slice(1));
+      if (!target) { var first = $(".dsa-sub"); if (first) first.open = true; return; }
+      var d = target.closest("details"); if (d) d.open = true;
+      target.hidden = false; target.classList.add("is-target");
+      setTimeout(function () { target.scrollIntoView({ block: "center" }); }, 30);
+    };
+    window.addEventListener("hashchange", openTarget);
+    window.addEventListener("scroll", function () { $$(".pat-pop").forEach(function (p) { p.hidden = true; }); }, { passive: true });
     BB.on(function (w) { if (w === "progress") paintSheet(); });
+    window.addEventListener("storage", function (e) { if (e.key === "bb-dsa-marks" || e.key === "bb-dsa-notes") paintSheet(); });
     paintSheet();
-    if (location.hash) { var target = document.getElementById(location.hash.slice(1)); if (target) { target.hidden = false; target.classList.add("is-target"); } }
+    openTarget();
   }
 
   // ── search palette ─────────────────────────────────────────────
@@ -604,7 +701,7 @@
 
   // ── settings: theme, backup, restore, reset ────────────────────
   var DATA_KEYS = {
-    progress: { label: "Progress & brain", desc: "Completed lessons, solved problems, learned concepts, neurons", keys: ["bb-done-at", "bb-last", "hc-done", "hc-last"] },
+    progress: { label: "Progress & brain", desc: "Completed lessons, solved problems, learned concepts, neurons", keys: ["bb-done-at", "bb-last", "hc-done", "hc-last", "bb-dsa-marks", "bb-dsa-notes"] },
     focus: { label: "Focus history", desc: "Sessions, running timer and withered history", keys: ["bb-sessions", "bb-focus"] },
     tasks: { label: "Tasks & lists", desc: "All tasks, subtasks and custom lists", keys: ["bb-tasks", "bb-lists"] },
     habits: { label: "Habits", desc: "Custom habits and check-ins", keys: ["bb-habits"] },
