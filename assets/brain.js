@@ -1,7 +1,10 @@
 /* BLACKBOX brain — a dependency-free 3D neural map rendered on <canvas>.
    Neurons are laid out on an anatomical brain surface (two folded hemispheres, cerebellum,
-   brain stem) and split into regions: one per domain, nearest anchor wins. Lessons and focus
-   minutes light neurons outward from each region's anchor. Always drawn on a dark screen. */
+   brain stem) and split into regions, nearest anchor wins. At the top level the regions are
+   lobes (DevOps, DSA, System Design, …); setLevel() swaps in any other set of regions — a
+   lobe's topics, a topic's subtopics, single problems — with a zoom-through transition, so
+   you "go inside" the brain. Progress lights neurons outward from each region's anchor, and
+   the whole brain grows as more of it is wired. Always drawn on a dark screen. */
 (function () {
   "use strict";
   var BB = window.BB;
@@ -20,7 +23,7 @@
 
   // ── geometry (built once, shared) ──────────────────────────────
   var GEO = null;
-  function geometry(domains) {
+  function geometry() {
     if (GEO) return GEO;
     var r = rng(20260924), N = 2300, P = [];
     function surf() { return 1 - Math.pow(r(), 4) * 0.34; }           // mostly on the cortex surface
@@ -53,27 +56,6 @@
     }
     P.forEach(function (p) { p.s = 0.7 + r() * 0.6; p.ph = r() * 6.283; });
 
-    // Regions: nearest anchor, ranked by distance so knowledge spreads outward.
-    var regions = {};
-    domains.forEach(function (d) { regions[d.id] = []; });
-    P.forEach(function (p, i) {
-      var best = 0, bd = 1e9;
-      domains.forEach(function (d, j) {
-        var an = d.anchor, dd = (p.x - an[0]) * (p.x - an[0]) + (p.y - an[1]) * (p.y - an[1]) + (p.z - an[2]) * (p.z - an[2]);
-        if (dd < bd) { bd = dd; best = j; }
-      });
-      p.d = best; p.dist = bd;
-      regions[domains[best].id].push(i);
-    });
-    var centroid = {};
-    Object.keys(regions).forEach(function (id) {
-      regions[id].sort(function (a, b) { return P[a].dist - P[b].dist; });
-      var cx = 0, cy = 0, cz = 0;
-      regions[id].forEach(function (idx, rank) { P[idx].rank = rank; cx += P[idx].x; cy += P[idx].y; cz += P[idx].z; });
-      var n = Math.max(1, regions[id].length);
-      centroid[id] = [cx / n, cy / n, cz / n];
-    });
-
     // Synapses: nearest neighbours (grid-bucketed so it stays fast with more neurons).
     var edges = [], seen = {}, adj = P.map(function () { return []; }), cell = 0.14, grid = {};
     function key(x, y, z) { return Math.floor(x / cell) + "," + Math.floor(y / cell) + "," + Math.floor(z / cell); }
@@ -94,8 +76,57 @@
         seen[k] = 1; adj[a].push(edges.length); adj[b].push(edges.length); edges.push([a, b]);
       });
     });
-    GEO = { nodes: P, edges: edges, adj: adj, regions: regions, centroid: centroid };
+    GEO = { nodes: P, edges: edges, adj: adj };
     return GEO;
+  }
+
+  // Spread n anchors over the cortex (farthest-point sampling, deterministic) for levels
+  // whose regions don't name their own anchor.
+  var anchorCache = {};
+  function autoAnchors(n) {
+    if (anchorCache[n]) return anchorCache[n];
+    var P = geometry().nodes, pool = [], out = [], best = 0, bd = 1e9, i;
+    for (i = 0; i < P.length; i += 3) if (P[i].part === 0) pool.push(P[i]);
+    pool.forEach(function (p, j) { var d = (p.x + 0.2) * (p.x + 0.2) + (p.y - 0.6) * (p.y - 0.6) + (p.z - 0.9) * (p.z - 0.9); if (d < bd) { bd = d; best = j; } });
+    var dist = pool.map(function () { return 1e9; });
+    while (out.length < n) {
+      var p = pool[best];
+      out.push([p.x, p.y, p.z]);
+      var far = -1;
+      pool.forEach(function (q, j) {
+        var d = (q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y) + (q.z - p.z) * (q.z - p.z);
+        if (d < dist[j]) dist[j] = d;
+        if (dist[j] > far) { far = dist[j]; best = j; }
+      });
+    }
+    // Order anchors front-left → back-right so neighbouring siblings sit side by side.
+    out.sort(function (a, b) { return (b[2] - a[2]) * 2 + (a[0] - b[0]) || 0; });
+    return (anchorCache[n] = out);
+  }
+
+  // Assign every neuron to its nearest region anchor, ranked by distance so progress spreads outward.
+  function assign(regions) {
+    var P = geometry().nodes, anchors = regions.some(function (d) { return !d.anchor; }) ? autoAnchors(regions.length) : null;
+    var byId = {}, ranks = new Int32Array(P.length), owner = new Int32Array(P.length), dist = new Float32Array(P.length);
+    regions.forEach(function (d) { byId[d.id] = []; });
+    P.forEach(function (p, i) {
+      var best = 0, bd = 1e9;
+      regions.forEach(function (d, j) {
+        var an = anchors ? anchors[j] : d.anchor, dd = (p.x - an[0]) * (p.x - an[0]) + (p.y - an[1]) * (p.y - an[1]) + (p.z - an[2]) * (p.z - an[2]);
+        if (dd < bd) { bd = dd; best = j; }
+      });
+      owner[i] = best; dist[i] = bd;
+      byId[regions[best].id].push(i);
+    });
+    var centroid = {};
+    Object.keys(byId).forEach(function (id) {
+      byId[id].sort(function (a, b) { return dist[a] - dist[b]; });
+      var cx = 0, cy = 0, cz = 0;
+      byId[id].forEach(function (idx, rank) { ranks[idx] = rank; cx += P[idx].x; cy += P[idx].y; cz += P[idx].z; });
+      var n = Math.max(1, byId[id].length);
+      centroid[id] = [cx / n, cy / n, cz / n];
+    });
+    return { regions: byId, owner: owner, rank: ranks, centroid: centroid };
   }
 
   function sprite(hex) {
@@ -123,10 +154,10 @@
   // ── renderer ───────────────────────────────────────────────────
   function Brain(canvas, opts) {
     opts = opts || {};
-    var domains = BB.DATA.domains;
-    var G = geometry(domains);
+    var G = geometry();
+    var domains = [], A = null;                                         // current level's regions + assignment
     var nodes = G.nodes.map(function (n) {
-      return { x: n.x, y: n.y, z: n.z, d: n.d, rank: n.rank, s: n.s, ph: n.ph, g: 0, t: 0, wait: 0, flash: 0, dead: 0, grow: false, tw: 0 };
+      return { x: n.x, y: n.y, z: n.z, d: 0, rank: 0, s: n.s, ph: n.ph, g: 0, t: 0, wait: 0, flash: 0, dead: 0, grow: false, tw: 0 };
     });
     var ctx = canvas.getContext("2d");
     var W = 0, H = 0, DPR = 1;
@@ -134,14 +165,25 @@
     var tiltX = 0, tiltY = 0, aimX = 0, aimY = 0;                      // cursor parallax
     var dragging = false, moved = 0, lastX = 0, lastY = 0, vel = 0, idleUntil = 0;
     var highlight = null, first = true, running = false, visible = true, raf = 0, last = 0, hl = {};
-    var sprites = domains.map(function (d) { return sprite(d.color); });
+    var sprites = [], dots = [];
     var spriteWhite = sprite("#dfe7ff"), spriteRed = sprite("#ff4d5e");
-    var dots = domains.map(function (d) { return dot(d.color); });
     var pulses = [], ghosts = [];
     var PX = new Float32Array(nodes.length), PY = new Float32Array(nodes.length), PZ = new Float32Array(nodes.length);
     var stats = { neurons: 0, total: nodes.length, synapses: 0, regions: 0, byRegion: {} };
     var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    domains.forEach(function (d) { hl[d.id] = 0; });
+    var growth = 0.84, growthAim = 0.84;                                // the brain physically grows as it's wired
+    var tr = null;                                                      // level transition in flight
+
+    function useRegions(list) {
+      domains = list;
+      A = assign(list);
+      nodes.forEach(function (n, i) { n.d = A.owner[i]; n.rank = A.rank[i]; });
+      sprites = list.map(function (d) { return sprite(d.color); });
+      dots = list.map(function (d) { return dot(d.color); });
+      hl = {}; list.forEach(function (d) { hl[d.id] = 0; });
+      highlight = null; pulses = [];
+    }
+    useRegions(opts.regions || BB.DATA.domains);
 
     function resize() {
       DPR = Math.min(2, window.devicePixelRatio || 1);
@@ -150,15 +192,17 @@
       canvas.width = W; canvas.height = H;
     }
 
+    // st: {regionId: {total, done, focusMin, pendingMin, soon}}. Lessons wire up to 75% of a
+    // region and focus minutes the rest; o.full lets lessons wire all of it (inner levels).
     function setState(st, o) {
       o = o || {};
-      var fresh = 0, litTotal = 0, regionsOn = 0;
+      var fresh = 0, litTotal = 0, regionsOn = 0, lessonShare = o.full ? 1 : 0.75;
       stats.byRegion = {};
       domains.forEach(function (d) {
-        var region = G.regions[d.id], size = region.length, s = st[d.id] || {};
-        var seed = s.soon ? 0 : 1;
-        var lessonPart = s.total ? Math.round(size * 0.75 * Math.min(1, s.done / s.total)) : 0;
-        var focusPart = Math.min(Math.floor(size * 0.25), Math.floor((s.focusMin || 0) / 2));
+        var region = A.regions[d.id], size = region.length, s = st[d.id] || {};
+        var seed = s.soon || o.full ? 0 : 1;
+        var lessonPart = s.total ? Math.round(size * lessonShare * Math.min(1, s.done / s.total)) : 0;
+        var focusPart = o.full ? 0 : Math.min(Math.floor(size * 0.25), Math.floor((s.focusMin || 0) / 2));
         var lit = Math.min(size, seed + lessonPart + focusPart);
         var pend = Math.min(size - lit, Math.floor((s.pendingMin || 0) / 2));
         if (lit + pend > seed) regionsOn++;
@@ -166,7 +210,7 @@
         litTotal += lit + pend;
         region.forEach(function (idx, rank) {
           var n = nodes[idx], want = rank < lit ? 1 : rank < lit + pend ? 2 : 0;
-          if (want && !n.t) { n.t = 1; n.wait = first ? Math.random() * 1.6 : (fresh++) * 0.12; }
+          if (want && !n.t) { n.t = 1; n.wait = first ? Math.random() * 1.6 : Math.min(o.quick ? 0.6 : 2.5, (fresh++) * (o.quick ? 0.004 : 0.12)); }
           else if (!want && n.t) { n.t = 0; if (n.grow && o.wither) n.dead = 1; }
           n.grow = want === 2;
         });
@@ -174,10 +218,22 @@
       first = false;
       stats.neurons = litTotal;
       stats.regions = regionsOn;
+      growthAim = 0.84 + 0.16 * Math.sqrt(litTotal / nodes.length);
       var syn = 0;
       G.edges.forEach(function (e) { if (nodes[e[0]].t && nodes[e[1]].t) syn++; });
       stats.synapses = syn;
       if (opts.onStats) opts.onStats(stats);
+    }
+
+    // Swap to another set of regions. dir "in" flies into `from` (a region id of the current
+    // level); "out" pulls back. o.ready() is called at the swap so the caller can setState.
+    function setLevel(list, o) {
+      o = o || {};
+      if (reduced || !o.dir) { useRegions(list); nodes.forEach(function (n) { n.g = n.t = 0; n.grow = false; }); first = true; if (o.ready) o.ready(); return; }
+      var focus = [0, 0, 0];
+      if (o.from && A.centroid[o.from]) focus = A.centroid[o.from];
+      tr = { phase: "out", t: 0, dir: o.dir, focus: focus, list: list, ready: o.ready };
+      schedule();
     }
 
     function spawnPulse() {
@@ -212,7 +268,30 @@
       }
       tiltX += (aimX - tiltX) * Math.min(1, dt * 3);
       tiltY += (aimY - tiltY) * Math.min(1, dt * 3);
+      growth += (growthAim - growth) * Math.min(1, adt * 1.5);
       domains.forEach(function (d) { hl[d.id] += ((highlight === d.id ? 1 : 0) - hl[d.id]) * Math.min(1, dt * 6); });
+
+      // level transition: fly into (or back out of) the brain, swap regions at the midpoint
+      var trZoom = 1, trShift = 0, trAlpha = 1;
+      if (tr) {
+        tr.t += adt / (tr.phase === "out" ? 0.55 : 0.7);
+        var k = Math.min(1, tr.t), ease = k * k * (3 - 2 * k);
+        if (tr.phase === "out") {
+          trZoom = tr.dir === "in" ? 1 + ease * 3.4 : 1 - ease * 0.55; trShift = tr.dir === "in" ? ease : 0; trAlpha = 1 - ease;
+          if (k >= 1 && tr.keep) { var cbk = tr.ready; tr = null; canvas.style.opacity = "0"; if (cbk) cbk(); }
+          else if (k >= 1) {
+            useRegions(tr.list);
+            nodes.forEach(function (n) { n.g = n.t = 0; n.grow = false; n.flash = 0; n.dead = 0; });
+            first = true;
+            if (tr.ready) tr.ready();
+            tr = { phase: "in", t: 0, dir: tr.dir, focus: tr.focus }; trShift = 0;
+          }
+        } else {
+          trZoom = tr.dir === "in" ? 0.45 + 0.55 * ease : 1.9 - 0.9 * ease; trAlpha = ease;
+          if (k >= 1) tr = null;
+        }
+      }
+      canvas.style.opacity = trAlpha < 1 ? trAlpha.toFixed(3) : "";
 
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
@@ -231,8 +310,12 @@
       var cyw = Math.cos(Y), syw = Math.sin(Y), cp = Math.cos(X), sp = Math.sin(X);
       var breathe = reduced ? 1 : 1 + 0.012 * Math.sin(t * 0.9);
       // fit the brain's real extents (≈1.9 long × 1.5 tall incl. stem) in both directions
-      var scale = Math.min(W * 0.45, H * 0.56) * zoom * (opts.fill || 1) * breathe, D = 3.2;
-      var cx = W / 2, cy = H / 2 - 0.1 * scale + (opts.offsetY || 0) * H;
+      var scale = Math.min(W * 0.45, H * 0.56) * zoom * (opts.fill || 1) * breathe * growth * trZoom, D = 3.2;
+      var cx = W / 2, cy = H / 2 - 0.1 * scale / trZoom + (opts.offsetY || 0) * H;
+      if (trShift && tr) {                                               // steer toward the region we're entering
+        var f0 = tr.focus, fx = f0[0] * cyw + f0[2] * syw, fz = -f0[0] * syw + f0[2] * cyw, fy = f0[1] * cp - fz * sp;
+        cx -= fx * scale * trShift; cy += fy * scale * trShift;
+      }
       for (i = 0; i < nodes.length; i++) {
         n = nodes[i];
         var x1 = n.x * cyw + n.z * syw, z1 = -n.x * syw + n.z * cyw;
@@ -361,6 +444,7 @@
 
     // ── interaction ──
     function nearest(clientX, clientY) {
+      if (tr) return null;
       var rect = canvas.getBoundingClientRect(), mx = (clientX - rect.left) * DPR, my = (clientY - rect.top) * DPR;
       var best = -1, bd = (26 * DPR) * (26 * DPR);
       for (var i = 0; i < nodes.length; i++) {
@@ -414,9 +498,18 @@
 
     return {
       setState: setState,
+      setLevel: setLevel,
+      // fly into a region, then call done() (the page swaps to that program's galaxy)
+      zoomTo: function (id, done) {
+        if (reduced) { if (done) done(); return; }
+        tr = { phase: "out", t: 0, dir: "in", focus: A.centroid[id] || [0, 0, 0], list: domains, ready: done, keep: true };
+        schedule();
+      },
+      reset: function () { tr = null; canvas.style.opacity = ""; schedule(); },
+      busy: function () { return !!tr; },
       highlight: function (id) { highlight = id || null; },
       stats: function () { return stats; },
-      regionSize: function (id) { return (G.regions[id] || []).length; }
+      regionSize: function (id) { return (A.regions[id] || []).length; }
     };
   }
 

@@ -1,11 +1,11 @@
-/* BLACKBOX core: storage, progress, focus engine, tasks store, search, theme, lesson page. */
+/* BLACKBOX core: storage, progress, focus engine, tasks store, search, lesson page. */
 (function () {
   "use strict";
 
   var doc = document.documentElement;
   var ROOT = doc.getAttribute("data-root") || "";
   var PAGE = doc.getAttribute("data-page");
-  var DATA = window.BB_DATA || { domains: [], tracks: {}, total: 0 };
+  var DATA = window.BB_DATA || { domains: [], tracks: {}, total: 0, aliases: {} };
   var isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
   var BB = (window.BB = { ROOT: ROOT, PAGE: PAGE, DATA: DATA });
 
@@ -39,8 +39,8 @@
   // ── domains ────────────────────────────────────────────────────
   var domainMap = {};
   DATA.domains.forEach(function (d) { domainMap[d.id] = d; });
-  BB.domain = function (id) { return domainMap[id] || DATA.domains[0]; };
-  BB.domainOfLesson = function (lid) { var t = DATA.tracks[(lid || "").split("/")[0]]; return t ? t.d : "foundations"; };
+  BB.domain = function (id) { return domainMap[id] || domainMap[(DATA.aliases || {})[id]] || DATA.domains[0]; };
+  BB.domainOfLesson = function (lid) { var t = DATA.tracks[(lid || "").split("/")[0]]; return t ? t.d : "devops"; };
 
   // ── toast & sound ──────────────────────────────────────────────
   function toast(msg, color) {
@@ -233,30 +233,27 @@
   };
 
   // ── brain state (consumed by brain.js) ─────────────────────────
-  BB.brainState = function () {
+  // `at` (ms) rewinds to how the brain looked then; omitted means now, including a running session.
+  BB.brainState = function (at) {
     var st = {};
     DATA.domains.forEach(function (d) { st[d.id] = { total: d.total, done: 0, focusMin: 0, pendingMin: 0, soon: d.soon }; });
-    Object.keys(doneAt).forEach(function (id) { var d = st[BB.domainOfLesson(id)]; if (d) d.done++; });
-    BB.sessions().forEach(function (s) { if (s.status === "done" && st[s.domain]) st[s.domain].focusMin += s.min; });
+    Object.keys(doneAt).forEach(function (id) { if (at != null && doneAt[id] > at) return; var d = st[BB.domainOfLesson(id)]; if (d) d.done++; });
+    BB.sessions().forEach(function (s) {
+      var d = st[BB.domain(s.domain).id];
+      if (s.status === "done" && d && (at == null || s.start <= at)) d.focusMin += s.min;
+    });
     var a = F.get();
-    if (a && a.mode === "focus" && st[a.domain]) st[a.domain].pendingMin = F.elapsed(a) / 60000;
+    if (at == null && a && a.mode === "focus" && st[BB.domain(a.domain).id]) st[BB.domain(a.domain).id].pendingMin = F.elapsed(a) / 60000;
     return st;
   };
+  // When you started: the first completion or focus session (legacy completions have no time).
+  BB.firstActivity = function () {
+    var t = Infinity;
+    Object.keys(doneAt).forEach(function (id) { if (doneAt[id]) t = Math.min(t, doneAt[id]); });
+    BB.sessions().forEach(function (s) { if (s.status === "done") t = Math.min(t, s.start); });
+    return t === Infinity ? null : t;
+  };
 
-  // ── theme ──────────────────────────────────────────────────────
-  function setTheme(t, persist) {
-    doc.setAttribute("data-theme", t);
-    if (persist) { try { localStorage.setItem("theme", t); } catch (e) {} }
-    emit("theme");
-  }
-  function toggleTheme() { setTheme(doc.getAttribute("data-theme") === "dark" ? "light" : "dark", true); }
-  $$("[data-theme-toggle]").forEach(function (b) { b.addEventListener("click", toggleTheme); });
-  try {
-    matchMedia("(prefers-color-scheme: light)").addEventListener("change", function (e) {
-      var stored = null; try { stored = localStorage.getItem("theme"); } catch (err) {}
-      if (!stored) setTheme(e.matches ? "light" : "dark", false);
-    });
-  } catch (e) {}
   if (!isMac) $$("[data-mod-key]").forEach(function (k) { k.textContent = "Ctrl K"; });
 
   // ── progress painting ──────────────────────────────────────────
@@ -273,6 +270,8 @@
       if (bar) bar.style.setProperty("--p", n / total);
       var c = $("[data-progress-count]", el);
       if (c) c.textContent = n;
+      var pc = $("[data-progress-pct]", el);
+      if (pc) pc.textContent = Math.round(n / total * 100) + "%";
       el.classList.toggle("is-complete", n >= total);
     });
     $$("[data-nd-track]").forEach(function (el) {
@@ -303,7 +302,6 @@
     else if (e.key === "bb-tasks" || e.key === "bb-lists") emit("tasks");
     else if (e.key === "bb-sessions") emit("session", {});
     else if (e.key === "bb-habits") emit("habits");
-    else if (e.key === "theme" && e.newValue) setTheme(e.newValue, false);
   });
 
   // ── home: continue card ────────────────────────────────────────
@@ -349,6 +347,7 @@
 
   if (article) {
     var lid = article.getAttribute("data-lesson-id");
+    if (lid) {   // HamChops lessons; Backend chapters share the reading features below
     var ltitle = article.getAttribute("data-lesson-title");
     var dom = BB.domain(article.getAttribute("data-domain"));
     save("bb-last", { id: lid, title: ltitle, sub: article.getAttribute("data-lesson-sub") });
@@ -376,8 +375,9 @@
       F.start({ min: 25, domain: dom.id, label: ltitle, task: t ? t.id : null });
       toast("25-minute focus started — neurons growing in " + dom.short, "var(--red)");
     });
+    }
 
-    $$(".prose .codehilite").forEach(function (block) {
+    $$(".prose .codehilite, .prose .cb").forEach(function (block) {
       var btn = document.createElement("button");
       btn.className = "copy-btn"; btn.type = "button";
       btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy</span>';
@@ -430,6 +430,204 @@
     $$("[data-drawer-close]").forEach(function (b) { b.addEventListener("click", function () { document.body.classList.remove("drawer-open"); }); });
     var cur = $(".sidebar .is-current"), sideInner = $(".sidebar-inner");
     if (cur && sideInner && sideInner.scrollHeight > sideInner.clientHeight) sideInner.scrollTop = cur.offsetTop - sideInner.clientHeight / 2;
+  }
+
+  // ── DSA / System Design sheets: tick items, bookmarks, revision, notes, filters ──
+  // Bookmarks/revision live in bb-dsa-marks ({id: {b: 1, r: 1}}) and notes in bb-dsa-notes
+  // ({id: text}); like everything bb-*, they sync to your account.
+  BB.marks = function () { return load("bb-dsa-marks", {}); };
+  BB.notes = function () { return load("bb-dsa-notes", {}); };
+  // Problem rows for the Revision/Bookmarks tabs and the Tracks page load on demand.
+  BB.dsaRows = function (cb) {
+    if (window.BB_DSA_ROWS) return cb(window.BB_DSA_ROWS);
+    var sc = document.createElement("script"); sc.src = ROOT + "assets/dsa-rows.js";
+    sc.onload = function () { cb(window.BB_DSA_ROWS || {}); };
+    document.head.appendChild(sc);
+  };
+  BB.dsaRowHtml = function (r, n) {
+    return r[3].split("{ROOT}").join(ROOT).replace('<td class="pn">0</td>', '<td class="pn">' + n + "</td>");
+  };
+  if (PAGE === "dsa" || PAGE === "sd" || PAGE === "be-chapter" || PAGE === "tracks") {
+    var statusSel = $("[data-status-filter]"), levelSel = $("[data-level-filter]"), hideDone = $("[data-hide-done]");
+    var paintSheet = function () {
+      var marks = BB.marks(), notes = BB.notes();
+      if (tab && tab !== "roadmap") renderCollection();
+      var st = statusSel ? statusSel.value : "all", lv = levelSel ? levelSel.value : "all", hide = hideDone && hideDone.checked, shown = 0, all = 0;
+      $$(".prob[data-lesson], .item[data-lesson]").forEach(function (row) {
+        var id = row.getAttribute("data-lesson"), done = BB.isDone(id), m = marks[id] || {};
+        row.classList.toggle("is-done", done);
+        $$("[data-mark]", row).forEach(function (b) { var on = !!m[b.getAttribute("data-mark")]; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
+        var nb = $("[data-note]", row); if (nb) nb.classList.toggle("on", !!notes[id]);
+        if (!row.closest(".sheet")) return;
+        all++;
+        row.hidden = (st === "solved" && !done) || (st === "unsolved" && done) || (lv !== "all" && row.getAttribute("data-level") !== lv) || (hide && done);
+        if (!row.hidden) shown++;
+      });
+      $$(".sheet-sub").forEach(function (sec) { sec.hidden = !$$("[data-lesson]", sec).some(function (r) { return !r.hidden; }); });
+      var fc = $("[data-filter-count]"); if (fc) fc.textContent = "Showing " + shown + " of " + all + " problems";
+      var levels = window.BB_LEVELS;
+      if (levels) $$("[data-level-done]").forEach(function (el) {
+        var k = el.getAttribute("data-level-done").charAt(0), n = 0;
+        Object.keys(levels).forEach(function (id) { if (levels[id] === k && BB.isDone(id)) n++; });
+        el.textContent = n;
+      });
+      $$("[data-mark-count]").forEach(function (el) {
+        var k = el.getAttribute("data-mark-count"); el.textContent = Object.keys(marks).filter(function (id) { return marks[id][k]; }).length;
+      });
+    };
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-toggle-done], [data-mark], [data-pattern], [data-note]");
+      if (!b) { $$(".pat-pop").forEach(function (p) { if (!p.contains(e.target)) p.hidden = true; }); return; }
+      var row = b.closest("[data-lesson]"), id = row.getAttribute("data-lesson"), name = ($(".pt a, .it-title", row) || {}).textContent || "";
+      if (b.hasAttribute("data-toggle-done")) {
+        var on = !BB.isDone(id), dom = BB.domain(BB.domainOfLesson(id));
+        BB.setDone(id, on);
+        if (on) { b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop"); toast("Neuron wired in " + dom.name, dom.color); }
+      } else if (b.hasAttribute("data-mark")) {
+        var k = b.getAttribute("data-mark"), marks = BB.marks(), m = marks[id] || {};
+        if (m[k]) delete m[k]; else m[k] = 1;
+        if (Object.keys(m).length) marks[id] = m; else delete marks[id];
+        save("bb-dsa-marks", marks);
+        toast(k === "b" ? (m.b ? "Bookmarked" : "Bookmark removed") : (m.r ? "Added to revision" : "Removed from revision"), m[k] ? "var(--warn)" : undefined);
+      } else if (b.hasAttribute("data-pattern")) {
+        var pop = b.nextElementSibling, open = pop.hidden;
+        $$(".pat-pop").forEach(function (p) { p.hidden = true; });
+        pop.hidden = !open;
+        if (open) {   // fixed to the viewport so the scrolling table can't clip it
+          var r = b.getBoundingClientRect(), w = Math.min(320, window.innerWidth - 32);
+          pop.style.left = Math.max(16, Math.min(window.innerWidth - w - 16, r.right - w)) + "px";
+          pop.style.top = (r.bottom + pop.offsetHeight + 8 > window.innerHeight ? Math.max(8, r.top - pop.offsetHeight - 6) : r.bottom + 6) + "px";
+        }
+      } else openNote(id, name);
+      paintSheet();
+    });
+    var noteModal = null;
+    var openNote = function (id, name) {
+      if (!noteModal) {
+        noteModal = document.createElement("div");
+        noteModal.className = "modal"; noteModal.setAttribute("role", "dialog"); noteModal.setAttribute("aria-modal", "true");
+        noteModal.innerHTML = '<div class="modal-backdrop" data-close></div><div class="modal-box note-box"><div class="modal-head"><div><p class="mono-label">/ notes</p><h2 data-note-title></h2></div>' +
+          '<button class="icon-btn" data-close aria-label="Close">✕</button></div><textarea data-note-text rows="10" placeholder="Approach, edge cases, mistakes to remember…"></textarea>' +
+          '<div class="modal-row"><button class="btn btn-primary sm" data-note-save>Save note</button><button class="btn btn-ghost sm" data-close>Cancel</button></div></div>';
+        document.body.appendChild(noteModal);
+        $$("[data-close]", noteModal).forEach(function (x) { x.addEventListener("click", function () { noteModal.hidden = true; }); });
+        $("[data-note-save]", noteModal).addEventListener("click", function () {
+          var notes = BB.notes(), v = $("[data-note-text]", noteModal).value.trim(), nid = noteModal.getAttribute("data-id");
+          if (v) notes[nid] = v.slice(0, 20000); else delete notes[nid];
+          save("bb-dsa-notes", notes); noteModal.hidden = true; toast(v ? "Note saved" : "Note removed", "var(--ok)"); paintSheet();
+        });
+      }
+      noteModal.setAttribute("data-id", id);
+      $("[data-note-title]", noteModal).textContent = name;
+      $("[data-note-text]", noteModal).value = BB.notes()[id] || "";
+      noteModal.hidden = false;
+      setTimeout(function () { $("[data-note-text]", noteModal).focus(); }, 30);
+    };
+    // Revision / Bookmarks tabs on the roadmap page
+    var tab = "roadmap";
+    var renderCollection = function () {
+      var body = $("[data-coll-body]"), rows = window.BB_DSA_ROWS;
+      if (!body) return;
+      if (!rows) {
+        body.innerHTML = '<tr><td colspan="8" class="coll-empty">Loading…</td></tr>';
+        BB.dsaRows(function () { renderCollection(); paintSheet(); });
+        return;
+      }
+      var marks = BB.marks(), ids = Object.keys(rows).filter(function (id) { return (marks[id] || {})[tab]; }), last = null, html = "";
+      ids.forEach(function (id, i) {
+        var r = rows[id];
+        if (r[1] !== last) { html += '<tr class="coll-topic"><td colspan="8"><a href="' + esc(r[0]) + '/index.html">' + esc(r[1]) + " →</a></td></tr>"; last = r[1]; }
+        html += BB.dsaRowHtml(r, i + 1);
+      });
+      body.innerHTML = html || '<tr><td colspan="8" class="coll-empty">' + (tab === "r" ? "Nothing to revise yet — press the ↻ button on a problem to add it here." : "No bookmarks yet — press ☆ on a problem to save it here.") + "</td></tr>";
+      $("[data-coll-sub]").textContent = tab === "r" ? "Revisit these problems when you are ready." : "Your saved problems in one place.";
+    };
+    if (location.hash === "#r" || location.hash === "#b") setTimeout(function () { var tb = $('[data-dsa-tabs] [data-tab="' + location.hash.slice(1) + '"]'); if (tb) tb.click(); }, 0);
+    BB.paintSheet = function () { paintSheet(); };
+    $$("[data-dsa-tabs] button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        tab = b.getAttribute("data-tab");
+        $$("[data-dsa-tabs] button").forEach(function (x) { x.classList.toggle("is-active", x === b); });
+        $("[data-tab-pane=roadmap]").hidden = tab !== "roadmap";
+        $("[data-tab-pane=collection]").hidden = tab === "roadmap";
+        paintSheet();
+      });
+    });
+    [statusSel, levelSel].forEach(function (sel) { if (sel) sel.addEventListener("change", function () {
+      if (sel.value !== "all") $$(".dsa-sub").forEach(function (d) { d.open = true; });
+      paintSheet();
+    }); });
+    if (hideDone) {
+      hideDone.checked = !!load("bb-sheet-hide-done", false);
+      hideDone.addEventListener("change", function () { save("bb-sheet-hide-done", hideDone.checked); paintSheet(); });
+    }
+    var expandSubs = $("[data-expand-subs]");
+    if (expandSubs) expandSubs.addEventListener("click", function () {
+      var subs = $$(".dsa-sub"), open = subs.some(function (d) { return !d.open; });
+      subs.forEach(function (d) { d.open = open; }); expandSubs.textContent = open ? "Collapse all" : "Expand all";
+    });
+    var openTarget = function () {
+      var target = location.hash && document.getElementById(location.hash.slice(1));
+      if (!target) { var first = $(".dsa-sub"); if (first) first.open = true; return; }
+      var d = target.closest("details"); if (d) d.open = true;
+      target.hidden = false; target.classList.add("is-target");
+      setTimeout(function () { target.scrollIntoView({ block: "center" }); }, 30);
+    };
+    window.addEventListener("hashchange", openTarget);
+    window.addEventListener("scroll", function () { $$(".pat-pop").forEach(function (p) { p.hidden = true; }); }, { passive: true });
+    BB.on(function (w) { if (w === "progress") paintSheet(); });
+    window.addEventListener("storage", function (e) { if (e.key === "bb-dsa-marks" || e.key === "bb-dsa-notes") paintSheet(); });
+    paintSheet();
+    openTarget();
+  }
+
+  // ── Backend chapters: whole-chapter complete, language tabs, diagrams ──
+  var beChapter = $("[data-be-chapter]");
+  if (beChapter) {
+    var beIds = $$(".be-sec[data-lesson]").map(function (x) { return x.getAttribute("data-lesson"); });
+    var beBtn = $("[data-be-complete]");
+    var paintBe = function () { beBtn.classList.toggle("is-done", beIds.length > 0 && beIds.every(BB.isDone)); };
+    beBtn.addEventListener("click", function () {
+      var all = beIds.every(BB.isDone);
+      beIds.forEach(function (id) { if (all ? BB.isDone(id) : !BB.isDone(id)) { if (all) delete doneAt[id]; else doneAt[id] = Date.now(); } });
+      save("bb-done-at", doneAt); emit("progress");
+      toast(all ? "Chapter marked not complete" : "Chapter complete · " + beIds.length + " neurons wired in Backend", all ? undefined : BB.domain("backend").color);
+    });
+    BB.on(function (w) { if (w === "progress") paintBe(); });
+    paintBe();
+    save("bb-last", { id: location.pathname.replace(/^.*?(backend\/[^/]+)\/.*$/, "$1"), title: $("h1").textContent, sub: "Backend" });
+  }
+  var setLang = function (lang, persist) {
+    $$(".code-tabs").forEach(function (g) {
+      if (!$('[data-tab-lang="' + lang + '"]', g)) return;
+      $$("[data-tab-lang]", g).forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-tab-lang") === lang); });
+      $$("[data-pane-lang]", g).forEach(function (p) { p.hidden = p.getAttribute("data-pane-lang") !== lang; });
+    });
+    if (persist) save("bb-code-lang", lang);
+  };
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-tab-lang]");
+    if (!b) return;
+    var y = b.getBoundingClientRect().top;
+    setLang(b.getAttribute("data-tab-lang"), true);
+    window.scrollBy(0, b.getBoundingClientRect().top - y);   // keep the clicked tab still while other groups resize
+  });
+  if ($(".code-tabs") && load("bb-code-lang", null)) setLang(load("bb-code-lang", null), false);
+  // Some inherited diagrams draw outside their viewBox; grow it to fit what the browser actually lays out.
+  if ($(".diagram-frame svg")) {
+    var fitDiagrams = function () {
+      $$(".diagram-frame svg").forEach(function (svg) {
+        var raw = svg.getAttribute("viewBox"); if (!raw) return;
+        var v = raw.trim().split(/[\s,]+/).map(Number), box;
+        try { box = svg.getBBox(); } catch (err) { return; }
+        if (!box || !box.width) return;
+        var nx = Math.min(v[0], Math.floor(box.x)), ny = Math.min(v[1], Math.floor(box.y));
+        var nw = Math.max(v[0] + v[2], Math.ceil(box.x + box.width)) - nx, nh = Math.max(v[1] + v[3], Math.ceil(box.y + box.height)) - ny;
+        if (nw - v[2] < 4 && nh - v[3] < 4 && v[0] - nx < 4 && v[1] - ny < 4) return;
+        svg.setAttribute("viewBox", nx + " " + ny + " " + nw + " " + nh);
+      });
+    };
+    (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(fitDiagrams, fitDiagrams);
   }
 
   // ── search palette ─────────────────────────────────────────────
@@ -549,13 +747,13 @@
   BB.openSearch = openSearch;
   $$("[data-open-search]").forEach(function (b) { b.addEventListener("click", function () { openSearch(); }); b.addEventListener("pointerenter", ensureIndex, { once: true }); });
 
-  // ── settings: theme, backup, restore, reset ────────────────────
+  // ── settings: account, backup, restore, reset ────────────────────
   var DATA_KEYS = {
-    progress: { label: "Lesson progress & brain", desc: "Completed lessons, neurons and last position", keys: ["bb-done-at", "bb-last", "hc-done", "hc-last"] },
+    progress: { label: "Progress & brain", desc: "Completed lessons, solved problems, learned concepts, neurons", keys: ["bb-done-at", "bb-last", "hc-done", "hc-last", "bb-dsa-marks", "bb-dsa-notes"] },
     focus: { label: "Focus history", desc: "Sessions, running timer and withered history", keys: ["bb-sessions", "bb-focus"] },
     tasks: { label: "Tasks & lists", desc: "All tasks, subtasks and custom lists", keys: ["bb-tasks", "bb-lists"] },
     habits: { label: "Habits", desc: "Custom habits and check-ins", keys: ["bb-habits"] },
-    prefs: { label: "Preferences", desc: "Timer lengths, deep focus, views, theme", keys: ["bb-dur-focus", "bb-dur-short", "bb-dur-long", "bb-strict", "bb-focus-domain", "bb-tasks-view", "bb-tasks-list", "bb-term-hist", "theme"] }
+    prefs: { label: "Preferences", desc: "Timer lengths, deep focus, views", keys: ["bb-dur-focus", "bb-dur-short", "bb-dur-long", "bb-strict", "bb-focus-domain", "bb-tasks-view", "bb-tasks-list", "bb-term-hist", "bb-sheet-hide-done"] }
   };
   function allKeys() { var k = []; Object.keys(DATA_KEYS).forEach(function (g) { k = k.concat(DATA_KEYS[g].keys); }); return k; }
   function exportData() {
@@ -597,10 +795,27 @@
       settings.setAttribute("role", "dialog"); settings.setAttribute("aria-modal", "true"); settings.setAttribute("aria-label", "Settings");
       settings.innerHTML = '<div class="modal-backdrop" data-close></div><div class="modal-box">' +
         '<div class="modal-head"><div><p class="mono-label">/ settings</p><h2>Settings &amp; data</h2></div><button class="icon-btn" data-close aria-label="Close">✕</button></div>' +
-        '<section class="modal-sec"><h3>Appearance</h3><div class="seg" data-theme-seg><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="system">System</button></div></section>' +
-        '<section class="modal-sec"><h3>Sync</h3><div class="sync-row"><span class="sync-status" data-sync-status></span><button class="btn btn-ghost sm" data-sync-now>Sync now</button></div>' +
-        '<p class="modal-note">Progress, tasks, habits and focus history are saved on your BLACKBOX server (a Docker volume) and kept in sync across browsers.</p></section>' +
-        '<section class="modal-sec"><h3>Backup</h3><p class="modal-note">Everything lives in this browser. Export a backup before resetting or switching browsers.</p>' +
+        '<section class="modal-sec"><h3>Account &amp; sync</h3><div class="sync-row"><span class="sync-status" data-sync-status></span><button class="btn btn-ghost sm" data-sync-now>Sync now</button></div>' +
+        '<p class="modal-note" data-account-note></p></section>' +
+        '<section class="modal-sec" data-acct-sec hidden><h3>Account</h3>' +
+        '<form class="acct-form" data-email-form><span class="mono-label">Email <em>— for password-reset links</em></span><div class="acct-row">' +
+        '<input type="email" name="email" placeholder="you@example.com" autocomplete="email" aria-label="Email">' +
+        '<input type="password" name="password" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
+        '<button class="btn btn-ghost sm" type="submit">Save</button></div></form>' +
+        '<form class="acct-form" data-pw-form><span class="mono-label" data-pw-title>Password</span><div class="acct-row">' +
+        '<input type="password" name="current" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
+        '<input type="password" name="password" placeholder="New password (8+ characters)" autocomplete="new-password" aria-label="New password">' +
+        '<button class="btn btn-ghost sm" type="submit" data-pw-btn>Change password</button></div></form>' +
+        '<div class="acct-form" data-google-row hidden><span class="mono-label">Google</span><div class="acct-row"><span class="acct-state" data-google-state></span>' +
+        '<a class="btn btn-ghost sm" data-google-link href="#">Link Google account</a></div></div>' +
+        '<form class="acct-form" data-codes-form><span class="mono-label">Recovery codes <em>— sign in if you forget your password</em></span><div class="acct-row">' +
+        '<input type="password" name="password" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
+        '<button class="btn btn-ghost sm" type="submit">Make new codes</button></div><ol class="codes" data-new-codes hidden></ol></form>' +
+        '<form class="acct-form danger" data-delete-form><span class="mono-label">Delete account <em>— removes your account and all its saved data</em></span><div class="acct-row">' +
+        '<input type="text" name="confirm" placeholder="Type your username" autocomplete="off" aria-label="Type your username to confirm">' +
+        '<input type="password" name="password" placeholder="Current password" autocomplete="current-password" aria-label="Current password" data-needs-pw>' +
+        '<button class="btn btn-red sm" type="submit">Delete</button></div></form></section>' +
+        '<section class="modal-sec"><h3>Backup</h3><p class="modal-note">Export a JSON copy of everything, or restore one into this browser.</p>' +
         '<div class="modal-row"><button class="btn btn-ghost sm" data-export>Export backup</button><label class="btn btn-ghost sm">Import backup<input type="file" accept="application/json" data-import hidden></label></div></section>' +
         '<section class="modal-sec danger-zone"><h3>Reset</h3><p class="modal-note">Choose what to wipe. This can’t be undone (unless you exported a backup).</p><div class="reset-list">' +
         Object.keys(DATA_KEYS).map(function (g) {
@@ -609,15 +824,44 @@
         '<button class="btn btn-red" data-reset disabled>Reset selected data</button></section></div>';
       document.body.appendChild(settings);
       $$("[data-close]", settings).forEach(function (b) { b.addEventListener("click", closeSettings); });
-      $$("[data-t]", settings).forEach(function (b) {
-        b.addEventListener("click", function () {
-          var t = b.getAttribute("data-t");
-          if (t === "system") { try { localStorage.removeItem("theme"); } catch (e) {} setTheme(matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark", false); }
-          else setTheme(t, true);
-          paintSeg();
+      $("[data-export]", settings).addEventListener("click", exportData);
+      var acctForm = function (sel, fn) {
+        var f = $(sel, settings);
+        f.addEventListener("submit", function (e) {
+          e.preventDefault();
+          var btns = $$("button", f); btns.forEach(function (b) { b.disabled = true; });
+          Promise.resolve().then(function () { return fn(f); }).catch(function (err) { toast(err.message, "var(--red)"); })
+            .then(function () { btns.forEach(function (b) { b.disabled = false; }); });
+        });
+      };
+      acctForm("[data-pw-form]", function (f) {
+        if (f.password.value.length < 8) throw new Error("New password must be at least 8 characters");
+        return BB.api("auth/password", { current: f.current.value, password: f.password.value }).then(function () {
+          f.reset(); toast("Password saved · other devices signed out", "var(--ok)"); loadAccount();
         });
       });
-      $("[data-export]", settings).addEventListener("click", exportData);
+      acctForm("[data-email-form]", function (f) {
+        return BB.api("auth/email", { email: f.email.value.trim(), password: f.password.value }).then(function () {
+          f.password.value = ""; toast("Email saved — reset links will go there", "var(--ok)");
+        });
+      });
+      acctForm("[data-codes-form]", function (f) {
+        return BB.api("auth/recovery-codes", { password: f.password.value }).then(function (r) {
+          f.password.value = "";
+          var ol = $("[data-new-codes]", settings);
+          ol.innerHTML = r.recoveryCodes.map(function (c) { return "<li><code>" + esc(c) + "</code></li>"; }).join("");
+          ol.hidden = false; toast("New codes made — the old ones no longer work. Save these now.", "var(--ok)");
+        });
+      });
+      acctForm("[data-delete-form]", function (f) {
+        if (f.confirm.value.trim().toLowerCase() !== (BB.account() || "")) throw new Error("Type your username to confirm");
+        if (!confirm("Delete your account and all of its saved progress? This can’t be undone.")) return;
+        return BB.api("auth/delete", { confirm: f.confirm.value.trim(), password: f.password.value }).then(function () {
+          wipeLocal(); try { localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
+          toast("Account deleted", "var(--red)");
+          setTimeout(function () { location.href = ROOT + "index.html"; }, 700);
+        });
+      });
       $("[data-sync-now]", settings).addEventListener("click", function () { BB.syncNow().then(function () { toast(BB.sync.mode === "synced" ? "Synced" : "Server not reachable", BB.sync.mode === "synced" ? "var(--ok)" : "var(--red)"); }); });
       $("[data-import]", settings).addEventListener("change", function (e) { if (e.target.files[0]) importData(e.target.files[0]); });
       var confirmIn = $("[data-reset-confirm]", settings), resetBtn = $("[data-reset]", settings);
@@ -634,22 +878,42 @@
         setTimeout(function () { location.href = ROOT + "index.html"; }, 600);
       });
     }
-    paintSeg();
     paintSync();
+    var signedIn = !!BB.account() && BB.sync.mode !== "signedout" && BB.sync.mode !== "local";
+    $("[data-acct-sec]", settings).hidden = !signedIn;
+    $("[data-new-codes]", settings).hidden = true;
+    if (signedIn) loadAccount();
+    $("[data-account-note]", settings).innerHTML = BB.sync.mode === "local" ? "This copy has no BLACKBOX server, so everything stays in this browser."
+      : signedIn ? "Signed in as <b>" + esc(BB.account()) + "</b>. Progress, tasks, habits and focus history are saved to your account and synced across devices."
+      : 'Not signed in — your progress is only in this browser. <a href="' + ROOT + 'login/index.html">Sign in or create an account</a> to save it.';
     $("[data-reset-confirm]", settings).value = "";
     $("[data-reset]", settings).disabled = true;
     settings.hidden = false; document.body.style.overflow = "hidden";
   }
-  function paintSeg() {
-    var stored = null; try { stored = localStorage.getItem("theme"); } catch (e) {}
-    $$("[data-t]", settings).forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-t") === (stored || "system")); });
+  // What the account has (email, password, Google) decides which fields the Account section shows.
+  function loadAccount() {
+    BB.api("auth/me").then(function (r) {
+      if (!settings || !r.user) return;
+      $("[data-email-form]", settings).email.value = r.email || "";
+      $$("[data-needs-pw]", settings).forEach(function (i) { i.hidden = !r.hasPassword; i.value = ""; });
+      $("[data-pw-title]", settings).textContent = r.hasPassword ? "Password" : "Password — none yet (you sign in with Google); set one to also sign in with it";
+      $("[data-pw-btn]", settings).textContent = r.hasPassword ? "Change password" : "Set password";
+      var gr = $("[data-google-row]", settings), gp = r.providers && r.providers.google;
+      gr.hidden = !gp && !r.google;
+      $("[data-google-state]", settings).textContent = r.google ? "Linked — you can sign in with Google" : "Not linked";
+      var gl = $("[data-google-link]", settings);
+      gl.hidden = !!r.google || !gp;
+      gl.href = ROOT + "api/auth/google/start?link=1&next=" + encodeURIComponent(location.pathname);
+    }).catch(function () {});
   }
+  if (location.hash === "#google=linked") { setTimeout(function () { toast("Google account linked", "var(--ok)"); }, 300); history.replaceState(null, "", location.pathname + location.search); }
   function paintSync() {
     $$("[data-sync-status]").forEach(function (el) {
       var m = BB.sync.mode, ago = BB.sync.last ? Math.max(0, Math.round((Date.now() - BB.sync.last) / 1000)) : null;
       el.className = "sync-status s-" + m;
-      el.innerHTML = "<i></i>" + (m === "synced" ? "Saved to server · " + (ago < 5 ? "just now" : ago < 60 ? ago + "s ago" : Math.round(ago / 60) + "m ago")
-        : m === "local" ? "This browser only — no sync server" : m === "error" ? "Server unreachable — will retry" : "Connecting…");
+      el.innerHTML = "<i></i>" + (m === "synced" ? "Saved to " + esc(BB.account() || "server") + " · " + (ago < 5 ? "just now" : ago < 60 ? ago + "s ago" : Math.round(ago / 60) + "m ago")
+        : m === "local" ? "This browser only — no sync server" : m === "signedout" ? 'Not signed in — <a href="' + ROOT + 'login/index.html">sign in</a> to save progress'
+        : m === "error" ? "Server unreachable — will retry" : "Connecting…");
     });
   }
   BB.on(function (w) { if (w === "sync") paintSync(); });
@@ -679,18 +943,21 @@
     if (e.key === "Escape") { closeSearch(); closeSettings(); document.body.classList.remove("drawer-open"); return; }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "/") { e.preventDefault(); openSearch(); }
-    else if (e.key === "d" || e.key === "D") toggleTheme();
     else if ((e.key === "f" || e.key === "F") && PAGE !== "focus") location.href = ROOT + "focus/index.html";
     else if (e.key === "ArrowRight") { var n = $("[data-nav-next]"); if (n) location.href = n.href; }
     else if (e.key === "ArrowLeft") { var p = $("[data-nav-prev]"); if (p) location.href = p.href; }
   });
 
   // ── server sync ────────────────────────────────────────────────
-  // localStorage stays the source of truth while you work (offline-first). Every bb-* key
-  // is mirrored to /api/state with a timestamp; the newer write wins on either side.
-  var SYNC_URL = ROOT + "api/state";
-  var syncMeta = load("bb-sync-meta", {}), snapshot = {}, dirty = {}, pushTimer = 0, syncing = false;
+  // localStorage stays the source of truth while you work (offline-first). Once you're signed
+  // in, every bb-* key is mirrored to your account at /api/state with a timestamp; the newer
+  // write wins on either side. Signed out, everything keeps working in this browser only.
+  var SYNC_URL = ROOT + "api/state", ACCOUNT_KEY = "blackbox-account";
+  var syncMeta = load("bb-sync-meta", {}), snapshot = {}, dirty = {}, pushTimer = 0, syncing = false, pulled = false;
+  var account = null;
+  try { account = localStorage.getItem(ACCOUNT_KEY); } catch (e) {}
   BB.sync = { mode: "connecting", last: 0, error: "" };
+  BB.account = function () { return account; };
   var MERGE_BY_ID = { "bb-tasks": 1, "bb-sessions": 1, "bb-habits": 1, "bb-lists": 1 };
   function syncable(k) { return k && k.indexOf("bb-") === 0 && k !== "bb-sync-meta"; }
   function localKeys() {
@@ -708,6 +975,28 @@
   // except collections, which are unioned on that first contact so nothing is lost.
   localKeys().forEach(function (k) { snapshot[k] = raw(k); if (!syncMeta[k]) { syncMeta[k] = 1; dirty[k] = true; } });
   save("bb-sync-meta", syncMeta);
+
+  // Another person's data must never leak into (or be pushed to) the account signing in.
+  function wipeLocal() {
+    localKeys().forEach(function (k) { try { localStorage.removeItem(k); } catch (e) {} });
+    snapshot = {}; syncMeta = {}; dirty = {};
+    save("bb-sync-meta", syncMeta);
+    doneAt = {};
+  }
+  // Browsing signed out and then signing in: treat local data as first contact, so it is
+  // unioned into the account instead of overwriting it with whatever is newest.
+  function markFirstContact() {
+    localKeys().forEach(function (k) { syncMeta[k] = 1; });
+    save("bb-sync-meta", syncMeta);
+  }
+  function setAccount(user) {
+    if (user === account) return;
+    if (account && user && user !== account) { wipeLocal(); rehydrate(); }
+    else if (!account && user) markFirstContact();   // e.g. back from Google sign-in: merge, don't overwrite
+    account = user || null;
+    try { account ? localStorage.setItem(ACCOUNT_KEY, account) : localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
+    emit("account");
+  }
 
   function scan() {
     // Storage wiped outside the app (DevTools, "clear site data"): never propagate that as
@@ -746,6 +1035,7 @@
     return serverV;
   }
   function apply(state) {
+    setAccount(state && state.user);
     var keys = (state && state.keys) || {}, changed = false;
     Object.keys(keys).forEach(function (k) {
       if (!syncable(k)) return;
@@ -772,16 +1062,21 @@
     ["progress", "tasks", "habits", "focus"].forEach(function (w) { emit(w); });
     emit("session", {});
   }
-  function request(method, body, keepalive) {
-    return fetch(SYNC_URL, {
+  function api(url, method, body, keepalive) {
+    return fetch(url, {
       method: method, keepalive: !!keepalive, cache: "no-store", credentials: "same-origin",
       headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined
     }).then(function (r) {
       if (r.status === 404 || r.status === 405 || r.status === 501) { var e = new Error("no server"); e.local = true; throw e; }
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (r.status === 401 && url === SYNC_URL) { var ea = new Error("signed out"); ea.auth = true; throw ea; }
+        if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+        return j;
+      });
     });
   }
+  BB.api = function (path, body) { return api(ROOT + "api/" + path, body ? "POST" : "GET", body); };
+  function failed(e) { setSyncStatus(e.local ? "local" : e.auth ? "signedout" : "error", e.message); }
   function payload() {
     var out = {};
     Object.keys(dirty).forEach(function (k) { out[k] = { v: raw(k), t: syncMeta[k] || Date.now() }; });
@@ -789,30 +1084,184 @@
   }
   function push(keepalive) {
     clearTimeout(pushTimer);
-    if (BB.sync.mode === "local" || !Object.keys(dirty).length) return Promise.resolve();
+    // Never push before the first pull has told us whose account this is.
+    if (!pulled || BB.sync.mode === "local" || BB.sync.mode === "signedout" || !Object.keys(dirty).length) return Promise.resolve();
     var body = payload(), sent = Object.keys(body.keys);
     if (keepalive && JSON.stringify(body).length > 60000) keepalive = false;   // keepalive bodies are size-capped
-    return request("PUT", body, keepalive).then(function (state) {
+    return api(SYNC_URL, "PUT", body, keepalive).then(function (state) {
       sent.forEach(function (k) { if (syncMeta[k] <= body.keys[k].t) delete dirty[k]; });
       apply(state); setSyncStatus("synced");
-    }).catch(function (e) { setSyncStatus(e.local ? "local" : "error", e.message); });
+    }).catch(failed);
   }
   function schedulePush() { clearTimeout(pushTimer); pushTimer = setTimeout(push, 800); }
   function pull() {
     if (syncing) return Promise.resolve();
     syncing = true;
-    return request("GET").then(function (state) { apply(state); setSyncStatus("synced"); })
-      .catch(function (e) { setSyncStatus(e.local ? "local" : "error", e.message); })
+    return api(SYNC_URL, "GET").then(function (state) { pulled = true; apply(state); setSyncStatus("synced"); })
+      .catch(failed)
       .then(function () { syncing = false; });
   }
   BB.syncNow = function () { scan(); return pull().then(function () { return push(); }); };
+  BB.signOut = function () {
+    scan();
+    return push().then(function () { return api(ROOT + "api/auth/logout", "POST", {}); }).catch(function () {}).then(function () {
+      wipeLocal();
+      try { localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
+      location.href = ROOT + "login/index.html";
+    });
+  };
+  // Called by the sign-in page before it redirects.
+  BB.onSignedIn = function (user) {
+    if (account && account !== user) wipeLocal();
+    else if (!account) markFirstContact();
+    account = user;
+    try { localStorage.setItem(ACCOUNT_KEY, user); } catch (e) {}
+  };
   if (location.protocol !== "file:") {
     pull();
     setInterval(scan, 1500);
-    setInterval(function () { if (BB.sync.mode !== "local" && !document.hidden) pull(); }, 30000);
+    setInterval(function () { if (BB.sync.mode !== "local" && BB.sync.mode !== "signedout" && !document.hidden) pull(); }, 30000);
     document.addEventListener("visibilitychange", function () { if (!document.hidden && BB.sync.mode !== "local") pull(); });
     window.addEventListener("pagehide", function () { scan(); push(true); });
   } else setSyncStatus("local");
+
+  // ── account: header button, sign-in page ───────────────────────
+  var acct = $("[data-account]");
+  function paintAccount() {
+    if (!acct) return;
+    var m = BB.sync.mode, signedIn = !!account && m !== "signedout";
+    acct.hidden = m === "local";
+    acct.classList.toggle("is-in", signedIn);
+    acct.classList.toggle("is-out", m === "signedout");
+    $("[data-account-name]", acct).textContent = signedIn ? account : "Sign in";
+    $("[data-account-user]", acct).textContent = account || "";
+    var btn = $("[data-account-btn]", acct);
+    btn.href = ROOT + "login/index.html" + (PAGE === "login" ? "" : "?next=" + encodeURIComponent(location.pathname + location.hash));
+  }
+  if (acct) {
+    var menu = $("[data-account-menu]", acct);
+    $("[data-account-btn]", acct).addEventListener("click", function (e) {
+      if (!acct.classList.contains("is-in")) return;
+      e.preventDefault(); menu.hidden = !menu.hidden;
+    });
+    document.addEventListener("click", function (e) { if (!acct.contains(e.target)) menu.hidden = true; });
+    $("[data-sign-out]", acct).addEventListener("click", function () { menu.hidden = true; BB.signOut(); });
+    $("[data-open-settings]", acct).addEventListener("click", function () { menu.hidden = true; });
+    BB.on(function (w) { if (w === "sync" || w === "account") paintAccount(); });
+    paintAccount();
+  }
+
+  if (PAGE === "login") {
+    var nextUrl = new URLSearchParams(location.search).get("next");
+    if (!nextUrl || !/^\/(?![\/\\])/.test(nextUrl)) nextUrl = ROOT + "index.html";  // same-site paths only
+    var views = $$("[data-view]"), mode = "login", pendingCodes = null, afterCodes = null;
+    var show = function (v) { views.forEach(function (x) { x.hidden = x.getAttribute("data-view") !== v; }); var f = $('[data-view="' + v + '"] input'); if (f) setTimeout(function () { f.focus(); }, 30); };
+    var err = function (sel, msg) { var el = $(sel); el.textContent = msg; el.hidden = !msg; };
+    var busy = function (form, on) { $$("button, input", form).forEach(function (x) { x.disabled = on; }); };
+    var noServer = function (e) { return e.local ? "This copy of BLACKBOX has no server, so accounts aren’t available." : e.message; };
+    var done = function (user, msg) {
+      BB.onSignedIn(user);
+      toast(msg, "var(--ok)");
+      setTimeout(function () { location.href = nextUrl; }, 450);
+    };
+    $$("[data-show]").forEach(function (b) { b.addEventListener("click", function () { show(b.getAttribute("data-show")); }); });
+
+    // sign in / create account
+    var form = $("[data-login-form]"), submit = $("[data-login-submit]");
+    var setMode = function (m) {
+      mode = m;
+      $$("[data-login-tabs] button").forEach(function (b) { var on = b.getAttribute("data-mode") === m; b.classList.toggle("is-active", on); b.setAttribute("aria-selected", on); });
+      $$("[data-register-only]").forEach(function (el) { el.hidden = m !== "register"; });
+      $("[data-login-label]").textContent = m === "register" ? "Username" : "Username or email";
+      form.password.setAttribute("autocomplete", m === "register" ? "new-password" : "current-password");
+      submit.textContent = m === "register" ? "Create account" : "Sign in";
+      $(".forgot").hidden = m === "register";
+      err("[data-login-error]", "");
+    };
+    $$("[data-login-tabs] button").forEach(function (b) { b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); }); });
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var u = form.username.value.trim().toLowerCase(), p = form.password.value;
+      if (mode === "register") {
+        if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(u)) return err("[data-login-error]", "Username: 3–32 characters — letters, numbers, . _ -");
+        if (p.length < 8) return err("[data-login-error]", "Password must be at least 8 characters");
+        if (p !== form.confirm.value) return err("[data-login-error]", "Passwords don’t match");
+      } else if (!u || !p) return err("[data-login-error]", "Enter your username (or email) and password");
+      busy(form, true); err("[data-login-error]", "");
+      var body = mode === "register" ? { username: u, password: p, email: form.email.value.trim() } : { login: u, password: p };
+      BB.api("auth/" + mode, body).then(function (r) {
+        if (r.recoveryCodes) {
+          pendingCodes = r.recoveryCodes; afterCodes = function () { done(r.user, "Account created — welcome, " + r.user); };
+          $("[data-codes]").innerHTML = r.recoveryCodes.map(function (c) { return "<li><code>" + esc(c) + "</code></li>"; }).join("");
+          BB.onSignedIn(r.user);
+          show("codes");
+        } else done(r.user, "Welcome back, " + r.user);
+      }).catch(function (x) { busy(form, false); err("[data-login-error]", noServer(x)); });
+    });
+
+    // forgot → email link, or recovery code
+    var ff = $("[data-forgot-form]");
+    ff.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var login = ff.login.value.trim();
+      if (!login) return err("[data-forgot-error]", "Enter your username or email");
+      busy(ff, true); err("[data-forgot-error]", ""); err("[data-forgot-ok]", "");
+      BB.api("auth/forgot", { login: login }).then(function (r) {
+        busy(ff, false);
+        err("[data-forgot-ok]", r.email ? "If that account has an email address, a reset link is on its way. It works for 30 minutes."
+          : "Email isn’t set up on this server, so we can’t send a link. Use a recovery code instead, or ask the site’s admin for a reset link.");
+      }).catch(function (x) { busy(ff, false); err("[data-forgot-error]", noServer(x)); });
+    });
+    var rf = $("[data-recover-form]");
+    rf.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (rf.password.value.length < 8) return err("[data-recover-error]", "Password must be at least 8 characters");
+      busy(rf, true); err("[data-recover-error]", "");
+      BB.api("auth/recover", { username: rf.username.value.trim().toLowerCase(), code: rf.code.value, password: rf.password.value })
+        .then(function (r) { done(r.user, "Password changed — that recovery code is now used up"); })
+        .catch(function (x) { busy(rf, false); err("[data-recover-error]", noServer(x)); });
+    });
+
+    // reset link: /login/#reset=TOKEN
+    var hash = new URLSearchParams(location.hash.slice(1)), token = hash.get("reset");
+    var sf = $("[data-reset-form]");
+    sf.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (sf.password.value.length < 8) return err("[data-reset-error]", "Password must be at least 8 characters");
+      if (sf.password.value !== sf.confirm.value) return err("[data-reset-error]", "Passwords don’t match");
+      busy(sf, true); err("[data-reset-error]", "");
+      BB.api("auth/reset", { token: token, password: sf.password.value })
+        .then(function (r) { done(r.user, "Password changed — you’re signed in"); })
+        .catch(function (x) { busy(sf, false); err("[data-reset-error]", noServer(x)); });
+    });
+
+    // recovery codes shown once after sign-up
+    var codeText = function () { return "BLACKBOX recovery codes (each works once)\n\n" + (pendingCodes || []).join("\n") + "\n"; };
+    $("[data-codes-copy]").addEventListener("click", function () {
+      (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(codeText()) : Promise.reject()).then(function () { toast("Copied", "var(--ok)"); }, function () { toast("Select the codes and copy them"); });
+    });
+    $("[data-codes-download]").addEventListener("click", function () {
+      var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([codeText()], { type: "text/plain" }));
+      a.download = "blackbox-recovery-codes.txt"; document.body.appendChild(a); a.click(); a.remove();
+    });
+    $("[data-codes-done]").addEventListener("click", function () { if (afterCodes) afterCodes(); });
+
+    // Google button + what the server supports
+    var g = $("[data-google]");
+    g.href = ROOT + "api/auth/google/start?next=" + encodeURIComponent(nextUrl.charAt(0) === "/" ? nextUrl : "/");
+    BB.api("auth/me").then(function (r) {
+      if (r.user) $("[data-login-note]").textContent = "You’re signed in as " + r.user + ". Signing in as someone else replaces this browser’s data with theirs.";
+      if (!r.signup) $('[data-login-tabs] [data-mode="register"]').hidden = true;
+      var hasG = !!(r.providers && r.providers.google);
+      g.hidden = !hasG; $("[data-google-or]").hidden = !hasG;
+      if (r.providers && !r.providers.email) $("[data-forgot-intro]").textContent = "Enter your username or email. (Email isn’t set up on this server yet — if no link arrives, use a recovery code.)";
+    }).catch(function () {});
+
+    if (token) show("reset");
+    else if (hash.get("error")) { show("auth"); err("[data-login-error]", hash.get("error")); }
+    else show("auth");
+    setMode(location.hash === "#register" ? "register" : "login");
+  }
 
   checkHidden();
   paintPill();
