@@ -33,9 +33,9 @@ docker compose up -d
 
 Open http://localhost:8080. Stop with `docker compose down`.
 
-**DevOps & SRE lessons** are your saved hamchops.com/learn pages, which aren't in this repo. For
-Docker, copy that `learn` folder into the repo (`cp -r ~/path/to/learn ./learn` — git ignores it);
-without it you get DSA, System Design and Backend only. Every `up` rebuilds the site, so new or edited lessons show up.
+The DevOps & SRE lessons live in `learn/` (one folder per track, each with an `index.html`), so a
+fresh clone builds the full site. Add or update lessons by saving pages into `learn/<track-slug>/`
+and committing them. Every `up` rebuilds the site, so new or edited lessons show up.
 Use a different port with `BLACKBOX_PORT=9000 docker compose up -d`.
 
 Create an account from **Sign in** (top right). Each account's progress, tasks, habits and focus
