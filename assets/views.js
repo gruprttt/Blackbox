@@ -157,6 +157,23 @@
     };
   }
 
+  // Finish-date estimate for a set of items: pace = items you finished per day over the days you've
+  // actually been at it (at least 7, at most 30, so one busy day doesn't promise the moon).
+  function eta(pred, total) {
+    var m = BB.doneMap(), now = Date.now(), done = 0, times = [];
+    Object.keys(m).forEach(function (id) { if (!pred(id)) return; done++; if (m[id]) times.push(m[id]); });
+    var left = Math.max(0, total - done);
+    if (!left) return { done: true, left: 0, pace: 0, text: "done", long: "all done" };
+    var first = times.length ? Math.min.apply(null, times) : now;
+    var win = Math.min(30, Math.max(7, Math.ceil((now - first) / 864e5) + 1));
+    var recent = times.filter(function (t) { return t > now - win * 864e5; }).length, pace = recent / win;
+    if (!pace) return { done: false, left: left, pace: 0, text: "—", long: "finish something to get an estimate" };
+    var days = Math.ceil(left / pace), d = new Date(now + days * 864e5);
+    var text = days > 3 * 365 ? "3+ yrs" : d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+    return { done: false, left: left, pace: pace, days: days, date: d, text: text,
+             long: left + " left at " + pace.toFixed(1) + "/day (last " + win + " days) ≈ " + (days > 3 * 365 ? "over 3 years" : days + " days") };
+  }
+
   // Per-day goal status for the last n days (oldest first): hit / miss / none (before you started) / today (still open).
   function goalDays(n) {
     var act = BB.activity(), today = BB.dayKey(), out = [];
@@ -233,14 +250,15 @@
     var ps = $("[data-path-status]");
     if (ps) {
       var pathTotal = DATA.pathTotal || 1;
-      var l14 = daily(14, function () { return true; }).reduce(function (a, b) { return a + b; }, 0) / 14, left = pathTotal - total, o = slo();
+      var inPath = function (id) { return P.some(function (r) { return id.indexOf(r[0] + "/") === 0; }); };
+      var E = eta(inPath, pathTotal), o = slo();
       var cur = P.findIndex(function (r) { return r[0] === current; });
       ps.innerHTML =
         '<div><span>status</span><b class="s-' + o.state + '"><i></i>' + (total >= pathTotal ? "COMPLETE" : o.label) + "</b></div>" +
         "<div><span>completion</span><b>" + (total / pathTotal * 100).toFixed(1) + "%</b></div>" +
         "<div><span>current</span><b>" + (cur >= 0 ? "Track " + ("0" + (cur + 1)).slice(-2) : "—") + "</b></div>" +
-        "<div><span>pace · 14d</span><b>" + l14.toFixed(1) + " /day</b></div>" +
-        "<div><span>eta</span><b>" + (l14 > 0 ? new Date(Date.now() + left / l14 * 864e5).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—") + "</b></div>";
+        "<div><span>pace</span><b>" + (E.done ? "—" : E.pace.toFixed(1) + " /day") + "</b></div>" +
+        '<div title="' + esc(E.long) + '"><span>eta</span><b>' + (E.done ? "done" : E.date ? E.date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—") + "</b></div>";
     }
     var btn = $("[data-path-next]");
     if (btn && next) {
@@ -541,14 +559,12 @@
       if (!el) return;
       var o = slo(), mins = BB.sessions().filter(function (x) { return x.status === "done"; }).map(function (x) { return x.min; });
       var p = [50, 95, 99].map(function (q) { var v = pctile(mins, q); return v == null ? "—" : Math.round(v) + "m"; });
-      var l14 = series(14).reduce(function (a, d) { return a + d.lessons; }, 0) / 14;
-      var done = Object.keys(BB.doneMap()).length, left = DATA.total - done;
-      var eta = l14 > 0 ? new Date(Date.now() + left / l14 * 864e5).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—";
+      var Eall = eta(function () { return true; }, DATA.total);
       var stk = BB.learningStreak();
       el.innerHTML = '<span class="tb-pill s-' + o.state + '"><i></i>' + o.label + "</span>" +
         "<span>SLI <b>" + (o.counted && o.state !== "idle" ? o.attain + "%" : "—") + "</b></span><span>SLO <b>" + (o.goal ? o.goal.slo : 80) + "%</b></span>" +
         "<span>streak <b>" + stk.current + "d</b></span>" +
-        "<span>items/day <b>" + l14.toFixed(1) + "</b></span><span>finish by <b>" + eta + "</b></span>";
+        "<span>items/day <b>" + Eall.pace.toFixed(1) + '</b></span><span title="Every program: ' + esc(Eall.long) + '">all programs by <b>' + Eall.text + "</b></span>";
       var chip = $("[data-tb-focus]"), a = BB.focus.get();
       if (chip) {
         chip.classList.toggle("on", !!a && a.mode === "focus");
