@@ -129,6 +129,12 @@ focus minutes wire the rest, and the brain physically grows as more of it is wir
 
 ## Home
 
+**Daily goal** (home page): your day counts when you finish *N items* (lessons, DSA problems, Backend
+sections, System Design concepts) **or** focus *M minutes* — 3 items or 25 minutes by default, and you
+can change it with *Change goal* (saved to your account). The card shows today's two rings, your
+streak, how many of the last 30 days you hit the goal, your 7-day averages, and how many days you can
+still skip (1 in 5) without breaking your rhythm. Session-length stats are under *More stats*.
+
 *Your path* on the home page lets you pick the program you're working on (DevOps & SRE by default,
 or DSA, System Design, Backend). The path, the hero's Continue button and your progress follow the
 program you pick, and the choice is saved to your account.

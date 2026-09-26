@@ -629,7 +629,7 @@ def render_home(tracks, sheets, be=None, full=None):
 
 <section class="wrap mission" aria-label="Mission control">
   <div class="section-title"><div><span class="mono-label">/ mission control</span><h2>Your learning, in production</h2>
-    <p class="section-sub">Live telemetry from your own study data — SLOs, error budget, region health and an event log. Nothing here is simulated.</p></div></div>
+    <p class="section-sub">Your own study data — daily goal, streak, activity per program and an event log. Nothing here is simulated.</p></div></div>
   <div class="tele-banner" data-banner>
     <div class="tb-head">
       <div class="tb-title"><p class="tb-label">/ live telemetry</p>

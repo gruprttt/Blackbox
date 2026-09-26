@@ -128,13 +128,19 @@
 
 
   // ── shared: path & health helpers (home + tracks page) ──
-  function met(a) { return !!a && (a.lessons > 0 || a.focus >= 25); }
+  // Daily goal: finish N items (lessons, problems, sections, concepts) OR focus M minutes. Each user sets their own.
+  function goal() {
+    var g = BB.load("bb-goal", null) || {};
+    return { items: g.items > 0 ? Math.min(50, g.items | 0) : 3, min: g.min > 0 ? Math.min(480, g.min | 0) : 25 };
+  }
+  function met(a) { var G = goal(); return !!a && (a.lessons >= G.items || a.focus >= G.min); }
 
   function slo() {
     var act = BB.activity(), today = BB.dayKey(), keys = Object.keys(act).filter(function (k) { return met(act[k]) || act[k].lessons || act[k].focus; }).sort();
     var todayAct = act[today] || { lessons: 0, focus: 0 };
     todayAct = { lessons: todayAct.lessons, focus: todayFocusMin() };
-    if (!keys.length && !met(todayAct)) return { state: "idle", label: "NO DATA" };
+    var G = goal();
+    if (!keys.length && !met(todayAct)) return { state: "idle", label: "START TODAY", today: todayAct, goal: G, detail: "", budget: null };
     var first = keys[0] || today, win = Math.min(30, BB.diffDays(today, first) + 1), missed = 0, hit = 0;
     for (var i = 1; i < win; i++) { if (met(act[BB.addDays(today, -i)])) hit++; else missed++; }
     var todayMet = met(todayAct);
@@ -143,10 +149,10 @@
     var end = new Date(); end.setHours(24, 0, 0, 0);
     var left = Math.max(0, end - Date.now()) / 60000;
     return {
-      state: todayMet ? "ok" : "warn", label: todayMet ? "HEALTHY" : "AT RISK",
-      detail: todayMet ? "Today’s SLO met" : BB.fmtMin(left) + " left to meet today’s SLO",
+      state: todayMet ? "ok" : "warn", label: todayMet ? "GOAL MET" : "NOT YET", today: todayAct, goal: G, hit: hit,
+      detail: todayMet ? "Done for today — anything more is a bonus" : BB.fmtMin(left) + " left today",
       budget: Math.max(0, allowed - missed) / allowed, missed: missed, allowed: allowed,
-      attain: Math.round(hit / Math.max(1, win - (todayMet ? 0 : 1)) * 100), win: win
+      attain: Math.round(hit / Math.max(1, win - (todayMet ? 0 : 1)) * 100), win: win, counted: Math.max(0, win - (todayMet ? 0 : 1))
     };
   }
 
@@ -358,30 +364,60 @@
     function pctile(arr, p) { if (!arr.length) return null; var a = arr.slice().sort(function (x, y) { return x - y; }); return a[Math.min(a.length - 1, Math.floor(p / 100 * a.length))]; }
 
 
+    var editingGoal = false;
     function renderTelemetry() {
       var el = $("[data-telemetry]");
-      if (!el) return;
+      if (!el || editingGoal) return;
       var ser = series(14), last7 = ser.slice(-7);
-      var lpd = last7.reduce(function (s, d) { return s + d.lessons; }, 0) / 7;
+      var ipd = last7.reduce(function (s, d) { return s + d.lessons; }, 0) / 7;
       var fpd = last7.reduce(function (s, d) { return s + d.focus; }, 0) / 7;
       var mins = BB.sessions().filter(function (x) { return x.status === "done"; }).map(function (x) { return x.min; });
       var p50 = pctile(mins, 50), p95 = pctile(mins, 95), p99 = pctile(mins, 99);
-      var st = BB.learningStreak(), o = slo();
+      var st = BB.learningStreak(), o = slo(), G = o.goal || goal(), T = o.today || { lessons: 0, focus: 0 };
       var due = BB.tasks.all().filter(function (t) { return !t.done && t.due && t.due <= BB.dayKey(); }).length;
-      var budgetPct = o.budget == null ? null : Math.round(o.budget * 100);
+      var skipLeft = o.budget == null ? null : Math.max(0, o.allowed - o.missed);
+      var fm = function (v) { return v == null ? "—" : Math.round(v) + " min"; };
+      var ring = function (v, max, color, label, unit) {
+        var f = Math.min(1, v / max);
+        return '<div class="goal-ring' + (f >= 1 ? " done" : "") + '" style="--p:' + f + ";--gc:" + color + '"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.5"/><circle class="gr-fill" cx="18" cy="18" r="15.5"/></svg>' +
+          "<div><b>" + Math.round(v) + "<small>/" + max + unit + "</small></b><span>" + label + "</span></div></div>";
+      };
       el.innerHTML =
-        '<div class="panel-head"><span class="mono-label">/ slo · error budget</span><span class="live-tag"><span class="rec live"></span>cortex · local</span></div>' +
-        '<div class="tele-status s-' + o.state + '"><div><b>Learning pipeline</b><span>SLO · 1 lesson or 25 focus-min per day</span></div><span class="tele-pill">' + o.label + "</span></div>" +
+        '<div class="panel-head"><span class="mono-label">/ daily goal</span><button class="link-btn" data-goal-edit>Change goal</button></div>' +
+        '<div class="tele-status s-' + o.state + '"><div><b>Today</b><span>Goal: ' + G.items + " item" + (G.items === 1 ? "" : "s") + " done <em>or</em> " + G.min + " focus minutes" +
+          (o.detail ? " · " + o.detail : "") + '</span></div><span class="tele-pill">' + o.label + "</span></div>" +
+        '<div class="goal-today">' + ring(T.lessons, G.items, "var(--blue)", "items done", "") + '<span class="goal-or">or</span>' + ring(T.focus, G.min, "var(--red)", "focus minutes", "") + "</div>" +
+        '<form class="goal-form" data-goal-form hidden><p>Your daily goal is met when <b>either</b> is reached:</p><div class="goal-fields">' +
+          '<label><input type="number" name="items" min="1" max="50" value="' + G.items + '"><span>items done</span></label><span class="goal-or">or</span>' +
+          '<label><input type="number" name="min" min="5" max="480" step="5" value="' + G.min + '"><span>focus minutes</span></label></div>' +
+          '<div class="goal-actions"><button class="btn btn-primary sm" type="submit">Save goal</button><button class="btn btn-ghost sm" type="button" data-goal-cancel>Cancel</button></div>' +
+          '<p class="goal-help">Items = lessons, DSA problems, Backend sections and System Design concepts you mark done.</p></form>' +
         '<div class="tele-grid">' +
-          '<div class="tcell"><span class="mono-label">lessons / day · 7d</span><b>' + lpd.toFixed(1) + "</b>" + spark(ser.map(function (d) { return d.lessons; }), "var(--blue)") + "</div>" +
-          '<div class="tcell"><span class="mono-label">focus min / day · 7d</span><b>' + Math.round(fpd) + "</b>" + spark(ser.map(function (d) { return d.focus; }), "var(--red)") + "</div>" +
-          '<div class="tcell"><span class="mono-label">session length</span><div class="pct-row"><span>p50<b>' + (p50 == null ? "—" : Math.round(p50) + "m") + "</b></span><span>p95<b>" + (p95 == null ? "—" : Math.round(p95) + "m") +
-            "</b></span><span>p99<b>" + (p99 == null ? "—" : Math.round(p99) + "m") + "</b></span></div></div>" +
-          '<div class="tcell"><span class="mono-label">uptime (streak)</span><b>' + st.current + "<small>d</small></b><span class=\"tsub\">best " + st.best + "d · " + due + " task" + (due === 1 ? "" : "s") + " due</span></div>" +
+          '<div class="tcell"><span class="mono-label">streak</span><b>' + st.current + "<small> day" + (st.current === 1 ? "" : "s") + '</small></b><span class="tsub">best ' + st.best + " day" + (st.best === 1 ? "" : "s") + "</span></div>" +
+          '<div class="tcell"><span class="mono-label">goal hit · last ' + (o.win || 30) + " day" + (o.win === 1 ? "" : "s") + "</span><b>" + (!o.counted ? "—" : o.hit + "<small>/" + o.counted + "</small>") +
+            '</b><span class="tsub">' + (!o.counted ? "today counts once you hit it" : o.attain + "% of days") + "</span></div>" +
+          '<div class="tcell"><span class="mono-label">items / day · 7-day avg</span><b>' + ipd.toFixed(1) + "</b>" + spark(ser.map(function (d) { return d.lessons; }), "var(--blue)") + "</div>" +
+          '<div class="tcell"><span class="mono-label">focus / day · 7-day avg</span><b>' + Math.round(fpd) + "<small> min</small></b>" + spark(ser.map(function (d) { return d.focus; }), "var(--red)") + "</div>" +
         "</div>" +
-        '<div class="budget' + (budgetPct != null && budgetPct < 34 ? " low" : "") + '"><div class="budget-head"><span class="mono-label">error budget · ' + (o.win || 30) + "d window</span><b>" +
-          (budgetPct == null ? "—" : budgetPct + "%") + '</b></div><div class="budget-bar"><span style="--p:' + (budgetPct == null ? 0 : budgetPct / 100) + '"></span></div><p>' +
-          (o.state === "idle" ? "No data yet — finish a lesson to start measuring." : (o.missed > o.allowed ? "Budget exhausted — " + o.missed + " missed days vs " + o.allowed + " allowed" : o.missed + " of " + o.allowed + " allowed missed days used") + " · SLO attainment " + o.attain + "% · " + o.detail) + "</p></div>";
+        '<div class="budget' + (skipLeft != null && (skipLeft === 0 || (o.allowed >= 3 && skipLeft / o.allowed < 0.34)) ? " low" : "") + '"><div class="budget-head"><span class="mono-label">days you can skip · last ' + (o.win || 30) + " day" + (o.win === 1 ? "" : "s") + "</span><b>" +
+          (skipLeft == null ? "—" : skipLeft + " of " + o.allowed + " left") + '</b></div><div class="budget-bar"><span style="--p:' + (skipLeft == null ? 0 : skipLeft / o.allowed) + '"></span></div><p>' +
+          (o.state === "idle" ? "Reach your goal once to start tracking your rhythm." :
+            o.missed > o.allowed ? "You've missed " + o.missed + " days — more than the " + o.allowed + " you can skip. Hit today's goal to start recovering." :
+            "Missing a day now and then is fine: up to 1 in 5 days keeps your rhythm healthy.") + "</p></div>" +
+        '<details class="more-stats"><summary>More stats</summary><div class="pct-row">' +
+          "<span>typical session<b>" + fm(p50) + "</b></span><span>long session<b>" + fm(p95) + "</b></span><span>longest<b>" + fm(p99) + "</b></span>" +
+          "<span>tasks due<b>" + due + "</b></span></div></details>";
+      var form = $("[data-goal-form]", el), edit = $("[data-goal-edit]", el);
+      edit.addEventListener("click", function () { var open = form.hidden; form.hidden = !open; editingGoal = open; if (open) $("input", form).focus(); });
+      $("[data-goal-cancel]", el).addEventListener("click", function () { editingGoal = false; renderTelemetry(); });
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var items = Math.max(1, Math.min(50, parseInt(form.items.value, 10) || 3)), min = Math.max(5, Math.min(480, parseInt(form.min.value, 10) || 25));
+        BB.save("bb-goal", { items: items, min: min });
+        editingGoal = false;
+        BB.toast("Daily goal: " + items + " item" + (items === 1 ? "" : "s") + " or " + min + " focus minutes", "var(--ok)");
+        renderTelemetry(); renderBannerHead(); paintPath();
+      });
     }
 
     function renderHeroFoot() {
@@ -416,9 +452,10 @@
       var l14 = series(14).reduce(function (a, d) { return a + d.lessons; }, 0) / 14;
       var done = Object.keys(BB.doneMap()).length, left = DATA.total - done;
       var eta = l14 > 0 ? new Date(Date.now() + left / l14 * 864e5).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—";
+      var stk = BB.learningStreak();
       el.innerHTML = '<span class="tb-pill s-' + o.state + '"><i></i>' + o.label + "</span>" +
-        "<span>p50 <b>" + p[0] + "</b></span><span>p95 <b>" + p[1] + "</b></span><span>p99 <b>" + p[2] + "</b></span>" +
-        "<span>lpd <b>" + l14.toFixed(1) + "</b></span><span>eta <b>" + eta + "</b></span>";
+        "<span>streak <b>" + stk.current + "d</b></span><span>typical session <b>" + p[0] + "</b></span>" +
+        "<span>items/day <b>" + l14.toFixed(1) + "</b></span><span>finish by <b>" + eta + "</b></span>";
       var chip = $("[data-tb-focus]"), a = BB.focus.get();
       if (chip) {
         chip.classList.toggle("on", !!a && a.mode === "focus");
