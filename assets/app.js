@@ -334,6 +334,7 @@
   });
 
   // ── lesson page ────────────────────────────────────────────────
+  var chapterDone = null;   // set by lesson / Backend chapter pages; drives the Next button
   var article = $("article.lesson");
   var completeBtn = $("[data-complete]");
   var addTaskBtn = $("[data-add-task]");
@@ -348,6 +349,7 @@
   if (article) {
     var lid = article.getAttribute("data-lesson-id");
     if (lid) {   // HamChops lessons; Backend chapters share the reading features below
+    chapterDone = function () { return BB.isDone(lid); };
     var ltitle = article.getAttribute("data-lesson-title");
     var dom = BB.domain(article.getAttribute("data-domain"));
     save("bb-last", { id: lid, title: ltitle, sub: article.getAttribute("data-lesson-sub") });
@@ -586,6 +588,7 @@
   if (beChapter) {
     var beIds = $$(".be-sec[data-lesson]").map(function (x) { return x.getAttribute("data-lesson"); });
     var beBtn = $("[data-be-complete]");
+    chapterDone = function () { return beIds.length > 0 && beIds.every(BB.isDone); };
     var paintBe = function () { beBtn.classList.toggle("is-done", beIds.length > 0 && beIds.every(BB.isDone)); };
     beBtn.addEventListener("click", function () {
       var all = beIds.every(BB.isDone);
@@ -597,6 +600,33 @@
     paintBe();
     save("bb-last", { id: location.pathname.replace(/^.*?(backend\/[^/]+)\/.*$/, "$1"), title: $("h1").textContent, sub: "Backend" });
   }
+  // ── Next button: appears once the chapter/lesson is complete; completing it also slides up a bar ──
+  var nextCta = $("[data-next-cta]");
+  if (nextCta && chapterDone) {
+    var wasDone = chapterDone(), nextBar = null;
+    var svg = function (d) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + d + '"/></svg>'; };
+    var showNextBar = function () {
+      if (nextBar) nextBar.remove();
+      nextBar = document.createElement("div");
+      nextBar.className = "next-bar"; nextBar.setAttribute("role", "status");
+      nextBar.innerHTML = '<span class="nb-done">' + svg("m5 12.5 4.5 4.5L19 7.5") + '</span><div class="nb-text"><b>' + (PAGE === "be-chapter" ? "Chapter complete" : "Lesson complete") + "</b><span>" +
+        esc(nextCta.getAttribute("data-next-title")) + '</span></div><a class="btn btn-primary sm" href="' + nextCta.getAttribute("href") + '">' + esc(nextCta.getAttribute("data-next-label")) + " " + svg("M5 12h14M13 6l6 6-6 6") +
+        '</a><button class="icon-btn" aria-label="Dismiss" data-nb-close>✕</button>';
+      document.body.appendChild(nextBar);
+      setTimeout(function () { var t = $(".toast"); if (t) t.classList.remove("show"); }, 0);   // the bar says it already
+      $("[data-nb-close]", nextBar).addEventListener("click", function () { nextBar.remove(); nextBar = null; });
+    };
+    var paintNext = function () {
+      var done = chapterDone();
+      nextCta.hidden = !done;
+      if (done && !wasDone) showNextBar();
+      if (!done && nextBar) { nextBar.remove(); nextBar = null; }
+      wasDone = done;
+    };
+    BB.on(function (w) { if (w === "progress") paintNext(); });
+    paintNext();
+  }
+
   var setLang = function (lang, persist) {
     $$(".code-tabs").forEach(function (g) {
       if (!$('[data-tab-lang="' + lang + '"]', g)) return;

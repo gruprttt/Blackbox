@@ -499,13 +499,6 @@
     return {
       setState: setState,
       setLevel: setLevel,
-      // fly into a region, then call done() (the page swaps to that program's galaxy)
-      zoomTo: function (id, done) {
-        if (reduced) { if (done) done(); return; }
-        tr = { phase: "out", t: 0, dir: "in", focus: A.centroid[id] || [0, 0, 0], list: domains, ready: done, keep: true };
-        schedule();
-      },
-      reset: function () { tr = null; canvas.style.opacity = ""; schedule(); },
       busy: function () { return !!tr; },
       highlight: function (id) { highlight = id || null; },
       stats: function () { return stats; },

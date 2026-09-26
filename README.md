@@ -110,17 +110,21 @@ switch: the map is a pannable skill map; click a card to see all of its sections
 problem, concept or lesson in them) in the side panel. You
 only leave the page when you open a lesson, problem or chapter to learn it.
 
+## Reading a chapter
+
+Backend chapters and DevOps lessons sit on a quiet animated background — a slow star field with a
+constellation of neurons in the margins that light up as you scroll and flare when you finish
+(it pauses in background tabs and stays still if your system asks for reduced motion). When a
+chapter or lesson is complete, a **Next chapter / Next lesson** button appears at the bottom and a
+bar slides up offering the next one.
+
 ## The brain
 
 Every program is a lobe. Lessons, solved problems and learned concepts light neurons in their lobe;
 focus minutes wire the rest, and the brain physically grows as more of it is wired.
 
 - **Click a lobe** to see what's inside it: its topics or chapters with your progress in each.
-- Press **Zoom into …** on a selected lobe (or `Enter`) to fly into it: the brain dissolves into a **galaxy**
-  where every topic is a star, sized by its content and glowing with your progress. Click a star to
-  inspect it, *Open topic* to study it; drag/scroll/pinch to explore, **Back** or
-  `Esc` returns to the brain. `brain/#dsa` and `brain/#dsa/t03` link straight in.
-- *Open in Tracks* goes to that program on the Tracks page.
+- *Open in Tracks* (or `Enter`) goes to that program on the Tracks page; `brain/#dsa` selects a lobe.
 - The timeline under the brain charts your growth — drag it to see any past day, or press ▶ to replay it.
 
 ## Home
@@ -154,7 +158,7 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `assets/style.css` | Design system (dark theme) |
 | `assets/app.js` | Core: progress, focus engine, tasks store, search |
 | `assets/brain.js` | Canvas 3D brain renderer (levels, dive transitions, growth, zoom-in) |
-| `assets/galaxy.js` | Galaxy view: a program's topics as stars you zoom into |
+| `assets/ambient.js` | Reading-page background: star field and neurons that light up as you read |
 | `assets/views.js` | Home, Brain explorer, Focus, Tasks and Habits pages |
 | `assets/mindmap.js` | Tracks page skill maps for every program (pan, zoom, expand topics) |
 | `server/server.py` | Accounts, password reset, Google sign-in and progress sync API (Python stdlib, SQLite) |

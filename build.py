@@ -344,8 +344,10 @@ def page(*, title, desc, root, body, kind):
         extra += f'<script src="{root}assets/programs.js" defer></script>\n'
     if kind == "tracks":
         extra += f'<script src="{root}assets/map-data.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n<script src="{root}assets/mindmap.js" defer></script>\n'
+    if kind in ("lesson", "be-chapter"):
+        extra += f'<script src="{root}assets/ambient.js" defer></script>\n'
     if kind == "brain":
-        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n<script src="{root}assets/galaxy.js" defer></script>\n'
+        extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n'
     if kind in APP_PAGES:
         extra += f'<script src="{root}assets/brain.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n'
     return f"""<!DOCTYPE html>
@@ -763,6 +765,12 @@ def render_topic(track, ti, topic):
     return page(title=f"{strip_tags(topic['title'])} · {SITE}", desc=strip_tags(topic["title"]), root=root, body=body, kind="topic")
 
 
+def next_cta(href, label, title):
+    """The "what's next" button: hidden until the chapter/lesson is complete (app.js shows it)."""
+    return (f'<a class="btn btn-primary btn-next" href="{href}" data-next-cta data-next-label="{html.escape(label)}" '
+            f'data-next-title="{html.escape(strip_tags(title))}" hidden><span>{html.escape(label)}</span>{ICON["right"]}</a>')
+
+
 def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
     root = "../../../"
     lid = lesson_id(track, topic, lesson)
@@ -786,6 +794,10 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
         return (f'<a class="pager-card {cls}" href="{root}{lesson_id(t, tp, l)}/index.html" data-nav-{cls}>'
                 f'<span>{arrow}</span><strong>{l["title"]}</strong><em>{sub}</em></a>')
 
+    if nxt:
+        lesson_next = next_cta(f"{root}{lesson_id(*nxt)}/index.html", "Next lesson" if nxt[0] is track else "Next track", strip_tags(nxt[2]["title"]))
+    else:
+        lesson_next = next_cta(f"{root}{track['slug']}/index.html", "Back to the track", "You've finished this track")
     other_topics = "".join(
         f'<li{" class=is-current" if tp is topic else ""}><a href="{root}{track["slug"]}/{tp["slug"]}/index.html">'
         f'<span>{i:02d}</span>{tp["title"]}</a></li>' for i, tp in enumerate(track["topics"], 1))
@@ -829,6 +841,7 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
           <span class="when-done">{ICON['check']}Completed</span>
         </button>
         <span class="lesson-count mono-label">Track {track['num']} · lesson {flat_index + 1} / {total}</span>
+        {lesson_next}
       </div>
       <div class="pager">
         {pager_card(prev, 'prev', 'Previous', True)}
@@ -963,7 +976,6 @@ def render_brain():
    <div class="console-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="console-title">cortex@blackbox:~ — neural map</span><span class="live-tag"><span class="rec live"></span>live</span></div>
    <div class="console-screen brain-stage" data-brain-stage>
     <canvas data-brain="full" aria-label="Interactive 3D brain"></canvas>
-    <canvas class="galaxy-canvas" data-galaxy hidden aria-label="Program galaxy: one star per topic"></canvas>
     <div class="stage-top">
       <p class="mono-label">Neural map</p>
       <h1 data-level-title>Your brain</h1>
@@ -974,12 +986,6 @@ def render_brain():
       <div><dt data-s2-label>Synapses</dt><dd data-s2>0</dd></div>
       <div><dt data-s3-label>Lobes active</dt><dd data-s3>0</dd></div>
     </dl>
-    <button class="stage-up" data-galaxy-back hidden>{ICON['left']}<span>Back to brain</span></button>
-    <div class="galaxy-tools" data-galaxy-tools hidden>
-      <button class="icon-btn" data-gz="in" aria-label="Zoom in">{ICON['plus']}</button>
-      <button class="icon-btn" data-gz="out" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
-      <button class="icon-btn" data-gz="home" aria-label="Recentre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-    </div>
     <p class="stage-tip mono-label" data-stage-tip>Drag to rotate · scroll to zoom · click a lobe to select it</p>
     <div class="stage-time mono-label" data-time-label hidden></div>
     <div class="brain-tooltip" data-brain-tooltip hidden></div>
@@ -1498,6 +1504,7 @@ def render_backend_chapter(be, ci):
       <div class="lesson-foot">
         <button class="btn btn-complete" data-be-complete><span class="when-todo">{ICON['check']}Mark whole chapter complete</span><span class="when-done">{ICON['check']}Chapter complete</span></button>
         <span class="lesson-count mono-label">{progress(c['prefix'], max(1, len(c['sections'])))}</span>
+        {next_cta(f"../{next_c['slug']}/index.html", "Next chapter", next_c['title']) if next_c else next_cta("../index.html", "All chapters", "You've reached the last chapter")}
       </div>
       <p class="credit">From <a href="{SOURCES['backend']['site']}" target="_blank" rel="noopener">Backend from First Principles</a> by {SOURCES['backend']['author']} ·
         <a href="{SOURCES['backend']['repo']}" target="_blank" rel="noopener">source</a></p>
