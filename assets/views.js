@@ -131,7 +131,8 @@
   // Daily goal: finish N items (lessons, problems, sections, concepts) OR focus M minutes. Each user sets their own.
   function goal() {
     var g = BB.load("bb-goal", null) || {};
-    return { items: g.items > 0 ? Math.min(50, g.items | 0) : 3, min: g.min > 0 ? Math.min(480, g.min | 0) : 25 };
+    return { items: g.items > 0 ? Math.min(50, g.items | 0) : 3, min: g.min > 0 ? Math.min(480, g.min | 0) : 25,
+             slo: g.slo >= 50 && g.slo <= 100 ? g.slo | 0 : 80 };   // SLO: % of days you aim to hit the goal
   }
   function met(a) { var G = goal(); return !!a && (a.lessons >= G.items || a.focus >= G.min); }
 
@@ -145,13 +146,13 @@
     for (var i = 1; i < win; i++) { if (met(act[BB.addDays(today, -i)])) hit++; else missed++; }
     var todayMet = met(todayAct);
     if (todayMet) hit++;
-    var allowed = Math.max(1, Math.round(win * 0.2));
+    var allowed = Math.round(win * (100 - G.slo) / 100);
     var end = new Date(); end.setHours(24, 0, 0, 0);
     var left = Math.max(0, end - Date.now()) / 60000;
     return {
       state: todayMet ? "ok" : "warn", label: todayMet ? "GOAL MET" : "NOT YET", today: todayAct, goal: G, hit: hit,
       detail: todayMet ? "Done for today — anything more is a bonus" : BB.fmtMin(left) + " left today",
-      budget: Math.max(0, allowed - missed) / allowed, missed: missed, allowed: allowed,
+      budget: allowed ? Math.max(0, allowed - missed) / allowed : (missed ? 0 : 1), missed: missed, allowed: allowed,
       attain: Math.round(hit / Math.max(1, win - (todayMet ? 0 : 1)) * 100), win: win, counted: Math.max(0, win - (todayMet ? 0 : 1))
     };
   }
@@ -375,47 +376,69 @@
       var p50 = pctile(mins, 50), p95 = pctile(mins, 95), p99 = pctile(mins, 99);
       var st = BB.learningStreak(), o = slo(), G = o.goal || goal(), T = o.today || { lessons: 0, focus: 0 };
       var due = BB.tasks.all().filter(function (t) { return !t.done && t.due && t.due <= BB.dayKey(); }).length;
-      var skipLeft = o.budget == null ? null : Math.max(0, o.allowed - o.missed);
       var fm = function (v) { return v == null ? "—" : Math.round(v) + " min"; };
-      var ring = function (v, max, color, label, unit) {
+      var plural = function (n, w) { return n + " " + w + (n === 1 ? "" : "s"); };
+      var ring = function (v, max, color, label) {
         var f = Math.min(1, v / max);
         return '<div class="goal-ring' + (f >= 1 ? " done" : "") + '" style="--p:' + f + ";--gc:" + color + '"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.5"/><circle class="gr-fill" cx="18" cy="18" r="15.5"/></svg>' +
-          "<div><b>" + Math.round(v) + "<small>/" + max + unit + "</small></b><span>" + label + "</span></div></div>";
+          "<div><b>" + Math.round(v) + "<small>/" + max + "</small></b><span>" + label + "</span></div></div>";
       };
+      // SRE view of the same data: SLI (measured), SLO (target), error budget (allowed misses)
+      var idle = o.state === "idle" || !o.counted, win = o.win || 30;
+      var sli = idle ? null : o.attain, meeting = sli != null && sli >= G.slo;
+      var left = o.budget == null ? null : Math.max(0, o.allowed - o.missed);
+      var sre =
+        '<div class="sre"><div class="sre-head"><span class="mono-label">/ reliability · sre-style</span><span class="sre-state ' + (idle ? "idle" : meeting ? "ok" : "bad") + '">' +
+          (idle ? "measuring…" : meeting ? "meeting your SLO" : "below your SLO") + "</span></div>" +
+        '<div class="sre-row"><span class="sre-term">SLI</span><div class="sre-what"><b>What we measure</b><span>Share of days you hit your daily goal (last ' + plural(win, "day") + ")</span></div>" +
+          '<div class="sre-val"><b>' + (sli == null ? "—" : sli + "%") + "</b><span>" + (idle ? "no full day yet" : o.hit + " of " + o.counted + " days") + "</span></div></div>" +
+        '<div class="sre-row"><span class="sre-term">SLO</span><div class="sre-what"><b>Your target</b><span>Hit the goal on at least ' + G.slo + "% of days</span></div>" +
+          '<div class="sre-val"><b>' + G.slo + "%</b><span>" + (idle ? "—" : meeting ? "✓ on target" : "✗ " + plural(G.slo - sli, "pt") + " short") + "</span></div></div>" +
+        '<div class="sre-row"><span class="sre-term">Error budget</span><div class="sre-what"><b>Days you can miss</b><span>' + (100 - G.slo) + "% of " + win + " days = " + plural(o.allowed || 0, "day") + " you can skip</span></div>" +
+          '<div class="sre-val"><b>' + (left == null ? "—" : left + "<small>/" + o.allowed + "</small>") + "</b><span>" + (left == null ? "—" : left === 0 ? "used up" : "left") + "</span></div></div>" +
+        '<div class="budget-bar' + (left != null && (left === 0 || (o.allowed >= 3 && left / o.allowed < 0.34)) ? " low" : "") + '"><span style="--p:' + (o.budget == null ? 0 : o.budget) + '"></span></div>' +
+        '<p class="sre-note">' + (idle ? "Hit your goal today and the numbers start filling in." :
+          left === 0 ? "Budget used up — SRE teams stop shipping risky changes and fix reliability; for you, it means protect a small daily habit until you're back above " + G.slo + "%." :
+          "Budget left means a missed day is fine — rest without guilt. When it runs out, that's your signal to get consistent again.") + "</p>" +
+        '<details class="sre-learn"><summary>New to SLI / SLO? The 30-second version</summary>' +
+          "<p><b>Think of a pizza shop</b> that promises delivery within 30 minutes.</p><ul>" +
+          "<li><b>SLI</b> (Service Level <em>Indicator</em>) is what you actually <em>measure</em>: the % of pizzas that really arrived in 30 minutes — say 97%.</li>" +
+          "<li><b>SLO</b> (Service Level <em>Objective</em>) is the <em>target</em> you commit to: “95% of pizzas on time”. Not 100% — perfection is too expensive.</li>" +
+          "<li><b>Error budget</b> is the gap you're <em>allowed</em> to miss: the 5% that may be late. While there's budget left you can take risks (try a new route); when it's spent, you slow down and fix things first.</li></ul>" +
+          "<p>Real SRE teams do exactly this for websites: SLI = % of requests that succeed fast, SLO = e.g. 99.9%, error budget = the 0.1% that may fail. " +
+          "Here the “service” is <b>your learning</b>: the SLI is how often you hit your daily goal, the SLO is the % you aim for, and the error budget is how many days you can skip.</p></details></div>";
+
       el.innerHTML =
         '<div class="panel-head"><span class="mono-label">/ daily goal</span><button class="link-btn" data-goal-edit>Change goal</button></div>' +
-        '<div class="tele-status s-' + o.state + '"><div><b>Today</b><span>Goal: ' + G.items + " item" + (G.items === 1 ? "" : "s") + " done <em>or</em> " + G.min + " focus minutes" +
+        '<div class="tele-status s-' + o.state + '"><div><b>Today</b><span>Goal: ' + plural(G.items, "item") + " done <em>or</em> " + G.min + " focus minutes" +
           (o.detail ? " · " + o.detail : "") + '</span></div><span class="tele-pill">' + o.label + "</span></div>" +
-        '<div class="goal-today">' + ring(T.lessons, G.items, "var(--blue)", "items done", "") + '<span class="goal-or">or</span>' + ring(T.focus, G.min, "var(--red)", "focus minutes", "") + "</div>" +
-        '<form class="goal-form" data-goal-form hidden><p>Your daily goal is met when <b>either</b> is reached:</p><div class="goal-fields">' +
+        '<div class="goal-today">' + ring(T.lessons, G.items, "var(--blue)", "items done") + '<span class="goal-or">or</span>' + ring(T.focus, G.min, "var(--red)", "focus minutes") + "</div>" +
+        '<form class="goal-form" data-goal-form hidden><p>Your day counts when you reach <b>either</b>:</p><div class="goal-fields">' +
           '<label><input type="number" name="items" min="1" max="50" value="' + G.items + '"><span>items done</span></label><span class="goal-or">or</span>' +
           '<label><input type="number" name="min" min="5" max="480" step="5" value="' + G.min + '"><span>focus minutes</span></label></div>' +
+          '<div class="goal-fields"><label><span>and aim to hit it on</span><input type="number" name="slo" min="50" max="100" step="5" value="' + G.slo + '"><span>% of days (your SLO)</span></label></div>' +
           '<div class="goal-actions"><button class="btn btn-primary sm" type="submit">Save goal</button><button class="btn btn-ghost sm" type="button" data-goal-cancel>Cancel</button></div>' +
-          '<p class="goal-help">Items = lessons, DSA problems, Backend sections and System Design concepts you mark done.</p></form>' +
+          '<p class="goal-help">Items = lessons, DSA problems, Backend sections and System Design concepts you mark done. An SLO of 80% lets you skip about 6 days a month.</p></form>' +
+        sre +
         '<div class="tele-grid">' +
-          '<div class="tcell"><span class="mono-label">streak</span><b>' + st.current + "<small> day" + (st.current === 1 ? "" : "s") + '</small></b><span class="tsub">best ' + st.best + " day" + (st.best === 1 ? "" : "s") + "</span></div>" +
-          '<div class="tcell"><span class="mono-label">goal hit · last ' + (o.win || 30) + " day" + (o.win === 1 ? "" : "s") + "</span><b>" + (!o.counted ? "—" : o.hit + "<small>/" + o.counted + "</small>") +
-            '</b><span class="tsub">' + (!o.counted ? "today counts once you hit it" : o.attain + "% of days") + "</span></div>" +
+          '<div class="tcell"><span class="mono-label">streak</span><b>' + st.current + "<small> day" + (st.current === 1 ? "" : "s") + '</small></b><span class="tsub">best ' + plural(st.best, "day") + "</span></div>" +
+          '<div class="tcell"><span class="mono-label">typical focus session</span><b>' + (p50 == null ? "—" : Math.round(p50) + "<small> min</small>") + '</b><span class="tsub">' + plural(mins.length, "session") + " so far</span></div>" +
           '<div class="tcell"><span class="mono-label">items / day · 7-day avg</span><b>' + ipd.toFixed(1) + "</b>" + spark(ser.map(function (d) { return d.lessons; }), "var(--blue)") + "</div>" +
           '<div class="tcell"><span class="mono-label">focus / day · 7-day avg</span><b>' + Math.round(fpd) + "<small> min</small></b>" + spark(ser.map(function (d) { return d.focus; }), "var(--red)") + "</div>" +
         "</div>" +
-        '<div class="budget' + (skipLeft != null && (skipLeft === 0 || (o.allowed >= 3 && skipLeft / o.allowed < 0.34)) ? " low" : "") + '"><div class="budget-head"><span class="mono-label">days you can skip · last ' + (o.win || 30) + " day" + (o.win === 1 ? "" : "s") + "</span><b>" +
-          (skipLeft == null ? "—" : skipLeft + " of " + o.allowed + " left") + '</b></div><div class="budget-bar"><span style="--p:' + (skipLeft == null ? 0 : skipLeft / o.allowed) + '"></span></div><p>' +
-          (o.state === "idle" ? "Reach your goal once to start tracking your rhythm." :
-            o.missed > o.allowed ? "You've missed " + o.missed + " days — more than the " + o.allowed + " you can skip. Hit today's goal to start recovering." :
-            "Missing a day now and then is fine: up to 1 in 5 days keeps your rhythm healthy.") + "</p></div>" +
         '<details class="more-stats"><summary>More stats</summary><div class="pct-row">' +
-          "<span>typical session<b>" + fm(p50) + "</b></span><span>long session<b>" + fm(p95) + "</b></span><span>longest<b>" + fm(p99) + "</b></span>" +
-          "<span>tasks due<b>" + due + "</b></span></div></details>";
+          "<span>typical session · p50<b>" + fm(p50) + "</b></span><span>long session · p95<b>" + fm(p95) + "</b></span><span>longest · p99<b>" + fm(p99) + "</b></span>" +
+          "<span>tasks due<b>" + due + "</b></span></div><p class=\"goal-help\">p50 / p95 / p99: half / 95% / 99% of your sessions were this long or shorter — the same way SREs report request latency.</p></details>";
       var form = $("[data-goal-form]", el), edit = $("[data-goal-edit]", el);
       edit.addEventListener("click", function () { var open = form.hidden; form.hidden = !open; editingGoal = open; if (open) $("input", form).focus(); });
       $("[data-goal-cancel]", el).addEventListener("click", function () { editingGoal = false; renderTelemetry(); });
       form.addEventListener("submit", function (e) {
         e.preventDefault();
         var items = Math.max(1, Math.min(50, parseInt(form.items.value, 10) || 3)), min = Math.max(5, Math.min(480, parseInt(form.min.value, 10) || 25));
-        BB.save("bb-goal", { items: items, min: min });
+        var sloT = Math.max(50, Math.min(100, parseInt(form.slo.value, 10) || 80));
+        BB.save("bb-goal", { items: items, min: min, slo: sloT });
         editingGoal = false;
-        BB.toast("Daily goal: " + items + " item" + (items === 1 ? "" : "s") + " or " + min + " focus minutes", "var(--ok)");
+        BB.toast("Goal: " + plural(items, "item") + " or " + min + " min a day · SLO " + sloT + "%", "var(--ok)");
         renderTelemetry(); renderBannerHead(); paintPath();
       });
     }
@@ -454,7 +477,8 @@
       var eta = l14 > 0 ? new Date(Date.now() + left / l14 * 864e5).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—";
       var stk = BB.learningStreak();
       el.innerHTML = '<span class="tb-pill s-' + o.state + '"><i></i>' + o.label + "</span>" +
-        "<span>streak <b>" + stk.current + "d</b></span><span>typical session <b>" + p[0] + "</b></span>" +
+        "<span>SLI <b>" + (o.counted && o.state !== "idle" ? o.attain + "%" : "—") + "</b></span><span>SLO <b>" + (o.goal ? o.goal.slo : 80) + "%</b></span>" +
+        "<span>streak <b>" + stk.current + "d</b></span>" +
         "<span>items/day <b>" + l14.toFixed(1) + "</b></span><span>finish by <b>" + eta + "</b></span>";
       var chip = $("[data-tb-focus]"), a = BB.focus.get();
       if (chip) {

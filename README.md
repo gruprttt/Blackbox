@@ -112,9 +112,13 @@ only leave the page when you open a lesson, problem or chapter to learn it.
 
 ## Reading a chapter
 
-Backend chapters and DevOps lessons sit on a quiet animated background — a slow star field with a
-constellation of neurons in the margins that light up as you scroll and flare when you finish
-(it pauses in background tabs and stays still if your system asks for reduced motion). When a
+Backend chapters and DevOps lessons open with a warp jump into deep space: a live-rendered black
+hole (WebGL ray tracing — light bends around it, the golden accretion disk glows brighter on the side
+spinning towards you, and stars are lensed near its shadow). You drift closer as you read, and the
+disk flares when you finish. The text sits on dark glass so it stays readable. The renderer runs at a
+fraction of screen resolution, caps at 30 fps, lowers its quality on slow machines, pauses in
+background tabs, shows a still frame if your system asks for reduced motion, and falls back to a
+drawn image without WebGL. When a
 chapter or lesson is complete, a **Next chapter / Next lesson** button appears at the bottom and a
 bar slides up offering the next one.
 
@@ -133,7 +137,12 @@ focus minutes wire the rest, and the brain physically grows as more of it is wir
 sections, System Design concepts) **or** focus *M minutes* — 3 items or 25 minutes by default, and you
 can change it with *Change goal* (saved to your account). The card shows today's two rings, your
 streak, how many of the last 30 days you hit the goal, your 7-day averages, and how many days you can
-still skip (1 in 5) without breaking your rhythm. Session-length stats are under *More stats*.
+still skip without breaking your rhythm.
+
+The same numbers are shown SRE-style, with a plain-language explainer on the card (*New to SLI / SLO?*):
+**SLI** = the share of days you actually hit your goal, **SLO** = the share you aim for (80% by default,
+editable), **error budget** = how many days you can miss before falling below your SLO.
+Session-length percentiles (p50 / p95 / p99) are under *More stats*.
 
 *Your path* on the home page lets you pick the program you're working on (DevOps & SRE by default,
 or DSA, System Design, Backend). The path, the hero's Continue button and your progress follow the
