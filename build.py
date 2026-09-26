@@ -344,8 +344,6 @@ def page(*, title, desc, root, body, kind):
         extra += f'<script src="{root}assets/programs.js" defer></script>\n'
     if kind == "tracks":
         extra += f'<script src="{root}assets/map-data.js" defer></script>\n<script src="{root}assets/views.js" defer></script>\n<script src="{root}assets/mindmap.js" defer></script>\n'
-    if kind in ("lesson", "be-chapter"):
-        extra += f'<script src="{root}assets/ambient.js" defer></script>\n'
     if kind == "brain":
         extra += f'<script src="{root}assets/brain-tree.js" defer></script>\n'
     if kind in APP_PAGES:

@@ -112,16 +112,7 @@ only leave the page when you open a lesson, problem or chapter to learn it.
 
 ## Reading a chapter
 
-Backend chapters and DevOps lessons look out onto a different scene of space per page (chosen from
-the page address, so it's always the same for that page): a distant ray-traced black hole, an
-edge-on accretion disk, Earth from low orbit with city lights, Mars, or a golden spiral galaxy — with
-a small caption naming it, placed in the space around the text. For quality *and* speed the scene is
-ray-traced **once** at full screen resolution (supersampled, up to 4K) in small strips spread over a
-few frames, so the page never stutters; afterwards nothing is re-rendered — the only motion is a slow
-GPU camera drift, a few twinkling stars and the odd shooting star. The scene edges closer as you
-read and flares when you finish; the text stays on dark glass. Reduced-motion turns the motion off,
-and browsers without WebGL get a drawn fallback. Add `?scene=0`…`?scene=4` to a chapter URL to preview a scene. When a
-chapter or lesson is complete, a **Next chapter / Next lesson** button appears at the bottom and a
+When a chapter or lesson is complete, a **Next chapter / Next lesson** button appears at the bottom and a
 bar slides up offering the next one.
 
 ## The brain
@@ -177,7 +168,6 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `assets/style.css` | Design system (dark theme) |
 | `assets/app.js` | Core: progress, focus engine, tasks store, search |
 | `assets/brain.js` | Canvas 3D brain renderer (levels, dive transitions, growth, zoom-in) |
-| `assets/ambient.js` | Reading-page background: star field and neurons that light up as you read |
 | `assets/views.js` | Home, Brain explorer, Focus, Tasks and Habits pages |
 | `assets/mindmap.js` | Tracks page skill maps for every program (pan, zoom, expand topics) |
 | `server/server.py` | Accounts, password reset, Google sign-in and progress sync API (Python stdlib, SQLite) |
