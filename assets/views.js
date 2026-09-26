@@ -157,6 +157,19 @@
     };
   }
 
+  // Per-day goal status for the last n days (oldest first): hit / miss / none (before you started) / today (still open).
+  function goalDays(n) {
+    var act = BB.activity(), today = BB.dayKey(), out = [];
+    var first = Object.keys(act).filter(function (k) { var a = act[k]; return a.lessons || a.focus; }).sort()[0] || today;
+    for (var i = n - 1; i >= 0; i--) {
+      var k = BB.addDays(today, -i), a = act[k] || { lessons: 0, focus: 0 };
+      if (!i) a = { lessons: a.lessons, focus: todayFocusMin() };
+      var ok = met(a);
+      out.push({ k: k, items: a.lessons || 0, focus: Math.round(a.focus || 0), st: k < first ? "none" : ok ? "hit" : i ? "miss" : "today" });
+    }
+    return out;
+  }
+
   // Daily activity score (lessons + focus/25) for anything matching a predicate.
   function daily(days, lessonPred, sessionPred) {
     var today = BB.dayKey(), idx = {}, out = [], m = BB.doneMap();
@@ -366,6 +379,56 @@
 
 
     var editingGoal = false;
+    // SRE telemetry: a status-page uptime strip, SLI trend vs SLO, and error-budget burn-down.
+    function telemetry(G) {
+      var days = goalDays(30), counted = days.filter(function (d) { return d.st === "hit" || d.st === "miss"; });
+      var hits = counted.filter(function (d) { return d.st === "hit"; }).length;
+      var fmtDay = function (k) { var d = new Date(k + "T12:00:00"); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+      var label = { hit: "goal hit", miss: "missed", none: "not started yet", today: "today · still open" };
+      var bars = days.map(function (d) {
+        return '<i class="ub-' + d.st + '" title="' + fmtDay(d.k) + " · " + label[d.st] + (d.st === "none" ? "" : " · " + d.items + " items · " + d.focus + " min") + '"></i>';
+      }).join("");
+      // rolling 7-day SLI and remaining error budget for each day
+      var sliPts = [], budPts = [], maxBud = 1;
+      days.forEach(function (d, j) {
+        var win = days.slice(Math.max(0, j - 6), j + 1).filter(function (x) { return x.st === "hit" || x.st === "miss"; });
+        sliPts.push(win.length ? win.filter(function (x) { return x.st === "hit"; }).length / win.length * 100 : null);
+        var upto = days.slice(0, j + 1).filter(function (x) { return x.st === "hit" || x.st === "miss"; });
+        var allowed = Math.round(upto.length * (100 - G.slo) / 100), miss = upto.filter(function (x) { return x.st === "miss"; }).length;
+        var rem = upto.length ? allowed - miss : null;
+        budPts.push(rem); if (rem != null) maxBud = Math.max(maxBud, allowed, Math.abs(rem));
+      });
+      var W = 300, H = 92, px = function (j) { return (j / 29 * (W - 8) + 4).toFixed(1); };
+      function path(vals, y) {
+        var d = "", pen = false;
+        vals.forEach(function (v, j) { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + px(j) + "," + y(v).toFixed(1); pen = true; });
+        return d;
+      }
+      var ySli = function (v) { return 6 + (100 - v) / 100 * (H - 16); };
+      var sliLine = path(sliPts, ySli), sloY = ySli(G.slo).toFixed(1);
+      var firstIdx = sliPts.findIndex(function (v) { return v != null; });
+      var sliArea = firstIdx < 0 ? "" : sliLine + "L" + px(29) + "," + (H - 10) + "L" + px(firstIdx) + "," + (H - 10) + "Z";
+      var below = sliPts.map(function (v, j) { return v != null && v < G.slo ? '<circle cx="' + px(j) + '" cy="' + ySli(v).toFixed(1) + '" r="2.4"/>' : ""; }).join("");
+      var yBud = function (v) { var mid = (H - 10) / 2 + 3; return mid - v / maxBud * ((H - 16) / 2); }, zeroY = yBud(0).toFixed(1);
+      var budLine = path(budPts, yBud);
+      var lastSli = sliPts[29], lastBud = budPts[29];
+      var axis = '<span>30 days ago</span><span>15</span><span>today</span>';
+      return '<div class="sre-tele">' +
+        '<div class="uptime"><div class="uptime-head"><span class="mono-label">uptime · last 30 days</span><b>' + (counted.length ? Math.round(hits / counted.length * 100) + "%" : "—") +
+          '</b></div><div class="uptime-bars" role="img" aria-label="' + hits + " of " + counted.length + ' days goal hit">' + bars + '</div><div class="t-axis">' + axis + "</div>" +
+          '<div class="uptime-legend"><span><i class="ub-hit"></i>goal hit</span><span><i class="ub-miss"></i>missed</span><span><i class="ub-today"></i>today</span><span><i class="ub-none"></i>before you started</span></div></div>' +
+        '<div class="tele-charts">' +
+          '<figure class="tchart"><figcaption><span class="mono-label">SLI · 7-day rolling</span><b>' + (lastSli == null ? "—" : Math.round(lastSli) + "%") + '</b></figcaption>' +
+            '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-label="SLI trend against your SLO">' +
+            '<path class="tc-area" d="' + sliArea + '"/><line class="tc-slo" x1="4" x2="' + (W - 4) + '" y1="' + sloY + '" y2="' + sloY + '"/>' +
+            '<path class="tc-line" d="' + sliLine + '"/><g class="tc-bad">' + below + "</g></svg>" +
+            '<div class="t-axis">' + axis + '</div><p class="tc-note"><i class="lg-slo"></i>dashed line = your SLO (' + G.slo + "%) · red dots = days the trend was below it</p></figure>" +
+          '<figure class="tchart"><figcaption><span class="mono-label">error budget remaining</span><b>' + (lastBud == null ? "—" : lastBud + (Math.abs(lastBud) === 1 ? " day" : " days")) + '</b></figcaption>' +
+            '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-label="Error budget burn-down">' +
+            '<line class="tc-zero" x1="4" x2="' + (W - 4) + '" y1="' + zeroY + '" y2="' + zeroY + '"/><path class="tc-bud" d="' + budLine + '"/></svg>' +
+            '<div class="t-axis">' + axis + '</div><p class="tc-note">Every day you hit the goal earns a little budget; every miss spends a whole day. Below the line = over budget.</p></figure>' +
+        "</div></div>";
+    }
     function renderTelemetry() {
       var el = $("[data-telemetry]");
       if (!el || editingGoal) return;
@@ -397,6 +460,7 @@
         '<div class="sre-row"><span class="sre-term">Error budget</span><div class="sre-what"><b>Days you can miss</b><span>' + (100 - G.slo) + "% of " + win + " days = " + plural(o.allowed || 0, "day") + " you can skip</span></div>" +
           '<div class="sre-val"><b>' + (left == null ? "—" : left + "<small>/" + o.allowed + "</small>") + "</b><span>" + (left == null ? "—" : left === 0 ? "used up" : "left") + "</span></div></div>" +
         '<div class="budget-bar' + (left != null && (left === 0 || (o.allowed >= 3 && left / o.allowed < 0.34)) ? " low" : "") + '"><span style="--p:' + (o.budget == null ? 0 : o.budget) + '"></span></div>' +
+        telemetry(G) +
         '<p class="sre-note">' + (idle ? "Hit your goal today and the numbers start filling in." :
           left === 0 ? "Budget used up — SRE teams stop shipping risky changes and fix reliability; for you, it means protect a small daily habit until you're back above " + G.slo + "%." :
           "Budget left means a missed day is fine — rest without guilt. When it runs out, that's your signal to get consistent again.") + "</p>" +
