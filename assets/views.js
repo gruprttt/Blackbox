@@ -408,7 +408,7 @@
       var sliLine = path(sliPts, ySli), sloY = ySli(G.slo).toFixed(1);
       var firstIdx = sliPts.findIndex(function (v) { return v != null; });
       var sliArea = firstIdx < 0 ? "" : sliLine + "L" + px(29) + "," + (H - 10) + "L" + px(firstIdx) + "," + (H - 10) + "Z";
-      var below = sliPts.map(function (v, j) { return v != null && v < G.slo ? '<circle cx="' + px(j) + '" cy="' + ySli(v).toFixed(1) + '" r="2.4"/>' : ""; }).join("");
+      var below = sliPts.map(function (v, j) { return v == null ? "" : '<circle class="' + (v < G.slo ? "bad" : "pt") + '" cx="' + px(j) + '" cy="' + ySli(v).toFixed(1) + '" r="' + (v < G.slo ? 2.6 : 1.8) + '"/>'; }).join("");
       var yBud = function (v) { var mid = (H - 10) / 2 + 3; return mid - v / maxBud * ((H - 16) / 2); }, zeroY = yBud(0).toFixed(1);
       var budLine = path(budPts, yBud);
       var lastSli = sliPts[29], lastBud = budPts[29];
@@ -425,7 +425,8 @@
             '<div class="t-axis">' + axis + '</div><p class="tc-note"><i class="lg-slo"></i>dashed line = your SLO (' + G.slo + "%) · red dots = days the trend was below it</p></figure>" +
           '<figure class="tchart"><figcaption><span class="mono-label">error budget remaining</span><b>' + (lastBud == null ? "—" : lastBud + (Math.abs(lastBud) === 1 ? " day" : " days")) + '</b></figcaption>' +
             '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-label="Error budget burn-down">' +
-            '<line class="tc-zero" x1="4" x2="' + (W - 4) + '" y1="' + zeroY + '" y2="' + zeroY + '"/><path class="tc-bud" d="' + budLine + '"/></svg>' +
+            '<line class="tc-zero" x1="4" x2="' + (W - 4) + '" y1="' + zeroY + '" y2="' + zeroY + '"/><path class="tc-bud" d="' + budLine + '"/>' +
+              budPts.map(function (v, j) { return v == null ? "" : '<circle class="tc-bpt' + (v < 0 ? " bad" : "") + '" cx="' + px(j) + '" cy="' + yBud(v).toFixed(1) + '" r="1.8"/>'; }).join("") + "</svg>" +
             '<div class="t-axis">' + axis + '</div><p class="tc-note">Every day you hit the goal earns a little budget; every miss spends a whole day. Below the line = over budget.</p></figure>' +
         "</div></div>";
     }
@@ -449,7 +450,7 @@
       // SRE view of the same data: SLI (measured), SLO (target), error budget (allowed misses)
       var idle = o.state === "idle" || !o.counted, win = o.win || 30;
       var sli = idle ? null : o.attain, meeting = sli != null && sli >= G.slo;
-      var left = o.budget == null ? null : Math.max(0, o.allowed - o.missed);
+      var left = o.budget == null ? null : Math.max(0, o.allowed - o.missed), earning = left === 0 && !o.allowed && !o.missed;
       var sre =
         '<div class="sre"><div class="sre-head"><span class="mono-label">/ reliability · sre-style</span><span class="sre-state ' + (idle ? "idle" : meeting ? "ok" : "bad") + '">' +
           (idle ? "measuring…" : meeting ? "meeting your SLO" : "below your SLO") + "</span></div>" +
@@ -458,10 +459,10 @@
         '<div class="sre-row"><span class="sre-term">SLO</span><div class="sre-what"><b>Your target</b><span>Hit the goal on at least ' + G.slo + "% of days</span></div>" +
           '<div class="sre-val"><b>' + G.slo + "%</b><span>" + (idle ? "—" : meeting ? "✓ on target" : "✗ " + plural(G.slo - sli, "pt") + " short") + "</span></div></div>" +
         '<div class="sre-row"><span class="sre-term">Error budget</span><div class="sre-what"><b>Days you can miss</b><span>' + (100 - G.slo) + "% of " + win + " days = " + plural(o.allowed || 0, "day") + " you can skip</span></div>" +
-          '<div class="sre-val"><b>' + (left == null ? "—" : left + "<small>/" + o.allowed + "</small>") + "</b><span>" + (left == null ? "—" : left === 0 ? "used up" : "left") + "</span></div></div>" +
-        '<div class="budget-bar' + (left != null && (left === 0 || (o.allowed >= 3 && left / o.allowed < 0.34)) ? " low" : "") + '"><span style="--p:' + (o.budget == null ? 0 : o.budget) + '"></span></div>' +
-        telemetry(G) +
+          '<div class="sre-val"><b>' + (left == null ? "—" : left + "<small>/" + o.allowed + "</small>") + "</b><span>" + (left == null ? "—" : earning ? "earning" : left === 0 ? "used up" : "left") + "</span></div></div>" +
+        '<div class="budget-bar' + (left != null && !earning && (left === 0 || (o.allowed >= 3 && left / o.allowed < 0.34)) ? " low" : "") + '"><span style="--p:' + (o.budget == null ? 0 : o.budget) + '"></span></div>' +
         '<p class="sre-note">' + (idle ? "Hit your goal today and the numbers start filling in." :
+          earning ? "You earn skip days as you go — about one for every " + Math.round(100 / Math.max(1, 100 - G.slo)) + " days you track. Miss a day before then and you dip below your SLO." :
           left === 0 ? "Budget used up — SRE teams stop shipping risky changes and fix reliability; for you, it means protect a small daily habit until you're back above " + G.slo + "%." :
           "Budget left means a missed day is fine — rest without guilt. When it runs out, that's your signal to get consistent again.") + "</p>" +
         '<details class="sre-learn"><summary>New to SLI / SLO? The 30-second version</summary>' +
@@ -483,7 +484,11 @@
           '<div class="goal-fields"><label><span>and aim to hit it on</span><input type="number" name="slo" min="50" max="100" step="5" value="' + G.slo + '"><span>% of days (your SLO)</span></label></div>' +
           '<div class="goal-actions"><button class="btn btn-primary sm" type="submit">Save goal</button><button class="btn btn-ghost sm" type="button" data-goal-cancel>Cancel</button></div>' +
           '<p class="goal-help">Items = lessons, DSA problems, Backend sections and System Design concepts you mark done. An SLO of 80% lets you skip about 6 days a month.</p></form>' +
-        sre +
+        sre;
+      var dash = $("[data-tele-dash]");
+      if (dash) dash.innerHTML =
+        '<div class="panel-head"><span class="mono-label">/ slo dashboard · your learning as a service</span><span class="tsub">last 30 days</span></div>' +
+        telemetry(G) +
         '<div class="tele-grid">' +
           '<div class="tcell"><span class="mono-label">streak</span><b>' + st.current + "<small> day" + (st.current === 1 ? "" : "s") + '</small></b><span class="tsub">best ' + plural(st.best, "day") + "</span></div>" +
           '<div class="tcell"><span class="mono-label">typical focus session</span><b>' + (p50 == null ? "—" : Math.round(p50) + "<small> min</small>") + '</b><span class="tsub">' + plural(mins.length, "session") + " so far</span></div>" +

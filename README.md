@@ -112,14 +112,15 @@ only leave the page when you open a lesson, problem or chapter to learn it.
 
 ## Reading a chapter
 
-Backend chapters and DevOps lessons open with a warp jump into space, and each page lands in a
-different scene (chosen from the page address, so it's always the same for that page): a distant
-ray-traced black hole, an edge-on accretion disk, Earth from low orbit with city lights, Mars, or a
-golden spiral galaxy — with a small caption naming it. The scene sits in the space around the text,
-drifts a little closer as you read and flares when you finish; the text stays on dark glass. It runs
-at a fraction of screen resolution, caps at 30 fps, lowers its quality on slow machines, pauses in
-background tabs, shows a still frame for reduced motion and falls back to a drawn image without
-WebGL. Add `?scene=0`…`?scene=4` to a chapter URL to preview a scene. When a
+Backend chapters and DevOps lessons look out onto a different scene of space per page (chosen from
+the page address, so it's always the same for that page): a distant ray-traced black hole, an
+edge-on accretion disk, Earth from low orbit with city lights, Mars, or a golden spiral galaxy — with
+a small caption naming it, placed in the space around the text. For quality *and* speed the scene is
+ray-traced **once** at full screen resolution (supersampled, up to 4K) in small strips spread over a
+few frames, so the page never stutters; afterwards nothing is re-rendered — the only motion is a slow
+GPU camera drift, a few twinkling stars and the odd shooting star. The scene edges closer as you
+read and flares when you finish; the text stays on dark glass. Reduced-motion turns the motion off,
+and browsers without WebGL get a drawn fallback. Add `?scene=0`…`?scene=4` to a chapter URL to preview a scene. When a
 chapter or lesson is complete, a **Next chapter / Next lesson** button appears at the bottom and a
 bar slides up offering the next one.
 

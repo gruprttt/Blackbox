@@ -656,6 +656,7 @@ def render_home(tracks, sheets, be=None, full=None):
       <div class="term-hints"><span><kbd>Tab</kbd> complete</span><span><kbd>↑</kbd> history</span><span>try <code>help</code> · <code>next</code> · <code>path</code></span></div>
     </div>
   </div>
+  <div class="panel tele-dash" data-tele-dash></div>
 </section>
 
 <section class="wrap programs-sec" id="programs">
