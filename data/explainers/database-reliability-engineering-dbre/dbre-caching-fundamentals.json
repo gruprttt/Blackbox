@@ -1,0 +1,734 @@
+{
+  "introduction-the-need-for-speed": {
+    "core": "Memory is about a million times faster than disk or network. A cache keeps a small, popular subset of data in memory, and its hit rate tells you how much load it really takes off the database.",
+    "first_principles": {
+      "problem": "A popular query (\"top 10 trending products\") might run thousands of times per second, identically. Each run hits the database, burns CPU and competes for I/O, recomputing an answer that hasn't changed.",
+      "truths": [
+        "RAM is nanoseconds, while disk or network is milliseconds (about 10⁶ slower).",
+        "A small fraction of data gets most of the requests.",
+        "A fast store holds less data than a slow one."
+      ],
+      "derivation": [
+        "Compute the answer once and **store it in fast memory** (Redis/Memcached).",
+        "Serve the next 9,999 requests from memory.",
+        "Measure the **hit rate**: 95% hits means only 5% of reads reach the database, a 20× reduction.",
+        "If the hit rate is low, the cache isn't helping enough. Check what you cache and for how long."
+      ]
+    },
+    "analogy": {
+      "title": "Remembering your own phone number",
+      "story": "You don't look your phone number up in the phone book every time. Your brain caches it. Looking up a stranger's number is slow, but you rarely need it. If 1 second of memory recall were the scale, the phone-book lookup would take about 12 days.",
+      "mapping": [
+        [
+          "Remembered number",
+          "Cache hit"
+        ],
+        [
+          "Phone book lookup",
+          "Database query (miss)"
+        ],
+        [
+          "Things you remember",
+          "Hot subset of data"
+        ],
+        [
+          "How often you don't need the book",
+          "Hit rate"
+        ]
+      ],
+      "breaks": "Your memory doesn't serve a stale number after someone changes it. A cache can, unless it's invalidated or expires."
+    },
+    "mindmap": {
+      "center": "Why Caching",
+      "branches": [
+        {
+          "label": "Speed gap",
+          "children": [
+            "RAM: ns",
+            "Disk / network: ms",
+            "~10⁶ ×"
+          ]
+        },
+        {
+          "label": "Cache",
+          "children": [
+            "Subset of data",
+            "Fast memory",
+            "Redis / Memcached"
+          ]
+        },
+        {
+          "label": "Hit rate",
+          "children": [
+            "95% → 20× less DB load",
+            "First metric to check"
+          ]
+        },
+        {
+          "label": "DBRE angle",
+          "children": [
+            "Hot queries",
+            "Protect the DB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What a hit rate is worth",
+      "scenario": "A product page does 10,000 reads/s against Postgres.",
+      "flow": [
+        "10,000 reads/s",
+        "Cache hit rate 95%",
+        "500 reads/s reach DB",
+        "DB load ÷ 20"
+      ],
+      "steps": [
+        {
+          "label": "Without cache",
+          "detail": "The database executes all 10,000 queries/s."
+        },
+        {
+          "label": "With cache",
+          "detail": "9,500 are served from Redis in about 0.3 ms each and 500 reach the database."
+        },
+        {
+          "label": "At 50% hits",
+          "detail": "5,000/s still hit the database, which may not be enough relief."
+        }
+      ],
+      "code": [],
+      "outcome": "the hit rate turns into a concrete reduction in database load you can plan around."
+    },
+    "summary": {
+      "points": [
+        "Cache = trade capacity for speed.",
+        "Hit rate is the key metric.",
+        "Cache the hot, repeated, expensive reads."
+      ]
+    },
+    "check": [
+      {
+        "q": "Your cache hit rate is 40%. What would you investigate?",
+        "a": "Whether you cache the right keys, whether TTLs are too short, whether memory is too small (evictions), and whether the access pattern is too random to cache well."
+      }
+    ]
+  },
+  "caching-pattern-cache-aside-lazy-loading": {
+    "core": "With cache-aside, the application checks the cache first, and on a miss it reads the database and fills the cache. Only requested data is cached, and the app survives cache outages by falling back to the database.",
+    "first_principles": {
+      "problem": "We want popular data in the cache without preloading everything, and without the cache becoming a single point of failure. Something has to decide when data enters the cache.",
+      "truths": [
+        "We only know what's popular once it's requested.",
+        "Caches can restart or fail.",
+        "The database remains the source of truth."
+      ],
+      "derivation": [
+        "On a read, **check the cache** first.",
+        "**Hit**: return immediately.",
+        "**Miss**: query the database, **write the result to the cache with a TTL**, then return it.",
+        "If the cache is down, **fall back to the database**. Degrade, don't fail.",
+        "Accept the costs: a **cold start** after a restart, and **staleness** until TTL or invalidation."
+      ]
+    },
+    "analogy": {
+      "title": "A kitchen counter vs. the pantry",
+      "story": "When you need an ingredient, you look on the counter first. If it's not there, you walk to the pantry, take it, and leave it on the counter for next time. If the counter collapses, you can still cook. You just walk to the pantry every time.",
+      "mapping": [
+        [
+          "Counter",
+          "Cache"
+        ],
+        [
+          "Pantry",
+          "Database"
+        ],
+        [
+          "Leaving it on the counter",
+          "Populate cache on miss"
+        ],
+        [
+          "Counter collapses",
+          "Cache outage → fallback"
+        ],
+        [
+          "Empty counter in the morning",
+          "Cold cache"
+        ]
+      ],
+      "breaks": "An ingredient on the counter doesn't change. A cached user record can be stale the moment the database is updated, until the TTL expires or you delete the key."
+    },
+    "mindmap": {
+      "center": "Cache-Aside",
+      "branches": [
+        {
+          "label": "Read path",
+          "children": [
+            "Check cache",
+            "Hit → return",
+            "Miss → DB → fill cache"
+          ]
+        },
+        {
+          "label": "Who does it",
+          "children": [
+            "The application",
+            "Cache knows nothing of DB"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Only requested data",
+            "Survives cache failure",
+            "Simple"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Cold start",
+            "Stale until TTL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Profile reads for user 123",
+      "scenario": "The profile page is read constantly and updated rarely.",
+      "flow": [
+        "GET user:123",
+        "Miss",
+        "SELECT from DB",
+        "SET user:123 EX 3600",
+        "Next request: hit"
+      ],
+      "steps": [
+        {
+          "label": "First request",
+          "detail": "Miss: query Postgres and store the result with a 1 h TTL."
+        },
+        {
+          "label": "Next requests",
+          "detail": "Hit: served in under 1 ms."
+        },
+        {
+          "label": "On update",
+          "detail": "When the user edits their profile, `DEL user:123` so the next read refreshes it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def get_user(uid):\n    data = cache.get(f\"user:{uid}\")\n    if data is None:\n        data = db.fetch_user(uid)\n        cache.set(f\"user:{uid}\", data, ex=3600)\n    return data"
+        }
+      ],
+      "outcome": "the profile is served from memory almost always, and a cache outage only slows things down."
+    },
+    "summary": {
+      "points": [
+        "App orchestrates cache and DB.",
+        "Only requested data is cached.",
+        "Fallback to DB on cache failure. Watch DB load when it happens."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to the database when a cache-aside cache goes down?",
+        "a": "All reads fall through to it, so it suddenly takes 100% of traffic. The system works, but the DB must have headroom and you must be alerted."
+      }
+    ]
+  },
+  "caching-patterns-write-through-and-write-back": {
+    "core": "Write-through updates the cache and database together (always fresh, slower writes). Write-back acknowledges after the cache and flushes later (very fast, but writes can be lost).",
+    "first_principles": {
+      "problem": "Cache-aside handles reads, but when data changes the cache may still hold the old version. We need a policy for writes that balances freshness, speed and safety.",
+      "truths": [
+        "Writing to RAM is fast, and writing to the database is slower.",
+        "Waiting for both is safe but slow.",
+        "Acknowledging before the database has it risks loss on crash."
+      ],
+      "derivation": [
+        "**Write-through**: write to the cache, which synchronously writes to the DB, and ack after both. Cache is never stale.",
+        "Combine with a **TTL** so written-but-unread data doesn't hog memory.",
+        "**Write-back**: write to the cache, ack immediately, and flush to the DB asynchronously. Repeated writes to one key **coalesce**.",
+        "Never use write-back for data you can't lose (payments, orders)."
+      ]
+    },
+    "analogy": {
+      "title": "Note-taking in a meeting",
+      "story": "Write-through: every decision is written on the whiteboard and typed into the official minutes at the same moment, so they always match, but the meeting moves slower. Write-back: decisions go on the whiteboard and someone types the minutes up later. Fast, but if the whiteboard is wiped first, those decisions are gone.",
+      "mapping": [
+        [
+          "Whiteboard",
+          "Cache"
+        ],
+        [
+          "Official minutes",
+          "Database"
+        ],
+        [
+          "Writing both at once",
+          "Write-through"
+        ],
+        [
+          "Typing up later",
+          "Write-back (async flush)"
+        ],
+        [
+          "Whiteboard wiped",
+          "Cache crash → lost writes"
+        ]
+      ],
+      "breaks": "Meeting minutes are usually typed up within the hour. Write-back flush timing depends on timers and memory pressure, so the exposure window can be longer than you expect."
+    },
+    "mindmap": {
+      "center": "Write Strategies",
+      "branches": [
+        {
+          "label": "Write-through",
+          "children": [
+            "Cache → DB synchronously",
+            "Never stale",
+            "Slower writes"
+          ]
+        },
+        {
+          "label": "Write-back",
+          "children": [
+            "Ack after cache",
+            "Async flush",
+            "Coalesces writes"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Write-back loses data on crash"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Correctness → write-through",
+            "Counters / metrics → write-back"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "View counters vs. order records",
+      "scenario": "A site tracks article view counts and stores customer orders.",
+      "flow": [
+        "Orders: write-through",
+        "Views: write-back",
+        "1,000 increments → 1 DB write",
+        "Order never lost"
+      ],
+      "steps": [
+        {
+          "label": "Orders",
+          "detail": "Write-through: the order is in the DB before the customer sees confirmation."
+        },
+        {
+          "label": "Views",
+          "detail": "Write-back: increments go to Redis, and a job flushes totals to the DB every 30 s."
+        },
+        {
+          "label": "Trade-off",
+          "detail": "If Redis crashes, up to 30 s of view counts are lost, which is acceptable for views and not for orders."
+        }
+      ],
+      "code": [],
+      "outcome": "each kind of data gets the write path its importance deserves."
+    },
+    "summary": {
+      "points": [
+        "Write-through = fresh, slower.",
+        "Write-back = fast, risky.",
+        "Match the strategy to how bad data loss would be."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is write-back good for counters?",
+        "a": "Many increments to one key collapse into one database write, and losing a few seconds of counts is usually acceptable."
+      }
+    ]
+  },
+  "eviction-policies-taking-out-the-trash": {
+    "core": "When the cache is full something must go. TTL expires items by age, LRU drops the least recently used, LFU drops the least frequently used, and ARC adapts between them. The right policy follows your access pattern.",
+    "first_principles": {
+      "problem": "Cache memory is fixed. New items keep arriving, so old ones must be removed. Remove the wrong ones and your hit rate quietly collapses even though the cache looks healthy.",
+      "truths": [
+        "Memory is finite.",
+        "Some data is recently hot, and some is permanently popular.",
+        "Stale data shouldn't live forever."
+      ],
+      "derivation": [
+        "**TTL**: expire each item after a set time, which bounds staleness.",
+        "**LRU**: evict what was used longest ago, which suits temporal locality. It's the general default.",
+        "**LFU**: evict what is used least often, which protects evergreen hot keys (but new keys start at 0).",
+        "**ARC**: track both recency and frequency and adapt automatically.",
+        "Configure it in Redis with `maxmemory-policy` (e.g. `allkeys-lru`, `allkeys-lfu`, `volatile-lru`)."
+      ]
+    },
+    "analogy": {
+      "title": "Clearing out your fridge",
+      "story": "TTL: throw things out by their use-by date. LRU: toss whatever you haven't touched for the longest. LFU: toss what you rarely eat, but keep the milk you use daily even if you haven't had any since this morning. ARC: a smart fridge that learns which rule works best for your household.",
+      "mapping": [
+        [
+          "Use-by date",
+          "TTL"
+        ],
+        [
+          "Untouched longest",
+          "LRU"
+        ],
+        [
+          "Rarely eaten",
+          "LFU"
+        ],
+        [
+          "Smart fridge",
+          "ARC"
+        ],
+        [
+          "Fridge space",
+          "maxmemory"
+        ]
+      ],
+      "breaks": "You can see what's in your fridge. A cache evicts silently. The only signs are evictions in `INFO stats` and a falling hit rate."
+    },
+    "mindmap": {
+      "center": "Eviction",
+      "branches": [
+        {
+          "label": "TTL",
+          "children": [
+            "Expire by age",
+            "Bounds staleness"
+          ]
+        },
+        {
+          "label": "LRU",
+          "children": [
+            "Least recently used",
+            "Default choice"
+          ]
+        },
+        {
+          "label": "LFU",
+          "children": [
+            "Least frequently used",
+            "Evergreen hot keys"
+          ]
+        },
+        {
+          "label": "ARC",
+          "children": [
+            "Recency + frequency",
+            "Self-tuning"
+          ]
+        },
+        {
+          "label": "Redis",
+          "children": [
+            "maxmemory-policy",
+            "allkeys-lru / lfu"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A trending + evergreen news site",
+      "scenario": "A few articles are popular for years, and breaking news spikes for hours.",
+      "flow": [
+        "LRU: evergreen evicted after a quiet hour",
+        "Hit rate dips",
+        "Switch to allkeys-lfu",
+        "Evergreen stays cached"
+      ],
+      "steps": [
+        {
+          "label": "Symptom",
+          "detail": "Overnight, evergreen articles get evicted by LRU, so morning traffic misses."
+        },
+        {
+          "label": "Change",
+          "detail": "`allkeys-lfu` keeps frequently read keys even after a quiet period."
+        },
+        {
+          "label": "Verify",
+          "detail": "Watch `evicted_keys` and the hit rate before and after."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "redis-cli CONFIG SET maxmemory-policy allkeys-lfu\nredis-cli INFO stats | grep -E 'keyspace_hits|keyspace_misses|evicted_keys'"
+        }
+      ],
+      "outcome": "the policy matches the workload and the hit rate stops dropping at predictable times."
+    },
+    "summary": {
+      "points": [
+        "TTL limits staleness, eviction limits size.",
+        "LRU is general, LFU is for evergreen hot keys.",
+        "Measure evictions and hit rate."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's LFU's weakness?",
+        "a": "New items start with low counts and may be evicted before they become popular (cache pollution by old favourites)."
+      }
+    ]
+  },
+  "cache-penetration-the-attack-of-the-nulls": {
+    "core": "Requests for keys that don't exist are never cached, so they all hit the database. Cache the \"not found\" answer briefly, or reject impossible keys with a Bloom filter.",
+    "first_principles": {
+      "problem": "An attacker or buggy crawler requests user IDs that don't exist. Each one misses the cache, queries the database, finds nothing, and caches nothing, so the next identical request does it all again. Millions of these go straight through to the database.",
+      "truths": [
+        "Cache-aside only stores data that was found.",
+        "A \"not found\" answer is still an answer worth remembering.",
+        "A set of valid keys can be summarised compactly with Bloom filters."
+      ],
+      "derivation": [
+        "**Cache null results**: store a sentinel for missing keys with a **short TTL** (e.g. 60 s).",
+        "Keep the TTL short so a newly created record isn't hidden for long.",
+        "Or put a **Bloom filter** of all valid keys in front: \"definitely not in DB\" means reject immediately.",
+        "Bloom filters have no false negatives, so valid keys are never rejected, and they're tiny in RAM."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist and the staff list",
+      "story": "Visitors keep asking for people who don't work here. A good receptionist writes \"no such person\" on a sticky note so they don't phone HR each time (cached null), or checks the staff list first and turns away unknown names immediately (Bloom filter).",
+      "mapping": [
+        [
+          "Asking for non-existent people",
+          "Requests for missing keys"
+        ],
+        [
+          "Phoning HR each time",
+          "DB query per request"
+        ],
+        [
+          "\"No such person\" note",
+          "Null sentinel with TTL"
+        ],
+        [
+          "Staff list check",
+          "Bloom filter"
+        ]
+      ],
+      "breaks": "A staff list is exact. A Bloom filter sometimes says \"maybe\" for a key that doesn't exist, so a few requests still reach the database, but never the reverse."
+    },
+    "mindmap": {
+      "center": "Cache Penetration",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Missing keys never cached",
+            "Every request hits DB"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "Attackers / crawlers",
+            "Bad IDs"
+          ]
+        },
+        {
+          "label": "Fix 1",
+          "children": [
+            "Cache NULL sentinel",
+            "Short TTL"
+          ]
+        },
+        {
+          "label": "Fix 2",
+          "children": [
+            "Bloom filter of valid keys",
+            "No false negatives"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A scraper hammering random IDs",
+      "scenario": "50,000 requests per second for `/users/{random}`, and almost none exist.",
+      "flow": [
+        "Random ID",
+        "Bloom filter: definitely absent",
+        "404 without cache or DB",
+        "DB load unchanged"
+      ],
+      "steps": [
+        {
+          "label": "Before",
+          "detail": "All 50,000/s miss the cache and query Postgres, and CPU spikes."
+        },
+        {
+          "label": "Null caching",
+          "detail": "Repeated IDs are now answered from cache, which helps but random IDs are always new."
+        },
+        {
+          "label": "Bloom filter",
+          "detail": "Reject IDs not in the filter before any cache or DB access."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "if not valid_ids_bloom.might_contain(user_id):\n    return 404                      # definitely not in DB\nuser = cache.get(f\"user:{user_id}\")\nif user == \"NULL\":\n    return 404\nif user is None:\n    user = db.get_user(user_id)\n    cache.set(f\"user:{user_id}\", user or \"NULL\", ex=3600 if user else 60)"
+        }
+      ],
+      "outcome": "junk traffic is absorbed before it reaches the database."
+    },
+    "summary": {
+      "points": [
+        "Misses for missing keys bypass the cache.",
+        "Cache nulls with a short TTL.",
+        "Bloom filters reject impossible keys cheaply."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does the null sentinel need a short TTL?",
+        "a": "If the record is created later, a long-lived sentinel would keep reporting 'not found' until it expires."
+      }
+    ]
+  },
+  "cache-stampede-the-thundering-herd": {
+    "core": "When a hot cache key expires, every concurrent request misses at once and runs the same expensive query. Prevent it by letting only one caller rebuild (lock), refreshing early, or spreading expiry times.",
+    "first_principles": {
+      "problem": "A homepage config takes 2 s to compute and is cached for an hour. At 10:00:00 it expires, and 5,000 requests arriving in the next millisecond all miss and fire the same 2-second query. The database slows, rebuilds take longer, more requests pile up, and it spirals.",
+      "truths": [
+        "Many requests can see the same miss at the same instant.",
+        "Only one fresh copy is needed.",
+        "Keys populated together will expire together."
+      ],
+      "derivation": [
+        "**Mutex**: on a miss, take a lock (`SET lock NX EX 5`). Only the winner queries, and the others wait briefly or serve stale data.",
+        "**Probabilistic early expiration (XFetch)**: refresh *before* expiry with increasing probability, so the key is never empty.",
+        "**Jittered TTLs**: add randomness so keys loaded together don't expire together.",
+        "After deploys or restarts, **pre-warm** the cache before sending traffic."
+      ]
+    },
+    "analogy": {
+      "title": "The office coffee pot",
+      "story": "When the coffee runs out at 9:00, fifty people show up at once and all try to brew a fresh pot. Better: whoever finds it empty puts up a \"brewing, back in 2 min\" sign and everyone else waits (lock), or someone starts a new pot when it's nearly empty (early refresh).",
+      "mapping": [
+        [
+          "Empty pot",
+          "Expired hot key"
+        ],
+        [
+          "Fifty people brewing",
+          "Stampede of identical queries"
+        ],
+        [
+          "\"Brewing\" sign",
+          "Mutex / single-flight"
+        ],
+        [
+          "Brew before it's empty",
+          "Probabilistic early refresh"
+        ],
+        [
+          "Different refill times",
+          "Jittered TTLs"
+        ]
+      ],
+      "breaks": "People notice the sign. Code must check the lock explicitly, and if the lock holder crashes, the lock's TTL must expire it."
+    },
+    "mindmap": {
+      "center": "Cache Stampede",
+      "branches": [
+        {
+          "label": "Trigger",
+          "children": [
+            "Hot key expires",
+            "Cache restart / deploy"
+          ]
+        },
+        {
+          "label": "Spiral",
+          "children": [
+            "N identical queries",
+            "DB slows",
+            "More pile up"
+          ]
+        },
+        {
+          "label": "Mutex",
+          "children": [
+            "SET NX EX",
+            "One rebuilder"
+          ]
+        },
+        {
+          "label": "Early refresh",
+          "children": [
+            "XFetch / PER",
+            "Never empty"
+          ]
+        },
+        {
+          "label": "Jitter / warm",
+          "children": [
+            "Random TTL offset",
+            "Pre-warm after deploy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"The DB gets hammered for 30 s after every deploy\"",
+      "scenario": "Each deploy restarts the cache tier, and the database then pegs at 100% for half a minute.",
+      "flow": [
+        "Deploy restarts cache",
+        "Every hot key empty",
+        "Herd of misses",
+        "Add pre-warm + lock",
+        "Smooth deploys"
+      ],
+      "steps": [
+        {
+          "label": "Diagnosis",
+          "detail": "It's a stampede: the deploy empties the cache and every request recomputes."
+        },
+        {
+          "label": "Lock",
+          "detail": "Single-flight rebuild per key, so others wait about 100 ms."
+        },
+        {
+          "label": "Pre-warm",
+          "detail": "Fill the top 1,000 keys before shifting traffic, with jittered TTLs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "if r.set(\"lock:homepage\", \"1\", nx=True, ex=5):\n    try:\n        val = expensive_query()\n        r.set(\"homepage\", val, ex=3600 + random.randint(0, 300))\n    finally:\n        r.delete(\"lock:homepage\")"
+        }
+      ],
+      "outcome": "deploys stop causing database spikes because each key is rebuilt once, not thousands of times."
+    },
+    "summary": {
+      "points": [
+        "Stampede = many misses on one hot key at once.",
+        "Lock, refresh early, or jitter.",
+        "Pre-warm after deploys."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does the lock need its own expiry (EX 5)?",
+        "a": "If the process holding it crashes, the lock would otherwise never be released and nobody could rebuild the key."
+      }
+    ]
+  }
+}

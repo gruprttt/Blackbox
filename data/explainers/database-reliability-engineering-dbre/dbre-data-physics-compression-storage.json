@@ -1,0 +1,853 @@
+{
+  "introduction-the-physical-reality-of-data": {
+    "core": "Data is physical: every byte costs money to store and time to move. A DBRE makes databases faster and cheaper at once by shrinking data (compression) and organising it so queries read only what they need.",
+    "first_principles": {
+      "problem": "It's easy to think of data as tables and rows. Underneath, it sits on disks billed per GB-month and travels to a CPU thousands of times faster than the disk can supply it. At scale, I/O is almost always the bottleneck and storage the biggest bill.",
+      "truths": [
+        "Storage costs scale with bytes.",
+        "Moving bytes from disk or network is far slower than processing them.",
+        "Queries often need only a small part of the stored bytes."
+      ],
+      "derivation": [
+        "**Shrink** the data with compression, so there are fewer bytes to store and to move.",
+        "**Organise** the data (e.g. columnar) so a query reads only the bytes it needs.",
+        "Apply both at different layers: **file, block/page, column**.",
+        "Win twice: less I/O means faster queries **and** a smaller bill."
+      ]
+    },
+    "analogy": {
+      "title": "A warehouse",
+      "story": "Every item takes shelf space (cost), and fetching from the back takes time (I/O). Vacuum-packing items saves space (compression). Shelving similar items together means the picker only walks one aisle (columnar layout).",
+      "mapping": [
+        [
+          "Shelf space",
+          "Storage cost"
+        ],
+        [
+          "Walking to the back",
+          "Disk / network I/O"
+        ],
+        [
+          "Vacuum packing",
+          "Compression"
+        ],
+        [
+          "One aisle per item type",
+          "Columnar storage"
+        ]
+      ],
+      "breaks": "Unpacking a vacuum bag is quick. Decompression costs CPU on every read, so heavy compression can move the bottleneck from disk to CPU."
+    },
+    "mindmap": {
+      "center": "Data Physics",
+      "branches": [
+        {
+          "label": "Realities",
+          "children": [
+            "Storage costs money",
+            "I/O is slow"
+          ]
+        },
+        {
+          "label": "Shrink",
+          "children": [
+            "Compression",
+            "Fewer bytes moved"
+          ]
+        },
+        {
+          "label": "Organise",
+          "children": [
+            "Row vs columnar",
+            "Read only needed bytes"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "File",
+            "Block / page",
+            "Column"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 10 TB analytics table",
+      "scenario": "Stored as uncompressed rows on S3, scanned in full by most queries.",
+      "flow": [
+        "10 TB raw rows",
+        "Columnar layout",
+        "Compression ~5:1",
+        "Queries read 1 of 20 columns",
+        "Cost & time ↓"
+      ],
+      "steps": [
+        {
+          "label": "Shrink",
+          "detail": "Compression takes 10 TB to about 2 TB, which cuts the storage bill by about 80%."
+        },
+        {
+          "label": "Organise",
+          "detail": "Columnar format means a query on 1 of 20 columns reads about 5% of that."
+        },
+        {
+          "label": "Combined",
+          "detail": "Each query reads around 100 GB instead of 10 TB."
+        }
+      ],
+      "code": [],
+      "outcome": "the same question gets answered faster and cheaper, which is the data-physics win-win."
+    },
+    "summary": {
+      "points": [
+        "Bytes cost money and time.",
+        "Shrink with compression, organise with layout.",
+        "Both layers multiply each other's gains."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is I/O usually the bottleneck rather than CPU?",
+        "a": "CPUs process billions of operations per second, while disks and networks deliver data far more slowly, so the CPU waits on data."
+      }
+    ]
+  },
+  "the-compression-trade-off-triangle": {
+    "core": "Every compression algorithm trades ratio, compression speed and decompression speed. Databases write once and read many times, so decompression speed usually matters most.",
+    "first_principles": {
+      "problem": "Engineers often pick the algorithm with the best ratio, then wonder why queries got slower. Squeezing data harder costs CPU, and every read pays the decompression price again.",
+      "truths": [
+        "Higher ratio usually means more CPU.",
+        "Data is written once and read many times.",
+        "Ratio saves I/O, and decompression speed costs CPU."
+      ],
+      "derivation": [
+        "Name the three axes: **ratio**, **compression speed**, **decompression speed**. You can optimise two.",
+        "Weight **decompression speed** heavily for read-heavy databases.",
+        "Choose by bottleneck: **I/O-bound → favour ratio**, **CPU-bound → favour fast decode**.",
+        "Start with **Zstd** because its levels let you move along the triangle."
+      ]
+    },
+    "analogy": {
+      "title": "Packing a suitcase",
+      "story": "Throw clothes in loosely in 30 seconds, or spend 20 minutes folding to fit twice as much. If you unpack and repack every day of the trip, an intricate folding scheme becomes a daily chore.",
+      "mapping": [
+        [
+          "Folding tightly",
+          "High compression ratio"
+        ],
+        [
+          "Packing time",
+          "Compression speed"
+        ],
+        [
+          "Daily unpacking",
+          "Decompression on every read"
+        ],
+        [
+          "Suitcase space",
+          "Storage / I/O"
+        ]
+      ],
+      "breaks": "Unpacking time is the same each day. Decompression cost multiplies with query volume, so a small per-read cost becomes a big CPU bill."
+    },
+    "mindmap": {
+      "center": "Compression Trade-offs",
+      "branches": [
+        {
+          "label": "Ratio",
+          "children": [
+            "Less space",
+            "Less I/O"
+          ]
+        },
+        {
+          "label": "Compress speed",
+          "children": [
+            "Write / ingest cost"
+          ]
+        },
+        {
+          "label": "Decompress speed",
+          "children": [
+            "Every read pays",
+            "Often most important"
+          ]
+        },
+        {
+          "label": "Choose by bottleneck",
+          "children": [
+            "I/O-bound → ratio",
+            "CPU-bound → fast decode"
+          ]
+        },
+        {
+          "label": "Default",
+          "children": [
+            "Zstd, tune level"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Query slowed down after switching codecs",
+      "scenario": "A team switched from LZ4 to a maximum-ratio codec to cut storage, and dashboard queries got 3× slower.",
+      "flow": [
+        "Max-ratio codec",
+        "Disk I/O ↓",
+        "CPU 95% decompressing",
+        "Switch to Zstd level 3",
+        "CPU ↓, I/O still modest"
+      ],
+      "steps": [
+        {
+          "label": "Diagnose",
+          "detail": "Disk is idle and CPU is saturated: the bottleneck moved to decompression."
+        },
+        {
+          "label": "Fix",
+          "detail": "Zstd level 3 has a ratio close to the heavy codec and much faster decode."
+        },
+        {
+          "label": "Lesson",
+          "detail": "Optimise the read path, not just storage size."
+        }
+      ],
+      "code": [],
+      "outcome": "storage stays small and queries are fast again."
+    },
+    "summary": {
+      "points": [
+        "Ratio vs compress speed vs decompress speed.",
+        "Read-heavy → prioritise decompression speed.",
+        "Find your bottleneck before choosing."
+      ]
+    },
+    "check": [
+      {
+        "q": "System is I/O-bound with idle CPU. Which way do you move?",
+        "a": "Towards a higher compression ratio. Spend spare CPU to read fewer bytes."
+      }
+    ]
+  },
+  "the-speed-demons-lz4-and-snappy": {
+    "core": "LZ4 and Snappy aim for \"good enough\" compression (30–50%) at near-memory speed, for when CPU or ingest rate is the bottleneck rather than disk space.",
+    "first_principles": {
+      "problem": "A pipeline ingests 500,000 events per second. If compression can't keep up, a backlog builds. If every cache hit must be decompressed, slow decompression adds latency to every request.",
+      "truths": [
+        "Some workloads are limited by CPU or throughput, not storage.",
+        "Simpler algorithms run faster.",
+        "Modest compression still reduces I/O and network traffic."
+      ],
+      "derivation": [
+        "Give up ratio for speed: **LZ4** (decompresses > 4 GB/s per core) and **Snappy** (very low CPU).",
+        "Use them for **ingest pipelines, in-memory caches, inter-service traffic, write-heavy paths**.",
+        "If CPU is at 90% and disk is idle, **switching to LZ4 frees CPU**.",
+        "Accept the cost: about 2:1 instead of 5:1, so more storage for archives."
+      ]
+    },
+    "analogy": {
+      "title": "Quickly folding laundry",
+      "story": "You fold shirts roughly in half: not as compact as perfect folding, but you can keep up with the dryer and grab a shirt in a second.",
+      "mapping": [
+        [
+          "Rough folding",
+          "LZ4 / Snappy"
+        ],
+        [
+          "Keeping up with the dryer",
+          "Ingest rate"
+        ],
+        [
+          "Grabbing a shirt fast",
+          "Fast decompression"
+        ],
+        [
+          "Less compact drawer",
+          "Lower ratio, more storage"
+        ]
+      ],
+      "breaks": "Drawer space at home is fixed and free. Cloud storage is billed per GB, so at 10+ TB the lower ratio becomes real money."
+    },
+    "mindmap": {
+      "center": "LZ4 & Snappy",
+      "branches": [
+        {
+          "label": "Goal",
+          "children": [
+            "Speed over ratio",
+            "~30–50% smaller"
+          ]
+        },
+        {
+          "label": "LZ4",
+          "children": [
+            "> 4 GB/s decode",
+            "ClickHouse, RocksDB, Kafka"
+          ]
+        },
+        {
+          "label": "Snappy",
+          "children": [
+            "Low CPU",
+            "Hadoop, Cassandra"
+          ]
+        },
+        {
+          "label": "Use cases",
+          "children": [
+            "Ingest",
+            "Caches",
+            "Service traffic"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "~2:1 vs Zstd ~5:1"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Kafka producer CPU bottleneck",
+      "scenario": "Producers compress with gzip and max out CPU at 300k msgs/s, but the target is 500k.",
+      "flow": [
+        "gzip: CPU-bound",
+        "Switch to lz4",
+        "CPU ↓ 60%",
+        "Throughput 500k/s",
+        "Slightly larger topic"
+      ],
+      "steps": [
+        {
+          "label": "Change",
+          "detail": "`compression.type=lz4` on the producers."
+        },
+        {
+          "label": "Effect",
+          "detail": "Compression CPU drops sharply and throughput reaches target."
+        },
+        {
+          "label": "Cost",
+          "detail": "Topic storage grows somewhat. Fine for 7-day retention."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# Kafka producer\ncompression.type=lz4"
+        }
+      ],
+      "outcome": "the pipeline keeps up with the ingest rate, at the cost of a bit more disk."
+    },
+    "summary": {
+      "points": [
+        "LZ4/Snappy: fast, modest ratio.",
+        "Use when CPU or ingest rate is the limit.",
+        "Archives prefer higher ratio."
+      ]
+    },
+    "check": [
+      {
+        "q": "On S3, 10 TB at 2:1 vs 5:1. Rough storage difference?",
+        "a": "5 TB vs 2 TB, about 3 TB more stored (≈ $69 vs $46 per month at $0.023/GB-month)."
+      }
+    ]
+  },
+  "the-balanced-master-zstandard-zstd": {
+    "core": "Zstd gives better compression than gzip at near-LZ4 decompression speed, with levels 1–22 that change write cost but not read speed, and trained dictionaries that make tiny records compressible.",
+    "first_principles": {
+      "problem": "The old choice was fast but big (LZ4) or small but slow (gzip). Small records like 200-byte JSON events barely compress at all, because there's too little data in each to find patterns.",
+      "truths": [
+        "Compressors find repeated patterns within the data they see.",
+        "Small inputs contain few repeats.",
+        "Data is usually read far more often than written."
+      ],
+      "derivation": [
+        "Use **Zstd** for a gzip-beating ratio with fast decode.",
+        "Tune the **level**: 1–3 for hot data, about 3–9 general, 10–19 archival, 20–22 for cold archives.",
+        "Note that **decompression speed is nearly constant across levels**, so high levels cost only at write time.",
+        "For tiny records, **train a dictionary** (`zstd --train`) on samples and use it (`-D`) on both sides, which gives 3–5× ratios."
+      ]
+    },
+    "analogy": {
+      "title": "A shared shorthand",
+      "story": "Writing a thousand short notes, each one repeats \"timestamp\", \"severity\" and \"message\". If both writer and reader agree on shorthand symbols for those words in advance (a dictionary), every note shrinks dramatically even though each is tiny.",
+      "mapping": [
+        [
+          "Agreed shorthand",
+          "Trained dictionary"
+        ],
+        [
+          "Short notes",
+          "Small JSON records"
+        ],
+        [
+          "Writing more carefully",
+          "Higher compression level"
+        ],
+        [
+          "Reading speed unchanged",
+          "Constant decompression speed"
+        ]
+      ],
+      "breaks": "Shorthand everyone knows is free to share. A Zstd dictionary must be versioned and available everywhere data is decompressed, or old data becomes unreadable."
+    },
+    "mindmap": {
+      "center": "Zstandard",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Better than gzip",
+            "Near-LZ4 decode"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "1–3 hot",
+            "3–9 general",
+            "10–19 archive",
+            "20–22 cold"
+          ]
+        },
+        {
+          "label": "Key fact",
+          "children": [
+            "Decode speed ≈ constant"
+          ]
+        },
+        {
+          "label": "Dictionaries",
+          "children": [
+            "Small records",
+            "zstd --train",
+            "3–5× ratio"
+          ]
+        },
+        {
+          "label": "Adopted by",
+          "children": [
+            "PostgreSQL 15+",
+            "ClickHouse",
+            "Kafka",
+            "Linux"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Millions of 300-byte JSON log events",
+      "scenario": "Each event is stored individually, and plain compression saves only about 5%.",
+      "flow": [
+        "Sample 100k events",
+        "zstd --train → dict",
+        "Compress with -D dict",
+        "~4× smaller"
+      ],
+      "steps": [
+        {
+          "label": "Train",
+          "detail": "Build a dictionary from representative samples."
+        },
+        {
+          "label": "Use",
+          "detail": "Compress and decompress each record with the same dictionary."
+        },
+        {
+          "label": "Operate",
+          "detail": "Version the dictionary alongside the data and retrain when the format changes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "zstd --train samples/*.json -o events.dict\nzstd -D events.dict event.json -o event.json.zst\nzstd -D events.dict -d event.json.zst"
+        }
+      ],
+      "outcome": "small records finally compress well, cutting storage several times over."
+    },
+    "summary": {
+      "points": [
+        "Zstd: the modern default.",
+        "Raise the level for archives without hurting reads.",
+        "Dictionaries rescue tiny records."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a high Zstd level fine for archival data?",
+        "a": "The extra cost is only at compression (once). Decompression speed barely changes, so reads aren't penalised."
+      }
+    ]
+  },
+  "the-specialist-gorilla-time-series-compression": {
+    "core": "Gorilla compresses time-series by exploiting its structure: regular timestamps become delta-of-deltas (mostly zero) and slowly changing values are XOR'd with the previous one, often 12:1 or better.",
+    "first_principles": {
+      "problem": "Metrics arrive every second as a 64-bit timestamp plus a 64-bit float, billions of times. The values barely change between points, yet generic compressors only reach 2–3:1 because they don't understand that structure.",
+      "truths": [
+        "Timestamps usually arrive at regular intervals.",
+        "Consecutive measurements are usually very close.",
+        "Similar floats share most of their bits."
+      ],
+      "derivation": [
+        "Store **delta-of-deltas** for timestamps: regular intervals mean 0, which costs a few bits.",
+        "**XOR** each float with the previous one: similar values leave mostly zero bits.",
+        "Encode only the **meaningful bits** between leading and trailing zeros.",
+        "Result: about **1–2 bytes per point** instead of 16."
+      ]
+    },
+    "analogy": {
+      "title": "Writing down a train timetable",
+      "story": "Instead of writing \"10:00, 10:15, 10:30, 10:45\", write \"10:00, then every 15 minutes, no change, no change\". Instead of writing full temperatures each minute, write \"same as before, +0.1, same\".",
+      "mapping": [
+        [
+          "\"Every 15 minutes\"",
+          "Delta"
+        ],
+        [
+          "\"No change\"",
+          "Delta-of-delta = 0"
+        ],
+        [
+          "\"+0.1\"",
+          "XOR with previous value"
+        ],
+        [
+          "Short notes",
+          "Few bits per point"
+        ]
+      ],
+      "breaks": "A timetable never jumps randomly. Irregular or noisy data (jittery timestamps, random values) compresses far worse with Gorilla."
+    },
+    "mindmap": {
+      "center": "Gorilla Compression",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "16 bytes per point",
+            "Values barely change"
+          ]
+        },
+        {
+          "label": "Timestamps",
+          "children": [
+            "Delta",
+            "Delta-of-delta ≈ 0"
+          ]
+        },
+        {
+          "label": "Values",
+          "children": [
+            "XOR with previous",
+            "Leading/trailing zeros"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "~12:1",
+            "1–2 bytes/point"
+          ]
+        },
+        {
+          "label": "Used in",
+          "children": [
+            "Prometheus",
+            "InfluxDB",
+            "TimescaleDB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Four temperature readings",
+      "scenario": "Readings at 1000, 1060, 1120, 1180 s with values 20.5, 20.6, 20.6, 20.5.",
+      "flow": [
+        "Timestamps → deltas 60,60,60",
+        "Delta-of-deltas 0,0",
+        "Values XOR previous",
+        "Mostly zero bits"
+      ],
+      "steps": [
+        {
+          "label": "Timestamps",
+          "detail": "The first is stored in full. After that, delta-of-delta is 0, about 1 bit each."
+        },
+        {
+          "label": "Values",
+          "detail": "20.6 XOR 20.6 = 0, a single bit, and 20.5 vs 20.6 shares the leading bits."
+        },
+        {
+          "label": "Scale",
+          "detail": "Across billions of points this is the difference between terabytes and hundreds of gigabytes."
+        }
+      ],
+      "code": [],
+      "outcome": "a time-series database stores far more history in the same space."
+    },
+    "summary": {
+      "points": [
+        "Exploit domain structure, not just generic patterns.",
+        "Delta-of-delta for regular timestamps.",
+        "XOR for slowly changing floats."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Gorilla beat Zstd on metrics?",
+        "a": "It encodes the mathematical regularity (fixed intervals, small value changes) directly, while Zstd only looks for repeated byte sequences."
+      }
+    ]
+  },
+  "row-vs-columnar-storage": {
+    "core": "Row storage keeps each record's fields together (great for fetching or updating whole records). Columnar storage keeps each field's values together (great for scanning a few fields across many records).",
+    "first_principles": {
+      "problem": "`SELECT AVG(age) FROM users` over a billion rows only needs one column, but a row store must read every full row (names, emails, countries) and discard 90% of what it read. On a 100-column table, that's 100× more I/O than needed.",
+      "truths": [
+        "Disks read contiguous bytes efficiently.",
+        "Transactional queries need whole records.",
+        "Analytical queries need a few columns from many records."
+      ],
+      "derivation": [
+        "**Row layout**: write each record contiguously, so one read gets everything about a user. It's the **OLTP** choice.",
+        "**Columnar layout**: write each column contiguously, so `AVG(age)` reads only `age`. It's the **OLAP** choice.",
+        "Accept the opposite costs: columnar makes single-row fetch and insert scattered, while row storage makes column scans wasteful.",
+        "So keep **OLTP and OLAP on different systems**."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet vs. a spreadsheet printout",
+      "story": "A filing cabinet has one folder per customer with everything inside: perfect for \"show me Alice\". A stack of printouts with one page per field (all names, all ages, all countries) is perfect for \"average age of everyone\", but painful for \"everything about Alice\".",
+      "mapping": [
+        [
+          "Folder per customer",
+          "Row-oriented"
+        ],
+        [
+          "Page per field",
+          "Columnar"
+        ],
+        [
+          "\"Show me Alice\"",
+          "OLTP point lookup"
+        ],
+        [
+          "\"Average age\"",
+          "OLAP aggregate"
+        ]
+      ],
+      "breaks": "Paper costs the same either way. On disk, columnar also compresses far better because each column holds one type of similar values."
+    },
+    "mindmap": {
+      "center": "Row vs Columnar",
+      "branches": [
+        {
+          "label": "Row",
+          "children": [
+            "Record together",
+            "Fast lookups / updates",
+            "OLTP"
+          ]
+        },
+        {
+          "label": "Columnar",
+          "children": [
+            "Column together",
+            "Read few columns",
+            "OLAP"
+          ]
+        },
+        {
+          "label": "Row weakness",
+          "children": [
+            "Analytics read everything"
+          ]
+        },
+        {
+          "label": "Columnar weakness",
+          "children": [
+            "Row fetch scattered",
+            "Slower inserts"
+          ]
+        },
+        {
+          "label": "Architecture",
+          "children": [
+            "Separate OLTP and OLAP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AVG(age) over a 5-column users table",
+      "scenario": "1 billion users and 5 columns of similar size.",
+      "flow": [
+        "Row store: read all 5 columns",
+        "Columnar: read only age",
+        "I/O ↓ 80%"
+      ],
+      "steps": [
+        {
+          "label": "Row",
+          "detail": "Read every page of every row, about 5 units of I/O, to use 1."
+        },
+        {
+          "label": "Columnar",
+          "detail": "Read only the `age` column: 1 unit of I/O."
+        },
+        {
+          "label": "Wider tables",
+          "detail": "At 100 columns the gap is about 100×."
+        }
+      ],
+      "code": [],
+      "outcome": "analytical scans read only what they need, which is why warehouses are columnar."
+    },
+    "summary": {
+      "points": [
+        "Row = OLTP, columnar = OLAP.",
+        "Columnar avoids reading unused columns.",
+        "Separate the two workloads."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is columnar bad at fetching one full record?",
+        "a": "Each field lives in a different place on disk, so one record means one read per column."
+      }
+    ]
+  },
+  "the-power-of-columnar-parquet-and-orc": {
+    "core": "Columnar files like Parquet and ORC win on three fronts: far better compression, reading only the needed columns (projection pushdown) and skipping files or row groups using min/max statistics (predicate pushdown).",
+    "first_principles": {
+      "problem": "Analytics data often sits in CSV or JSON: every query parses every byte of every column, and nothing can be skipped. That's slow and expensive at terabyte scale.",
+      "truths": [
+        "Uniform data compresses far better than mixed data.",
+        "Queries select a few columns and filter on a few values.",
+        "Knowing a file's min/max for a column can prove it holds no matches."
+      ],
+      "derivation": [
+        "Store data **by column** so each column compresses with type-specific encodings (RLE, delta, dictionary): about **5–10× better**.",
+        "Read only the requested columns' byte ranges: **projection pushdown**.",
+        "Keep **statistics** (min, max, nulls) per row group, and skip groups or files whose range can't match: **predicate pushdown**.",
+        "Choose **Parquet** for the widest ecosystem, **ORC** for richer indexing (bloom filters) in Hive/Trino."
+      ]
+    },
+    "analogy": {
+      "title": "A library with a smart catalogue",
+      "story": "Books are shelved by subject (columns), so you only visit the shelves you need. Each shelf has a label: \"published 1990–1995\". Looking for 2020 books, you skip that shelf without opening a single book.",
+      "mapping": [
+        [
+          "Shelves by subject",
+          "Column chunks"
+        ],
+        [
+          "Visiting only needed shelves",
+          "Projection pushdown"
+        ],
+        [
+          "Shelf label with year range",
+          "Min/max statistics"
+        ],
+        [
+          "Skipping a shelf",
+          "Predicate pushdown"
+        ],
+        [
+          "Neatly packed shelves",
+          "Columnar compression"
+        ]
+      ],
+      "breaks": "Library labels are always accurate. Statistics only help if data is clustered: if every file contains every value range, min/max can't rule anything out."
+    },
+    "mindmap": {
+      "center": "Parquet & ORC",
+      "branches": [
+        {
+          "label": "Compression",
+          "children": [
+            "Uniform columns",
+            "RLE, delta, dictionary",
+            "5–10× better"
+          ]
+        },
+        {
+          "label": "Projection pushdown",
+          "children": [
+            "Read only selected columns"
+          ]
+        },
+        {
+          "label": "Predicate pushdown",
+          "children": [
+            "Min/max per row group",
+            "Skip files"
+          ]
+        },
+        {
+          "label": "Parquet",
+          "children": [
+            "Widest support",
+            "Great nested data"
+          ]
+        },
+        {
+          "label": "ORC",
+          "children": [
+            "Bloom filters",
+            "Hive / Trino"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"Why is Parquet better than CSV?\"",
+      "scenario": "A 100-column events dataset. The query uses 5 columns, filtered by `event_date`.",
+      "flow": [
+        "CSV: parse everything",
+        "Parquet: 5 of 100 columns",
+        "Stats skip non-matching row groups",
+        "Compressed reads"
+      ],
+      "steps": [
+        {
+          "label": "Projection",
+          "detail": "Read 5% of the columns: 95% less I/O before compression is even considered."
+        },
+        {
+          "label": "Compression",
+          "detail": "Those 5 columns are much smaller on disk than their CSV text."
+        },
+        {
+          "label": "Predicates",
+          "detail": "Row groups whose `event_date` max is before the filter are skipped entirely."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- Athena / Trino over Parquet on S3\nSELECT country, count(*) FROM events\nWHERE event_date = DATE '2026-10-01'\nGROUP BY country;   -- reads 2 columns, skips other dates' row groups"
+        }
+      ],
+      "outcome": "the query reads a tiny fraction of the data and costs a fraction as much."
+    },
+    "summary": {
+      "points": [
+        "Columnar → much better compression.",
+        "Projection pushdown = read only needed columns.",
+        "Predicate pushdown = skip by statistics."
+      ]
+    },
+    "check": [
+      {
+        "q": "When does predicate pushdown fail to help?",
+        "a": "When data isn't sorted or partitioned by the filtered column, so every row group's min/max range includes the filter value."
+      }
+    ]
+  }
+}
