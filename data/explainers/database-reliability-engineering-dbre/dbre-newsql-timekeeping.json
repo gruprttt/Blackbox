@@ -1,0 +1,585 @@
+{
+  "introduction-the-relativity-problem": {
+    "core": "Every server's clock is slightly wrong, and NTP only narrows the gap to tens or hundreds of milliseconds. If a distributed database orders events by local clocks, it can put events in the wrong order and show users impossible states.",
+    "first_principles": {
+      "problem": "On one machine, timestamps order events perfectly. Across three servers that disagree by 250 ms, a deposit on server A at 10:00:00.000 and a balance check on server B (clock 200 ms behind) at \"09:59:59.800\" look reversed, and the user sees $0 after depositing.",
+      "truths": [
+        "Hardware clocks drift.",
+        "NTP can't remove all error because network delay varies.",
+        "Ordering by wrong clocks gives wrong orderings."
+      ],
+      "derivation": [
+        "Admit that **local clocks can't be trusted** for global ordering.",
+        "Name the risk: a later event gets an **earlier timestamp**.",
+        "Every NewSQL system must **bound or work around** clock error, which is what the next lessons cover."
+      ]
+    },
+    "analogy": {
+      "title": "Watches set by hand",
+      "story": "Three friends set their watches by eye. One is 250 ms fast, one 200 ms slow. If they log events by their own watches and later merge the logs, a reply can appear to have been sent before the question.",
+      "mapping": [
+        [
+          "Each friend's watch",
+          "Server clock"
+        ],
+        [
+          "Setting by eye",
+          "NTP sync with error"
+        ],
+        [
+          "Merged log out of order",
+          "Wrong transaction ordering"
+        ],
+        [
+          "Reply before question",
+          "Inconsistent read"
+        ]
+      ],
+      "breaks": "Friends can ask each other what happened. A database must decide automatically, often in milliseconds."
+    },
+    "mindmap": {
+      "center": "The Relativity Problem",
+      "branches": [
+        {
+          "label": "One machine",
+          "children": [
+            "One clock",
+            "Order is easy"
+          ]
+        },
+        {
+          "label": "Many machines",
+          "children": [
+            "Clocks drift",
+            "NTP error 10s–100s ms"
+          ]
+        },
+        {
+          "label": "Danger",
+          "children": [
+            "Later event, earlier timestamp",
+            "Inconsistent reads"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "Bound the error",
+            "Track causality"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The disappearing deposit",
+      "scenario": "A deposit commits on server A at its 10:00:00.000. A balance read on server B happens after it, at B's 09:59:59.800.",
+      "flow": [
+        "Deposit @ A 10:00:00.000",
+        "Read @ B 09:59:59.800",
+        "Timestamps say read came first",
+        "User sees $0"
+      ],
+      "steps": [
+        {
+          "label": "Reality",
+          "detail": "The read happened after the deposit."
+        },
+        {
+          "label": "Timestamps",
+          "detail": "B's slow clock gives the read an earlier timestamp."
+        },
+        {
+          "label": "Result",
+          "detail": "Snapshot ordering hides the deposit, so the database looks wrong."
+        }
+      ],
+      "code": [],
+      "outcome": "you see why time is a core correctness problem for distributed databases."
+    },
+    "summary": {
+      "points": [
+        "Clocks disagree.",
+        "NTP leaves residual error.",
+        "Clock-based ordering can be wrong."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't NTP make clocks exact?",
+        "a": "It estimates offset from round-trip time, but one-way network delay varies and can't be measured exactly, so some error always remains."
+      }
+    ]
+  },
+  "the-gold-standard-external-consistency": {
+    "core": "External consistency (linearizability) means that if T1 finishes before T2 starts in real time, T1 gets a smaller timestamp. NTP's 50–500 ms error makes that impossible to guarantee without extra mechanisms.",
+    "first_principles": {
+      "problem": "Before choosing a solution, we need a precise goal. \"Transactions appear in some order\" (serializability) isn't enough for users, who expect the database to respect the order things actually happened in the real world.",
+      "truths": [
+        "Users observe real-time order (\"I paid, then checked\").",
+        "Serializable order doesn't have to match real time.",
+        "Clock error makes real-time order ambiguous between machines."
+      ],
+      "derivation": [
+        "State the rule: **T1.end < T2.start ⇒ ts(T1) < ts(T2)**.",
+        "Call it **linearizability / external consistency**, the strongest guarantee.",
+        "Note that it's **stronger than serializability**, which only needs *some* serial order.",
+        "Accept that NTP alone **can't** enforce it, so you need TrueTime or HLC + uncertainty handling."
+      ]
+    },
+    "analogy": {
+      "title": "A ledger with one authoritative pen",
+      "story": "However many clerks are in however many cities, the ledger reads as if one pen wrote every entry in the order things truly happened. A payment made before a balance check is always written above it.",
+      "mapping": [
+        [
+          "Single authoritative pen",
+          "External consistency"
+        ],
+        [
+          "Order things truly happened",
+          "Real-time order"
+        ],
+        [
+          "Any plausible order",
+          "Serializability"
+        ],
+        [
+          "Clerks' unreliable watches",
+          "Clock skew"
+        ]
+      ],
+      "breaks": "A single pen is physically one place. A global database has no single place, so it needs a clever substitute for the pen."
+    },
+    "mindmap": {
+      "center": "External Consistency",
+      "branches": [
+        {
+          "label": "Rule",
+          "children": [
+            "T1 ends before T2 starts",
+            "→ ts(T1) < ts(T2)"
+          ]
+        },
+        {
+          "label": "Names",
+          "children": [
+            "Linearizability",
+            "External consistency"
+          ]
+        },
+        {
+          "label": "vs Serializable",
+          "children": [
+            "Some order",
+            "Not necessarily real time"
+          ]
+        },
+        {
+          "label": "Obstacle",
+          "children": [
+            "NTP 50–500 ms",
+            "Variable latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "New York and Tokyo",
+      "scenario": "T1 commits in New York, then the user phones a friend in Tokyo, who starts T2 and must see T1's write.",
+      "flow": [
+        "T1 commits (NY)",
+        "Phone call",
+        "T2 starts (Tokyo)",
+        "Must see T1",
+        "Needs ts(T1) < ts(T2)"
+      ],
+      "steps": [
+        {
+          "label": "Serializable only",
+          "detail": "The database may legally order T2 before T1, so the friend doesn't see the write."
+        },
+        {
+          "label": "Externally consistent",
+          "detail": "Timestamps follow real time, so T2 sees T1."
+        },
+        {
+          "label": "Mechanism",
+          "detail": "Needed because NY and Tokyo clocks can't be trusted to agree."
+        }
+      ],
+      "code": [],
+      "outcome": "you can state precisely what Spanner and CockroachDB are trying to guarantee."
+    },
+    "summary": {
+      "points": [
+        "Real-time order must be preserved.",
+        "Stronger than serializability.",
+        "Impossible with NTP alone."
+      ]
+    },
+    "check": [
+      {
+        "q": "Linearizability vs serializability?",
+        "a": "Serializability is equivalent to some serial order. Linearizability also requires that order to match real-time order of non-overlapping operations."
+      }
+    ]
+  },
+  "google-spanner-truetime-the-hardware-solution": {
+    "core": "TrueTime returns time as an interval guaranteed to contain the truth (about ±7 ms, thanks to GPS and atomic clocks). Spanner commits at the interval's upper bound and waits (about 2ε ≈ 14 ms) until that time has certainly passed.",
+    "first_principles": {
+      "problem": "Spanner needs external consistency across continents. Pretending clocks are exact fails silently, so it needs a way to make ordering correct despite clock error.",
+      "truths": [
+        "You can't know the exact time, but you can bound the error.",
+        "After waiting out the bound, ordering is unambiguous.",
+        "Tighter bounds mean shorter waits."
+      ],
+      "derivation": [
+        "Make uncertainty explicit: `TrueTime.now()` returns **[earliest, latest]**.",
+        "Keep the window tiny with **GPS + atomic clocks** in every data centre.",
+        "At commit, set **T_write = now().latest**.",
+        "**Wait** until `now().earliest > T_write` (about 2ε), then acknowledge.",
+        "Any later transaction's timestamp is necessarily greater: **guaranteed by physics**."
+      ]
+    },
+    "analogy": {
+      "title": "Sealing an envelope with a postmark",
+      "story": "You stamp a letter with the latest time it could possibly be, then hold it until every clock in the building has passed that time before posting. Nobody can ever receive a reply stamped earlier than your letter.",
+      "mapping": [
+        [
+          "Latest possible time stamp",
+          "T_write = now().latest"
+        ],
+        [
+          "Holding the letter",
+          "Commit wait (~2ε)"
+        ],
+        [
+          "Every clock has passed it",
+          "earliest > T_write"
+        ],
+        [
+          "Precise building clocks",
+          "GPS + atomic clocks"
+        ]
+      ],
+      "breaks": "Holding one letter costs a moment. Commit wait is paid on every write, so it's a hard latency floor of about 14 ms."
+    },
+    "mindmap": {
+      "center": "TrueTime",
+      "branches": [
+        {
+          "label": "API",
+          "children": [
+            "now() → [earliest, latest]",
+            "ε ≈ 7 ms"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "GPS receivers",
+            "Atomic clocks"
+          ]
+        },
+        {
+          "label": "Commit wait",
+          "children": [
+            "T_write = latest",
+            "Wait ~2ε",
+            "Then ack"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Absolute correctness",
+            "~14 ms write floor",
+            "Google-only hardware"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A write at T_write = 1000 ms",
+      "scenario": "TrueTime interval at commit: [986, 1000].",
+      "flow": [
+        "Pick T_write = 1000",
+        "Wait until earliest > 1000",
+        "Ack at ~1014 ms",
+        "Any T2 later gets > 1000"
+      ],
+      "steps": [
+        {
+          "label": "Pick",
+          "detail": "Use the upper bound so no clock can think it's later than this already."
+        },
+        {
+          "label": "Wait",
+          "detail": "About 14 ms until the lower bound has passed 1000."
+        },
+        {
+          "label": "Guarantee",
+          "detail": "Any transaction starting now sees earliest > 1000, so it gets a larger timestamp."
+        }
+      ],
+      "code": [],
+      "outcome": "globally correct ordering, with a fixed, predictable cost per write."
+    },
+    "summary": {
+      "points": [
+        "Time as an interval.",
+        "Commit wait removes ambiguity.",
+        "Hardware buys a small ε, and so a short wait."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't Spanner just use NTP?",
+        "a": "NTP error of 50–500 ms would make commit wait 100–1000 ms per write, which is unusably slow."
+      }
+    ]
+  },
+  "cockroachdb-hybrid-logical-clocks-the-software-solution": {
+    "core": "CockroachDB pairs each wall-clock time with a logical counter and pushes clocks forward whenever a message with a later timestamp arrives (HLC), so cause always precedes effect. Leftover uncertainty is handled with read restarts and by shutting down nodes whose clocks drift too far.",
+    "first_principles": {
+      "problem": "On commodity hardware with NTP, uncertainty is 250–500 ms, so a Spanner-style commit wait would add half a second to every write. CockroachDB needs correctness without special clocks or huge waits.",
+      "truths": [
+        "If B received a message from A, A's event happened first (causality).",
+        "Clocks may only ever move forward.",
+        "A bound on skew lets you detect ambiguous cases."
+      ],
+      "derivation": [
+        "Timestamp = **(physical, logical)**.",
+        "On receive: physical = **max(local, incoming)**, and bump the logical counter to break ties, so time **never goes backwards** and causality is preserved.",
+        "Declare **max_offset** (500 ms default) as the tolerated skew.",
+        "On read, if a value's timestamp falls in the **uncertainty window**, **restart** the transaction at a higher timestamp.",
+        "If a node detects its clock beyond max_offset, it **shuts itself down**: availability traded for consistency."
+      ]
+    },
+    "analogy": {
+      "title": "Passing notes with times on them",
+      "story": "Everyone writes the time on each note they pass. If you receive a note stamped later than your own watch, you move your watch forward to match. A reply can then never be stamped before the note it answers. If your watch is wildly wrong, you're asked to leave the game.",
+      "mapping": [
+        [
+          "Time written on notes",
+          "HLC timestamp on messages"
+        ],
+        [
+          "Moving your watch forward",
+          "max(local, incoming)"
+        ],
+        [
+          "Tie-break counter",
+          "Logical component"
+        ],
+        [
+          "Asked to leave",
+          "Node self-terminates beyond max_offset"
+        ]
+      ],
+      "breaks": "Friends can ask \"which came first?\". CockroachDB resolves ambiguity by restarting the transaction, which costs latency when it happens."
+    },
+    "mindmap": {
+      "center": "Hybrid Logical Clocks",
+      "branches": [
+        {
+          "label": "Timestamp",
+          "children": [
+            "Physical (wall clock)",
+            "Logical counter"
+          ]
+        },
+        {
+          "label": "Update rule",
+          "children": [
+            "max(local, incoming)",
+            "Never backwards"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "Causality preserved"
+          ]
+        },
+        {
+          "label": "Uncertainty",
+          "children": [
+            "max_offset 500 ms",
+            "Read restarts"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Clock monitoring",
+            "Node shuts down if insane"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A message from a node whose clock is ahead",
+      "scenario": "Node B (clock 10:00:00.100) receives a message stamped (10:00:00.300, 2).",
+      "flow": [
+        "Receive (…300, 2)",
+        "max(…100, …300) = …300",
+        "HLC → (…300, 3)",
+        "Next local event > received"
+      ],
+      "steps": [
+        {
+          "label": "Jump",
+          "detail": "B's HLC moves to the incoming physical time."
+        },
+        {
+          "label": "Tie-break",
+          "detail": "The logical counter becomes 3 so B's next event is strictly later."
+        },
+        {
+          "label": "Effect",
+          "detail": "Anything B does in response is ordered after what caused it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "p_new = max(p_local, p_incoming)\nif p_new > p_local:            HLC = (p_new, l_incoming + 1)\nelif p_new == p_incoming == p_local:  HLC = (p_new, max(l_local, l_incoming) + 1)\nelse:                          HLC = (p_new, l_local + 1)"
+        }
+      ],
+      "outcome": "causal order without special hardware, plus a safety net for the remaining ambiguity."
+    },
+    "summary": {
+      "points": [
+        "HLC = wall clock + logical counter.",
+        "Clocks only move forward, so causality holds.",
+        "Uncertainty: restarts and drift shutdowns."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does CockroachDB shut down a node with a drifting clock?",
+        "a": "Its timestamps could break ordering guarantees. A restarted node is far better than silent inconsistency."
+      }
+    ]
+  },
+  "comparison-truetime-vs-hlc": {
+    "core": "TrueTime bounds clock error with hardware and pays a fixed ~14 ms commit wait. HLC bounds it in software, pays occasional uncertainty restarts, and needs well-monitored NTP. Same problem, different trade-offs.",
+    "first_principles": {
+      "problem": "Both Spanner and CockroachDB promise strong consistency across machines. You need to know which mechanism fits your platform, latency budget and operations team, and what their failure modes look like.",
+      "truths": [
+        "External consistency needs a bound on clock uncertainty.",
+        "Hardware bounds are tight but not portable.",
+        "Software bounds are portable but looser."
+      ],
+      "derivation": [
+        "**TrueTime**: GPS/atomic clocks, ε < 7 ms, **commit wait ~14 ms** on every write, no clock-skew failure mode, Google-only.",
+        "**HLC**: NTP + logical counters, ~250–500 ms bound, **no fixed floor**, occasional **uncertainty restarts**, nodes self-terminate on drift.",
+        "Choose TrueTime for GCP, predictable latency and no restarts.",
+        "Choose HLC for multi-cloud or self-hosting, accepting restarts and **monitoring NTP** carefully."
+      ]
+    },
+    "analogy": {
+      "title": "Two ways to run a relay race fairly",
+      "story": "One stadium installs perfect synchronised timers and makes each runner wait a fixed instant before handing off (TrueTime). Another uses ordinary watches but passes a baton with the time written on it, and re-runs a leg if the order is ever unclear (HLC).",
+      "mapping": [
+        [
+          "Perfect synchronised timers",
+          "GPS + atomic clocks"
+        ],
+        [
+          "Fixed wait before handoff",
+          "Commit wait"
+        ],
+        [
+          "Time on the baton",
+          "HLC timestamps"
+        ],
+        [
+          "Re-running a leg",
+          "Uncertainty restart"
+        ]
+      ],
+      "breaks": "Re-running a leg is rare and obvious. Uncertainty restarts are transparent to apps but show up as tail latency, so watch the restart metrics."
+    },
+    "mindmap": {
+      "center": "TrueTime vs HLC",
+      "branches": [
+        {
+          "label": "TrueTime",
+          "children": [
+            "Hardware clocks",
+            "ε < 7 ms",
+            "Commit wait ~14 ms"
+          ]
+        },
+        {
+          "label": "HLC",
+          "children": [
+            "NTP + logical",
+            "~250–500 ms bound",
+            "Uncertainty restarts"
+          ]
+        },
+        {
+          "label": "Failure modes",
+          "children": [
+            "TrueTime: none from skew",
+            "HLC: node self-terminates"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "GCP / no restarts → Spanner",
+            "Portable / OSS → CockroachDB"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Monitor NTP on all nodes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Picking for a fintech on two clouds",
+      "scenario": "The team runs on AWS and Azure and needs serializable global transactions.",
+      "flow": [
+        "Must be multi-cloud",
+        "Spanner = GCP only",
+        "Pick CockroachDB",
+        "Monitor NTP + restarts"
+      ],
+      "steps": [
+        {
+          "label": "Constraint",
+          "detail": "Multi-cloud rules out Spanner."
+        },
+        {
+          "label": "Operate",
+          "detail": "chrony on every node, alert on clock offset well below max_offset."
+        },
+        {
+          "label": "Watch",
+          "detail": "Track transaction restart rate and p99 latency for uncertainty effects."
+        }
+      ],
+      "code": [],
+      "outcome": "a choice made on platform and operations facts, not hype."
+    },
+    "summary": {
+      "points": [
+        "Both bound uncertainty, by hardware or by software.",
+        "Fixed wait vs occasional restarts.",
+        "HLC needs disciplined NTP operations."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which approach has a fixed per-write latency floor?",
+        "a": "TrueTime/Spanner: commit wait of about 2ε (~14 ms) on every write."
+      }
+    ]
+  }
+}

@@ -1,0 +1,728 @@
+{
+  "introduction-when-b-trees-fail": {
+    "core": "A B-tree needs a single sort order. Containers (JSON, arrays, text) and shapes (geometry, ranges) have none, so Postgres offers GIN, GiST, BRIN and Hash indexes, each matched to a different question.",
+    "first_principles": {
+      "problem": "A B-tree answers \"equal to\" and \"between\" on values that line up on one axis. It can't answer \"which documents contain color=blue\", \"which shops are within 2 miles\" or \"which posts have tag X\", because there's no meaningful \"greater than\" for coordinates or containers.",
+      "truths": [
+        "B-trees depend on a total, one-dimensional ordering.",
+        "Containment, overlap and proximity aren't orderings.",
+        "An index must mirror the question it answers."
+      ],
+      "derivation": [
+        "For \"contains element\" (JSONB, arrays, full text) use an **inverted index**: **GIN**.",
+        "For shapes, ranges and nearest-neighbour use **bounding-box trees**: **GiST**.",
+        "For huge, naturally ordered append-only tables use **block summaries**: **BRIN**.",
+        "For exact equality only, **Hash**.",
+        "Also consider structural tricks for any type: **covering** and **partial** indexes, and remember **over-indexing** costs."
+      ]
+    },
+    "analogy": {
+      "title": "Different ways to find things in a city",
+      "story": "A street-number index (B-tree) works for \"house 42 on Main Street\". To find \"every shop selling coffee\" you need a directory by product (GIN). To find \"everything within 2 km\" you need a map divided into districts (GiST).",
+      "mapping": [
+        [
+          "Street-number list",
+          "B-tree"
+        ],
+        [
+          "Directory by product",
+          "GIN"
+        ],
+        [
+          "Map by district",
+          "GiST"
+        ],
+        [
+          "\"Houses 1–500 are in this block\"",
+          "BRIN"
+        ],
+        [
+          "Exact phone-number lookup",
+          "Hash"
+        ]
+      ],
+      "breaks": "City directories rarely change. Database indexes are updated on every write, so each type also has a write cost."
+    },
+    "mindmap": {
+      "center": "Beyond B-Trees",
+      "branches": [
+        {
+          "label": "B-tree limit",
+          "children": [
+            "Needs 1-D order",
+            "No containment / proximity"
+          ]
+        },
+        {
+          "label": "GIN",
+          "children": [
+            "Arrays, JSONB, FTS",
+            "@>, @@, &&"
+          ]
+        },
+        {
+          "label": "GiST",
+          "children": [
+            "Geometry, ranges, KNN",
+            "&&, <->"
+          ]
+        },
+        {
+          "label": "BRIN",
+          "children": [
+            "Huge ordered tables",
+            "Tiny index"
+          ]
+        },
+        {
+          "label": "Hash",
+          "children": [
+            "Equality only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three queries a B-tree can't serve",
+      "scenario": "JSON attribute filter, \"near me\" search, tag search.",
+      "flow": [
+        "attrs @> '{color:blue}' → GIN",
+        "near point → GiST",
+        "tags && '{sql}' → GIN",
+        "created_at range on log table → BRIN"
+      ],
+      "steps": [
+        {
+          "label": "JSON",
+          "detail": "A GIN index on `attrs` turns a full scan into an index lookup."
+        },
+        {
+          "label": "Geo",
+          "detail": "A GiST index on `location` prunes whole regions."
+        },
+        {
+          "label": "Logs",
+          "detail": "BRIN on `created_at` is a few KB and skips most blocks of a time-ordered table."
+        }
+      ],
+      "code": [],
+      "outcome": "each query gets an index whose structure matches its question."
+    },
+    "summary": {
+      "points": [
+        "B-trees need a single sort order.",
+        "GIN = contains, GiST = shapes/near, BRIN = huge ordered, Hash = equality.",
+        "Match index to question."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a B-tree index geographic proximity?",
+        "a": "Proximity in 2-D has no single linear order. 'North' isn't greater than 'West', so a sorted tree can't group nearby points."
+      }
+    ]
+  },
+  "gin-indexes-the-inverted-index": {
+    "core": "GIN breaks each container value (array, JSONB, tsvector) into elements and maps every element to the rows containing it, so containment queries are set lookups and intersections instead of scans. It's fast to read and costly to write.",
+    "first_principles": {
+      "problem": "`WHERE tags @> ARRAY['sql','database']` must otherwise open every row and parse every array. On millions of rows that's seconds per query.",
+      "truths": [
+        "A container holds many searchable elements.",
+        "Queries ask which rows contain certain elements.",
+        "Updating many index entries per row is expensive."
+      ],
+      "derivation": [
+        "**Invert** the data: element → list of rows.",
+        "Answer `@>` (contains all) by **intersecting** lists, and `&&` (overlaps) by **union**.",
+        "Pay on writes: each changed container updates many entries.",
+        "Buffer writes in a **pending list** (`gin_pending_list_limit`, default 4 MB), merged in bulk on vacuum or when full."
+      ]
+    },
+    "analogy": {
+      "title": "A book's back-of-book index",
+      "story": "Instead of reading every page to find \"volcano\", you look up \"volcano\" in the index and get pages 12, 87 and 203. To find pages mentioning both \"volcano\" and \"lava\", you intersect two short lists.",
+      "mapping": [
+        [
+          "Index word",
+          "Element (tag, JSON key/value)"
+        ],
+        [
+          "Page numbers",
+          "Row IDs"
+        ],
+        [
+          "Intersecting two lists",
+          "@> containment"
+        ],
+        [
+          "Reprinting the index for a new edition",
+          "Write cost / pending list merge"
+        ]
+      ],
+      "breaks": "A book index is built once. GIN must update on every insert, which is why it buffers changes and why heavy writers see merge spikes."
+    },
+    "mindmap": {
+      "center": "GIN Index",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Element → rows",
+            "Inverted index"
+          ]
+        },
+        {
+          "label": "Data types",
+          "children": [
+            "Arrays",
+            "JSONB",
+            "tsvector"
+          ]
+        },
+        {
+          "label": "Operators",
+          "children": [
+            "@> contains",
+            "&& overlaps",
+            "@@ text match"
+          ]
+        },
+        {
+          "label": "Write cost",
+          "children": [
+            "Many entries per row",
+            "Pending list",
+            "gin_pending_list_limit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tag search on posts",
+      "scenario": "Rows: 1 [sql, database, performance], 2 [database, replication], 3 [sql, tuning].",
+      "flow": [
+        "'sql' → {1,3}",
+        "'database' → {1,2}",
+        "Intersect → {1}",
+        "Fetch row 1"
+      ],
+      "steps": [
+        {
+          "label": "Build",
+          "detail": "`CREATE INDEX ON posts USING GIN (tags)`."
+        },
+        {
+          "label": "Query",
+          "detail": "`tags @> ARRAY['sql','database']` uses two list lookups and an intersection."
+        },
+        {
+          "label": "JSONB",
+          "detail": "The same idea for `attrs @> '{\"color\":\"blue\"}'`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE INDEX posts_tags_gin ON posts USING GIN (tags);\nSELECT id FROM posts WHERE tags @> ARRAY['sql','database'];\n\nCREATE INDEX users_attrs_gin ON users USING GIN (attributes jsonb_path_ops);\nSELECT id FROM users WHERE attributes @> '{\"color\": \"blue\"}';"
+        }
+      ],
+      "outcome": "containment queries go from scanning every row to a couple of index lookups."
+    },
+    "summary": {
+      "points": [
+        "GIN = inverted index for containers.",
+        "Great reads, costly writes.",
+        "Tune the pending list for write-heavy tables."
+      ]
+    },
+    "check": [
+      {
+        "q": "How would you speed up a JSONB filter?",
+        "a": "A GIN index on the column and queries using @>. Watch write overhead and gin_pending_list_limit on busy tables."
+      }
+    ]
+  },
+  "gist-indexes-the-shape-of-data": {
+    "core": "GiST groups nearby or overlapping objects into nested bounding boxes, so a spatial or range query can skip whole regions that can't match. It powers PostGIS, range overlaps and nearest-neighbour search.",
+    "first_principles": {
+      "problem": "\"All coffee shops within 2 miles\" or \"bookings that overlap this date range\" can't use sort order. Without a structure that understands space, the database computes distance or overlap for every row.",
+      "truths": [
+        "Nearby objects can be enclosed by one bounding rectangle.",
+        "If a rectangle doesn't touch your search area, nothing inside it can match.",
+        "Nested rectangles form a tree."
+      ],
+      "derivation": [
+        "Wrap nearby items in **minimum bounding rectangles**, and wrap those in bigger rectangles: a tree (R-tree via the GiST framework).",
+        "Search from the top: **prune** any box that doesn't overlap the query area.",
+        "Descend only into overlapping boxes and **recheck** leaves (possible false positives).",
+        "Use `<->` with `ORDER BY … LIMIT` for **K-nearest-neighbour** without computing every distance.",
+        "Prefer GiST for **write-heavy** full-text and spatial data, and GIN for read-heavy containment."
+      ]
+    },
+    "analogy": {
+      "title": "Organising a map collection",
+      "story": "You can't sort maps alphabetically by \"where\". So you put European maps in one cabinet, Asian in another, then group by country inside. To find maps covering Lyon, you skip the Asia cabinet entirely.",
+      "mapping": [
+        [
+          "Cabinet per continent",
+          "Top-level bounding box"
+        ],
+        [
+          "Drawer per country",
+          "Child bounding box"
+        ],
+        [
+          "Skipping Asia",
+          "Pruning a subtree"
+        ],
+        [
+          "Checking the actual map",
+          "Leaf recheck"
+        ]
+      ],
+      "breaks": "Cabinets don't overlap. Bounding boxes can, so a query may need to descend into several branches, and that's why GiST reads can be slightly slower than GIN."
+    },
+    "mindmap": {
+      "center": "GiST Index",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Bounding rectangles",
+            "Nested tree (R-tree)"
+          ]
+        },
+        {
+          "label": "Search",
+          "children": [
+            "Prune non-overlapping",
+            "Recheck leaves"
+          ]
+        },
+        {
+          "label": "Use cases",
+          "children": [
+            "PostGIS ST_DWithin",
+            "Range overlap &&",
+            "KNN <->"
+          ]
+        },
+        {
+          "label": "vs GIN",
+          "children": [
+            "Faster writes",
+            "Slightly slower, lossy reads"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Nearest coffee shops",
+      "scenario": "Find the 5 closest shops to the user, from 2 million shops.",
+      "flow": [
+        "Start at top boxes",
+        "Prune far regions",
+        "Explore nearest boxes",
+        "Return 5 nearest"
+      ],
+      "steps": [
+        {
+          "label": "Index",
+          "detail": "`CREATE INDEX ON shops USING GIST (location)`."
+        },
+        {
+          "label": "Query",
+          "detail": "`ORDER BY location <-> point LIMIT 5`: the planner walks the tree outward from the point."
+        },
+        {
+          "label": "Ranges",
+          "detail": "The same index type handles `tstzrange` booking overlaps with `&&`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE INDEX shops_loc_gist ON shops USING GIST (location);\nSELECT name FROM shops ORDER BY location <-> ST_MakePoint(-122.4, 37.8) LIMIT 5;\n\nCREATE INDEX bookings_period_gist ON bookings USING GIST (period);\nSELECT * FROM bookings WHERE period && tstzrange('2026-10-11', '2026-10-12');"
+        }
+      ],
+      "outcome": "spatial and overlap queries touch a few branches instead of millions of rows."
+    },
+    "summary": {
+      "points": [
+        "GiST = nested bounding boxes.",
+        "Prune whole regions.",
+        "KNN via <-> + LIMIT."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can GiST return false positives?",
+        "a": "Bounding boxes approximate shapes, so a box can overlap the query area while the actual object inside doesn't. Leaves are rechecked."
+      }
+    ]
+  },
+  "covering-indexes-the-shortcut": {
+    "core": "A covering index stores the columns a query needs inside the index (INCLUDE), so the database answers from the index alone (index-only scan) without jumping to the table. It only works fully when VACUUM keeps the visibility map current.",
+    "first_principles": {
+      "problem": "A normal index lookup is two steps: find the key in the index, then jump to the table (heap) for the other columns. For thousands of matching rows scattered across pages, those jumps are thousands of random reads.",
+      "truths": [
+        "Heap fetches are random I/O.",
+        "If the needed data is already in the index, the heap is unnecessary.",
+        "Postgres must still know each row version is visible."
+      ],
+      "derivation": [
+        "Add the selected columns as **INCLUDE** payload in the index leaves.",
+        "The query is satisfied from the index: **index-only scan**, often 10–100× faster.",
+        "Prefer `INCLUDE` over adding to the key: payload isn't sorted, so inner nodes stay small.",
+        "Keep the **visibility map** current with VACUUM, or Postgres falls back to heap checks."
+      ]
+    },
+    "analogy": {
+      "title": "A contact card with the phone number on it",
+      "story": "A name index that only says \"see filing cabinet B, folder 512\" forces a walk to the cabinet. If the index card already shows the phone number, you're done without leaving your desk.",
+      "mapping": [
+        [
+          "Index card pointing to a folder",
+          "Plain index + heap pointer"
+        ],
+        [
+          "Walking to the cabinet",
+          "Heap fetch (random I/O)"
+        ],
+        [
+          "Phone number on the card",
+          "INCLUDE payload"
+        ],
+        [
+          "Done at the desk",
+          "Index-only scan"
+        ]
+      ],
+      "breaks": "An index card is always current. In Postgres the index can't tell if a row version is visible, so it relies on the visibility map, which only VACUUM updates."
+    },
+    "mindmap": {
+      "center": "Covering Index",
+      "branches": [
+        {
+          "label": "Double jump",
+          "children": [
+            "Index scan",
+            "Heap fetch (random)"
+          ]
+        },
+        {
+          "label": "INCLUDE",
+          "children": [
+            "Payload in leaves",
+            "Index-only scan"
+          ]
+        },
+        {
+          "label": "INCLUDE vs key",
+          "children": [
+            "Not sortable/filterable",
+            "Smaller inner nodes"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Visibility map",
+            "Needs VACUUM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Heap Fetches that won't go away",
+      "scenario": "A covering index was added, but EXPLAIN still shows thousands of heap fetches.",
+      "flow": [
+        "CREATE INDEX … INCLUDE",
+        "EXPLAIN: Heap Fetches 4,812",
+        "VACUUM ANALYZE",
+        "Heap Fetches 0"
+      ],
+      "steps": [
+        {
+          "label": "Index",
+          "detail": "`(zipcode) INCLUDE (first_name, last_name)`."
+        },
+        {
+          "label": "Puzzle",
+          "detail": "Pages aren't marked all-visible because vacuum hasn't run since recent updates."
+        },
+        {
+          "label": "Fix",
+          "detail": "`VACUUM ANALYZE users` turns it into a true index-only scan."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE INDEX idx_zip_cov ON users (zipcode) INCLUDE (first_name, last_name);\nEXPLAIN (ANALYZE) SELECT first_name, last_name FROM users WHERE zipcode = '90210';\n--  Index Only Scan ... Heap Fetches: 4812\nVACUUM ANALYZE users;   -- → Heap Fetches: 0"
+        }
+      ],
+      "outcome": "the query never touches the table and runs many times faster."
+    },
+    "summary": {
+      "points": [
+        "INCLUDE = payload in the index.",
+        "Index-only scans skip the heap.",
+        "Vacuum keeps them truly index-only."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use INCLUDE instead of adding columns to the index key?",
+        "a": "INCLUDE columns live only in leaves and aren't sorted, which keeps the tree smaller. Key columns are needed only if you filter or sort by them."
+      }
+    ]
+  },
+  "partial-indexes-the-specialist": {
+    "core": "A partial index only indexes rows matching a WHERE condition, typically the small hot subset you actually query. It's tiny, fits in RAM and is cheap to maintain, but queries must include a matching condition to use it.",
+    "first_principles": {
+      "problem": "An orders table has 1 billion rows, but only 10 million are active and queried constantly. A full index covers all billion: gigabytes in RAM, slower writes, long rebuilds, mostly for rows nobody looks at.",
+      "truths": [
+        "Most queries hit a small, well-defined subset.",
+        "Index size drives RAM use and write cost.",
+        "The planner only uses an index it can prove is relevant."
+      ],
+      "derivation": [
+        "Add a **WHERE** to the index: `… WHERE status = 'active'`, which makes it about 100× smaller.",
+        "Write cost falls: only rows in the subset touch it.",
+        "The query's WHERE must **imply** the index's predicate. Verify with `EXPLAIN`.",
+        "Use it for **queues** (`processed = false`), **soft deletes** (`deleted_at IS NULL`), and **unique among active rows**."
+      ]
+    },
+    "analogy": {
+      "title": "A VIP guest list",
+      "story": "Instead of a phone book of everyone in the city, the doorman keeps a short list of tonight's VIPs. It's quick to check and easy to update, but useless for someone who isn't on tonight's list.",
+      "mapping": [
+        [
+          "Full city phone book",
+          "Full index"
+        ],
+        [
+          "Tonight's VIP list",
+          "Partial index"
+        ],
+        [
+          "Being on the list",
+          "Matching the predicate"
+        ],
+        [
+          "Asking about a non-VIP",
+          "Query without the predicate"
+        ]
+      ],
+      "breaks": "A doorman can improvise. The planner can't: if it can't prove your query implies the predicate, it won't use the index."
+    },
+    "mindmap": {
+      "center": "Partial Index",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Index only a subset",
+            "WHERE in CREATE INDEX"
+          ]
+        },
+        {
+          "label": "Wins",
+          "children": [
+            "~100× smaller",
+            "Fits in RAM",
+            "Cheaper writes"
+          ]
+        },
+        {
+          "label": "Constraint",
+          "children": [
+            "Query must imply predicate",
+            "Check EXPLAIN"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Pending jobs",
+            "Soft delete",
+            "Unique among active"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Unique email among active users",
+      "scenario": "Deleted users may share an email with an active user, but active users must be unique.",
+      "flow": [
+        "Soft delete with deleted_at",
+        "UNIQUE … WHERE deleted_at IS NULL",
+        "Active emails unique",
+        "Deleted rows ignored"
+      ],
+      "steps": [
+        {
+          "label": "Index",
+          "detail": "A unique index restricted to `deleted_at IS NULL`."
+        },
+        {
+          "label": "Effect",
+          "detail": "Re-registering an email after deleting the old account works."
+        },
+        {
+          "label": "Hot path",
+          "detail": "Another partial index on active orders serves the app's main query."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE UNIQUE INDEX users_email_active ON users (email) WHERE deleted_at IS NULL;\nCREATE INDEX orders_active ON orders (order_id) WHERE status = 'active';\n-- uses it:   WHERE order_id = 12345 AND status = 'active'\n-- doesn't:   WHERE order_id = 12345"
+        }
+      ],
+      "outcome": "small, fast indexes that match how the data is really used."
+    },
+    "summary": {
+      "points": [
+        "Index the 1% you query.",
+        "Query must imply the predicate.",
+        "Great for queues, soft deletes, conditional uniqueness."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might a partial index be ignored for WHERE order_id = $1?",
+        "a": "Nothing in the query proves status = 'active', so the planner can't safely use an index that excludes other statuses."
+      }
+    ]
+  },
+  "the-cost-of-over-indexing": {
+    "core": "Every index is paid for on every write, takes buffer-pool memory and gives the planner more chances to choose badly. Audit unused indexes (idx_scan = 0) and drop them carefully.",
+    "first_principles": {
+      "problem": "\"More indexes = faster queries\" is a common junior instinct. A table with 10 indexes turns each INSERT into 11 writes, crowds hot data out of RAM, and can slow the very reads the indexes were meant to help.",
+      "truths": [
+        "Each index must be updated when its columns change.",
+        "Buffer pool memory is finite and shared.",
+        "The planner chooses among indexes using statistics."
+      ],
+      "derivation": [
+        "Count **write amplification**: 1 row write + N index writes, plus more lock contention.",
+        "Count **space**: unused indexes evict hot pages from `shared_buffers`, causing misses.",
+        "Watch **planner confusion**: overlapping indexes and stale stats lead to bad choices.",
+        "**Audit**: `pg_stat_user_indexes` where `idx_scan = 0`, excluding PK/unique constraints, sorted by size.",
+        "Drop in a quiet window, watch `pg_stat_statements` for regressions, and remember stats reset on restart."
+      ]
+    },
+    "analogy": {
+      "title": "Too many filing systems",
+      "story": "An office that files every document in ten different cabinets (by date, author, client, colour…) spends most of its time filing. The cabinets fill the room so there's no space for what's actually used, and staff waste time deciding which cabinet to search.",
+      "mapping": [
+        [
+          "Filing each doc 10 times",
+          "Write amplification"
+        ],
+        [
+          "Cabinets filling the room",
+          "Buffer pool pressure"
+        ],
+        [
+          "Deciding which cabinet",
+          "Planner choice"
+        ],
+        [
+          "Removing unused cabinets",
+          "Dropping idx_scan = 0 indexes"
+        ]
+      ],
+      "breaks": "Unused cabinets are visible. Unused indexes are invisible unless you query the statistics views."
+    },
+    "mindmap": {
+      "center": "Over-Indexing",
+      "branches": [
+        {
+          "label": "Writes",
+          "children": [
+            "1 + N writes per row",
+            "More lock contention"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "Indexes compete in shared_buffers",
+            "Hot pages evicted"
+          ]
+        },
+        {
+          "label": "Planner",
+          "children": [
+            "More candidates",
+            "Bad choices"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "idx_scan = 0",
+            "Exclude PK / unique",
+            "Sort by size"
+          ]
+        },
+        {
+          "label": "Drop safely",
+          "children": [
+            "Quiet window",
+            "Watch regressions",
+            "Stats reset on restart"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A quarterly index audit",
+      "scenario": "An events table with 14 indexes and slowing ingestion.",
+      "flow": [
+        "Query idx_scan = 0",
+        "Exclude constraint indexes",
+        "5 unused, 18 GB",
+        "Drop one by one",
+        "Ingest +40%"
+      ],
+      "steps": [
+        {
+          "label": "Find",
+          "detail": "5 indexes with zero scans since the stats reset 90 days ago, totalling 18 GB."
+        },
+        {
+          "label": "Check",
+          "detail": "Confirm none backs a constraint or a rare critical report."
+        },
+        {
+          "label": "Drop",
+          "detail": "`DROP INDEX CONCURRENTLY`, one per day, watching query stats."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT s.indexrelname, pg_size_pretty(pg_relation_size(s.indexrelid)) AS size\nFROM pg_stat_user_indexes s\nWHERE s.idx_scan = 0\n  AND NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = s.indexrelid)\nORDER BY pg_relation_size(s.indexrelid) DESC;\n\nDROP INDEX CONCURRENTLY events_old_idx;"
+        }
+      ],
+      "outcome": "faster writes and more RAM for the indexes that matter."
+    },
+    "summary": {
+      "points": [
+        "Indexes cost on every write.",
+        "Unused indexes waste RAM and confuse the planner.",
+        "Audit and drop carefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can idx_scan = 0 be misleading?",
+        "a": "Statistics reset on restart or manual reset, so a recently restarted server shows zero scans even for indexes used monthly."
+      }
+    ]
+  }
+}
