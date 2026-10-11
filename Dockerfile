@@ -7,6 +7,7 @@ FROM python:3.12-alpine AS build
 WORKDIR /src
 COPY learn-ui/build.py learn-ui/build.py
 COPY learn-ui/assets learn-ui/assets
+COPY learn-ui/concepts learn-ui/concepts
 COPY learn learn
 RUN python3 learn-ui/build.py learn /site
 

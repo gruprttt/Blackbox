@@ -40,8 +40,25 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `assets/brain.js` | Canvas 3D brain renderer |
 | `assets/views.js` | Home, Brain, Focus, Tasks and Habits pages |
 | `assets/mindmap.js` | Tracks page skill map (pan, zoom, expand topics) |
+| `concepts/<track-slug>.json` | Core concepts for a track, explained from first principles (see below) |
 | `server/server.py` | Progress sync API (Python stdlib, JSON file storage) |
 | `Dockerfile`, `deploy/nginx.conf`, `docker-compose.yml` | `web` (nginx) + `api` services and the data volume |
+
+## Core concepts
+
+Each `concepts/<track-slug>.json` file adds a **Core concepts** section to that track. Every concept
+gets its own page with five parts:
+
+1. **First principles**: the problem before any tool existed, the ground truths, and the solution built up step by step
+2. **Analogy**: an everyday story, a mapping table and where the analogy breaks
+3. **Mind map**: generated as an SVG from `mindmap.branches` (tap to enlarge)
+4. **Worked example**: a scenario, a flow, numbered steps, code and the outcome
+5. **Summary**: the core in one sentence, key points and self-check questions
+
+Pages are generated at `concepts/<track>/<concept>/index.html` and listed on the track page. A
+concept is also shown on the lesson topic page with the same slug, or any topic slug listed in its
+`attach`. Text fields accept `**bold**`, `*italic*` and `` `code` ``. Database Reliability (DBRE) is
+the first track covered.
 
 ## Adding a new subject
 

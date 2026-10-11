@@ -260,7 +260,7 @@ ICON = {
 }
 
 NAV = [("Learn", "index.html", "learn", ("home",)),
-       ("Tracks", "tracks/index.html", "map", ("tracks", "track", "topic", "lesson")),
+       ("Tracks", "tracks/index.html", "map", ("tracks", "track", "topic", "lesson", "concept")),
        ("Brain", "brain/index.html", "brain", ("brain",)),
        ("Focus", "focus/index.html", "focus", ("focus",)),
        ("Tasks", "tasks/index.html", "tasks", ("tasks",)),
@@ -319,8 +319,8 @@ def page(*, title, desc, root, body, kind):
 
 def header(root, kind):
     drawer = (f'<button class="icon-btn drawer-btn" data-drawer-toggle aria-label="Open lesson list">{ICON["menu"]}</button>'
-              if kind == "lesson" else "")
-    bar = '<div class="read-progress" aria-hidden="true"><span></span></div>' if kind == "lesson" else ""
+              if kind in ("lesson", "concept") else "")
+    bar = '<div class="read-progress" aria-hidden="true"><span></span></div>' if kind in ("lesson", "concept") else ""
     def item(label, href, icon, kinds):
         link = f'<a href="{root}{href}"{" aria-current=page class=is-active" if kind in kinds else ""}>{ICON[icon]}<span>{label}</span></a>'
         if label != "Tracks" or not TRACKS:
@@ -583,7 +583,7 @@ def track_pager(root, track):
     return out + "</div>"
 
 
-def render_track(track):
+def render_track(track, cdata=None):
     root = "../"
     items = []
     for i, tp in enumerate(track["topics"], 1):
@@ -608,6 +608,7 @@ def render_track(track):
         f"{PROGRAMS[0]['name']} · Track {track['num']} of {track['of']:02d}", track['title'],
         f"{len(track['topics'])} topics · {track['n_lessons']} lessons · {fmt_minutes(track['minutes'])} of reading", actions)}
 <section class="wrap section">
+  {concepts_block(root, track['slug'], cdata) if cdata else ''}
   <div class="topic-tools"><h2>Topics</h2><div><button class="link-btn danger" data-reset-prefix="{track['slug']}/" data-reset-label="Track {track['num']}">Reset track</button><button class="link-btn" data-expand-all>Expand all</button></div></div>
   <div class="topic-list">{''.join(items)}</div>
   {track_pager(root, track)}
@@ -616,8 +617,9 @@ def render_track(track):
     return page(title=f"{strip_tags(track['title'])} · {SITE}", desc=f"Learn {strip_tags(track['title'])}.", root=root, body=body, kind="track")
 
 
-def render_topic(track, ti, topic):
+def render_topic(track, ti, topic, cdata=None):
     root = "../../"
+    attached = [c for c in cdata["topics"] if topic["slug"] == c["slug"] or topic["slug"] in c.get("attach", [])] if cdata else []
     pre = f"{track['slug']}/{topic['slug']}/"
     prev_t = track["topics"][ti - 1] if ti > 0 else None
     next_t = track["topics"][ti + 1] if ti + 1 < len(track["topics"]) else None
@@ -632,6 +634,7 @@ def render_topic(track, ti, topic):
         f"Topic {ti + 1} of {len(track['topics'])}", topic['title'],
         f"{len(topic['lessons'])} lessons · {fmt_minutes(sum(l['minutes'] for l in topic['lessons']))}", actions)}
 <section class="wrap narrow section">
+  {concepts_block(root, track['slug'], cdata, attached, "Understand the core first") if attached else ''}
   <ol class="lesson-list big">{lesson_rows(root, track, topic)}</ol>
   {nav}
 </section>
@@ -751,6 +754,234 @@ def render_tracks(tracks):
 </section>
 </main>"""
     return page(title=f"Tracks · {SITE}", desc="Skill map of every track.", root=root, body=body, kind="tracks")
+
+
+# ───────────────────────────── core concepts ─────────────────────────────
+# Each file in concepts/<track-slug>.json explains that track's ideas from first principles:
+# the problem, the ground truths, an analogy, a mind map, a worked example and a summary.
+# A concept also shows up on the lesson-topic page with the same slug, or any slug listed in its "attach".
+
+CONCEPTS_DIR = HERE / "concepts"
+MM_COLORS = ["#5b8cff", "#2dd4bf", "#fb923c", "#a78bfa", "#f472b6", "#a3e635", "#fbbf24", "#38bdf8"]
+
+
+def load_concepts():
+    out = {}
+    for f in sorted(CONCEPTS_DIR.glob("*.json")) if CONCEPTS_DIR.is_dir() else []:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        out[data.get("track", f.stem)] = data
+    return out
+
+
+def fmt(text):
+    """Escape, then allow **bold**, *italic* and `code` inline."""
+    s = html.escape(text, quote=False)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", s)
+    return re.sub(r"`(.+?)`", r"<code>\1</code>", s)
+
+
+def paras(text):
+    return "".join(f"<p>{fmt(p.strip())}</p>" for p in text.split("\n\n") if p.strip())
+
+
+def concept_track(tracks, slug):
+    """The lesson track a concept file belongs to, or a stand-in when its lessons aren't built."""
+    for t in tracks:
+        if t["slug"] == slug:
+            return t
+    dom = DOMAIN_BY_ID[TRACK_DOMAIN.get(slug, "foundations")]
+    return {"slug": slug, "title": slug.replace("-", " ").title(), "num": "··", "color": dom["color"],
+            "domain": dom, "missing": True}
+
+
+def text_w(s, px):
+    """Rough rendered width of `s` in Geist at `px` font size (no DOM to measure with at build time)."""
+    em = 0.0
+    for ch in s:
+        em += (.66 if ch.isupper() or ch in "MW@%" else .32 if ch in " .,:;'|!il()[]/-" else .58 if ch.isdigit() else .55)
+    return em * px
+
+
+def mindmap_svg(mm):
+    """A two-sided mind map: centre idea, branches left and right, leaves fanning out."""
+    branches = mm["branches"]
+    half = (len(branches) + 1) // 2
+    sides = [(1, branches[:half]), (-1, branches[half:])]
+    ROW, GAP, LINK, TWIG = 30, 20, 44, 28
+    bw = lambda b: text_w(b["label"], 14) * 1.06 + 30             # branch pill (bold text + padding)
+    lw = lambda b: max((text_w(c, 13) for c in b.get("children", [])), default=0) + 16
+
+    def block_h(b):
+        return max(1, len(b.get("children", []))) * ROW
+
+    def side_h(bs):
+        return sum(block_h(b) for b in bs) + GAP * max(0, len(bs) - 1)
+
+    def reach(bs):  # how far this side extends from the centre pill's edge
+        return max((LINK + bw(b) + TWIG + lw(b) for b in bs), default=0)
+
+    H = max(side_h(bs) for _, bs in sides) + 40
+    cw = text_w(mm["center"], 15) * 1.08 + 44
+    pad = 12
+    cx = pad + reach(sides[1][1]) + cw / 2
+    W, cy = cx + cw / 2 + reach(sides[0][1]) + pad, H / 2
+    parts = []
+    color_i = 0
+    for sgn, bs in sides:
+        y = cy - side_h(bs) / 2
+        for b in bs:
+            col = MM_COLORS[color_i % len(MM_COLORS)]
+            color_i += 1
+            bh = block_h(b)
+            by = y + bh / 2
+            x0 = cx + sgn * cw / 2
+            near = x0 + sgn * LINK                   # branch edge facing the centre
+            far = near + sgn * bw(b)                 # branch edge facing the leaves
+            parts.append(f'<path class="mm-link" style="stroke:{col}" d="M{x0:.0f},{cy:.0f} C{x0 + sgn * 26:.0f},{cy:.0f} {near - sgn * 26:.0f},{by:.0f} {near:.0f},{by:.0f}"/>')
+            parts.append(f'<rect class="mm-branch" style="stroke:{col};fill:{col}" x="{min(near, far):.0f}" y="{by - 15:.0f}" width="{bw(b):.0f}" height="30" rx="15"/>')
+            parts.append(f'<text class="mm-btext" x="{(near + far) / 2:.0f}" y="{by + 4.5:.0f}" text-anchor="middle">{html.escape(b["label"])}</text>')
+            for k, c in enumerate(b.get("children", [])):
+                ly = y + ROW * k + ROW / 2
+                lx = far + sgn * TWIG
+                parts.append(f'<path class="mm-link thin" style="stroke:{col}" d="M{far:.0f},{by:.0f} C{far + sgn * 14:.0f},{by:.0f} {lx - sgn * 14:.0f},{ly:.0f} {lx:.0f},{ly:.0f}"/>')
+                parts.append(f'<circle style="fill:{col}" cx="{lx:.0f}" cy="{ly:.0f}" r="3.5"/>')
+                anchor = "start" if sgn > 0 else "end"
+                parts.append(f'<text class="mm-ltext" x="{lx + sgn * 9:.0f}" y="{ly + 4.5:.0f}" text-anchor="{anchor}">{html.escape(c)}</text>')
+            y += bh + GAP
+    parts.append(f'<rect class="mm-center" x="{cx - cw / 2:.0f}" y="{cy - 22:.0f}" width="{cw:.0f}" height="44" rx="22"/>')
+    parts.append(f'<text class="mm-ctext" x="{cx:.0f}" y="{cy + 5.5:.0f}" text-anchor="middle">{html.escape(mm["center"])}</text>')
+    outline = "".join(f'<li><b>{html.escape(b["label"])}</b>: {html.escape(", ".join(b.get("children", [])))}</li>' for b in branches)
+    return (f'<div class="mm-wrap" data-mm-zoom tabindex="0" role="button" aria-label="Open mind map full size"><span class="mm-hint" aria-hidden="true"></span><svg class="mm-svg" viewBox="0 0 {W:.0f} {H:.0f}" style="--mm-w:{W:.0f}px" role="img" '
+            f'aria-label="Mind map of {html.escape(mm["center"])}">{"".join(parts)}</svg></div>'
+            f'<details class="mm-outline"><summary>Read the map as a list</summary><ul>{outline}</ul></details>')
+
+
+def flow_html(flow):
+    steps = f'<span class="cx-flow-arrow" aria-hidden="true">{ICON["right"]}</span>'.join(
+        f'<span class="cx-flow-node"><em>{i:02d}</em>{fmt(n)}</span>' for i, n in enumerate(flow, 1))
+    return f'<div class="cx-flow">{steps}</div>'
+
+
+def code_block(c):
+    label = f'<span class="cx-code-lang">{html.escape(c.get("lang", ""))}</span>' if c.get("lang") else ""
+    return f'<div class="codehilite cx-code">{label}<pre><code>{html.escape(c["text"])}</code></pre></div>'
+
+
+def concept_sections(c):
+    fp, an, ex = c["first_principles"], c["analogy"], c["example"]
+    truths = "".join(f"<li>{fmt(t)}</li>" for t in fp["truths"])
+    derive = "".join(f"<li>{fmt(t)}</li>" for t in fp["derivation"])
+    mapping = "".join(f"<tr><td>{fmt(a)}</td><td>{fmt(b)}</td></tr>" for a, b in an["mapping"])
+    steps = "".join(f'<li><b>{fmt(s["label"])}</b><span>{fmt(s["detail"])}</span></li>' for s in ex["steps"])
+    codes = "".join(code_block(x) for x in ex.get("code", []))
+    flow = flow_html(ex["flow"]) if ex.get("flow") else ""
+    outcome = f'<blockquote><p><strong>What you would see:</strong> {fmt(ex["outcome"])}</p></blockquote>' if ex.get("outcome") else ""
+    summary = "".join(f"<li>{fmt(s)}</li>" for s in c["summary"]["points"])
+    checks = "".join(f'<details class="cx-check"><summary>{fmt(q["q"])}</summary><div>{paras(q["a"])}</div></details>' for q in c.get("check", []))
+    secs = [
+        ("first-principles", "01", "First principles", f"""
+<h4>The problem, before any tools existed</h4>{paras(fp["problem"])}
+<h4>Ground truths we can't argue with</h4><ul>{truths}</ul>
+<h4>Build the solution up from those truths</h4><ol class="cx-derive">{derive}</ol>"""),
+        ("analogy", "02", "Analogy", f"""
+<div class="cx-analogy"><p class="mono-label">{fmt(an["title"])}</p>{paras(an["story"])}</div>
+<div class="table-wrapper"><table><thead><tr><th>In the analogy</th><th>In the database</th></tr></thead><tbody>{mapping}</tbody></table></div>
+<p class="cx-breaks"><strong>Where the analogy breaks:</strong> {fmt(an["breaks"])}</p>"""),
+        ("mind-map", "03", "Mind map", mindmap_svg(c["mindmap"])),
+        ("example", "04", "Worked example", f"""
+<h4>{fmt(ex["title"])}</h4>{paras(ex["scenario"])}{flow}<ol class="cx-steps">{steps}</ol>{codes}{outcome}"""),
+        ("summary", "05", "Summary: the core of it", f"""
+<p class="cx-core">{fmt(c["summary"]["core"])}</p><ul>{summary}</ul>
+{f'<h4>Check yourself</h4>{checks}' if checks else ''}"""),
+    ]
+    toc = [(sid, title) for sid, _, title, _ in secs]
+    body = "".join(f'<section class="cx-sec" id="{sid}"><h3 id="{sid}-h"><span class="cx-num">{num}</span>{title}</h3>{inner}</section>'
+                   for sid, num, title, inner in secs)
+    return body, toc
+
+
+def concept_card(root, track_slug, c, i):
+    return (f'<a class="cx-card" href="{root}concepts/{track_slug}/{c["slug"]}/index.html">'
+            f'<span class="cx-card-num">{i:02d}</span><span class="cx-card-main"><b>{html.escape(c["title"])}</b>'
+            f'<span>{fmt(c["one_liner"])}</span></span><span class="cx-card-go">{ICON["right"]}</span></a>')
+
+
+def concepts_block(root, track_slug, cdata, only=None, heading="Core concepts"):
+    items = [(i, c) for i, c in enumerate(cdata["topics"], 1) if only is None or c in only]
+    if not items:
+        return ""
+    cards = "".join(concept_card(root, track_slug, c, i) for i, c in items)
+    return (f'<div class="cx-block"><div class="topic-tools"><h2>{heading}</h2>'
+            f'<a class="link-btn" href="{root}concepts/{track_slug}/index.html">All concepts</a></div>'
+            f'<p class="section-sub">First principles, an analogy, a mind map, a worked example and a summary for each idea.</p>'
+            f'<div class="cx-grid">{cards}</div></div>')
+
+
+def render_concepts_index(track, cdata):
+    root = "../../"
+    first_c = cdata["topics"][0]
+    actions = f'<a class="btn btn-primary" href="{first_c["slug"]}/index.html">{ICON["play"]}<span>Start with concept 01</span></a>'
+    if not track.get("missing"):
+        actions += f'<a class="btn btn-ghost on-dark" href="{root}{track["slug"]}/index.html">{ICON["book"]}<span>Lessons</span></a>'
+    items = [(PROGRAMS[0]["name"], "index.html#path")]
+    items += [(f"Track {track['num']}", None if track.get("missing") else track["slug"] + "/index.html"), ("Core concepts", None)]
+    items = [(l, h) for l, h in items if h or l == "Core concepts"]
+    body = f"""<main id="main" style="--c:{track['color']}">
+{banner(root, track, crumbs(root, items), "Core concepts · first principles", html.escape(cdata["title"]),
+        f"{len(cdata['topics'])} concepts · {html.escape(cdata.get('blurb', ''))}", actions)}
+<section class="wrap narrow section">
+  <div class="cx-how">
+    <p class="mono-label">How each concept is explained</p>
+    <ol><li><b>First principles</b> the problem and the truths it rests on</li><li><b>Analogy</b> a picture from everyday life</li>
+    <li><b>Mind map</b> how the pieces connect</li><li><b>Worked example</b> one concrete scenario, step by step</li><li><b>Summary</b> the core, in a few lines</li></ol>
+  </div>
+  <div class="cx-grid one">{''.join(concept_card(root, track['slug'], c, i) for i, c in enumerate(cdata['topics'], 1))}</div>
+</section>
+</main>"""
+    return page(title=f"Core concepts · {strip_tags(cdata['title'])} · {SITE}", desc=f"{strip_tags(cdata['title'])}, explained from first principles.",
+                root=root, body=body, kind="concept")
+
+
+def render_concept(track, cdata, ci, c):
+    root = "../../../"
+    topics = cdata["topics"]
+    body_html, toc = concept_sections(c)
+    toc_html = ('<aside class="toc" aria-label="On this page"><p class="mono-label">On this page</p><nav>'
+                + "".join(f'<a href="#{sid}" data-toc-link="{sid}">{t}</a>' for sid, t in toc) + "</nav></aside>")
+    side = "".join(f'<li{" class=is-current" if x is c else ""}><a href="../{x["slug"]}/index.html"><span>{i:02d}</span>{html.escape(x["title"])}</a></li>'
+                   for i, x in enumerate(topics, 1))
+    prev_c = topics[ci - 1] if ci > 0 else None
+    next_c = topics[ci + 1] if ci + 1 < len(topics) else None
+    pager = '<div class="pager">'
+    pager += (f'<a class="pager-card prev" href="../{prev_c["slug"]}/index.html" data-nav-prev><span>{ICON["left"]} Previous concept</span><strong>{html.escape(prev_c["title"])}</strong></a>' if prev_c else "<span></span>")
+    pager += (f'<a class="pager-card next" href="../{next_c["slug"]}/index.html" data-nav-next><span>Next concept {ICON["right"]}</span><strong>{html.escape(next_c["title"])}</strong></a>' if next_c else "<span></span>")
+    pager += "</div>"
+    track_link = "" if track.get("missing") else f'<a class="side-topic-title" href="{root}{track["slug"]}/index.html">Back to the lessons</a>'
+    body = f"""<div class="drawer-backdrop" data-drawer-close></div>
+<div class="lesson-layout" style="--c:{track['color']}">
+  <aside class="sidebar" id="sidebar" aria-label="Concepts in this track">
+    <div class="sidebar-inner">
+      <a class="side-track" href="../index.html"><span class="num-tile sm">{track['num']}</span><span><em class="mono-label">Core concepts</em>{html.escape(cdata['title'])}</span></a>
+      <div class="side-topic"><p class="mono-label">Concept {ci + 1} / {len(topics)}</p>{track_link}</div>
+      <ol class="cx-side">{side}</ol>
+    </div>
+  </aside>
+  <main id="main" class="lesson-main">
+    {crumbs(root, [(html.escape(cdata['title']), f"concepts/{track['slug']}/index.html"), (html.escape(c['title']), None)])}
+    <article class="lesson concept">
+      <header class="lesson-head">
+        <div class="lesson-meta"><span class="chip">Core concept</span><span>{ICON['clock']}{c.get('minutes', 10)} min read</span><span>Concept {ci + 1} of {len(topics)}</span></div>
+        <h1>{html.escape(c['title'])}</h1>
+        <p class="cx-lede">{fmt(c['one_liner'])}</p>
+      </header>
+      <div class="prose">{body_html}</div>
+      {pager}
+    </article>
+  </main>
+  {toc_html}
+</div>"""
+    return page(title=f"{c['title']} · {SITE}", desc=c["one_liner"].replace("`", "").replace("**", ""), root=root, body=body, kind="concept")
 
 
 def render_404():
@@ -882,6 +1113,7 @@ def main():
         sys.exit(f"source not found: {SRC}")
     tracks = load()
     TRACKS[:] = tracks
+    concepts = load_concepts()
     if OUT.exists():
         shutil.rmtree(OUT)
     shutil.copytree(HERE / "assets", OUT / "assets")
@@ -914,12 +1146,12 @@ def main():
     for t in tracks:
         tt = strip_tags(t["title"])
         index.append([tt, f"{t['slug']}/index.html", t["domain"]["name"], "", "k", ""])
-        write(OUT / t["slug"] / "index.html", render_track(t))
+        write(OUT / t["slug"] / "index.html", render_track(t, concepts.get(t["slug"])))
         flat = [(t, tp, l) for tp in t["topics"] for l in tp["lessons"]]
         g0 = next(i for i, x in enumerate(path) if x[2] is flat[0][2])
         for ti, tp in enumerate(t["topics"]):
             index.append([strip_tags(tp["title"]), f"{t['slug']}/{tp['slug']}/index.html", tt, "", "t", ""])
-            write(OUT / t["slug"] / tp["slug"] / "index.html", render_topic(t, ti, tp))
+            write(OUT / t["slug"] / tp["slug"] / "index.html", render_topic(t, ti, tp, concepts.get(t["slug"])))
         for fi, (_, tp, l) in enumerate(flat):
             gi = g0 + fi
             prev = path[gi - 1] if gi > 0 else None
@@ -929,6 +1161,15 @@ def main():
                   render_lesson(t, t["topics"].index(tp), tp, tp["lessons"].index(l), l, prev, nxt, fi, len(flat)))
             index.append([strip_tags(l["title"]), f"{lid}/index.html", tt, strip_tags(tp["title"]), "l",
                           " ".join(h for _, h in l["toc"])])
+
+    for slug, cdata in concepts.items():
+        ct = concept_track(tracks, slug)
+        write(OUT / "concepts" / slug / "index.html", render_concepts_index(ct, cdata))
+        index.append([f"Core concepts · {cdata['title']}", f"concepts/{slug}/index.html", strip_tags(ct["title"]), "", "k", "first principles"])
+        for ci, c in enumerate(cdata["topics"]):
+            write(OUT / "concepts" / slug / c["slug"] / "index.html", render_concept(ct, cdata, ci, c))
+            index.append([c["title"], f"concepts/{slug}/{c['slug']}/index.html", strip_tags(ct["title"]), "Core concept", "t",
+                          " ".join([c["one_liner"], c["mindmap"]["center"]] + [b["label"] for b in c["mindmap"]["branches"]])])
 
     data = {
         "domains": [dict(id=d["id"], name=d["name"], short=d["short"], color=d["color"], anchor=d["anchor"],
@@ -942,7 +1183,8 @@ def main():
           "window.SEARCH_INDEX=" + json.dumps(index, ensure_ascii=False, separators=(",", ":")) + ";")
 
     n_lessons = sum(1 for r in index if r[4] == "l")
-    print(f"built {len(tracks)} tracks, {sum(len(t['topics']) for t in tracks)} topics, {n_lessons} lessons → {OUT}")
+    n_concepts = sum(len(c["topics"]) for c in concepts.values())
+    print(f"built {len(tracks)} tracks, {sum(len(t['topics']) for t in tracks)} topics, {n_lessons} lessons, {n_concepts} concepts → {OUT}")
 
 
 if __name__ == "__main__":

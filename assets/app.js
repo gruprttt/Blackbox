@@ -340,7 +340,7 @@
   var completeBtn = $("[data-complete]");
   var addTaskBtn = $("[data-add-task]");
   function syncLessonButtons() {
-    if (!article) return;
+    if (!article || !article.getAttribute("data-lesson-id")) return;
     var id = article.getAttribute("data-lesson-id");
     if (completeBtn) completeBtn.classList.toggle("is-done", BB.isDone(id));
     if (addTaskBtn) addTaskBtn.classList.toggle("is-on", !!BB.tasks.byLesson(id));
@@ -351,10 +351,10 @@
     var lid = article.getAttribute("data-lesson-id");
     var ltitle = article.getAttribute("data-lesson-title");
     var dom = BB.domain(article.getAttribute("data-domain"));
-    save("bb-last", { id: lid, title: ltitle, sub: article.getAttribute("data-lesson-sub") });
+    if (lid) save("bb-last", { id: lid, title: ltitle, sub: article.getAttribute("data-lesson-sub") });
     syncLessonButtons();
 
-    completeBtn.addEventListener("click", function () {
+    if (completeBtn) completeBtn.addEventListener("click", function () {
       if (BB.isDone(lid)) { BB.setDone(lid, false); toast("Marked as not completed"); }
       else {
         BB.setDone(lid, true);
@@ -364,13 +364,13 @@
       syncLessonButtons();
     });
 
-    addTaskBtn.addEventListener("click", function () {
+    if (addTaskBtn) addTaskBtn.addEventListener("click", function () {
       var existing = BB.tasks.byLesson(lid);
       if (existing) { BB.tasks.remove(existing.id); toast("Removed from tasks"); }
       else { BB.tasks.add({ title: ltitle, list: "reading", lesson: lid, due: BB.dayKey() }); toast("Added to Reading list · due today", "var(--blue)"); }
     });
 
-    $("[data-focus-lesson]").addEventListener("click", function () {
+    if ($("[data-focus-lesson]")) $("[data-focus-lesson]").addEventListener("click", function () {
       if (F.get()) { toast("A focus session is already running"); return; }
       var t = BB.tasks.byLesson(lid);
       F.start({ min: 25, domain: dom.id, label: ltitle, task: t ? t.id : null });
@@ -426,6 +426,14 @@
       });
     }
 
+    $$("[data-mm-zoom]").forEach(function (m) {
+      if (m.scrollWidth > m.clientWidth) m.scrollLeft = (m.scrollWidth - m.clientWidth) / 2;  // phones: start on the centre idea
+      var toggle = function () { var on = m.classList.toggle("is-zoomed"); document.body.classList.toggle("mm-open", on); };
+      m.addEventListener("click", toggle);
+      m.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " " || (e.key === "Escape" && m.classList.contains("is-zoomed"))) { e.preventDefault(); toggle(); }
+      });
+    });
     $$("[data-drawer-toggle]").forEach(function (b) { b.addEventListener("click", function () { document.body.classList.add("drawer-open"); }); });
     $$("[data-drawer-close]").forEach(function (b) { b.addEventListener("click", function () { document.body.classList.remove("drawer-open"); }); });
     var cur = $(".sidebar .is-current"), sideInner = $(".sidebar-inner");
