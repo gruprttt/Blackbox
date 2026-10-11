@@ -1,0 +1,605 @@
+{
+  "introduction-oltp-vs-olap": {
+    "core": "OLTP databases run many tiny, concurrent, ACID transactions on live state. OLAP warehouses run huge scans that aggregate history. They need opposite designs, so keep analytics off the production database.",
+    "first_principles": {
+      "problem": "Someone runs \"average order value by country\" on the production Postgres. The scan over hundreds of millions of rows eats I/O and CPU, and checkout slows for real customers. One database can't be great at both jobs.",
+      "truths": [
+        "Transactions touch a few whole rows. Analytics touch a few columns of many rows.",
+        "Big scans compete with live traffic for the same resources.",
+        "Live state and historical insight have different owners and lifecycles."
+      ],
+      "derivation": [
+        "**OLTP** (Postgres, MySQL): row-oriented, fast, concurrent, ACID, GB to low TB.",
+        "**OLAP** (Snowflake, BigQuery, Redshift): column-oriented, scan-optimised, TB to PB.",
+        "**Golden rule**: never run heavy analytics on production OLTP.",
+        "Move data to the warehouse (replicate or export) and analyse there. It's an **architectural boundary**, not just a tuning tip."
+      ]
+    },
+    "analogy": {
+      "title": "Waiters vs. the owner's monthly report",
+      "story": "Waiters take orders and process payments: small, fast, constant actions. The owner reviews a month of sales by dish category: one big, slow analysis. If the owner did that analysis at the till during dinner rush, service would stall.",
+      "mapping": [
+        [
+          "Waiters at the till",
+          "OLTP"
+        ],
+        [
+          "Owner's monthly analysis",
+          "OLAP"
+        ],
+        [
+          "Analysis at the till during rush",
+          "Analytics on prod DB"
+        ],
+        [
+          "Owner's back office",
+          "Data warehouse"
+        ]
+      ],
+      "breaks": "The owner can wait until closing time. Analysts need answers during the day, which is why a separate warehouse is the solution, not \"run it at night\"."
+    },
+    "mindmap": {
+      "center": "OLTP vs OLAP",
+      "branches": [
+        {
+          "label": "OLTP",
+          "children": [
+            "Tiny transactions",
+            "Row-oriented",
+            "ACID, concurrency"
+          ]
+        },
+        {
+          "label": "OLAP",
+          "children": [
+            "Big scans",
+            "Column-oriented",
+            "TB–PB"
+          ]
+        },
+        {
+          "label": "Golden rule",
+          "children": [
+            "No heavy analytics on prod"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Replicate / export",
+            "Warehouse for insight"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A report that slows checkout",
+      "scenario": "A monthly revenue query runs on the primary at 10 a.m.",
+      "flow": [
+        "Report scans 400 M rows",
+        "I/O + CPU saturated",
+        "Checkout p99 ×3",
+        "Move report to warehouse"
+      ],
+      "steps": [
+        {
+          "label": "Impact",
+          "detail": "The scan evicts hot pages and saturates disk, so checkout queries wait."
+        },
+        {
+          "label": "Fix",
+          "detail": "Load orders into BigQuery nightly or via CDC, and run the report there."
+        },
+        {
+          "label": "Result",
+          "detail": "Production returns to normal and the report runs faster on columnar storage."
+        }
+      ],
+      "code": [],
+      "outcome": "each system does the job it was designed for, and neither hurts the other."
+    },
+    "summary": {
+      "points": [
+        "OLTP = live transactions, OLAP = historical analysis.",
+        "Different layouts: rows vs columns.",
+        "Keep analytics off production."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a warehouse also bad at OLTP-style workloads?",
+        "a": "Frequent small updates and deletes are hostile to columnar, bulk-optimised storage. It's built for big reads, not tiny writes."
+      }
+    ]
+  },
+  "columnar-storage-the-secret-sauce": {
+    "core": "Warehouses store each column contiguously, so queries read only the columns they use, similar values compress 5–10×, and per-block min/max metadata (zone maps) lets the engine skip whole partitions.",
+    "first_principles": {
+      "problem": "`AVG(age)` over 500 M users in a row store reads 200-byte rows to use 4 bytes each, wasting 98% of the I/O. At petabyte scale that's hours and huge bills.",
+      "truths": [
+        "Analytical queries use few columns.",
+        "Values in one column are alike and compress well.",
+        "Knowing a block's min/max can prove it holds no matches."
+      ],
+      "derivation": [
+        "**Store by column**: read only the needed columns (**selective I/O**). 3 of 50 columns means about 6% of the bytes.",
+        "**Compress** each column (run-length, dictionary): 5–10× smaller.",
+        "Keep **zone maps / sort keys**: min/max per micro-partition, so filters prune blocks without reading them.",
+        "Separate **compute from storage** (Snowflake) so many warehouses query the same data without contention."
+      ]
+    },
+    "analogy": {
+      "title": "A spreadsheet printed column by column",
+      "story": "Print every column as its own booklet. To average everyone's age you pick up only the \"age\" booklet. Each booklet has a cover note saying \"ages 18–35 inside\", so if you want people over 60 you don't even open it.",
+      "mapping": [
+        [
+          "Booklet per column",
+          "Columnar storage"
+        ],
+        [
+          "Only the age booklet",
+          "Selective I/O"
+        ],
+        [
+          "Cover note with range",
+          "Zone map (min/max)"
+        ],
+        [
+          "Not opening a booklet",
+          "Partition pruning"
+        ]
+      ],
+      "breaks": "Booklets are equally easy to update. Columnar storage makes single-row updates expensive, because one row's fields live in many places."
+    },
+    "mindmap": {
+      "center": "Columnar Storage",
+      "branches": [
+        {
+          "label": "Row store waste",
+          "children": [
+            "Read 200 B to use 4 B"
+          ]
+        },
+        {
+          "label": "Selective I/O",
+          "children": [
+            "Only needed columns"
+          ]
+        },
+        {
+          "label": "Compression",
+          "children": [
+            "RLE, dictionary",
+            "5–10×"
+          ]
+        },
+        {
+          "label": "Pruning",
+          "children": [
+            "Sort keys",
+            "Zone maps",
+            "Skip micro-partitions"
+          ]
+        },
+        {
+          "label": "Bonus",
+          "children": [
+            "Compute ≠ storage"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"Why is Snowflake faster than Postgres for analytics?\"",
+      "scenario": "The same AVG(age) WHERE age > 60 over 500 M users.",
+      "flow": [
+        "Read only age column",
+        "Compressed ~2 GB not 200 GB",
+        "Zone maps skip young partitions",
+        "Seconds, not hours"
+      ],
+      "steps": [
+        {
+          "label": "Columnar",
+          "detail": "Read about 1% of the bytes a row store would."
+        },
+        {
+          "label": "Pruning",
+          "detail": "Micro-partitions whose max(age) < 60 are skipped entirely."
+        },
+        {
+          "label": "Concurrency",
+          "detail": "Separate virtual warehouses don't fight for I/O."
+        }
+      ],
+      "code": [],
+      "outcome": "you can explain warehouse speed in three concrete layers, not \"it's in the cloud\"."
+    },
+    "summary": {
+      "points": [
+        "Read only the columns you need.",
+        "Similar values compress very well.",
+        "Zone maps skip whole blocks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes partition pruning effective?",
+        "a": "Data physically ordered or clustered by the filter column, so each block's min/max range is narrow and most blocks can be skipped."
+      }
+    ]
+  },
+  "schemas-star-vs-snowflake": {
+    "core": "Analytical models separate facts (measurable events) from dimensions (descriptive context). The star schema keeps dimensions denormalised for simple, fast joins, and the snowflake schema normalises them to save storage that rarely matters.",
+    "first_principles": {
+      "problem": "Raw operational tables are awkward for analysis: many joins, cryptic codes, no calendar attributes. Analysts need a predictable shape where every question is \"join facts to a few dimensions, filter, aggregate\".",
+      "truths": [
+        "Business events (sales, views) are numerous and measurable.",
+        "Descriptions (product, store, date) are fewer and change slowly.",
+        "In cloud warehouses storage is cheap and joins cost time."
+      ],
+      "derivation": [
+        "Put events in a long **fact table**: metrics plus foreign keys.",
+        "Put context in **dimension tables**: product, store, date (with quarter, holiday flags…).",
+        "**Star**: one hop from fact to each dimension, with region stored right in `dim_stores` (deliberate redundancy).",
+        "**Snowflake**: normalise dimensions into hierarchies, which saves negligible space and adds joins and complexity.",
+        "Default to **star**, and snowflake only for a real, measured storage problem."
+      ]
+    },
+    "analogy": {
+      "title": "A receipt book and reference cards",
+      "story": "Every sale is a line in a huge receipt book (facts): item code, store code, date code, amount. Reference cards explain codes: what item 42 is, where store 7 is. Star: each card has everything on it. Snowflake: the item card says \"category: see card C3\", so you need another lookup.",
+      "mapping": [
+        [
+          "Receipt lines",
+          "Fact table"
+        ],
+        [
+          "Reference cards",
+          "Dimension tables"
+        ],
+        [
+          "Everything on one card",
+          "Star schema"
+        ],
+        [
+          "\"See card C3\"",
+          "Snowflake schema hierarchy"
+        ]
+      ],
+      "breaks": "Paper cards cost money to print, so snowflaking once saved real space. In a cloud warehouse the saved megabytes are rounding error, while the extra joins on billions of fact rows aren't."
+    },
+    "mindmap": {
+      "center": "Star vs Snowflake",
+      "branches": [
+        {
+          "label": "Fact table",
+          "children": [
+            "Events",
+            "Metrics + FKs",
+            "Billions of rows"
+          ]
+        },
+        {
+          "label": "Dimensions",
+          "children": [
+            "Product, store, date",
+            "Descriptive"
+          ]
+        },
+        {
+          "label": "Star",
+          "children": [
+            "Denormalised dims",
+            "One join per dim",
+            "Default"
+          ]
+        },
+        {
+          "label": "Snowflake",
+          "children": [
+            "Normalised hierarchies",
+            "More joins",
+            "Tiny savings"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Total sales by category in Q4 2023",
+      "scenario": "fact_sales with dim_products and dim_dates.",
+      "flow": [
+        "fact_sales",
+        "JOIN dim_products (category)",
+        "JOIN dim_dates (quarter)",
+        "Filter Q4 2023",
+        "SUM by category"
+      ],
+      "steps": [
+        {
+          "label": "Star",
+          "detail": "Category is a column in dim_products, so it's two simple joins."
+        },
+        {
+          "label": "Snowflake",
+          "detail": "Category lives in dim_categories, so there's an extra join across 10 B fact rows."
+        },
+        {
+          "label": "Choose",
+          "detail": "Star: simpler for analysts and faster."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT p.category, SUM(f.amount_sold) AS revenue\nFROM fact_sales f\nJOIN dim_products p ON f.product_id = p.product_id\nJOIN dim_dates d    ON f.date_id = d.date_id\nWHERE d.year = 2023 AND d.quarter = 4\nGROUP BY p.category ORDER BY revenue DESC;"
+        }
+      ],
+      "outcome": "every analytical question follows one simple, fast pattern."
+    },
+    "summary": {
+      "points": [
+        "Facts = events, dimensions = context.",
+        "Star = denormalised dimensions, the default.",
+        "Snowflake rarely pays off in the cloud."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is redundancy acceptable in star-schema dimensions?",
+        "a": "Dimension tables are small, storage is cheap, and eliminating joins over huge fact tables is worth far more."
+      }
+    ]
+  },
+  "the-pipeline-etl-vs-elt": {
+    "core": "ETL transforms data on a separate server before loading. ELT loads raw data first and transforms it inside the warehouse with SQL (dbt). The difference is where compute lives, and cheap, elastic warehouse compute makes ELT the modern default.",
+    "first_principles": {
+      "problem": "Data starts in app databases, SaaS APIs and logs, messy and inconsistent. It has to be cleaned and modelled for analysis. Old pipelines did that on a separate ETL server, a bottleneck that also threw away the raw data, so bugs couldn't be fixed by re-running.",
+      "truths": [
+        "Transformation logic will have bugs and will change.",
+        "Raw data, once discarded, may be impossible to get back.",
+        "Cloud warehouses have elastic compute that's good at SQL."
+      ],
+      "derivation": [
+        "**ETL** (pre-cloud): extract, then transform on a separate server, then load clean data. Made sense when warehouse CPU was scarce.",
+        "**ELT** (cloud): extract, **load raw** into a staging schema, then transform **in the warehouse** with SQL.",
+        "Manage transformations with **dbt**: SQL models, dependencies, tests, docs.",
+        "Keep the **raw layer append-only** as an audit trail and replay source.",
+        "Exception: mask or anonymise PII **before** load if policy forbids raw PII in the warehouse."
+      ]
+    },
+    "analogy": {
+      "title": "Cooking at home vs. in a big kitchen",
+      "story": "ETL: you prep and cook everything at home on a small stove, then bring only the finished dish to the party, and if the recipe was wrong, the raw ingredients are gone. ELT: you bring the raw groceries to a huge professional kitchen, cook there, and keep the groceries, so you can re-cook if the recipe changes.",
+      "mapping": [
+        [
+          "Small stove at home",
+          "Separate ETL server"
+        ],
+        [
+          "Finished dish only",
+          "Load clean data only"
+        ],
+        [
+          "Groceries kept",
+          "Raw layer preserved"
+        ],
+        [
+          "Professional kitchen",
+          "Warehouse compute"
+        ],
+        [
+          "Recipe book",
+          "dbt models"
+        ]
+      ],
+      "breaks": "Bringing raw groceries is harmless. Loading raw personal data into a warehouse can breach privacy rules, so sensitive fields may need masking first."
+    },
+    "mindmap": {
+      "center": "ETL vs ELT",
+      "branches": [
+        {
+          "label": "ETL",
+          "children": [
+            "Transform before load",
+            "Separate server",
+            "Raw discarded"
+          ]
+        },
+        {
+          "label": "ELT",
+          "children": [
+            "Load raw first",
+            "Transform in warehouse",
+            "SQL / dbt"
+          ]
+        },
+        {
+          "label": "Why ELT now",
+          "children": [
+            "Elastic compute",
+            "Replayable",
+            "Plain SQL"
+          ]
+        },
+        {
+          "label": "Raw layer",
+          "children": [
+            "Append-only",
+            "Audit trail"
+          ]
+        },
+        {
+          "label": "Exception",
+          "children": [
+            "PII masking before load"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing a revenue bug retroactively",
+      "scenario": "A transformation double-counted refunds for 6 months.",
+      "flow": [
+        "Bug found",
+        "ELT: raw orders intact",
+        "Fix dbt model",
+        "dbt run --full-refresh",
+        "History corrected"
+      ],
+      "steps": [
+        {
+          "label": "ETL world",
+          "detail": "Raw data is gone, so you must re-extract 6 months from the source, if you even can."
+        },
+        {
+          "label": "ELT world",
+          "detail": "Fix `fact_sales.sql` and rebuild from the raw layer."
+        },
+        {
+          "label": "Test",
+          "detail": "Add a dbt test so it can't regress."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "models/\n  staging/stg_orders.sql      -- clean raw.orders\n  marts/fact_sales.sql        -- join + aggregate\n$ dbt run --select fact_sales --full-refresh && dbt test"
+        }
+      ],
+      "outcome": "mistakes in logic become a re-run, not a data-loss incident."
+    },
+    "summary": {
+      "points": [
+        "The real difference is where compute lives.",
+        "ELT + dbt is the cloud default.",
+        "Keep raw data immutable."
+      ]
+    },
+    "check": [
+      {
+        "q": "When might you still transform before loading?",
+        "a": "When raw data contains PII that policy forbids storing in the warehouse, so it must be masked or anonymised first."
+      }
+    ]
+  },
+  "partitioning-and-clustering-query-performance-at-scale": {
+    "core": "Partition big tables by a low-cardinality column (usually date) so queries read only matching segments, and cluster or sort within partitions by high-cardinality filter columns so zone maps skip blocks. Don't over-partition.",
+    "first_principles": {
+      "problem": "Even columnar scans of a multi-trillion-row fact table are slow, and warehouses charge per byte scanned or per compute second. Reading five years of data to answer a one-day question wastes both.",
+      "truths": [
+        "Most queries filter by time.",
+        "Physically grouping rows lets the engine skip groups.",
+        "Too many tiny partitions make metadata the bottleneck."
+      ],
+      "derivation": [
+        "**Partition** by date (daily is common) so a one-day query reads one partition (about 99.95% less).",
+        "**Cluster** within partitions by frequent high-cardinality filters (store_id, user_id) so block min/max become narrow.",
+        "Combine: **partition by date, cluster by the other filter**.",
+        "Avoid **partition explosion**: never partition by user_id. Skip both for tiny tables (< 1 GB)."
+      ]
+    },
+    "analogy": {
+      "title": "A filing room by month, folders sorted by customer",
+      "story": "Drawers are labelled by month (partitions), and within each drawer folders are sorted by customer (clustering). To find store 42 in January you open one drawer and go straight to the right section. A drawer per customer (100 million drawers) would make the room impossible to navigate.",
+      "mapping": [
+        [
+          "Drawer per month",
+          "Date partition"
+        ],
+        [
+          "Folders sorted inside",
+          "Clustering / sort key"
+        ],
+        [
+          "Going straight to a section",
+          "Zone-map block skipping"
+        ],
+        [
+          "100 million drawers",
+          "Partition explosion"
+        ]
+      ],
+      "breaks": "Drawers stay sorted. In warehouses, new data lands unsorted and clustering degrades, so it must be maintained (automatic reclustering costs credits)."
+    },
+    "mindmap": {
+      "center": "Partitioning & Clustering",
+      "branches": [
+        {
+          "label": "Partitioning",
+          "children": [
+            "By date",
+            "Skip whole segments"
+          ]
+        },
+        {
+          "label": "Clustering",
+          "children": [
+            "Sort within partition",
+            "Zone maps skip blocks"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "Date partition",
+            "+ cluster by filter col"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Over-partitioning",
+            "Small files",
+            "Tiny tables"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 5-year events table queried for one day and one store",
+      "scenario": "BigQuery, billed per byte scanned.",
+      "flow": [
+        "Partition by DATE(ts)",
+        "Cluster by store_id",
+        "Query: day + store 42",
+        "1 partition, few blocks",
+        "Cost ↓ ~99.9%"
+      ],
+      "steps": [
+        {
+          "label": "Partition",
+          "detail": "The date filter reads 1 of 1,825 daily partitions."
+        },
+        {
+          "label": "Cluster",
+          "detail": "Inside it, only blocks whose store_id range includes 42 are read."
+        },
+        {
+          "label": "Bill",
+          "detail": "Bytes scanned, and therefore cost, drop by orders of magnitude."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE TABLE analytics.events (event_ts TIMESTAMP, store_id INT64, amount NUMERIC)\nPARTITION BY DATE(event_ts) CLUSTER BY store_id;\n\nSELECT SUM(amount) FROM analytics.events\nWHERE DATE(event_ts) = '2026-10-01' AND store_id = 42;"
+        }
+      ],
+      "outcome": "queries cost and take a tiny fraction of a full scan."
+    },
+    "summary": {
+      "points": [
+        "Partition by low-cardinality (date).",
+        "Cluster by high-cardinality filters.",
+        "Avoid partition explosion."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not partition by user_id?",
+        "a": "Millions of partitions make metadata listing and planning slower than the queries. Cluster by user_id instead."
+      }
+    ]
+  }
+}
