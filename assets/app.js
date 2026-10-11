@@ -434,7 +434,13 @@
     if (cur && sideInner && sideInner.scrollHeight > sideInner.clientHeight) sideInner.scrollTop = cur.offsetTop - sideInner.clientHeight / 2;
   }
 
-  // ── topic explainer: tap a mind map to see it full size ─────────
+  // ── topic explainer: open the folded copy on lesson pages; tap a mind map to see it full size ──
+  var explain = $("[data-explain]");
+  var openExplain = function () { if (explain) { explain.open = true; explain.scrollIntoView({ behavior: "smooth", block: "start" }); } };
+  if (explain && location.hash === "#explained") openExplain();
+  $$("[data-explain-open]").forEach(function (a) {
+    a.addEventListener("click", function (e) { if (!explain) return; e.preventDefault(); document.body.classList.remove("drawer-open"); openExplain(); });
+  });
   $$("[data-mm-zoom]").forEach(function (m) {
     if (m.scrollWidth > m.clientWidth) m.scrollLeft = (m.scrollWidth - m.clientWidth) / 2;  // phones: start on the centre idea
     var toggle = function () { document.body.classList.toggle("mm-open", m.classList.toggle("is-zoomed")); };

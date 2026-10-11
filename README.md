@@ -121,7 +121,8 @@ topic page, under its lesson list. The lessons are not changed. Each topic gets:
 4. **Worked example**: a scenario, a flow, numbered steps, code and the outcome
 5. **Summary**: the core in one sentence, key points and self-check questions
 
-Every lesson in that topic gets a *Topic explained* link in its sidebar. Keys in the file are topic
+Every lesson in that topic also gets it at the end of the page, folded under *Explain this topic from
+first principles* (open it there or from the sidebar link). Keys in the file are topic
 folder names. Text accepts `**bold**`, `*italic*` and `` `code` ``. Database Reliability (DBRE) is
 done for all 20 topics.
 

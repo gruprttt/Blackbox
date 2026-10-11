@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build BLACKBOX — a standalone learning site — from the saved HamChops /learn pages.
+"""Build BLACKBOX — a standalone learning site — from the saved lesson pages in learn/.
 
 Usage:  python3 build.py [SOURCE_DIR] [OUT_DIR]
 Defaults: SOURCE_DIR=./learn (or ../learn)  OUT_DIR=./dist
@@ -225,9 +225,16 @@ def rewrite_links(body):
     return re.sub(r'href="([^"]*)"', fix, body)
 
 
+def cf_email(m):
+    """Saved pages scramble example emails (Cloudflare); decode them back to plain text."""
+    raw = bytes.fromhex(m.group(1))
+    return html.escape(bytes(c ^ raw[0] for c in raw[1:]).decode("utf-8", "replace"))
+
+
 def parse_lesson(path):
     src = path.read_text(encoding="utf-8")
     body = first(r'<div class="lesson-content">(.*?)<!-- Report Issue Button -->', src)
+    body = re.sub(r'<a [^>]*data-cfemail="([0-9a-f]+)"[^>]*>.*?</a>', cf_email, body, flags=re.S)
     body = re.sub(r"</div>\s*$", "", body)
     body = re.sub(r'<div class="table-scroll-hint"[^>]*>.*?</div>', "", body, flags=re.S)
     body = rewrite_links(body)
@@ -832,15 +839,15 @@ def mindmap_svg(mm):
 
 
 def side_explain(root, track, topic):
-    """Lesson sidebar link to the topic's explainer (empty when the topic has none)."""
+    """Lesson sidebar link that opens the folded explainer on the same page (empty when there's none)."""
     if not topic.get("explain"):
         return ""
-    return (f'\n        <a class="side-explain" href="{root}{track["slug"]}/{topic["slug"]}/index.html#explained">'
-            f'{ICON["brain"]}Topic explained: first principles, analogy, mind map</a>')
+    return (f'\n        <a class="side-explain" href="#explained" data-explain-open>'
+            f'{ICON["brain"]}Explain this topic: first principles, analogy, mind map</a>')
 
 
-def explainer_html(topic):
-    """The "Topic explained" section appended under a topic's lesson list."""
+def explainer_html(topic, collapsible=False):
+    """The "Topic explained" section: under a topic's lesson list, or folded at the end of each lesson."""
     x = topic["explain"]
     fp, an, ex = x["first_principles"], x["analogy"], x["example"]
     li = lambda items: "".join(f"<li>{fmt(t)}</li>" for t in items)
@@ -874,15 +881,22 @@ def explainer_html(topic):
     nav = "".join(f'<a href="#x-{sid}"><em>{i:02d}</em>{t}</a>' for i, (sid, t, _) in enumerate(secs, 1))
     body = "".join(f'<section class="cx-sec" id="x-{sid}"><h3><span class="cx-num">{i:02d}</span>{t}</h3>{inner}</section>'
                    for i, (sid, t, inner) in enumerate(secs, 1))
-    return f"""
-  <section class="cx-explain" id="explained" aria-labelledby="explained-h">
-  <div class="cx-head">
+    inner = f"""<div class="cx-head">
     <p class="mono-label">Topic explained · from first principles</p>
-    <h2 id="explained-h">The core of {topic['title']}</h2>
+    <h2>The core of {topic['title']}</h2>
     <p class="cx-lede">{fmt(x["core"])}</p>
     <nav class="cx-nav" aria-label="Explainer sections">{nav}</nav>
   </div>
-  <div class="prose">{body}</div>
+  <div class="prose">{body}</div>"""
+    if collapsible:
+        return f"""
+      <details class="cx-explain cx-fold" id="explained" data-explain>
+        <summary>{ICON["brain"]}<span><b>Explain this topic from first principles</b><em>First principles · analogy · mind map · worked example · summary</em></span>{ICON["chev"]}</summary>
+        {inner}
+      </details>"""
+    return f"""
+  <section class="cx-explain" id="explained">
+  {inner}
 </section>"""
 
 
@@ -978,7 +992,7 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
           <span class="domain-tag" style="--c:{track['color']}"><i></i>{track['domain']['name']}</span>
         </div>
       </header>
-      <div class="prose">{content}</div>
+      <div class="prose">{content}</div>{explainer_html(topic, collapsible=True) if topic.get("explain") else ""}
       <div class="lesson-foot">
         <button class="btn btn-complete" data-complete>
           <span class="when-todo">{ICON['check']}Mark as complete</span>
