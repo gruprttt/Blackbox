@@ -110,6 +110,21 @@ switch: the map is a pannable skill map; click a card to see all of its sections
 problem, concept or lesson in them) in the side panel. You
 only leave the page when you open a lesson, problem or chapter to learn it.
 
+## Topic explainers
+
+`data/explainers/<track-slug>.json` adds a **Topic explained** section to the bottom of a DevOps
+topic page, under its lesson list. The lessons are not changed. Each topic gets:
+
+1. **First principles**: the problem before any tool existed, the ground truths, and the solution built up step by step
+2. **Analogy**: an everyday story, a table mapping it to the real system, and where the analogy breaks
+3. **Mind map**: drawn as an SVG at build time (tap to enlarge, or read it as a list)
+4. **Worked example**: a scenario, a flow, numbered steps, code and the outcome
+5. **Summary**: the core in one sentence, key points and self-check questions
+
+Every lesson in that topic gets a *Topic explained* link in its sidebar. Keys in the file are topic
+folder names. Text accepts `**bold**`, `*italic*` and `` `code` ``. Database Reliability (DBRE) is
+done for all 20 topics.
+
 ## Reading a chapter
 
 When a chapter or lesson is complete, a **Next chapter / Next lesson** button appears at the bottom and a
@@ -164,6 +179,7 @@ python3 server/server.py --static dist --data .data --port 8765   # site + sync 
 | `build.py` | Parses `learn/` and generates every page; `LOBES` are the brain's top-level regions |
 | `data/dsa-a2z.json` | Striver's A2Z sheet (18 topics, 62 subtopics, 474 problems with links) |
 | `data/system-design.json` | System Design curriculum (topics → concepts) |
+| `data/explainers/*.json` | First-principles explainers added under each DevOps topic |
 | `mdx.py` | Dependency-free MDX → HTML converter for the Backend chapters |
 | `assets/style.css` | Design system (dark theme) |
 | `assets/app.js` | Core: progress, focus engine, tasks store, search |

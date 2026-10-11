@@ -1,0 +1,3052 @@
+{
+  "dbre-rdbms-internals": {
+    "core": "A relational database is a machine for keeping a promise (ACID) on hardware that breaks that promise by default: slow disks, volatile memory and many users at once.",
+    "first_principles": {
+      "problem": "To the application a database looks like a magic box: send SQL, get rows. Inside, it is fighting physics. Disks are slow, memory forgets everything on power loss, and hundreds of clients are reading and changing the same rows at the same moment.\n\nEvery internal part of the engine (pages, the buffer pool, the WAL, B+ trees, MVCC, vacuum) exists to solve one of those problems without breaking the ACID contract.",
+      "truths": [
+        "Disk is about 100,000× slower than RAM, and it reads and writes in fixed-size blocks, not single rows.",
+        "RAM is fast but loses everything on a crash.",
+        "A crash can happen between any two instructions.",
+        "Many transactions touch the same data at the same time, and making them wait is expensive."
+      ],
+      "derivation": [
+        "Since disk works in blocks, store rows in fixed-size **pages** (8 KB in Postgres) inside **heap files**. A page is the unit of I/O.",
+        "Since disk is slow, keep hot pages in a RAM cache, the **buffer pool**, and evict cold ones (clock sweep).",
+        "Since RAM is volatile, **log every change to the WAL and fsync it before saying \"committed\"**. Data pages can be written later, and the log replays them after a crash.",
+        "Since scanning every page is slow, keep sorted **B+ tree indexes** so any row is 3–4 page reads away.",
+        "Since locking makes readers and writers wait, keep **multiple row versions (MVCC)** so each transaction reads its own snapshot.",
+        "Since old versions pile up, run **VACUUM** to reclaim them, and to freeze old transaction IDs before they wrap around."
+      ]
+    },
+    "analogy": {
+      "title": "A busy library with a front desk",
+      "story": "Books (rows) sit on shelves in boxes of fixed size (pages). Popular boxes are kept on the front desk (buffer pool) so the librarian doesn't walk to the back every time. Every loan or return is first written in the logbook (WAL), so if the computer crashes the day can be reconstructed.\n\nThe card catalogue (B+ tree) tells you which box a book is in. When a book is revised, the old edition stays on the shelf for readers who already started it (MVCC), and a night cleaner (VACUUM) removes editions nobody is reading any more.",
+      "mapping": [
+        [
+          "Fixed-size boxes on shelves",
+          "Pages in heap files"
+        ],
+        [
+          "Front desk with popular boxes",
+          "Buffer pool"
+        ],
+        [
+          "Logbook written before shelving",
+          "Write-ahead log"
+        ],
+        [
+          "Card catalogue",
+          "B+ tree index"
+        ],
+        [
+          "Old editions kept for current readers",
+          "MVCC row versions"
+        ],
+        [
+          "Night cleaner",
+          "VACUUM / autovacuum"
+        ]
+      ],
+      "breaks": "A library's old editions don't threaten the building. In Postgres, if VACUUM never freezes old rows, the 32-bit transaction counter can wrap around, and the database will shut down writes to protect itself."
+    },
+    "mindmap": {
+      "center": "RDBMS Internals",
+      "branches": [
+        {
+          "label": "Storage",
+          "children": [
+            "8 KB pages",
+            "Heap files",
+            "Page = unit of I/O"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "Buffer pool",
+            "Clock-sweep eviction",
+            "Dirty pages"
+          ]
+        },
+        {
+          "label": "Durability",
+          "children": [
+            "WAL: log first, data later",
+            "fsync on commit",
+            "Crash recovery = replay"
+          ]
+        },
+        {
+          "label": "Finding rows",
+          "children": [
+            "B+ tree",
+            "Leaves linked for ranges",
+            "3–4 reads for any row"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "MVCC versions",
+            "xmin / xmax",
+            "Snapshots & isolation levels"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "VACUUM",
+            "Autovacuum",
+            "XID wraparound"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Following one UPDATE through the engine",
+      "scenario": "`UPDATE accounts SET balance = 90 WHERE id = 7;` on Postgres, while another session is reading the same row.",
+      "flow": [
+        "Index lookup (B+ tree)",
+        "Page into buffer pool",
+        "New row version (MVCC)",
+        "WAL record + fsync",
+        "COMMIT OK",
+        "Old version → VACUUM later"
+      ],
+      "steps": [
+        {
+          "label": "Find",
+          "detail": "The primary-key B+ tree leads to the page holding row 7 in about 3 page reads, most of them already in the buffer pool."
+        },
+        {
+          "label": "Change",
+          "detail": "Postgres doesn't overwrite. It writes a **new version** of the row with `xmin` = this transaction's ID and marks the old one's `xmax`. The other session keeps reading the old version."
+        },
+        {
+          "label": "Log",
+          "detail": "A WAL record describing the change is appended and, at COMMIT, fsync'd. The data page itself stays dirty in RAM."
+        },
+        {
+          "label": "Later",
+          "detail": "A checkpoint writes the dirty page to disk. Once no snapshot can see the old version, autovacuum marks its space reusable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- See MVCC's hidden columns and the physical location of the row\nSELECT xmin, xmax, ctid, * FROM accounts WHERE id = 7;\n\n-- How much of the working set is served from RAM?\nSELECT sum(blks_hit) * 100.0 / nullif(sum(blks_hit + blks_read), 0) AS cache_hit_pct\nFROM pg_stat_database;"
+        }
+      ],
+      "outcome": "the reader was never blocked, the change was safe on disk the moment COMMIT returned, and only one small sequential WAL write happened on the critical path."
+    },
+    "summary": {
+      "points": [
+        "**Pages** are the unit of I/O and the **buffer pool** hides disk latency.",
+        "**WAL**: log first, data later. Commit means the log is flushed.",
+        "**B+ trees** keep any row a few reads away and their linked leaves make range scans cheap.",
+        "**MVCC** lets readers and writers not block each other, and **VACUUM** pays for that."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Postgres write a new row version instead of updating in place?",
+        "a": "So transactions with older snapshots can keep reading the previous version without locks. That's MVCC. The cost is dead tuples that VACUUM must clean up."
+      },
+      {
+        "q": "What does 'commit' actually guarantee has reached disk?",
+        "a": "The WAL records up to that transaction, not the data pages. Those can be rebuilt from the WAL after a crash."
+      }
+    ]
+  },
+  "dbre-scaling-rdbms": {
+    "core": "Scale reads by copying the data (replicas), scale writes by splitting it (shards), and protect the server from connection overhead with a pooler. Each step buys capacity and costs consistency or simplicity.",
+    "first_principles": {
+      "problem": "Success means more users, and eventually one database server can't keep up. Its CPU, disk and RAM have ceilings, and buying a bigger box gets exponentially more expensive and still has a top.\n\nThe load comes in different shapes: too many reads, too many writes, or just too many connections. Each shape needs a different fix.",
+      "truths": [
+        "Most applications read far more than they write.",
+        "Every write must land on the machine that owns that data.",
+        "Copying data to another machine takes time, so the copy is always a little behind.",
+        "Each Postgres connection is an OS process with its own memory."
+      ],
+      "derivation": [
+        "Reads don't change data, so they can be served by **copies**: stream the WAL to **replicas** and send reads there. Accept **replication lag**.",
+        "Let a replica that is offline catch up later by having the primary keep its WAL: **replication slots**. Watch them, because a dead slot keeps WAL forever and fills the disk.",
+        "Writes can't be spread over copies, so **split the data**: each **shard** owns a subset of keys and takes only its writes.",
+        "Plan for **resharding** from day one (consistent hashing, many logical shards per server), because moving live data is the hardest part.",
+        "Thousands of client connections waste memory and CPU, so put **PgBouncer** in front and multiplex them onto a few real connections."
+      ]
+    },
+    "analogy": {
+      "title": "A popular restaurant growing up",
+      "story": "At first one chef cooks and serves. When too many people want the menu read to them, you print copies of the menu (replicas): anyone can read them, but they may be a day out of date.\n\nWhen there's too much cooking for one kitchen, you open a second kitchen and split the menu: kitchen A does pizzas, kitchen B does pasta (shards). Moving the pizza oven later is a nightmare. Meanwhile a host at the door (PgBouncer) seats guests at a fixed number of tables instead of letting everyone crowd into the kitchen.",
+      "mapping": [
+        [
+          "Printed copies of the menu",
+          "Read replicas"
+        ],
+        [
+          "Copies a little out of date",
+          "Replication lag"
+        ],
+        [
+          "Second kitchen with half the menu",
+          "Shard"
+        ],
+        [
+          "Moving the pizza oven",
+          "Resharding"
+        ],
+        [
+          "Host seating guests at fixed tables",
+          "PgBouncer connection pooling"
+        ]
+      ],
+      "breaks": "Menu copies don't need anything from the head office. A replica with a replication slot makes the primary *keep* WAL for it, so a forgotten replica can fill the primary's disk and take it down."
+    },
+    "mindmap": {
+      "center": "Scaling an RDBMS",
+      "branches": [
+        {
+          "label": "Scale reads",
+          "children": [
+            "Primary + replicas",
+            "WAL streaming",
+            "Replication lag"
+          ]
+        },
+        {
+          "label": "Replication slots",
+          "children": [
+            "Replica can catch up",
+            "Retains WAL",
+            "Disk-full risk"
+          ]
+        },
+        {
+          "label": "Scale writes",
+          "children": [
+            "Sharding",
+            "Range / hash / directory",
+            "Shard key choice"
+          ]
+        },
+        {
+          "label": "Resharding",
+          "children": [
+            "Moving live data hurts",
+            "Consistent hashing",
+            "Many logical shards"
+          ]
+        },
+        {
+          "label": "Connections",
+          "children": [
+            "Process per connection",
+            "PgBouncer",
+            "Session / transaction / statement"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A read-heavy app outgrows one server",
+      "scenario": "An e-commerce API runs 9,000 reads/s and 600 writes/s on one Postgres primary at 85% CPU. During sales, connections hit `max_connections`.",
+      "flow": [
+        "Primary at 85% CPU",
+        "Add 2 read replicas",
+        "Route reads, mind lag",
+        "Add PgBouncer",
+        "Primary at 35% CPU"
+      ],
+      "steps": [
+        {
+          "label": "Diagnose",
+          "detail": "`pg_stat_statements` shows about 90% of time is SELECTs for product pages and search, which are fine to serve slightly stale."
+        },
+        {
+          "label": "Replicas",
+          "detail": "Add two streaming replicas. Product and search reads go there. Checkout and \"my orders\" reads stay on the primary (read-your-writes)."
+        },
+        {
+          "label": "Slots",
+          "detail": "Each replica gets a slot, plus an alert on retained WAL size so a dead replica can't fill the disk."
+        },
+        {
+          "label": "Pooling",
+          "detail": "PgBouncer in transaction mode turns 3,000 app connections into 60 real ones."
+        },
+        {
+          "label": "Shard later",
+          "detail": "Writes (600/s) fit one primary comfortably, so sharding is not needed yet."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- Replica lag and retained WAL per slot, run on the primary\nSELECT slot_name, active,\n       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained_wal\nFROM pg_replication_slots;\n\nSELECT application_name, replay_lag FROM pg_stat_replication;"
+        }
+      ],
+      "outcome": "the primary drops to about a third of its CPU, the connection limit stops being hit, and the expensive step (sharding) is put off until writes really need it."
+    },
+    "summary": {
+      "points": [
+        "Reads scale with **replicas**. Design for **lag** (read-your-writes).",
+        "**Replication slots** must be monitored, because an inactive slot = growing WAL = disk full.",
+        "Writes scale only by **sharding**, and the shard key and **resharding** plan are the hard parts.",
+        "**PgBouncer** transaction mode is the usual production setting. Mind session state."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why don't replicas help a write-bound database?",
+        "a": "Every replica must apply every write too. Only splitting the data (sharding) reduces the writes each machine has to do."
+      },
+      {
+        "q": "A replica has been down for three days and the primary's disk is filling. Why?",
+        "a": "Its replication slot is making the primary keep all WAL since the replica disconnected. Drop the slot or bring the replica back."
+      }
+    ]
+  },
+  "dbre-nosql-taxonomy": {
+    "core": "Each NoSQL family gives up some of SQL's generality to be excellent at one data shape: key lookups, documents, huge write streams or relationships. Pick the one whose shape matches your access pattern.",
+    "first_principles": {
+      "problem": "Relational databases are a superb general tool, but \"general\" has costs. A fixed schema slows teams down, joins get expensive at huge scale, a single primary limits write throughput, and some questions (\"friends of friends of friends\") are painful in SQL.\n\nSo the question is: if you know exactly how your data will be accessed, what can you give up to be much faster at that?",
+      "truths": [
+        "The fastest query is a direct lookup by key, with no planning and no joins.",
+        "Data that's read together should be stored together.",
+        "Appending is far cheaper than updating in place.",
+        "Some problems are about connections between things more than the things themselves."
+      ],
+      "derivation": [
+        "If you only ever fetch by key, drop everything else: **key-value stores** (Redis), with O(1) lookups and often all data in RAM.",
+        "If you read whole objects, store each object as one **document** (MongoDB) with a flexible schema and no joins to reassemble it.",
+        "If you write enormous volumes across many machines, use **wide-column stores** (Cassandra/ScyllaDB): partition by key, append writes to an **LSM tree**, and use Bloom filters and compaction to keep reads sane.",
+        "If the questions are about paths and relationships, store **nodes and edges** directly (Neo4j), so traversals follow pointers instead of running joins."
+      ]
+    },
+    "analogy": {
+      "title": "Different kinds of storage at home",
+      "story": "A key hook by the door (key-value): you know exactly which key you want and grab it instantly. A filing folder per person (document): everything about Alice is in Alice's folder. A huge archive of time-stamped logbooks filled front to back and reorganised at night (wide-column + LSM). A family tree on the wall (graph): you answer \"who is my second cousin\" by following lines, not by cross-referencing ledgers.\n\nA relational database is the well-organised office with cross-referenced ledgers. It can answer anything, but it's not the fastest for any one of these.",
+      "mapping": [
+        [
+          "Key hook by the door",
+          "Key-value store (Redis)"
+        ],
+        [
+          "Folder per person",
+          "Document store (MongoDB)"
+        ],
+        [
+          "Logbooks filled in order, tidied at night",
+          "Wide-column + LSM + compaction"
+        ],
+        [
+          "Family tree on the wall",
+          "Graph database (Neo4j)"
+        ],
+        [
+          "Cross-referenced office ledgers",
+          "Relational database"
+        ]
+      ],
+      "breaks": "At home you can reorganise freely. In NoSQL your data model is built around today's queries, so a new kind of question can mean rewriting how the data is stored."
+    },
+    "mindmap": {
+      "center": "NoSQL Families",
+      "branches": [
+        {
+          "label": "Key-value",
+          "children": [
+            "Redis",
+            "O(1) by key",
+            "Caches, sessions, counters"
+          ]
+        },
+        {
+          "label": "Document",
+          "children": [
+            "MongoDB",
+            "Flexible schema",
+            "Object = document"
+          ]
+        },
+        {
+          "label": "Wide-column",
+          "children": [
+            "Cassandra / ScyllaDB",
+            "Partition + clustering key",
+            "Massive write scale"
+          ]
+        },
+        {
+          "label": "LSM internals",
+          "children": [
+            "MemTable → SSTables",
+            "Bloom filters",
+            "Compaction"
+          ]
+        },
+        {
+          "label": "Graph",
+          "children": [
+            "Neo4j / Cypher",
+            "Nodes, edges, properties",
+            "Deep traversals"
+          ]
+        },
+        {
+          "label": "Choosing",
+          "children": [
+            "Start from access pattern",
+            "What you give up",
+            "Polyglot persistence"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One product, four data shapes",
+      "scenario": "A social shopping app needs sessions, product catalogue, an activity feed of billions of events, and \"people you may know\".",
+      "flow": [
+        "Sessions → Redis",
+        "Catalogue → MongoDB",
+        "Activity events → Cassandra",
+        "Friend suggestions → Neo4j",
+        "Orders stay in Postgres"
+      ],
+      "steps": [
+        {
+          "label": "Sessions",
+          "detail": "Fetched by session ID on every request with a TTL: a perfect key-value fit."
+        },
+        {
+          "label": "Catalogue",
+          "detail": "Products have wildly different attributes (shoes vs. laptops). Documents avoid a 200-column table."
+        },
+        {
+          "label": "Activity feed",
+          "detail": "Heavy append-only writes, read by `(user_id, time)`, so partition key = user, clustering = time desc."
+        },
+        {
+          "label": "Suggestions",
+          "detail": "\"Friends of friends who bought X\" is a 2–3 hop traversal, which is trivial in a graph and painful as SQL self-joins."
+        },
+        {
+          "label": "Money",
+          "detail": "Orders and payments need multi-row ACID transactions, so they stay relational."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- Cassandra (CQL): the table is designed around the query\nCREATE TABLE activity_by_user (\n  user_id uuid, ts timeuuid, action text, item_id uuid,\n  PRIMARY KEY ((user_id), ts)\n) WITH CLUSTERING ORDER BY (ts DESC);\n\n-- Neo4j (Cypher): friends-of-friends, not already friends\nMATCH (me:User {id: $id})-[:FRIEND]->()-[:FRIEND]->(fof)\nWHERE NOT (me)-[:FRIEND]->(fof) AND fof <> me\nRETURN fof, count(*) AS mutual ORDER BY mutual DESC LIMIT 10;"
+        }
+      ],
+      "outcome": "each store does what it is best at, and the cost is running and understanding several systems."
+    },
+    "summary": {
+      "points": [
+        "**Key-value** = fastest, simplest. **Document** = flexible objects. **Wide-column** = write scale. **Graph** = relationships.",
+        "Wide-column speed comes from **LSM trees**: append, flush, compact, and use Bloom filters to skip files.",
+        "In NoSQL you **model for the query**, not for the entity.",
+        "Keep data that needs multi-row transactions relational unless you have a strong reason not to."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are Cassandra writes so fast?",
+        "a": "A write is an append to the commit log plus an insert into an in-memory MemTable. No random disk I/O happens on the write path, and sorted SSTables are flushed and compacted later."
+      },
+      {
+        "q": "When does a graph database beat SQL?",
+        "a": "When queries traverse many hops of relationships of varying depth. Each hop in SQL is another join, while a graph follows stored edges directly."
+      }
+    ]
+  },
+  "dbre-distributed-data-cap-pacelc": {
+    "core": "Once data lives on more than one machine, a network split forces a choice between answering and being correct (CAP), and even without failures every request trades latency against consistency (PACELC). Quorums let you tune where you sit.",
+    "first_principles": {
+      "problem": "With one machine, \"the current value\" is simple: it's whatever is on that machine. Copy the data to three machines for safety and speed, and suddenly they can disagree. Messages between them are delayed or lost, and a node can't tell a slow peer from a dead one.\n\nWe need rules for what a read returns and when a write counts, and we need ways to bring copies back into agreement afterwards.",
+      "truths": [
+        "Networks drop and delay messages. Partitions will happen.",
+        "Waiting for more replicas to confirm takes more time.",
+        "During a partition, the two sides can't coordinate.",
+        "Replicas that missed writes will drift until something fixes them."
+      ],
+      "derivation": [
+        "During a **partition (P)** you must choose: refuse some requests to stay correct (**C**), or answer everything and risk stale or conflicting data (**A**). That's **CAP**, and P isn't optional.",
+        "Even with no partition (**E**lse), waiting for more replicas costs **Latency**, and skipping them costs **Consistency**: **PACELC**.",
+        "Make it tunable: with N replicas, a write waits for W acks and a read asks R replicas. If **R + W > N**, every read overlaps the latest write (**quorum**).",
+        "When a replica is briefly down, a neighbour stores the write for it and hands it over later: **hinted handoff**.",
+        "Fix remaining drift: compare versions during reads (**read repair**) and periodically compare whole datasets with Merkle trees (**anti-entropy repair**)."
+      ]
+    },
+    "analogy": {
+      "title": "Three branch offices keeping one shared ledger",
+      "story": "A company has three offices, each with a copy of the customer ledger. When the phone lines between them go down, each office has a choice: stop taking updates until the lines are back (consistent), or keep serving customers and reconcile later (available).\n\nOn a normal day, a cautious clerk calls two other offices before confirming a change (slow but safe), while a fast clerk confirms immediately (quick but possibly out of step). If an office was closed for the afternoon, a neighbour keeps its messages on a sticky note and passes them on in the morning.",
+      "mapping": [
+        [
+          "Phone lines down between offices",
+          "Network partition (P)"
+        ],
+        [
+          "Stop taking updates",
+          "Choose consistency (CP)"
+        ],
+        [
+          "Keep serving, reconcile later",
+          "Choose availability (AP)"
+        ],
+        [
+          "Calling 2 of 3 offices before confirming",
+          "Quorum write (W=2 of N=3)"
+        ],
+        [
+          "Sticky note for a closed office",
+          "Hinted handoff"
+        ],
+        [
+          "Monthly ledger reconciliation",
+          "Anti-entropy repair"
+        ]
+      ],
+      "breaks": "Offices can phone each other to check the time. Distributed nodes can't fully trust their clocks, so \"latest write wins\" based on timestamps can silently drop writes."
+    },
+    "mindmap": {
+      "center": "CAP & PACELC",
+      "branches": [
+        {
+          "label": "CAP",
+          "children": [
+            "Consistency",
+            "Availability",
+            "Partition tolerance (mandatory)"
+          ]
+        },
+        {
+          "label": "PACELC",
+          "children": [
+            "If Partition: A vs C",
+            "Else: Latency vs Consistency",
+            "PA/EL vs PC/EC"
+          ]
+        },
+        {
+          "label": "Quorums",
+          "children": [
+            "N, W, R",
+            "R + W > N → strong",
+            "W=1 fast, R=N slow"
+          ]
+        },
+        {
+          "label": "Temporary failure",
+          "children": [
+            "Hinted handoff",
+            "Sloppy quorum",
+            "Hints expire"
+          ]
+        },
+        {
+          "label": "Repairing drift",
+          "children": [
+            "Read repair",
+            "Anti-entropy",
+            "Merkle trees"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tuning consistency in a 3-replica Cassandra cluster",
+      "scenario": "A profile service runs with replication factor N=3. The team wants reads to always see the latest write but still tolerate one node being down.",
+      "flow": [
+        "N = 3 replicas",
+        "Write at QUORUM (W=2)",
+        "Read at QUORUM (R=2)",
+        "2 + 2 > 3 → overlap",
+        "1 node down → still OK"
+      ],
+      "steps": [
+        {
+          "label": "Choose W and R",
+          "detail": "QUORUM = 2 of 3 for both, and 2 + 2 = 4 > 3, so every read set overlaps the last write set in at least one replica."
+        },
+        {
+          "label": "One node fails",
+          "detail": "Two nodes are still up, so QUORUM reads and writes still succeed. The system stays available and consistent."
+        },
+        {
+          "label": "Hint stored",
+          "detail": "Writes meant for the dead node are kept as hints by a coordinator and replayed when it returns (within the hint window)."
+        },
+        {
+          "label": "Drift",
+          "detail": "If it was down longer than the hint window, run `nodetool repair` (anti-entropy) to bring it fully back in sync."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- cqlsh: per-request consistency\nCONSISTENCY QUORUM;\nUPDATE profiles SET email = 'a@new.com' WHERE user_id = 42;\nSELECT email FROM profiles WHERE user_id = 42;   -- guaranteed to see the update\n\n-- Faster but weaker: W=1, R=1 → 1 + 1 = 2, not > 3 → may read stale data\nCONSISTENCY ONE;"
+        }
+      ],
+      "outcome": "strong reads with one node down, at the cost of waiting for two replicas on every request (the \"EC\" side of PACELC)."
+    },
+    "summary": {
+      "points": [
+        "**Partitions happen**, so the real CAP choice is C or A *during* one.",
+        "**PACELC**: on a normal day, you still trade latency for consistency.",
+        "**R + W > N** gives read-your-latest-write. Tune it per query.",
+        "Hinted handoff covers short outages, and **repair** covers everything else. Schedule it."
+      ]
+    },
+    "check": [
+      {
+        "q": "N=3, W=1, R=3: is this strongly consistent? Why would anyone do it?",
+        "a": "Yes (1+3 > 3), but every read needs all 3 replicas, so one node down breaks reads. It suits write-heavy workloads that rarely read."
+      },
+      {
+        "q": "Why is 'CA' not a real choice for a distributed database?",
+        "a": "You can't opt out of network partitions. A system that isn't partition-tolerant just behaves unpredictably when one happens."
+      }
+    ]
+  },
+  "dbre-newsql-spanner-cockroachdb-tidb": {
+    "core": "NewSQL keeps SQL and ACID transactions but spreads data across many machines by splitting it into ranges, replicating each with consensus (Paxos/Raft), and ordering transactions with carefully managed time.",
+    "first_principles": {
+      "problem": "For a decade the choice was stark: relational databases gave you SQL and transactions but scaled writes poorly, while NoSQL scaled horizontally but gave up joins, transactions or strong consistency. Teams ended up rebuilding transactions in application code, badly.\n\nNewSQL asks whether we can have horizontal scale *and* serialisable SQL transactions.",
+      "truths": [
+        "One machine's write capacity is limited, so data must be split to scale writes.",
+        "Replicas need agreement on order, or they diverge.",
+        "A majority vote (consensus) can agree on an order despite minority failures.",
+        "Transactions spanning machines need a global notion of which commit happened first."
+      ],
+      "derivation": [
+        "Split tables into contiguous key **ranges** (tablets/regions) and spread them across nodes, splitting automatically as they grow.",
+        "Replicate each range with **Paxos/Raft**: a write commits when a majority agrees, so the range survives minority failures with no data loss.",
+        "For transactions over several ranges, use a **two-phase commit** coordinated across the range leaders.",
+        "To order transactions globally, assign **timestamps** that respect real time: Spanner uses **TrueTime** (atomic clocks + commit wait), CockroachDB uses **hybrid logical clocks**.",
+        "Keep a **SQL layer** on top so applications still speak SQL. TiDB even separates SQL (TiDB), storage (TiKV) and placement (PD), plus columnar replicas (TiFlash) for analytics."
+      ]
+    },
+    "analogy": {
+      "title": "A national chain of bank branches with one rulebook",
+      "story": "Instead of one giant head office, accounts are split by surname across many branches (ranges). Each branch has three tellers who must agree, by majority, before any entry is final (consensus), so one sick teller doesn't stop the branch.\n\nA transfer between accounts at two branches needs both branches to prepare, then both to commit (two-phase commit). To keep a single story of \"what happened first\" across the country, every branch stamps entries using carefully synchronised clocks.",
+      "mapping": [
+        [
+          "Accounts split by surname across branches",
+          "Key ranges spread across nodes"
+        ],
+        [
+          "Three tellers agreeing by majority",
+          "Raft/Paxos replication"
+        ],
+        [
+          "Prepare at both branches, then commit",
+          "Distributed two-phase commit"
+        ],
+        [
+          "Synchronised clocks stamping entries",
+          "TrueTime / HLC timestamps"
+        ],
+        [
+          "Customers still fill in the same forms",
+          "SQL interface"
+        ]
+      ],
+      "breaks": "Branches in one country are milliseconds apart. Global NewSQL clusters are 100+ ms apart, and every consensus round pays that, so data placement (keeping rows near their users) matters enormously for latency."
+    },
+    "mindmap": {
+      "center": "NewSQL",
+      "branches": [
+        {
+          "label": "Goal",
+          "children": [
+            "SQL + ACID",
+            "Horizontal scale",
+            "Survive node/zone loss"
+          ]
+        },
+        {
+          "label": "Data layout",
+          "children": [
+            "Ranges / tablets",
+            "Auto-split & rebalance",
+            "Leaseholder / leader"
+          ]
+        },
+        {
+          "label": "Replication",
+          "children": [
+            "Raft / Paxos",
+            "Majority commit",
+            "No data loss on minority failure"
+          ]
+        },
+        {
+          "label": "Transactions",
+          "children": [
+            "Two-phase commit",
+            "MVCC timestamps",
+            "Serializable by default"
+          ]
+        },
+        {
+          "label": "Systems",
+          "children": [
+            "Spanner (TrueTime)",
+            "CockroachDB (HLC)",
+            "TiDB (TiKV + TiFlash)"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Higher write latency",
+            "Contention hurts",
+            "Ops complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A transfer between two ranges in CockroachDB",
+      "scenario": "`accounts` is split into ranges. Alice's row lives in range 12 (leader in us-east), Bob's in range 31 (leader in us-west). Alice sends Bob $50.",
+      "flow": [
+        "BEGIN",
+        "Write intent on range 12",
+        "Write intent on range 31",
+        "Raft majority each",
+        "Commit txn record",
+        "Intents resolved"
+      ],
+      "steps": [
+        {
+          "label": "Intents",
+          "detail": "Each UPDATE writes a provisional *write intent* to its range, replicated by Raft to a majority of that range's replicas."
+        },
+        {
+          "label": "Commit point",
+          "detail": "The transaction record flips to COMMITTED (also via Raft). That single write is the atomic commit for both ranges."
+        },
+        {
+          "label": "Cleanup",
+          "detail": "Intents are converted to normal values asynchronously. Readers who hit an intent check the transaction record."
+        },
+        {
+          "label": "Latency",
+          "detail": "Each Raft round costs a cross-zone round-trip, which is why NewSQL writes are slower than a single-node Postgres write."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- CockroachDB: plain SQL, distributed underneath\nBEGIN;\nUPDATE accounts SET balance = balance - 50 WHERE id = 'alice';\nUPDATE accounts SET balance = balance + 50 WHERE id = 'bob';\nCOMMIT;\n\n-- See how a table is split into ranges and where their leaseholders are\nSHOW RANGES FROM TABLE accounts;"
+        }
+      ],
+      "outcome": "a serialisable, atomic transfer across machines, with no application-level coordination, paid for in write latency."
+    },
+    "summary": {
+      "points": [
+        "NewSQL = **ranges + consensus replication + distributed transactions + SQL**.",
+        "Time ordering is the hard part: **TrueTime** uses hardware, **HLC** uses software.",
+        "Expect higher per-write latency than single-node Postgres, and design to avoid hot ranges.",
+        "Choose by needs: global strong consistency (Spanner), open-source Postgres-like (CockroachDB), MySQL-compatible + HTAP (TiDB)."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does each range use consensus instead of async replication?",
+        "a": "A write is only acknowledged once a majority has it, so losing a minority of replicas loses no committed data and a new leader can be elected safely."
+      },
+      {
+        "q": "What usually limits NewSQL write performance?",
+        "a": "Network round-trips for consensus (especially across regions) and contention on hot keys or ranges, which forces retries."
+      }
+    ]
+  },
+  "dbre-caching-fundamentals": {
+    "core": "A cache keeps a copy of expensive answers in fast memory. All the difficulty is in keeping that copy correct enough, deciding what to throw away, and not letting misses or expiries stampede the database.",
+    "first_principles": {
+      "problem": "Some answers are expensive to produce: a complex query, a remote API call, a rendered page. Users ask for the same answers again and again, and recomputing them each time wastes the slowest resource we have and adds latency.\n\nKeeping a copy is easy. The hard parts are keeping it fresh, fitting it in limited memory, and surviving the moments when the copy is missing.",
+      "truths": [
+        "Memory is orders of magnitude faster than disk or network.",
+        "Access is skewed: a small fraction of keys gets most of the traffic.",
+        "Memory is limited, so something must be evicted.",
+        "A copy can disagree with the source the moment the source changes."
+      ],
+      "derivation": [
+        "Put a fast key-value store (Redis/Memcached) in front of the database and measure the **hit rate**. At 99% hits, the database sees only 1% of reads.",
+        "**Cache-aside**: the app checks the cache, and on a miss reads the DB and fills the cache. It is simple, and only requested data is cached.",
+        "If reads must never be stale, **write-through** (update cache and DB together). If writes must be fast, **write-back** (cache first, DB later, which risks loss).",
+        "Since memory is finite, evict with **TTL / LRU / LFU / ARC** depending on the access pattern.",
+        "Guard the edges: cache **\"not found\"** results or use a Bloom filter (**penetration**), and let only one caller rebuild an expired hot key (**stampede**)."
+      ]
+    },
+    "analogy": {
+      "title": "Sticky notes on your monitor",
+      "story": "You keep the few phone numbers you dial all day on sticky notes on your monitor, instead of looking each one up in the company directory. The monitor only fits so many notes, so you peel off the ones you haven't used in a while.\n\nIf someone changes their number, your note is wrong until you notice. And if twenty colleagues all find the same note missing at once, the directory desk gets twenty identical requests at the same moment.",
+      "mapping": [
+        [
+          "Sticky notes",
+          "Cache entries"
+        ],
+        [
+          "Company directory",
+          "Database (source of truth)"
+        ],
+        [
+          "Monitor space",
+          "Cache memory"
+        ],
+        [
+          "Peeling off unused notes",
+          "Eviction (LRU / LFU / TTL)"
+        ],
+        [
+          "Outdated phone number",
+          "Stale cache entry"
+        ],
+        [
+          "Twenty people rushing the desk",
+          "Cache stampede"
+        ]
+      ],
+      "breaks": "Your sticky notes are private. A shared cache serves thousands of users, so one bad entry (or one expiry) affects everyone at once."
+    },
+    "mindmap": {
+      "center": "Caching",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Speed gap",
+            "Skewed access",
+            "Hit rate"
+          ]
+        },
+        {
+          "label": "Read patterns",
+          "children": [
+            "Cache-aside",
+            "Read-through"
+          ]
+        },
+        {
+          "label": "Write patterns",
+          "children": [
+            "Write-through",
+            "Write-back",
+            "Invalidate on write"
+          ]
+        },
+        {
+          "label": "Eviction",
+          "children": [
+            "TTL",
+            "LRU",
+            "LFU",
+            "ARC"
+          ]
+        },
+        {
+          "label": "Penetration",
+          "children": [
+            "Missing keys hit DB",
+            "Cache nulls",
+            "Bloom filter"
+          ]
+        },
+        {
+          "label": "Stampede",
+          "children": [
+            "Hot key expires",
+            "Lock / single-flight",
+            "Jittered TTL, early refresh"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A homepage widget that melts the database every 5 minutes",
+      "scenario": "\"Top products\" is cached in Redis for 300 s. It costs a 2-second query. Every 5 minutes the DB CPU spikes to 100% and pages time out.",
+      "flow": [
+        "Key expires",
+        "2,000 requests miss",
+        "2,000 identical queries",
+        "DB at 100%",
+        "Add lock + jitter",
+        "1 rebuild per expiry"
+      ],
+      "steps": [
+        {
+          "label": "Diagnose",
+          "detail": "The spike happens exactly at TTL expiry. Every concurrent request sees a miss and runs the 2-second query. That's a **stampede**."
+        },
+        {
+          "label": "Single-flight",
+          "detail": "On a miss, try `SET lock:top_products NX EX 10`. Only the winner queries the DB, and the others serve the stale value or wait briefly."
+        },
+        {
+          "label": "Jitter / early refresh",
+          "detail": "Use TTL = 300 s ± random 30 s, and refresh in the background when the key is near expiry."
+        },
+        {
+          "label": "Result",
+          "detail": "One query per refresh instead of thousands, and no CPU spike."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def get_top_products():\n    val = redis.get(\"top_products\")\n    if val is not None:\n        return val\n    if redis.set(\"lock:top_products\", \"1\", nx=True, ex=10):   # only one rebuilder\n        val = db.query(TOP_PRODUCTS_SQL)\n        redis.set(\"top_products\", val, ex=300 + random.randint(0, 30))\n        redis.delete(\"lock:top_products\")\n        return val\n    time.sleep(0.05)                                          # others wait briefly, then retry\n    return redis.get(\"top_products\") or db.query(TOP_PRODUCTS_SQL)"
+        }
+      ],
+      "outcome": "the database sees one expensive query every ~5 minutes instead of thousands at once."
+    },
+    "summary": {
+      "points": [
+        "**Cache-aside** is the default. Choose write-through or write-back based on freshness vs. speed.",
+        "Pick an eviction policy that matches the access pattern. TTL bounds staleness.",
+        "Defend against **penetration** (cache nulls / Bloom filter) and **stampedes** (single-flight, jitter).",
+        "A cache is a performance tool, never the source of truth (unless you've designed write-back durability)."
+      ]
+    },
+    "check": [
+      {
+        "q": "Attackers request random product IDs that don't exist. Why does the cache not help, and what does?",
+        "a": "Misses never get cached, so every request hits the DB (penetration). Cache the 'not found' result briefly, or check a Bloom filter of valid IDs first."
+      },
+      {
+        "q": "When is write-back dangerous?",
+        "a": "Writes are acknowledged once they're in the cache. If the cache node dies before flushing to the DB, those writes are lost."
+      }
+    ]
+  },
+  "dbre-data-physics-compression-storage": {
+    "core": "Bytes cost money to store and time to move. Compression trades CPU for fewer bytes, and storage layout (rows vs. columns) decides how many bytes a query has to touch at all.",
+    "first_principles": {
+      "problem": "Data takes up physical space on disks, in memory and on the network, and every byte moved costs time and money. A 10 TB table that could be 2 TB means five times more disk, slower backups and slower scans.\n\nBut compression isn't free, and the way bytes are laid out on disk decides whether a query reads 1% of the data or all of it.",
+      "truths": [
+        "Real data is repetitive: similar values, repeated strings, slowly changing numbers.",
+        "Compressing and decompressing costs CPU, and stronger compression costs more.",
+        "Storage reads whole blocks. You pay for every byte in a block even if you need one column.",
+        "Values in the same column are far more alike than values across a row."
+      ],
+      "derivation": [
+        "Exploit repetition with compression, but accept the **trade-off triangle**: ratio vs. compression speed vs. decompression speed.",
+        "When latency matters most (hot paths, network), use **LZ4 / Snappy**: very fast, modest ratio.",
+        "As a general default, use **Zstandard**: tunable levels, good ratio, fast decode, and **dictionaries** for many small records.",
+        "For time-series metrics, use domain tricks: **Gorilla** stores timestamp delta-of-deltas and XOR'd floats, often in 1–2 bytes per point.",
+        "For analytics, store data **column by column** (Parquet/ORC): queries read only the columns they need, and similar values compress dramatically better."
+      ]
+    },
+    "analogy": {
+      "title": "Packing for a move",
+      "story": "Vacuum-sealing clothes saves a lot of space but takes time to pack and unpack. Quickly folding them saves less space but is fast. Which you choose depends on whether you're short of truck space or short of time.\n\nAnd how you pack matters as much as how tightly. If every box holds one complete outfit (rows), finding all your socks means opening every box. If one box holds all the socks (columns), you open exactly one box, and identical socks pack much tighter.",
+      "mapping": [
+        [
+          "Vacuum-sealing vs. quick folding",
+          "High-ratio vs. fast codecs"
+        ],
+        [
+          "Time to pack and unpack",
+          "CPU for compress / decompress"
+        ],
+        [
+          "Truck space",
+          "Disk, memory, network bytes"
+        ],
+        [
+          "Box per outfit",
+          "Row-oriented storage"
+        ],
+        [
+          "Box per item type",
+          "Columnar storage (Parquet / ORC)"
+        ]
+      ],
+      "breaks": "Movers rarely need one item from the middle of a box. Databases often do, so codecs that work in blocks (with indexes and statistics per block) let you skip most of the data without decompressing it."
+    },
+    "mindmap": {
+      "center": "Compression & Storage",
+      "branches": [
+        {
+          "label": "Trade-off triangle",
+          "children": [
+            "Ratio",
+            "Compress speed",
+            "Decompress speed"
+          ]
+        },
+        {
+          "label": "Speed codecs",
+          "children": [
+            "LZ4",
+            "Snappy",
+            "Hot paths, network"
+          ]
+        },
+        {
+          "label": "Zstandard",
+          "children": [
+            "Levels 1–22",
+            "Great default",
+            "Dictionary training"
+          ]
+        },
+        {
+          "label": "Time-series",
+          "children": [
+            "Gorilla",
+            "Delta-of-delta timestamps",
+            "XOR floats"
+          ]
+        },
+        {
+          "label": "Layout",
+          "children": [
+            "Row: OLTP",
+            "Column: OLAP",
+            "Read only needed columns"
+          ]
+        },
+        {
+          "label": "Columnar formats",
+          "children": [
+            "Parquet",
+            "ORC",
+            "Row groups + min/max stats"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shrinking a log archive and speeding up analytics",
+      "scenario": "A company keeps 30 days of JSON request logs (12 TB, gzip) on S3. Analysts query `status` and `latency_ms` for one service, and each query takes 40 minutes and scans everything.",
+      "flow": [
+        "12 TB gzip JSON",
+        "Convert to Parquet + Zstd",
+        "Partition by date/service",
+        "Query reads 2 columns",
+        "40 min → 30 s"
+      ],
+      "steps": [
+        {
+          "label": "Columnar",
+          "detail": "Rewriting as Parquet stores `status` values together. Mostly `200`, so they compress to almost nothing."
+        },
+        {
+          "label": "Codec",
+          "detail": "Zstd level 3: a better ratio than gzip and much faster to decompress."
+        },
+        {
+          "label": "Skip data",
+          "detail": "Parquet row groups store min/max per column, and partitions by `date` and `service` let the engine skip whole files."
+        },
+        {
+          "label": "Read less",
+          "detail": "The query touches 2 of 40 columns in 1 of 50 services, a tiny fraction of the bytes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import pyarrow.dataset as ds\n\nlogs = ds.dataset(\"s3://logs/raw/\", format=\"json\")\nds.write_dataset(logs, \"s3://logs/parquet/\", format=\"parquet\",\n                 partitioning=[\"date\", \"service\"],\n                 file_options=ds.ParquetFileFormat().make_write_options(compression=\"zstd\"))"
+        }
+      ],
+      "outcome": "storage drops to about a third and typical queries read under 1% of the bytes, so they run in seconds."
+    },
+    "summary": {
+      "points": [
+        "There's no best codec, only a point on the **ratio / speed** triangle.",
+        "**LZ4/Snappy** for speed, **Zstd** as the default, **Gorilla** for metrics.",
+        "**Rows** for transactions (fetch whole records), **columns** for analytics (scan few fields).",
+        "The biggest win is often **not reading data at all**: columns, partitions, min/max stats."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do columnar files compress so much better than row files?",
+        "a": "Values in one column share a type and are often similar or repeated, so run-length, dictionary and delta encodings work extremely well. Rows mix unrelated types."
+      },
+      {
+        "q": "When would you choose LZ4 over Zstd?",
+        "a": "When CPU time or latency matters more than space, e.g. compressing data on a hot request path or for in-memory or network transfer."
+      }
+    ]
+  },
+  "dbre-isolation-levels-anomalies": {
+    "core": "Isolation decides how much concurrent transactions may see of each other. Each weaker level allows a specific anomaly, and locking (pessimistic) or version checks (optimistic) are how applications close the gaps.",
+    "first_principles": {
+      "problem": "Every transaction is written as if it were alone in the database, but in reality hundreds run at once on the same rows. If they freely see each other's in-progress work, you get money from nowhere, double bookings and broken business rules.\n\nFull isolation is expensive, so databases let you choose how much protection you want, and you need to know exactly what each choice still lets through.",
+      "truths": [
+        "Uncommitted data may still be rolled back.",
+        "Data can change between two reads in the same transaction.",
+        "New rows can appear that match a condition you already checked.",
+        "Two transactions can each be correct alone and wrong together."
+      ],
+      "derivation": [
+        "Never show uncommitted data, which prevents **dirty reads** (READ COMMITTED).",
+        "Give a transaction a stable snapshot so re-reading a row returns the same value, which prevents **non-repeatable reads** (REPEATABLE READ).",
+        "Also protect *sets* of rows defined by a condition, which prevents **phantoms**.",
+        "Detect decisions made on data another transaction changed, which prevents **write skew**: only SERIALIZABLE does this.",
+        "In the application, either **lock first** (pessimistic: `SELECT … FOR UPDATE`) when conflicts are common, or **check a version on write and retry** (optimistic) when they're rare."
+      ]
+    },
+    "analogy": {
+      "title": "Booking seats in a cinema with many box offices",
+      "story": "Several box offices sell seats for the same show. A dirty read is one clerk seeing a seat as sold because another clerk *started* a sale that the customer then cancelled. A non-repeatable read is a clerk checking seat F7, chatting, checking again and finding it changed.\n\nA phantom is counting \"how many seats left in row F\" twice and getting different counts because someone added a folding seat. Write skew is two clerks each seeing \"two ushers on duty\" and each sending one home. Pessimistic locking is putting a hand on the seat while you decide. Optimistic locking is checking the seat's version number at the moment you print the ticket, and retrying if it moved.",
+      "mapping": [
+        [
+          "Seeing a sale that was cancelled",
+          "Dirty read"
+        ],
+        [
+          "Seat status changes between looks",
+          "Non-repeatable read"
+        ],
+        [
+          "Row count changes",
+          "Phantom read"
+        ],
+        [
+          "Both send an usher home",
+          "Write skew"
+        ],
+        [
+          "Hand on the seat",
+          "Pessimistic lock (FOR UPDATE)"
+        ],
+        [
+          "Check version when printing",
+          "Optimistic lock (version column)"
+        ]
+      ],
+      "breaks": "Clerks can talk to each other. Database transactions can't, so the database itself must detect conflicts, and SERIALIZABLE will abort one transaction that the application must retry."
+    },
+    "mindmap": {
+      "center": "Isolation & Anomalies",
+      "branches": [
+        {
+          "label": "Anomalies",
+          "children": [
+            "Dirty read",
+            "Non-repeatable read",
+            "Phantom read",
+            "Write skew"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Read Uncommitted",
+            "Read Committed",
+            "Repeatable Read",
+            "Serializable"
+          ]
+        },
+        {
+          "label": "Implementation",
+          "children": [
+            "Locks (2PL)",
+            "MVCC snapshots",
+            "SSI conflict detection"
+          ]
+        },
+        {
+          "label": "Pessimistic",
+          "children": [
+            "SELECT … FOR UPDATE",
+            "FOR SHARE / SKIP LOCKED",
+            "Deadlock risk"
+          ]
+        },
+        {
+          "label": "Optimistic",
+          "children": [
+            "Version column",
+            "UPDATE … WHERE version = n",
+            "Retry on 0 rows"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two users buy the last concert ticket",
+      "scenario": "`tickets.remaining = 1`. Two checkout requests arrive at the same millisecond. Both read 1, both decrement, and two tickets are sold.",
+      "flow": [
+        "T1 reads remaining = 1",
+        "T2 reads remaining = 1",
+        "Both write 0",
+        "Oversold!",
+        "Fix: version check",
+        "Loser retries → sold out"
+      ],
+      "steps": [
+        {
+          "label": "Bug",
+          "detail": "Read-then-write in the app with no protection: a **lost update**. Both transactions decided from the same stale value."
+        },
+        {
+          "label": "Pessimistic fix",
+          "detail": "`SELECT … FOR UPDATE` locks the row. T2 waits until T1 commits, then reads 0 and refuses."
+        },
+        {
+          "label": "Optimistic fix",
+          "detail": "Add a `version` column and update only if the version is unchanged. T2's update matches 0 rows, so it reloads and sees sold out."
+        },
+        {
+          "label": "Choose",
+          "detail": "High contention (one hot row) → pessimistic. Rare conflicts → optimistic avoids lock waits."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- Optimistic: succeed only if nobody changed the row since we read it (version 17)\nUPDATE tickets\nSET remaining = remaining - 1, version = version + 1\nWHERE event_id = 99 AND version = 17 AND remaining > 0;\n-- 1 row updated → ticket is yours;  0 rows → someone beat you, reload and retry\n\n-- Pessimistic: lock the row for the rest of the transaction\nBEGIN;\nSELECT remaining FROM tickets WHERE event_id = 99 FOR UPDATE;\nUPDATE tickets SET remaining = remaining - 1 WHERE event_id = 99;\nCOMMIT;"
+        }
+      ],
+      "outcome": "exactly one ticket sold. The second buyer gets a clean \"sold out\" instead of an oversell."
+    },
+    "summary": {
+      "points": [
+        "Each level blocks one more anomaly: dirty → non-repeatable → phantom → write skew.",
+        "**Write skew** slips past Repeatable Read. Use SERIALIZABLE or lock the rows you decide from.",
+        "**Pessimistic** for hot rows, **optimistic** for rare conflicts, and always handle retries.",
+        "Know your database's default (Postgres: Read Committed; MySQL InnoDB: Repeatable Read)."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the difference between a non-repeatable read and a phantom?",
+        "a": "A non-repeatable read is an existing row's value changing between reads. A phantom is the *set* of rows matching a condition changing (rows inserted or deleted)."
+      },
+      {
+        "q": "Why can pessimistic locking cause deadlocks?",
+        "a": "Two transactions lock rows in different orders and each waits for the other's lock. The database detects the cycle and aborts one of them."
+      }
+    ]
+  },
+  "dbre-storage-physics-lsm-vs-btree": {
+    "core": "B-trees update data in place to keep reads cheap. LSM trees append and reorganise later to keep writes cheap. You can't minimise read, write and space amplification all at once (RUM).",
+    "first_principles": {
+      "problem": "Every storage engine has to put bytes on a disk and find them again. Disks hate small random writes but are great at big sequential ones, and reads want data to be in exactly one predictable place.\n\nThose wishes conflict, so engines make a fundamental choice: organise data on write (fast reads) or organise it later (fast writes).",
+      "truths": [
+        "Sequential I/O is much cheaper than random I/O, especially on HDDs and for SSD wear.",
+        "Data in one known place is fast to read. Data in many places is slow to read.",
+        "Rewriting the same data more than once wastes I/O (write amplification).",
+        "Keeping old copies around costs space (space amplification)."
+      ],
+      "derivation": [
+        "**B-tree**: keep a sorted tree of pages and **update in place**. Any key takes about log(n) page reads (few, predictable), but each small change rewrites a whole page plus a WAL record.",
+        "**LSM tree**: buffer writes in a sorted in-memory **MemTable**, flush it as an immutable **SSTable**, and **merge (compact)** SSTables in the background. Writes are sequential and cheap.",
+        "LSM reads may check the MemTable and several SSTables, so add **Bloom filters** to skip files that can't contain the key.",
+        "Name the costs, **read, write and space amplification**, and accept the **RUM conjecture**: improving two worsens the third.",
+        "Choose by workload: read-heavy, update-in-place OLTP → B-tree (Postgres, InnoDB). Write-heavy ingest → LSM (RocksDB, Cassandra)."
+      ]
+    },
+    "analogy": {
+      "title": "The organised librarian vs. the fast journalist",
+      "story": "The librarian shelves every new book in its exact alphabetical spot right away. Finding any book is quick, but every new arrival means walking to the right shelf and sometimes reshuffling a whole shelf.\n\nThe journalist scribbles every new fact into a notebook in order, which is extremely fast. When a notebook is full it goes on a pile, and at night the notebooks are merged into a neat, sorted volume. Looking something up during the day means checking today's notebook and several piles, unless a quick index card says \"not in this pile\".",
+      "mapping": [
+        [
+          "Shelving each book in place",
+          "B-tree update-in-place"
+        ],
+        [
+          "Today's notebook",
+          "MemTable"
+        ],
+        [
+          "Pile of full notebooks",
+          "SSTables"
+        ],
+        [
+          "Nightly merge into a sorted volume",
+          "Compaction"
+        ],
+        [
+          "\"Not in this pile\" index card",
+          "Bloom filter"
+        ]
+      ],
+      "breaks": "The journalist's night merge is free. Real compaction competes with live traffic for disk and CPU, and if it falls behind, reads slow down and space balloons."
+    },
+    "mindmap": {
+      "center": "B-Tree vs LSM",
+      "branches": [
+        {
+          "label": "B-tree",
+          "children": [
+            "Update in place",
+            "Pages + WAL",
+            "Predictable reads"
+          ]
+        },
+        {
+          "label": "LSM tree",
+          "children": [
+            "MemTable → SSTable",
+            "Append-only",
+            "Compaction"
+          ]
+        },
+        {
+          "label": "Read amp",
+          "children": [
+            "B-tree: ~log n pages",
+            "LSM: many files",
+            "Bloom filters help"
+          ]
+        },
+        {
+          "label": "Write amp",
+          "children": [
+            "B-tree: page rewrites",
+            "LSM: rewrites in compaction"
+          ]
+        },
+        {
+          "label": "Space amp",
+          "children": [
+            "B-tree: fragmentation",
+            "LSM: obsolete versions"
+          ]
+        },
+        {
+          "label": "RUM conjecture",
+          "children": [
+            "Read, Update, Memory",
+            "Optimise two, pay on third"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Picking an engine for IoT telemetry",
+      "scenario": "200,000 sensor readings per second, each about 100 bytes. Mostly written, occasionally read by `(device_id, time range)`, and expired after 30 days.",
+      "flow": [
+        "200k writes/s",
+        "B-tree: random page writes",
+        "LSM: sequential appends",
+        "Time-window compaction",
+        "Expire whole files"
+      ],
+      "steps": [
+        {
+          "label": "B-tree pain",
+          "detail": "Each insert dirties an index page somewhere in a large tree. At 200k/s, random I/O, page splits and WAL volume dominate."
+        },
+        {
+          "label": "LSM fit",
+          "detail": "Inserts go to the MemTable and are flushed sequentially. Write throughput is limited by sequential bandwidth, not seeks."
+        },
+        {
+          "label": "Reads",
+          "detail": "Time-range reads per device check a few SSTables. Bloom filters skip the rest."
+        },
+        {
+          "label": "Retention",
+          "detail": "Time-window compaction groups data by day, so expiring 30-day-old data drops whole SSTables without rewriting anything."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- Cassandra (LSM) table for the telemetry workload\nCREATE TABLE readings (\n  device_id uuid, ts timestamp, value double,\n  PRIMARY KEY ((device_id), ts)\n) WITH compaction = {'class': 'TimeWindowCompactionStrategy',\n                     'compaction_window_unit': 'DAYS', 'compaction_window_size': 1}\n  AND default_time_to_live = 2592000;   -- 30 days"
+        }
+      ],
+      "outcome": "the write path stays sequential and cheap, and retention costs almost nothing, at the price of slightly slower and less predictable point reads."
+    },
+    "summary": {
+      "points": [
+        "**B-tree** = organise on write → cheap, predictable reads (OLTP default).",
+        "**LSM** = organise later → cheap writes, compaction does the work (ingest-heavy).",
+        "Three costs: **read, write, space amplification**. You can't minimise all three.",
+        "LSM health = compaction keeping up. B-tree health = page splits, bloat and cache fit."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do LSM trees need Bloom filters more than B-trees do?",
+        "a": "A key may be in any of several SSTables. Without a filter, a read for a missing key could hit every file. A B-tree has exactly one path to check."
+      },
+      {
+        "q": "Where does an LSM tree's write amplification come from if writes are appends?",
+        "a": "From compaction: the same data is read and rewritten each time SSTables are merged into larger levels."
+      }
+    ]
+  },
+  "dbre-online-schema-migrations": {
+    "core": "To change a big live table without downtime, build the new shape beside the old one, keep them in sync while copying, swap them in an instant, and make the application tolerate both shapes during the change.",
+    "first_principles": {
+      "problem": "`ALTER TABLE` on a 500 GB table can lock it for hours or rewrite the whole thing, blocking every read and write. On a live product that is an outage, and on replicas it can mean hours of replication lag.\n\nBut schemas must evolve. We need a way to change a table's shape while traffic keeps flowing and while old and new application versions run side by side.",
+      "truths": [
+        "Rewriting a huge table takes time proportional to its size.",
+        "Locks held for long periods block traffic, and waiting DDL blocks everything queued behind it.",
+        "A rename is an instant metadata change.",
+        "During a rolling deploy, old and new app versions run at the same time."
+      ],
+      "derivation": [
+        "Don't alter the live table. Create a **shadow (ghost) table** with the new schema.",
+        "**Copy rows** from old to new in small chunks, throttled so production and replicas aren't overwhelmed.",
+        "**Keep it in sync** with ongoing writes: via **triggers** (pt-online-schema-change, which adds write amplification) or by **tailing the binlog** (gh-ost, which is throttle-able and trigger-free).",
+        "When caught up, **cut over** with an atomic rename, a lock lasting milliseconds.",
+        "Make the application safe for both shapes using **expand → migrate → contract**. In Postgres, prefer native online operations (`CREATE INDEX CONCURRENTLY`, `NOT VALID` constraints) and tools like pgroll."
+      ]
+    },
+    "analogy": {
+      "title": "Changing tyres on a moving car",
+      "story": "You can't stop the car, so you bolt a new set of wheels alongside the old ones, spin them up to the same speed, and in one instant shift the weight onto them. The old wheels come off afterwards.\n\nWhile both sets are attached, the car has to be drivable on either, so the driver can't do anything that only works with the new wheels until the switch is complete.",
+      "mapping": [
+        [
+          "New wheels bolted alongside",
+          "Shadow / ghost table"
+        ],
+        [
+          "Spinning them up to speed",
+          "Chunked copy + sync (triggers / binlog)"
+        ],
+        [
+          "Easing off when the road is rough",
+          "Throttling on load / replica lag"
+        ],
+        [
+          "The instant weight shift",
+          "Atomic rename cutover"
+        ],
+        [
+          "Drivable on either set",
+          "Expand–contract compatibility"
+        ]
+      ],
+      "breaks": "A car doesn't care how many times you check the wheels. Trigger-based sync makes *every* production write do extra work, which can itself cause the slowdown you were trying to avoid. That's why binlog-based tools exist."
+    },
+    "mindmap": {
+      "center": "Online Schema Migration",
+      "branches": [
+        {
+          "label": "The problem",
+          "children": [
+            "ALTER locks / rewrites",
+            "Hours of blocking",
+            "Replica lag"
+          ]
+        },
+        {
+          "label": "Shadow table",
+          "children": [
+            "Create new schema",
+            "Chunked copy",
+            "Sync ongoing writes"
+          ]
+        },
+        {
+          "label": "pt-osc",
+          "children": [
+            "Triggers",
+            "Write amplification",
+            "Hard to pause"
+          ]
+        },
+        {
+          "label": "gh-ost",
+          "children": [
+            "Tails binlog",
+            "No triggers",
+            "Throttle on lag"
+          ]
+        },
+        {
+          "label": "Cutover",
+          "children": [
+            "Atomic rename",
+            "Postponed cutover",
+            "Brief lock"
+          ]
+        },
+        {
+          "label": "App compatibility",
+          "children": [
+            "Expand → migrate → contract",
+            "Dual-write window",
+            "Postgres: CONCURRENTLY, pgroll"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adding a column and index to a 400 GB MySQL table with gh-ost",
+      "scenario": "`orders` (1.2 billion rows) needs a `channel` column and an index. A plain `ALTER` is estimated at 6+ hours of table rebuild and replica lag.",
+      "flow": [
+        "Create _orders_gho",
+        "Copy chunks",
+        "Apply binlog events",
+        "Throttle on lag",
+        "Postponed cutover",
+        "Atomic rename"
+      ],
+      "steps": [
+        {
+          "label": "Ghost table",
+          "detail": "gh-ost creates `_orders_gho` with the new column and index, then copies rows in chunks of about 1,000."
+        },
+        {
+          "label": "Sync",
+          "detail": "It reads the binlog as a replica would and applies every INSERT/UPDATE/DELETE on `orders` to the ghost table."
+        },
+        {
+          "label": "Throttle",
+          "detail": "If replica lag exceeds 1.5 s, or a flag file is created, the copy pauses. Production always wins."
+        },
+        {
+          "label": "Cutover",
+          "detail": "The cutover is postponed until an engineer removes the flag file in a quiet window. Then a sub-second atomic rename swaps the tables."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "gh-ost \\\n  --host=replica-1 --database=shop --table=orders \\\n  --alter=\"ADD COLUMN channel VARCHAR(20) NULL, ADD INDEX idx_channel (channel)\" \\\n  --max-lag-millis=1500 --chunk-size=1000 \\\n  --postpone-cut-over-flag-file=/tmp/ghost.postpone \\\n  --execute"
+        }
+      ],
+      "outcome": "the schema changes over a few hours of background copying with no blocking, controlled lag, and a cutover you choose the moment of."
+    },
+    "summary": {
+      "points": [
+        "Never run a blocking `ALTER` on a big hot table. **Shadow table + sync + atomic swap.**",
+        "**gh-ost** (binlog) beats trigger-based tools for throttling and load.",
+        "The app must survive both schemas: **expand → migrate → contract**.",
+        "Postgres has many online ops natively. Use `CONCURRENTLY`, `NOT VALID`, `lock_timeout`."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does trigger-based sync add load to production?",
+        "a": "Every write to the original table fires a trigger that writes the ghost table too, inside the same transaction, doubling write work and lengthening locks."
+      },
+      {
+        "q": "Why is renaming a column in one step dangerous during a rolling deploy?",
+        "a": "Old app instances still query the old name and fail instantly. Add the new column, dual-write, switch reads, then drop the old one later."
+      }
+    ]
+  },
+  "dbre-reliability-patterns": {
+    "core": "A database is a shared, fragile resource. Reliability comes from refusing work it can't finish: limit concurrency, give every query a deadline, cut off failing traffic early, and don't use it for jobs it's bad at.",
+    "first_principles": {
+      "problem": "Most database outages aren't caused by the database breaking. They're caused by the database being asked to do too much at once: a slow query gets retried, retries pile up, connections run out, and every service sharing the database goes down together.\n\nThe database can't defend itself well, so the clients around it have to behave defensively.",
+      "truths": [
+        "Throughput peaks at a modest number of concurrent queries. Beyond that, contention makes everything slower.",
+        "A query nobody is waiting for any more is pure waste.",
+        "Retrying a failing request adds load exactly when the system can least afford it.",
+        "Polling a table as a queue creates lock contention and dead rows at high rates."
+      ],
+      "derivation": [
+        "Size the connection pool near the database's real parallel capacity, and **queue or reject extra work** (admission control) instead of letting it in.",
+        "Give every request a **deadline** and pass it down, so the DB query is cancelled (`statement_timeout`) when the caller has already given up.",
+        "Wrap calls in a **circuit breaker**: after repeated failures, fail fast for a while instead of hammering a struggling database.",
+        "Don't build high-throughput **queues in a table**. Use a real queue (SQS, Kafka, RabbitMQ), or at least `FOR UPDATE SKIP LOCKED` for small volumes."
+      ]
+    },
+    "analogy": {
+      "title": "A popular nightclub door",
+      "story": "A club with a capacity of 200 doesn't let 2,000 people in because they're outside. A bouncer counts heads and makes people queue (admission control). If someone has been inside for 3 hours on a coat-check ticket that expired, staff stop serving them (deadline).\n\nIf the bar's tap breaks, the bouncer stops letting people in for a few minutes rather than packing more thirsty guests around a broken tap (circuit breaker). And you don't run the cloakroom out of the dance floor (queue in the database).",
+      "mapping": [
+        [
+          "Capacity limit + queue at the door",
+          "Pool sizing + admission control"
+        ],
+        [
+          "Expired ticket, stop serving",
+          "Deadline propagation / statement_timeout"
+        ],
+        [
+          "Pausing entry while the tap is broken",
+          "Circuit breaker (open state)"
+        ],
+        [
+          "Cloakroom on the dance floor",
+          "Queue-in-database anti-pattern"
+        ],
+        [
+          "Packed, nobody can move",
+          "Contention collapse / death spiral"
+        ]
+      ],
+      "breaks": "A bouncer sees the room. Clients usually can't see database load directly, so breakers and admission control must infer it from latency and error rates, and they need tuning."
+    },
+    "mindmap": {
+      "center": "DB Reliability Patterns",
+      "branches": [
+        {
+          "label": "Anti-pattern",
+          "children": [
+            "Queue in a table",
+            "Polling + locks",
+            "Dead tuples, contention"
+          ]
+        },
+        {
+          "label": "Circuit breaker",
+          "children": [
+            "Closed → Open → Half-open",
+            "Fail fast",
+            "Stop the death spiral"
+          ]
+        },
+        {
+          "label": "Deadlines",
+          "children": [
+            "Zombie queries",
+            "Propagate timeout",
+            "statement_timeout"
+          ]
+        },
+        {
+          "label": "Admission control",
+          "children": [
+            "Small pool",
+            "Queue / shed load",
+            "Little's Law sizing"
+          ]
+        },
+        {
+          "label": "Retries",
+          "children": [
+            "Exponential backoff",
+            "Jitter",
+            "Retry budgets"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stopping a retry storm",
+      "scenario": "A report endpoint's query slows from 200 ms to 8 s after data growth. The API gateway times out at 5 s and the client retries 3 times. The DB is soon running 4× the queries, all slow, and every service using it degrades.",
+      "flow": [
+        "Slow query",
+        "Client timeout + retry",
+        "4× load",
+        "Pool exhausted",
+        "Add deadline + breaker",
+        "Fail fast, DB recovers"
+      ],
+      "steps": [
+        {
+          "label": "Zombies",
+          "detail": "When the gateway gives up at 5 s, the DB keeps running the query to 8 s for nobody, and each retry starts another."
+        },
+        {
+          "label": "Deadline",
+          "detail": "Pass the remaining budget down: `SET LOCAL statement_timeout = '4500ms'`, so the DB cancels work the caller can no longer use."
+        },
+        {
+          "label": "Breaker",
+          "detail": "After 50% failures in 10 s, the breaker opens and the endpoint returns \"report temporarily unavailable\" immediately for 30 s."
+        },
+        {
+          "label": "Admission",
+          "detail": "The report endpoint gets its own small pool (5 connections), so it can never starve checkout."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def run_report(params, deadline):\n    if breaker.is_open():\n        raise Unavailable(\"reports temporarily disabled\")\n    remaining_ms = int((deadline - time.monotonic()) * 1000) - 200\n    if remaining_ms <= 0:\n        raise DeadlineExceeded()\n    with report_pool.connection(timeout=0.5) as conn:      # small, separate pool\n        conn.execute(f\"SET LOCAL statement_timeout = {remaining_ms}\")\n        try:\n            return conn.execute(REPORT_SQL, params).fetchall()\n        except QueryCanceled:\n            breaker.record_failure(); raise"
+        }
+      ],
+      "outcome": "the slow report fails quickly and visibly while checkout and everything else stay healthy, buying time to fix the query."
+    },
+    "summary": {
+      "points": [
+        "**More connections ≠ more throughput.** Cap concurrency and queue the rest.",
+        "Every query needs a **deadline** tied to the caller's.",
+        "**Circuit breakers** turn slow failures into fast ones and stop retry storms.",
+        "Don't use the database as a high-volume queue."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can raising the pool size make an overloaded database slower?",
+        "a": "More concurrent queries means more lock contention, context switching and cache thrashing. Past the hardware's parallel capacity, total throughput drops and every query waits longer."
+      },
+      {
+        "q": "What's a 'zombie query'?",
+        "a": "A query still running on the database after the client that asked for it has timed out or disconnected. It uses resources and produces a result nobody receives."
+      }
+    ]
+  },
+  "dbre-advanced-indexing": {
+    "core": "B-trees answer \"find this value or range\". When your question is \"which rows contain X\", \"what overlaps this shape\", \"answer without touching the table\" or \"only index the 1% I query\", reach for GIN, GiST, covering or partial indexes, and remember that every index taxes every write.",
+    "first_principles": {
+      "problem": "A B-tree is perfect for sorted, scalar values: equality, ranges, ORDER BY. But modern data includes arrays, JSON documents, full-text, geometry and time ranges, and a B-tree can't answer \"which documents contain the tag `urgent`\" or \"which polygons contain this point\".\n\nEven for normal columns, a B-tree sometimes does too much work (visiting the table after the index) or indexes far more rows than you ever query.",
+      "truths": [
+        "An index is only useful if its structure matches the question being asked.",
+        "Jumping from the index to the table (heap) is a random read per row.",
+        "Many queries only care about a small, well-defined subset of rows.",
+        "Every index must be updated on every write that touches its columns."
+      ],
+      "derivation": [
+        "For \"contains\" questions (arrays, JSONB, full-text), invert it: map each **element → list of rows**. That's **GIN**. Fast lookups, slower writes.",
+        "For spatial and range overlap, organise by **bounding boxes** in a balanced tree: **GiST**. It answers \"intersects / contains / nearest\".",
+        "To skip the heap, put the extra columns **in the index** with `INCLUDE`, enabling **index-only scans** (if the visibility map is up to date).",
+        "To index only the rows you query, add a **WHERE** to the index: a **partial index**, which is small and cheap. The query must use a matching predicate.",
+        "Audit regularly and **drop unused indexes**: they amplify writes, waste space and confuse the planner."
+      ]
+    },
+    "analogy": {
+      "title": "Different ways to search a newspaper archive",
+      "story": "A B-tree is the date index: great for \"the issue from 3 March\". To find every article mentioning \"strike\", you want a word index listing every issue each word appears in (GIN). To find every map that covers your town, you want maps grouped by region on a big board (GiST).\n\nA covering index is an index card that already has the headline and author on it, so you don't need to fetch the newspaper. A partial index is a binder that only holds front-page stories, because those are all anyone asks for.",
+      "mapping": [
+        [
+          "Date index",
+          "B-tree"
+        ],
+        [
+          "Word → list of issues",
+          "GIN (inverted index)"
+        ],
+        [
+          "Maps grouped by region",
+          "GiST (bounding boxes)"
+        ],
+        [
+          "Index card with headline + author",
+          "Covering index (INCLUDE)"
+        ],
+        [
+          "Binder of front-page stories only",
+          "Partial index (WHERE …)"
+        ],
+        [
+          "Re-filing every index for each new article",
+          "Write amplification of many indexes"
+        ]
+      ],
+      "breaks": "An archive is read-mostly. Live tables change constantly, so each extra index (GIN especially) adds real cost to every INSERT and UPDATE."
+    },
+    "mindmap": {
+      "center": "Advanced Indexing",
+      "branches": [
+        {
+          "label": "GIN",
+          "children": [
+            "Inverted index",
+            "JSONB, arrays, full-text",
+            "@>, ?, @@"
+          ]
+        },
+        {
+          "label": "GiST",
+          "children": [
+            "Bounding-box tree",
+            "Geometry, ranges",
+            "Overlap, nearest-neighbour"
+          ]
+        },
+        {
+          "label": "Covering",
+          "children": [
+            "INCLUDE columns",
+            "Index-only scan",
+            "Visibility map"
+          ]
+        },
+        {
+          "label": "Partial",
+          "children": [
+            "WHERE status = 'pending'",
+            "Tiny & fast",
+            "Query must match predicate"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Write amplification",
+            "Space",
+            "Planner confusion",
+            "Drop unused"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Speeding up a job queue and a JSON filter",
+      "scenario": "`jobs` has 50 M rows, and 99.8% are `done`. Workers poll `WHERE status='pending' ORDER BY created_at LIMIT 10`. A dashboard filters `WHERE attrs @> '{\"region\":\"eu\"}'`.",
+      "flow": [
+        "Seq scans everywhere",
+        "Partial index for pending",
+        "GIN for JSONB",
+        "Covering for dashboard",
+        "ms instead of seconds"
+      ],
+      "steps": [
+        {
+          "label": "Partial",
+          "detail": "Index only pending rows: about 100k entries instead of 50 M. The worker query becomes an index scan on a tiny index."
+        },
+        {
+          "label": "GIN",
+          "detail": "`attrs @> …` can't use a B-tree. A GIN index on `attrs` maps each key/value to matching rows."
+        },
+        {
+          "label": "Covering",
+          "detail": "The dashboard needs `id, status` by `customer_id`, so `INCLUDE (status)` allows an index-only scan."
+        },
+        {
+          "label": "Audit",
+          "detail": "`pg_stat_user_indexes` shows two old indexes with `idx_scan = 0`. Drop them to give back write throughput."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE INDEX CONCURRENTLY jobs_pending ON jobs (created_at) WHERE status = 'pending';\nCREATE INDEX CONCURRENTLY jobs_attrs   ON jobs USING gin (attrs jsonb_path_ops);\nCREATE INDEX CONCURRENTLY jobs_cust    ON jobs (customer_id) INCLUDE (status);\n\n-- Indexes that have never been used since stats reset\nSELECT relname, indexrelname, pg_size_pretty(pg_relation_size(indexrelid))\nFROM pg_stat_user_indexes WHERE idx_scan = 0;"
+        }
+      ],
+      "outcome": "polling and filtering drop from seconds to milliseconds, and removing dead indexes partly pays for the new ones on the write side."
+    },
+    "summary": {
+      "points": [
+        "**GIN** for \"contains\" (JSONB, arrays, text), **GiST** for shapes and ranges.",
+        "**INCLUDE** makes covering indexes → index-only scans.",
+        "**Partial** indexes target the few rows you actually query.",
+        "Every index is a write tax. **Measure usage and drop the unused.**"
+      ]
+    },
+    "check": [
+      {
+        "q": "A partial index on WHERE status='pending' isn't used by the query WHERE status = $1. Why?",
+        "a": "With a parameter the planner can't prove at plan time that $1 = 'pending', so the predicate may not match. Use the literal or a dedicated query."
+      },
+      {
+        "q": "Why might an index-only scan still visit the heap?",
+        "a": "If a page isn't marked all-visible in the visibility map (recent changes, vacuum behind), Postgres must check the heap for row visibility."
+      }
+    ]
+  },
+  "dbre-newsql-timekeeping": {
+    "core": "Distributed databases need to agree on the order of events, but machine clocks drift. Spanner bounds clock error with hardware and waits it out. CockroachDB tracks causality in software and handles the remaining uncertainty with retries.",
+    "first_principles": {
+      "problem": "If transaction A commits before transaction B starts, every observer should see A before B. With one machine and one clock that's automatic. Across data centres, each machine's clock is slightly wrong, and NTP only keeps them within a few to hundreds of milliseconds.\n\nIf timestamps decide order, two machines can disagree about which commit came first, and a read can miss a write that already happened.",
+      "truths": [
+        "No two physical clocks agree exactly. Each has some error bound.",
+        "Messages carry causality: if I received your message, your event happened before mine.",
+        "If you know the maximum clock error, waiting that long removes the ambiguity.",
+        "Waiting costs latency, and retrying costs throughput."
+      ],
+      "derivation": [
+        "Define the goal, **external consistency (linearizability)**: if T1 commits before T2 starts in real time, T1's timestamp < T2's.",
+        "**Spanner/TrueTime**: GPS and atomic clocks give each node an *interval* `[earliest, latest]` (ε ≈ a few ms). Commit with timestamp = `latest`, then **commit-wait** until `earliest` has passed it.",
+        "**CockroachDB/HLC**: timestamp = (physical time, logical counter), and on every message take the max of local and received. This preserves causality without special hardware.",
+        "For remaining uncertainty, HLC uses a **max clock offset** (500 ms default). A read that sees a value inside its uncertainty window **restarts at a higher timestamp**.",
+        "Trade-off: TrueTime pays a small wait on every write. HLC pays occasional retries, and nodes exceeding the offset must be shut down."
+      ]
+    },
+    "analogy": {
+      "title": "Signing documents in offices with unreliable wall clocks",
+      "story": "Offices around the world sign contracts and must agree on which was signed first. Each office's wall clock is a bit off. Office A has a very accurate clock and knows it's within ±3 ms, so after signing it waits 3 ms before announcing \"done\". Nobody can later claim an earlier time.\n\nOffice B has an ordinary clock, but every letter it receives carries the sender's timestamp, and B never stamps anything earlier than the latest letter it has seen. If B can't tell whether a document from another office came before or after its own, it simply redoes its work with a later stamp.",
+      "mapping": [
+        [
+          "Accurate clock with known ±3 ms",
+          "TrueTime interval (ε)"
+        ],
+        [
+          "Waiting 3 ms before announcing",
+          "Commit wait"
+        ],
+        [
+          "Never stamp earlier than letters received",
+          "Hybrid logical clock update rule"
+        ],
+        [
+          "\"Can't tell which came first, redo\"",
+          "Uncertainty restart"
+        ],
+        [
+          "Office with a broken clock",
+          "Node beyond max offset (must be fenced)"
+        ]
+      ],
+      "breaks": "Offices can phone each other. Databases can't afford a round-trip per timestamp, which is why both approaches avoid a central clock server on the hot path."
+    },
+    "mindmap": {
+      "center": "NewSQL Timekeeping",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Clock drift",
+            "NTP error ms–100s ms",
+            "Ordering across nodes"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "External consistency",
+            "Real-time order respected",
+            "Linearizable reads"
+          ]
+        },
+        {
+          "label": "TrueTime",
+          "children": [
+            "GPS + atomic clocks",
+            "Interval [earliest, latest]",
+            "Commit wait ≈ ε"
+          ]
+        },
+        {
+          "label": "HLC",
+          "children": [
+            "Physical + logical",
+            "max(local, received)",
+            "No special hardware"
+          ]
+        },
+        {
+          "label": "Uncertainty",
+          "children": [
+            "Max clock offset",
+            "Read restarts",
+            "Fence drifting nodes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A read that lands in the uncertainty window (CockroachDB)",
+      "scenario": "Max offset 500 ms. Node X writes key `k` at HLC time 100.300. A transaction on node Y, whose clock runs 200 ms behind, reads `k` at its own time 100.200.",
+      "flow": [
+        "Write k @ 100.300 (X)",
+        "Read k @ 100.200 (Y)",
+        "Value newer but within 500 ms",
+        "Ambiguous order",
+        "Restart read @ 100.300+",
+        "Read sees the write"
+      ],
+      "steps": [
+        {
+          "label": "Ambiguity",
+          "detail": "The value's timestamp is *after* the read timestamp, but within the read's uncertainty window (100.200 → 100.700). In real time, the write may already have happened."
+        },
+        {
+          "label": "Safe choice",
+          "detail": "Rather than risk missing a committed write, the transaction is pushed to a timestamp above 100.300 and the read retries."
+        },
+        {
+          "label": "Result",
+          "detail": "The read sees the write. External consistency is preserved, at the cost of one retry."
+        },
+        {
+          "label": "Spanner contrast",
+          "detail": "Spanner would have commit-waited about ε (a few ms) on the write, so the read on any node with a later TrueTime is guaranteed to see it, with no retry."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- CockroachDB: the cluster-wide clock offset bound (nodes beyond it shut themselves down)\n-- set via: cockroach start --max-offset=500ms\nSHOW CLUSTER SETTING server.clock.forward_jump_check.enabled;\n-- Retries from uncertainty show up as transaction restarts:\nSELECT * FROM crdb_internal.node_metrics WHERE name LIKE 'txn.restarts%';"
+        }
+      ],
+      "outcome": "correct ordering without special hardware, paid for by occasional read restarts instead of a wait on every commit."
+    },
+    "summary": {
+      "points": [
+        "Clocks lie a little, and distributed databases must bound or work around the lie.",
+        "**TrueTime**: know the error (ε) and wait it out on commit.",
+        "**HLC**: carry causality in timestamps, retry within the uncertainty window.",
+        "Clock health is a production SLO. A drifting node must be removed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Spanner's commit wait need tight clock bounds?",
+        "a": "Every write waits about ε. With GPS/atomic clocks ε is a few milliseconds. With NTP-only bounds it could be hundreds of ms per commit."
+      },
+      {
+        "q": "What happens in CockroachDB if a node's clock drifts beyond the max offset?",
+        "a": "Correctness could be violated, so the node detects excessive offset from its peers and shuts itself down."
+      }
+    ]
+  },
+  "dbre-sql-fundamentals": {
+    "core": "SQL is declarative: you describe the result you want, and the database figures out how. Knowing the logical order of a query (FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY) and the main tools (joins, aggregation, CTEs, window functions, normalisation) lets you ask almost any question correctly.",
+    "first_principles": {
+      "problem": "Data is useless unless you can ask questions of it, and there are infinitely many questions. Writing a custom program (loops, lookups, sorting) for each question is slow and error-prone, and it ties your code to how data happens to be stored.\n\nWe need one language that describes *what* we want and leaves *how* to the database, plus a way to organise data so answers stay correct.",
+      "truths": [
+        "Data naturally comes as tables of facts that reference each other.",
+        "Most questions combine filtering, joining, grouping and ordering.",
+        "Storing the same fact twice lets the copies disagree.",
+        "The database knows its indexes and statistics better than your code does."
+      ],
+      "derivation": [
+        "Describe results declaratively with **SELECT**. The query is evaluated logically as **FROM → JOIN → WHERE → GROUP BY → HAVING → SELECT → ORDER BY → LIMIT**.",
+        "Relate tables with **JOINs** (inner, left, right, full) on keys instead of copying data around.",
+        "Summarise with **GROUP BY**, and filter rows with **WHERE** *before* grouping and groups with **HAVING** *after*.",
+        "Name intermediate steps with **CTEs** (`WITH`), including **recursive** ones for hierarchies.",
+        "Compute across related rows without collapsing them using **window functions** (`OVER (PARTITION BY … ORDER BY …)`).",
+        "Store each fact once (**normalisation**, 1NF→3NF) and **denormalise** deliberately only where reads demand it."
+      ]
+    },
+    "analogy": {
+      "title": "Ordering at a restaurant vs. cooking yourself",
+      "story": "With SQL you order from a menu: \"the pasta, no cheese, for table 4\". You don't tell the kitchen which pan to use. The chef (query planner) decides how, based on what's in the fridge (indexes, statistics).\n\nThe order slip is processed in a fixed sequence: find the ingredients (FROM/JOIN), discard what you don't want (WHERE), group into dishes (GROUP BY), drop dishes that don't qualify (HAVING), plate them (SELECT) and serve in order (ORDER BY).",
+      "mapping": [
+        [
+          "Order from the menu",
+          "Declarative SQL"
+        ],
+        [
+          "Chef choosing technique",
+          "Query planner"
+        ],
+        [
+          "Fetching ingredients",
+          "FROM / JOIN"
+        ],
+        [
+          "Discarding unwanted ingredients",
+          "WHERE"
+        ],
+        [
+          "Grouping into dishes, rejecting some",
+          "GROUP BY / HAVING"
+        ],
+        [
+          "One pantry label per ingredient",
+          "Normalisation"
+        ]
+      ],
+      "breaks": "A chef never misunderstands \"no cheese\". SQL will do exactly what you wrote, so a wrong JOIN condition silently multiplies rows instead of raising an error."
+    },
+    "mindmap": {
+      "center": "SQL Fundamentals",
+      "branches": [
+        {
+          "label": "SELECT anatomy",
+          "children": [
+            "Logical order",
+            "FROM → WHERE → GROUP BY",
+            "→ HAVING → SELECT → ORDER BY"
+          ]
+        },
+        {
+          "label": "Joins",
+          "children": [
+            "INNER",
+            "LEFT / RIGHT",
+            "FULL OUTER"
+          ]
+        },
+        {
+          "label": "Aggregation",
+          "children": [
+            "COUNT / SUM / AVG",
+            "GROUP BY",
+            "WHERE vs HAVING"
+          ]
+        },
+        {
+          "label": "CTEs",
+          "children": [
+            "WITH … AS",
+            "Readable steps",
+            "Recursive CTEs"
+          ]
+        },
+        {
+          "label": "Window functions",
+          "children": [
+            "OVER()",
+            "PARTITION BY / ORDER BY",
+            "ROW_NUMBER, RANK, LAG"
+          ]
+        },
+        {
+          "label": "Normalisation",
+          "children": [
+            "1NF, 2NF, 3NF",
+            "One fact, one place",
+            "Denormalise on purpose"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"Each customer's latest order, for customers who spent over $1,000\"",
+      "scenario": "Tables: `customers(id, name)` and `orders(id, customer_id, total, created_at)`. We want one row per big spender, showing their most recent order.",
+      "flow": [
+        "JOIN customers + orders",
+        "Window: rank orders per customer",
+        "Aggregate spend per customer",
+        "Filter: spend > 1000",
+        "Keep rank = 1"
+      ],
+      "steps": [
+        {
+          "label": "CTE 1: spend",
+          "detail": "`GROUP BY customer_id` with `HAVING sum(total) > 1000`. HAVING filters *groups*, which WHERE can't do."
+        },
+        {
+          "label": "CTE 2: ranked",
+          "detail": "`ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC)` numbers each customer's orders newest first, without collapsing rows."
+        },
+        {
+          "label": "Combine",
+          "detail": "Join both CTEs to `customers` and keep `rn = 1`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "WITH spend AS (\n  SELECT customer_id, sum(total) AS lifetime\n  FROM orders GROUP BY customer_id HAVING sum(total) > 1000\n), ranked AS (\n  SELECT o.*, row_number() OVER (PARTITION BY customer_id ORDER BY created_at DESC) AS rn\n  FROM orders o\n)\nSELECT c.name, s.lifetime, r.id AS latest_order, r.created_at\nFROM spend s\nJOIN customers c ON c.id = s.customer_id\nJOIN ranked r    ON r.customer_id = s.customer_id AND r.rn = 1\nORDER BY s.lifetime DESC;"
+        }
+      ],
+      "outcome": "one readable query answers a question that would take dozens of lines of application loops, and the planner can optimise it as a whole."
+    },
+    "summary": {
+      "points": [
+        "SQL says **what**, the planner decides **how**.",
+        "Remember the **logical order**. It explains why you can't use a SELECT alias in WHERE.",
+        "**WHERE** filters rows, **HAVING** filters groups. **Window functions** keep rows.",
+        "**Normalise** for integrity, **denormalise** deliberately for read speed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does `SELECT total*2 AS dbl FROM orders WHERE dbl > 10` fail?",
+        "a": "WHERE is evaluated before SELECT, so the alias doesn't exist yet. Repeat the expression or wrap the query in a CTE or subquery."
+      },
+      {
+        "q": "A LEFT JOIN with a WHERE condition on the right table returns fewer rows than expected. Why?",
+        "a": "Unmatched rows have NULLs on the right side, and the WHERE condition filters them out, turning it into an inner join. Move the condition into the ON clause."
+      }
+    ]
+  },
+  "dbre-backup-restore-drills": {
+    "core": "A backup is only real once you've restored it. Combine base backups with WAL archiving for point-in-time recovery, define RPO and RTO before disaster, and prove both with automated restore drills.",
+    "first_principles": {
+      "problem": "Teams often discover during an incident that their backups were empty, corrupt, missing WAL, or take 14 hours to restore. That's Schrödinger's backup: until you open it, it's both working and broken.\n\nMeanwhile the most common data loss is human (a bad migration, a `DELETE` without `WHERE`), and replicas copy those mistakes instantly.",
+      "truths": [
+        "Mistakes and bugs replicate. Only copies frozen in the past can undo them.",
+        "Full copies are slow and big. Change logs are small and continuous.",
+        "Restore time depends on data size, network bandwidth and replay speed.",
+        "Untested procedures fail when you need them."
+      ],
+      "derivation": [
+        "**Logical backups** (`pg_dump`) are portable and selective, but slow to restore large databases.",
+        "**Physical backups** (base backup + **WAL archiving**) are fast and complete, and enable **PITR**: restore the base, replay WAL to any second.",
+        "Define **RPO** (how much data you can lose) and **RTO** (how long you can be down) *before* the incident. They decide your backup frequency and architecture.",
+        "Keep enough WAL to cover your **retention window**, in storage that production credentials **can't delete**.",
+        "**Drill**: restore automatically on a schedule into an isolated environment, verify the data, measure the time, and write a report."
+      ]
+    },
+    "analogy": {
+      "title": "A fire drill for your data",
+      "story": "Every building has fire exits, but you only know they work if you hold a drill: the doors open, the stairs aren't blocked, and everyone is out in four minutes. If you never drill, you discover the locked door during the real fire.\n\nBackups are the exits. The restore drill is the fire drill. RPO is \"how much paperwork can we afford to leave behind\" and RTO is \"how fast must everyone be outside\".",
+      "mapping": [
+        [
+          "Fire exits",
+          "Backups (base + WAL)"
+        ],
+        [
+          "Fire drill",
+          "Automated restore drill"
+        ],
+        [
+          "Paperwork left behind",
+          "RPO"
+        ],
+        [
+          "Time to get everyone out",
+          "RTO"
+        ],
+        [
+          "Locked exit discovered in a real fire",
+          "Corrupt / incomplete backup found in an incident"
+        ]
+      ],
+      "breaks": "A fire drill takes the same time every time. Restore time grows with your data, so a drill that passed last year can fail your RTO this year. Track the trend."
+    },
+    "mindmap": {
+      "center": "Backup & Restore",
+      "branches": [
+        {
+          "label": "Logical",
+          "children": [
+            "pg_dump / mysqldump",
+            "Portable, selective",
+            "Slow for big DBs"
+          ]
+        },
+        {
+          "label": "Physical",
+          "children": [
+            "Base backup",
+            "WAL archiving",
+            "Fast, whole cluster"
+          ]
+        },
+        {
+          "label": "PITR",
+          "children": [
+            "Restore base",
+            "Replay WAL to time T",
+            "Retention window"
+          ]
+        },
+        {
+          "label": "Objectives",
+          "children": [
+            "RPO: data loss",
+            "RTO: downtime",
+            "Set before disaster"
+          ]
+        },
+        {
+          "label": "Drills",
+          "children": [
+            "Automated restore",
+            "Verify data",
+            "Measure time, report"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Off-site copies",
+            "Immutable storage",
+            "Separate credentials"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A weekly automated restore drill",
+      "scenario": "Production Postgres is 800 GB. The targets are RPO ≤ 5 min and RTO ≤ 2 h. The team wants proof every week, not hope.",
+      "flow": [
+        "Pick random recovery time",
+        "Restore base + WAL",
+        "Run checks",
+        "Measure duration",
+        "Report + alert",
+        "Destroy env"
+      ],
+      "steps": [
+        {
+          "label": "Provision",
+          "detail": "Every Sunday, CI creates an isolated instance and fetches the latest base backup from object storage."
+        },
+        {
+          "label": "PITR",
+          "detail": "It replays WAL to a random timestamp in the last 24 h, which also proves the WAL archive has no gaps."
+        },
+        {
+          "label": "Verify",
+          "detail": "It checks that row counts and checksums on key tables match a snapshot of production stats, and that recent data near the target time exists."
+        },
+        {
+          "label": "Measure",
+          "detail": "Restore time is recorded. If it's over 2 h (RTO) or any check fails, the on-call is alerted."
+        },
+        {
+          "label": "Report",
+          "detail": "Duration and backup age are graphed weekly, so creeping restore time is visible before it breaks the RTO."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "#!/usr/bin/env bash\nset -euo pipefail\nstart=$(date +%s)\ntarget=$(date -u -d \"-$((RANDOM % 1440)) min\" '+%Y-%m-%d %H:%M:%S+00')\nwal-g backup-fetch \"$PGDATA\" LATEST\ncat >> \"$PGDATA/postgresql.auto.conf\" <<EOF\nrestore_command = 'wal-g wal-fetch %f %p'\nrecovery_target_time = '$target'\nrecovery_target_action = 'promote'\nEOF\ntouch \"$PGDATA/recovery.signal\" && pg_ctl -D \"$PGDATA\" -w start\npsql -c \"SELECT count(*) FROM orders WHERE created_at > now() - interval '7 days'\"\necho \"restore_seconds $(( $(date +%s) - start ))\" | push_metric"
+        }
+      ],
+      "outcome": "every week there's fresh proof that backups restore, how long it takes, and that point-in-time recovery works, before anyone needs it."
+    },
+    "summary": {
+      "points": [
+        "**Replicas ≠ backups.** Mistakes replicate.",
+        "**Base backup + WAL archive** = point-in-time recovery.",
+        "Set **RPO/RTO** first, then design backups to meet them.",
+        "\"Tested\" means **restored automatically, verified and timed**, regularly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Your restore drill passes but takes 3 h and your RTO is 2 h. Options?",
+        "a": "Take base backups more often (less WAL to replay), restore from faster storage or in parallel, keep a delayed replica, or renegotiate the RTO."
+      },
+      {
+        "q": "Why restore to a random point in time rather than 'latest'?",
+        "a": "It exercises WAL replay and proves the archive is continuous across the whole window, not just that the newest base backup exists."
+      }
+    ]
+  },
+  "dbre-data-warehousing-olap": {
+    "core": "Transactions (OLTP) touch a few whole rows quickly. Analytics (OLAP) scan a few columns across billions of rows. A warehouse is built for the second job: columnar storage, analysis-friendly schemas, pipelines to feed it, and partitions to skip data.",
+    "first_principles": {
+      "problem": "The production database is tuned to fetch and update individual orders in milliseconds. Then someone asks \"revenue by region by month for three years\", and the query scans every row, takes an hour and slows down checkout for real customers.\n\nAnalytical questions have a completely different shape from transactional ones, so they deserve a different engine.",
+      "truths": [
+        "OLTP queries touch few rows but all of their columns. OLAP queries touch many rows but few columns.",
+        "Reading bytes you don't need is the main cost of analytics.",
+        "Analysts think in business facts and descriptions (sales by product by date).",
+        "Heavy analytical queries on the production database hurt customers."
+      ],
+      "derivation": [
+        "Separate the workloads: **OLTP** database for the app, **OLAP** warehouse for analysis.",
+        "Store warehouse data **by column**, so queries read only the columns they use and those compress extremely well.",
+        "Model for analysis: a central **fact table** (events, sales) surrounded by **dimension tables** (product, customer, date): a **star schema**, or normalised dimensions in a **snowflake schema**.",
+        "Feed the warehouse with a pipeline: **ETL** (transform before loading) or, with cheap cloud compute, **ELT** (load raw, transform in SQL, e.g. dbt).",
+        "Avoid scanning everything: **partition** by date and **cluster/sort** by common filters so whole blocks are skipped."
+      ]
+    },
+    "analogy": {
+      "title": "A shop till vs. the accountant's office",
+      "story": "The till handles one customer at a time: scan items, take payment, print the receipt, fast and precise. You'd never ask the cashier to compute last year's sales by region while customers queue.\n\nSo every night the receipts are sent to the accountant's office (warehouse), where they're filed into ledgers organised for analysis: one big ledger of sales lines, with reference books for products, stores and dates. The accountant can then sum one column across a million entries without bothering the shop.",
+      "mapping": [
+        [
+          "Shop till",
+          "OLTP database"
+        ],
+        [
+          "Accountant's office",
+          "Data warehouse (OLAP)"
+        ],
+        [
+          "Nightly transfer of receipts",
+          "ETL / ELT pipeline"
+        ],
+        [
+          "Big ledger of sales lines",
+          "Fact table"
+        ],
+        [
+          "Reference books (products, stores, dates)",
+          "Dimension tables"
+        ],
+        [
+          "Ledgers filed by month",
+          "Partitioning"
+        ]
+      ],
+      "breaks": "The accountant works from yesterday's receipts. Modern pipelines (CDC streaming) can make the warehouse minutes behind, but it's still a copy, never the system of record."
+    },
+    "mindmap": {
+      "center": "Data Warehousing",
+      "branches": [
+        {
+          "label": "OLTP vs OLAP",
+          "children": [
+            "Few rows vs many rows",
+            "All columns vs few",
+            "ms vs seconds"
+          ]
+        },
+        {
+          "label": "Columnar",
+          "children": [
+            "Read only needed columns",
+            "High compression",
+            "Vectorised scans"
+          ]
+        },
+        {
+          "label": "Schemas",
+          "children": [
+            "Fact table",
+            "Dimensions",
+            "Star vs Snowflake"
+          ]
+        },
+        {
+          "label": "Pipelines",
+          "children": [
+            "ETL (transform first)",
+            "ELT (load, then SQL)",
+            "dbt"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Partitioning by date",
+            "Clustering / sort keys",
+            "Pruning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"Revenue by region by month\" without hurting checkout",
+      "scenario": "The question currently runs on the production Postgres, scanning 2 billion order lines for 50 minutes while checkout latency doubles.",
+      "flow": [
+        "Postgres (OLTP)",
+        "Nightly ELT → BigQuery",
+        "fact_sales + dims",
+        "Partition by day, cluster by region",
+        "50 min → 8 s"
+      ],
+      "steps": [
+        {
+          "label": "Move",
+          "detail": "Load order lines into the warehouse nightly (or via CDC). Production no longer runs analytics."
+        },
+        {
+          "label": "Model",
+          "detail": "`fact_sales(date_key, product_key, store_key, qty, revenue)` with dimensions for product, store (with region) and date."
+        },
+        {
+          "label": "Lay out",
+          "detail": "Partition `fact_sales` by day and cluster by `store_key`, so a 3-year query skips nothing it needs and reads only 3 columns."
+        },
+        {
+          "label": "Query",
+          "detail": "Columnar scan of `revenue`, `date_key` and `store_key` only: seconds, not an hour."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE TABLE analytics.fact_sales (\n  sale_date DATE, product_key INT64, store_key INT64, qty INT64, revenue NUMERIC\n) PARTITION BY sale_date CLUSTER BY store_key;\n\nSELECT s.region, DATE_TRUNC(f.sale_date, MONTH) AS month, SUM(f.revenue) AS revenue\nFROM analytics.fact_sales f\nJOIN analytics.dim_store s USING (store_key)\nWHERE f.sale_date >= '2023-01-01'\nGROUP BY 1, 2 ORDER BY 1, 2;"
+        }
+      ],
+      "outcome": "analysts get answers in seconds and customers stop paying for analytics in checkout latency."
+    },
+    "summary": {
+      "points": [
+        "**OLTP** = many small, row-level transactions. **OLAP** = big scans over few columns.",
+        "**Columnar** storage is the core trick of warehouses.",
+        "**Star schema**: facts in the middle, dimensions around.",
+        "**ELT** is the modern default, and **partition + cluster** to skip data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a row-store slow for SUM(revenue) over a billion rows?",
+        "a": "It must read every full row (all columns) from disk to get one field. A column store reads just the revenue column, compressed."
+      },
+      {
+        "q": "When would you choose a snowflake schema over a star?",
+        "a": "When dimensions are large and highly redundant (e.g. deep product hierarchies) and storage or update consistency matters more than the simplest, fastest joins."
+      }
+    ]
+  },
+  "dbre-data-mesh-architecture": {
+    "core": "Data mesh treats analytical data like microservices treat code: the domain that produces the data owns it and publishes it as a product, on a shared self-serve platform, under automated global rules.",
+    "first_principles": {
+      "problem": "In most companies a central data team owns the lake or warehouse. Every domain (orders, payments, marketing) throws raw data over the wall, and the central team must understand all of it, fix every broken pipeline and answer every request.\n\nAs the company grows, that team becomes the bottleneck: tickets queue for weeks and the data is often wrong because the people who understand it aren't the ones who own it.",
+      "truths": [
+        "The people who produce the data understand it best.",
+        "A single central team can't scale with the number of domains.",
+        "Data nobody is accountable for decays.",
+        "Without shared standards, decentralisation becomes chaos."
+      ],
+      "derivation": [
+        "**Domain ownership**: each domain team owns its analytical data, just as it owns its services. \"You build it, you run it, you own the data.\"",
+        "**Data as a product**: publish datasets with an owner, schema, documentation, SLOs and versioning, so they're discoverable, trustworthy and usable.",
+        "**Self-serve platform**: a central platform team provides the tooling (storage, pipelines, catalogue, access) so domains don't each reinvent infrastructure.",
+        "**Federated computational governance**: global rules (privacy, interoperability, quality) are agreed together and **enforced automatically** by the platform, not by review meetings.",
+        "Adopt it only past a **maturity threshold**. A small company with one data team is better off with a warehouse."
+      ]
+    },
+    "analogy": {
+      "title": "A food market vs. one central kitchen",
+      "story": "In a central kitchen, every dish in the city is cooked by one team, which needs every recipe and gets slower as the city grows. In a market, each stall cooks its own speciality and is responsible for its quality (domain ownership). Stalls present food clearly labelled with ingredients and allergens (data as a product).\n\nThe market provides the shared stuff: electricity, water, card payments (self-serve platform). Health and safety rules apply to every stall, checked automatically by sensors rather than by an inspector tasting every dish (computational governance).",
+      "mapping": [
+        [
+          "Central kitchen",
+          "Central data team / monolithic lake"
+        ],
+        [
+          "Each stall owns its dishes",
+          "Domain-oriented ownership"
+        ],
+        [
+          "Labelled food with allergens",
+          "Data product (schema, docs, SLO)"
+        ],
+        [
+          "Market electricity, water, payments",
+          "Self-serve data platform"
+        ],
+        [
+          "Automated health & safety checks",
+          "Federated computational governance"
+        ]
+      ],
+      "breaks": "Market stalls rarely need each other's food. Data products constantly join across domains, so shared identifiers and interoperability standards are far more critical than in a real market."
+    },
+    "mindmap": {
+      "center": "Data Mesh",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Central team bottleneck",
+            "Domain knowledge lost",
+            "Brittle pipelines"
+          ]
+        },
+        {
+          "label": "Domain ownership",
+          "children": [
+            "You build it, you own the data",
+            "Domain boundaries",
+            "Team accountability"
+          ]
+        },
+        {
+          "label": "Data as a product",
+          "children": [
+            "Discoverable, trustworthy",
+            "Schema + SLOs",
+            "Versioning"
+          ]
+        },
+        {
+          "label": "Self-serve platform",
+          "children": [
+            "Storage, pipelines, catalogue",
+            "One config file",
+            "Platform team"
+          ]
+        },
+        {
+          "label": "Governance",
+          "children": [
+            "Global vs local rules",
+            "Policy as code",
+            "Automated enforcement"
+          ]
+        },
+        {
+          "label": "When",
+          "children": [
+            "Many domains",
+            "Org maturity",
+            "Else: warehouse / lake"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Turning \"payments\" into a data product",
+      "scenario": "The payments team's tables are copied raw into the lake by the central team. Finance dashboards break whenever payments changes a column, and nobody knows who to ask.",
+      "flow": [
+        "Payments owns 'settled_payments'",
+        "Declares schema + SLO",
+        "Platform builds pipeline",
+        "Policy-as-code checks PII",
+        "Published in catalogue"
+      ],
+      "steps": [
+        {
+          "label": "Own",
+          "detail": "The payments team defines `settled_payments_v1`: one row per settled payment, with documented meaning for every field."
+        },
+        {
+          "label": "Contract",
+          "detail": "A data contract specifies the schema, freshness SLO (≤ 15 min) and owner. Breaking changes require `v2` alongside `v1`."
+        },
+        {
+          "label": "Platform",
+          "detail": "One config file and the self-serve platform provisions storage, the pipeline, monitoring and the catalogue entry."
+        },
+        {
+          "label": "Govern",
+          "detail": "CI rejects the product if a column is tagged as PII without masking. That's a global rule, enforced automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# data-product.yaml (owned by the payments team)\nname: settled_payments\nversion: 1\nowner: payments-team@company.com\nschema:\n  - {name: payment_id,  type: string,    pii: false}\n  - {name: amount_cents, type: int64,    pii: false}\n  - {name: card_last4,  type: string,    pii: true, masking: hash}\n  - {name: settled_at,  type: timestamp, pii: false}\nslo:\n  freshness_minutes: 15\n  completeness_pct: 99.9\noutput_ports: [warehouse_table, kafka_topic]"
+        }
+      ],
+      "outcome": "finance consumes a versioned, documented dataset with a named owner and an SLO, and payments can evolve without silently breaking dashboards."
+    },
+    "summary": {
+      "points": [
+        "Four principles: **domain ownership, data as a product, self-serve platform, federated computational governance**.",
+        "It's an **organisational** change as much as a technical one.",
+        "Governance must be **automated (computational)** or it becomes a new bottleneck.",
+        "Don't adopt it before you have the scale and maturity to need it."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is 'computational' the key word in federated computational governance?",
+        "a": "Rules enforced by code in the platform scale to hundreds of data products. Rules enforced by human review become exactly the central bottleneck the mesh was meant to remove."
+      },
+      {
+        "q": "What turns a dataset into a 'data product'?",
+        "a": "Ownership and guarantees: discoverable, documented, with a schema contract, quality and freshness SLOs, versioning and access controls. Not just a table someone happened to write."
+      }
+    ]
+  },
+  "dbre-database-proxies": {
+    "core": "A database proxy sits between the apps and the database and makes the connections smart: it multiplexes many client connections onto few server connections, routes reads and writes, can cache results, and adds a security and visibility layer.",
+    "first_principles": {
+      "problem": "Applications open connections directly to the database. Hundreds of autoscaled pods, each with its own pool, means thousands of connections, and each Postgres connection is a process. Every app also has to know which server is primary and which are replicas, and the database has no central point to block a bad query or see who's sending what.\n\nPutting logic in every client is fragile. We need a smart layer in the middle.",
+      "truths": [
+        "Connections are expensive for the database and mostly idle.",
+        "Reads can go to replicas. Writes must go to the primary.",
+        "Some identical read queries are asked again and again.",
+        "One chokepoint is a great place to observe and enforce, and a single point of failure if you're careless."
+      ],
+      "derivation": [
+        "**Multiplex**: accept thousands of client connections and map them **M:N** onto a small pool of server connections (session/transaction/statement modes).",
+        "**Route by intent**: send SELECTs to replicas and writes to the primary using rules, but keep read-after-write traffic on the primary because of **replication lag**.",
+        "**Cache** repeatable read results at the proxy with a TTL, transparently to the app (ProxySQL), accepting staleness.",
+        "**Firewall** dangerous or unknown query patterns and collect **per-query stats** in one place.",
+        "Run the proxy itself **redundantly**, because it's now on the critical path."
+      ]
+    },
+    "analogy": {
+      "title": "An air-traffic control tower",
+      "story": "Without a tower, every pilot would negotiate directly with the runway. With one, thousands of flights share a few runways in an orderly way (multiplexing). Controllers send landings to one runway and take-offs to another (read/write splitting).\n\nThey can refuse an aircraft that isn't on the approved list (query firewall), and they log every movement (observability). But if the tower goes dark, nothing moves, so airports keep a backup tower.",
+      "mapping": [
+        [
+          "Many flights, few runways",
+          "Many client connections, few DB connections"
+        ],
+        [
+          "Landings vs take-offs on different runways",
+          "Read/write splitting"
+        ],
+        [
+          "Refusing unapproved aircraft",
+          "Query firewall / rules"
+        ],
+        [
+          "Movement log",
+          "Proxy stats tables"
+        ],
+        [
+          "Backup tower",
+          "Redundant proxy instances"
+        ]
+      ],
+      "breaks": "Planes can't land on a runway that's 2 seconds behind reality. Replicas can be, so blindly routing every SELECT to replicas returns stale data right after a write."
+    },
+    "mindmap": {
+      "center": "Database Proxies",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Connection storm",
+            "Process per connection",
+            "Logic scattered in clients"
+          ]
+        },
+        {
+          "label": "Multiplexing",
+          "children": [
+            "M:N mapping",
+            "Session / transaction mode",
+            "PgBouncer, RDS Proxy"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "Reads → replicas",
+            "Writes → primary",
+            "Lag caveat"
+          ]
+        },
+        {
+          "label": "Query cache",
+          "children": [
+            "ProxySQL TTL cache",
+            "Transparent to app",
+            "Staleness"
+          ]
+        },
+        {
+          "label": "Firewall & stats",
+          "children": [
+            "Allow/deny rules",
+            "Per-digest stats",
+            "Single place to look"
+          ]
+        },
+        {
+          "label": "Operate",
+          "children": [
+            "Run redundantly",
+            "Health checks",
+            "Adds a hop"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Read/write splitting with ProxySQL for a MySQL app",
+      "scenario": "A PHP app talks to one MySQL primary at 90% CPU. Two replicas sit mostly idle because changing the app to use them would take months.",
+      "flow": [
+        "App → ProxySQL :6033",
+        "Rule: SELECT → hostgroup 20",
+        "Rule: SELECT…FOR UPDATE → 10",
+        "Writes → hostgroup 10",
+        "Primary load halves"
+      ],
+      "steps": [
+        {
+          "label": "Hostgroups",
+          "detail": "Hostgroup 10 = primary (writes), hostgroup 20 = replicas (reads). ProxySQL health-checks both."
+        },
+        {
+          "label": "Rules",
+          "detail": "`^SELECT.*FOR UPDATE` → 10 (it takes locks), any other `^SELECT` → 20, everything else → 10."
+        },
+        {
+          "label": "Lag guard",
+          "detail": "Set `max_replication_lag = 2`, so a replica more than 2 s behind is temporarily removed from the read pool."
+        },
+        {
+          "label": "Observe",
+          "detail": "`stats_mysql_query_digest` shows the top query shapes by total time, the obvious targets to tune."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- ProxySQL admin interface\nINSERT INTO mysql_query_rules (rule_id, active, match_digest, destination_hostgroup, apply)\nVALUES (1, 1, '^SELECT.*FOR UPDATE', 10, 1),\n       (2, 1, '^SELECT',              20, 1);\nUPDATE mysql_servers SET max_replication_lag = 2 WHERE hostgroup_id = 20;\nLOAD MYSQL QUERY RULES TO RUNTIME; LOAD MYSQL SERVERS TO RUNTIME;\n\nSELECT digest_text, count_star, sum_time FROM stats_mysql_query_digest\nORDER BY sum_time DESC LIMIT 5;"
+        }
+      ],
+      "outcome": "read load moves to replicas without touching application code, with a lag guard and a single place to see the heaviest queries."
+    },
+    "summary": {
+      "points": [
+        "Core feature: **connection multiplexing** (M:N).",
+        "**Read/write splitting** works only if you handle **replication lag**.",
+        "Proxy-level **caching** and **firewalling** are bonuses with trade-offs.",
+        "The proxy is now critical infrastructure. **Run it redundantly.**"
+      ]
+    },
+    "check": [
+      {
+        "q": "Why route SELECT … FOR UPDATE to the primary?",
+        "a": "It takes row locks for a following write. Locks on a replica are meaningless, and the write must happen on the primary in the same transaction."
+      },
+      {
+        "q": "A user updates their profile and immediately sees the old one. What did the proxy do?",
+        "a": "It routed the follow-up SELECT to a lagging replica. Use read-your-writes rules (pin to the primary after writes) or lag thresholds."
+      }
+    ]
+  },
+  "dbre-change-data-capture": {
+    "core": "Change data capture reads the database's own change log and turns every committed insert, update and delete into an event stream, so other systems stay in sync without polling and without dual writes.",
+    "first_principles": {
+      "problem": "Other systems need to know when data changes: the warehouse, the search index, the cache, other services. The old way is to poll: `SELECT * FROM orders WHERE updated_at > :last` every few minutes. That misses deletes, depends on every writer setting `updated_at`, hammers the database, and is always minutes behind.\n\nThe other option is having the app write to both the database and a message queue, but if one write succeeds and the other fails, they're out of sync forever.",
+      "truths": [
+        "The database already records every committed change, in order, in its log (WAL/binlog).",
+        "Polling can't see deletes and adds load proportional to how often you poll.",
+        "Two separate writes can't be atomic without a transaction spanning both.",
+        "Schemas change over time, and consumers must survive that."
+      ],
+      "derivation": [
+        "**Tap the log**: read the WAL/binlog as a replica would and emit one event per row change, including deletes, with before and after values.",
+        "In Postgres, use **logical decoding** with a **replication slot**, and monitor it, because a stalled consumer makes the primary retain WAL.",
+        "Use a standard engine (**Debezium on Kafka Connect**) to publish change events to Kafka topics, then sink them to warehouses, search engines and caches.",
+        "Manage evolving schemas with a **schema registry** and compatibility rules.",
+        "For services that must publish events, write the event to an **outbox table** in the same transaction and let CDC publish it: atomic, with no dual write."
+      ]
+    },
+    "analogy": {
+      "title": "Subscribing to the bank's statement feed",
+      "story": "Instead of phoning the bank every hour to ask \"has anything changed in my account?\" (polling), you subscribe to the bank's own transaction feed. Every deposit, withdrawal and reversal arrives automatically, in order, the moment it's booked, because it's taken straight from the bank's ledger.\n\nIf you also want to tell your accountant about a payment, you don't send a separate letter that might get lost. You write the note on the payment itself, and the feed delivers both together (outbox).",
+      "mapping": [
+        [
+          "Phoning the bank every hour",
+          "Polling with updated_at"
+        ],
+        [
+          "Bank's transaction feed",
+          "CDC stream from WAL / binlog"
+        ],
+        [
+          "Reversals in the feed",
+          "Delete events (polling misses these)"
+        ],
+        [
+          "Note written on the payment itself",
+          "Transactional outbox"
+        ],
+        [
+          "Feed format version",
+          "Schema registry"
+        ]
+      ],
+      "breaks": "The bank keeps your feed history for you. In Postgres, a replication slot makes *your database* keep WAL until the consumer reads it, so a broken CDC pipeline can fill the production disk."
+    },
+    "mindmap": {
+      "center": "Change Data Capture",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Polling misses deletes",
+            "Polling adds load",
+            "Dual-write inconsistency"
+          ]
+        },
+        {
+          "label": "Log-based",
+          "children": [
+            "WAL / binlog",
+            "Logical decoding",
+            "Replication slot"
+          ]
+        },
+        {
+          "label": "Engine",
+          "children": [
+            "Debezium",
+            "Kafka Connect",
+            "Before/after events"
+          ]
+        },
+        {
+          "label": "Pipelines",
+          "children": [
+            "→ Warehouse",
+            "→ Search / cache",
+            "Soft vs hard deletes"
+          ]
+        },
+        {
+          "label": "Schema evolution",
+          "children": [
+            "Schema registry",
+            "Backward / forward compat",
+            "Avro / Protobuf"
+          ]
+        },
+        {
+          "label": "Outbox pattern",
+          "children": [
+            "Event row in same txn",
+            "CDC publishes it",
+            "No dual write"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Publishing \"OrderPlaced\" reliably with the outbox pattern",
+      "scenario": "The order service saves an order and must notify billing and shipping via Kafka. Today it writes to Postgres and then to Kafka, and when Kafka is down, orders exist that nobody ships.",
+      "flow": [
+        "BEGIN",
+        "INSERT order",
+        "INSERT outbox event",
+        "COMMIT (atomic)",
+        "Debezium reads WAL",
+        "Event on Kafka topic"
+      ],
+      "steps": [
+        {
+          "label": "One transaction",
+          "detail": "The order row and an `outbox` row describing `OrderPlaced` commit together, or not at all."
+        },
+        {
+          "label": "Capture",
+          "detail": "Debezium, using a logical replication slot, sees the committed outbox insert in the WAL."
+        },
+        {
+          "label": "Route",
+          "detail": "Debezium's outbox router publishes it to the `orders.events` topic, keyed by order ID so events stay in order per order."
+        },
+        {
+          "label": "Consume",
+          "detail": "Billing and shipping consume the event. Delivery is at-least-once, so consumers deduplicate by event ID."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN;\nINSERT INTO orders (id, customer_id, total) VALUES ('o-981', 'c-7', 4999);\nINSERT INTO outbox (id, aggregate_type, aggregate_id, type, payload)\nVALUES (gen_random_uuid(), 'order', 'o-981', 'OrderPlaced',\n        '{\"order_id\":\"o-981\",\"total\":4999}');\nCOMMIT;\n\n-- Watch the CDC slot so it can't silently fill the disk\nSELECT slot_name, active,\n       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn)) AS lag\nFROM pg_replication_slots WHERE slot_type = 'logical';"
+        }
+      ],
+      "outcome": "every committed order produces exactly one event in the log, even if Kafka is down at the time, and it is delivered as soon as the pipeline catches up."
+    },
+    "summary": {
+      "points": [
+        "CDC = **read the database's own log**, emit every committed change (deletes included).",
+        "**Debezium + Kafka Connect** is the standard stack.",
+        "**Monitor replication slot lag**, because a stuck consumer means WAL piles up on the primary.",
+        "**Outbox pattern** = atomic \"save + publish\" without dual writes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't polling with updated_at see deletes?",
+        "a": "A deleted row no longer exists to be selected. CDC sees the DELETE in the log and emits an event with the old values."
+      },
+      {
+        "q": "What's wrong with writing to the DB and then to Kafka in application code?",
+        "a": "The two writes aren't atomic. A crash or Kafka outage between them leaves the systems permanently inconsistent. The outbox makes the event part of the DB transaction."
+      }
+    ]
+  },
+  "dbre-vacuum-compaction-tuning": {
+    "core": "MVCC and LSM engines never overwrite data in place, so garbage accumulates. Vacuum (Postgres) and compaction (Cassandra) are the janitors, and the default settings are usually too lazy for big, busy tables.",
+    "first_principles": {
+      "problem": "Postgres keeps old row versions for MVCC, and Cassandra appends new SSTables for every write. Both are great for concurrency and write speed, but both leave garbage behind: dead tuples and obsolete versions.\n\nIf cleanup can't keep up, tables bloat, queries read more pages, disks fill, and in Postgres the transaction ID counter can approach wraparound, which forces an emergency shutdown of writes.",
+      "truths": [
+        "Every UPDATE/DELETE in Postgres leaves a dead tuple behind.",
+        "Cleanup work competes with production traffic for I/O.",
+        "A fixed percentage threshold means huge tables wait for millions of dead rows.",
+        "Different write patterns (overwrites vs. time-series) produce different kinds of garbage."
+      ],
+      "derivation": [
+        "Postgres **autovacuum** runs when dead tuples exceed `threshold + scale_factor × rows`. The default 20% is far too late for a 1-billion-row table, so **tune the scale factor per table** (e.g. 1%).",
+        "Autovacuum is throttled by a **cost limit** so it doesn't hurt traffic, and on fast SSDs the default throttle is too strict, so **raise the cost limit** (or lower the delay).",
+        "Watch for **blockers**: long transactions and stale replication slots stop vacuum from removing anything.",
+        "In Cassandra, choose a **compaction strategy** by workload: **STCS** (write-heavy), **LCS** (read-heavy, overwrites), **TWCS** (time-series with TTL).",
+        "**Monitor bloat**: dead tuples, last autovacuum time, transaction ID age, pending compactions and SSTables per read."
+      ]
+    },
+    "analogy": {
+      "title": "Office recycling bins",
+      "story": "Every time someone revises a document, the old copy goes in the recycling bin, because others might still be reading it. A janitor empties bins when they're 20% full. That's fine for a small office, but in a 10,000-person office a bin at 20% full is a mountain of paper.\n\nThe janitor is also told to work slowly so as not to disturb people (cost limit), and can't touch paper that someone is still holding (long transaction). Different departments need different routines: the archive room just throws away whole boxes after 30 days (time-window compaction).",
+      "mapping": [
+        [
+          "Old copies in the bin",
+          "Dead tuples / obsolete versions"
+        ],
+        [
+          "Emptying at 20% full",
+          "autovacuum_vacuum_scale_factor = 0.2"
+        ],
+        [
+          "Janitor told to work slowly",
+          "Autovacuum cost limit / delay"
+        ],
+        [
+          "Paper someone is still holding",
+          "Long transaction blocking cleanup"
+        ],
+        [
+          "Throwing away whole boxes after 30 days",
+          "Time-window compaction (TWCS)"
+        ]
+      ],
+      "breaks": "Paper doesn't threaten the building. In Postgres, if old rows are never frozen, transaction IDs can wrap around, and the database stops accepting writes to protect your data."
+    },
+    "mindmap": {
+      "center": "Vacuum & Compaction",
+      "branches": [
+        {
+          "label": "Why garbage",
+          "children": [
+            "MVCC dead tuples",
+            "LSM obsolete versions",
+            "Bloat"
+          ]
+        },
+        {
+          "label": "Autovacuum trigger",
+          "children": [
+            "threshold + scale_factor × rows",
+            "Default 20% too late",
+            "Tune per table"
+          ]
+        },
+        {
+          "label": "Throttling",
+          "children": [
+            "cost_limit",
+            "cost_delay",
+            "Unleash on SSDs"
+          ]
+        },
+        {
+          "label": "Blockers",
+          "children": [
+            "Long transactions",
+            "Idle in transaction",
+            "Stale replication slots"
+          ]
+        },
+        {
+          "label": "Cassandra",
+          "children": [
+            "STCS: write-heavy",
+            "LCS: read-heavy",
+            "TWCS: time-series + TTL"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "n_dead_tup",
+            "XID age",
+            "Pending compactions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Taming bloat on a hot 800-million-row table",
+      "scenario": "`events` is updated heavily. Queries slow down week by week, and the table is 3× larger than its live data. Autovacuum runs only every few days.",
+      "flow": [
+        "Bloat + slow queries",
+        "Check n_dead_tup & last_autovacuum",
+        "Scale factor 20% → 1%",
+        "Raise cost limit",
+        "Kill idle-in-txn",
+        "Steady size"
+      ],
+      "steps": [
+        {
+          "label": "Diagnose",
+          "detail": "`pg_stat_user_tables` shows 140 M dead tuples. With the default 20%, autovacuum waits for about 160 M dead rows before starting."
+        },
+        {
+          "label": "Per-table settings",
+          "detail": "Set the scale factor to 1% (about 8 M rows) so vacuum runs often and each run is small."
+        },
+        {
+          "label": "Let it work",
+          "detail": "Raise this table's `autovacuum_vacuum_cost_limit`, since NVMe disks can handle far more than the default throttle allows."
+        },
+        {
+          "label": "Remove blockers",
+          "detail": "Find a 9-hour `idle in transaction` session from a broken worker. Set `idle_in_transaction_session_timeout` so it can't happen again."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT relname, n_live_tup, n_dead_tup, last_autovacuum\nFROM pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 5;\n\nALTER TABLE events SET (autovacuum_vacuum_scale_factor = 0.01,\n                        autovacuum_vacuum_cost_limit  = 2000);\n\n-- Anything holding back cleanup?\nSELECT pid, state, now() - xact_start AS age, left(query, 60)\nFROM pg_stat_activity WHERE state LIKE 'idle in transaction%' ORDER BY age DESC;\n\nSELECT datname, age(datfrozenxid) FROM pg_database ORDER BY 2 DESC;   -- wraparound headroom"
+        }
+      ],
+      "outcome": "vacuum runs every few hours in small, cheap passes, the table stops growing, and query latency returns to normal."
+    },
+    "summary": {
+      "points": [
+        "No in-place overwrites → **garbage is inevitable**, so cleanup must keep pace.",
+        "Postgres defaults are tuned for small tables. **Lower the scale factor, raise the cost limit** on big hot ones.",
+        "**Long transactions and stale slots** silently block vacuum.",
+        "Cassandra: **STCS / LCS / TWCS** by workload. Watch pending compactions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a 20% scale factor work for small tables but not large ones?",
+        "a": "It's proportional. 20% of 10,000 rows is 2,000 dead rows, but 20% of a billion is 200 million, so vacuum starts far too late and each run is huge."
+      },
+      {
+        "q": "Why is TWCS a good fit for TTL'd time-series data in Cassandra?",
+        "a": "Data from the same time window lives in the same SSTables, so when the window's TTL expires, whole SSTables can be dropped without rewriting live data."
+      }
+    ]
+  }
+}

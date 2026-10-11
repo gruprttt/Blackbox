@@ -434,6 +434,16 @@
     if (cur && sideInner && sideInner.scrollHeight > sideInner.clientHeight) sideInner.scrollTop = cur.offsetTop - sideInner.clientHeight / 2;
   }
 
+  // ── topic explainer: tap a mind map to see it full size ─────────
+  $$("[data-mm-zoom]").forEach(function (m) {
+    if (m.scrollWidth > m.clientWidth) m.scrollLeft = (m.scrollWidth - m.clientWidth) / 2;  // phones: start on the centre idea
+    var toggle = function () { document.body.classList.toggle("mm-open", m.classList.toggle("is-zoomed")); };
+    m.addEventListener("click", toggle);
+    m.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || (e.key === "Escape" && m.classList.contains("is-zoomed"))) { e.preventDefault(); toggle(); }
+    });
+  });
+
   // ── DSA / System Design sheets: tick items, bookmarks, revision, notes, filters ──
   // Bookmarks/revision live in bb-dsa-marks ({id: {b: 1, r: 1}}) and notes in bb-dsa-notes
   // ({id: text}); like everything bb-*, they sync to your account.

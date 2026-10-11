@@ -270,6 +270,9 @@ def load():
                 topic["lessons"].append(parse_lesson(lp))
             topic["lessons"].sort(key=lambda l: (l["pos"], l["slug"]))
         track["topics"] = [t for t in track["topics"] if t["lessons"]]
+        explain = load_explainers(track["slug"])
+        for t in track["topics"]:
+            t["explain"] = explain.get(t["slug"])
         tracks.append(track)
     tracks.sort(key=lambda t: t["chapter"])
     for i, t in enumerate(tracks):
@@ -741,6 +744,148 @@ def render_track(track):
     return page(title=f"{strip_tags(track['title'])} · {SITE}", desc=f"Learn {strip_tags(track['title'])}.", root=root, body=body, kind="track")
 
 
+# ───────────────────────────── topic explainers ─────────────────────────────
+# data/explainers/<track-slug>.json adds a "Topic explained" section under a topic's lessons:
+# first principles, an analogy, a mind map, a worked example and a summary. Keys are topic slugs.
+# The lessons themselves are left untouched.
+
+MM_COLORS = ["#5b8cff", "#2dd4bf", "#fb923c", "#a78bfa", "#f472b6", "#a3e635", "#fbbf24", "#38bdf8"]
+
+
+def load_explainers(track_slug):
+    f = HERE / "data" / "explainers" / f"{track_slug}.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+
+
+def fmt(text):
+    """Escape, then allow **bold**, *italic* and `code` inline."""
+    s = html.escape(text, quote=False)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", s)
+    return re.sub(r"`(.+?)`", r"<code>\1</code>", s)
+
+
+def paras(text):
+    return "".join(f"<p>{fmt(p.strip())}</p>" for p in text.split("\n\n") if p.strip())
+
+
+def text_w(s, px):
+    """Rough rendered width of `s` in Geist at `px` font size (no DOM to measure with at build time)."""
+    em = 0.0
+    for ch in s:
+        em += (.66 if ch.isupper() or ch in "MW@%" else .32 if ch in " .,:;'|!il()[]/-" else .58 if ch.isdigit() else .55)
+    return em * px
+
+
+def mindmap_svg(mm):
+    """A two-sided mind map: centre idea, branches left and right, leaves fanning out."""
+    branches = mm["branches"]
+    half = (len(branches) + 1) // 2
+    sides = [(1, branches[:half]), (-1, branches[half:])]
+    ROW, GAP, LINK, TWIG = 30, 20, 44, 28
+    bw = lambda b: text_w(b["label"], 14) * 1.12 + 30             # branch pill (bold text + padding)
+    lw = lambda b: max((text_w(c, 13) for c in b.get("children", [])), default=0) + 16
+
+    def block_h(b):
+        return max(1, len(b.get("children", []))) * ROW
+
+    def side_h(bs):
+        return sum(block_h(b) for b in bs) + GAP * max(0, len(bs) - 1)
+
+    def reach(bs):  # how far this side extends from the centre pill's edge
+        return max((LINK + bw(b) + TWIG + lw(b) for b in bs), default=0)
+
+    H = max(side_h(bs) for _, bs in sides) + 40
+    cw = text_w(mm["center"], 15) * 1.08 + 44
+    pad = 12
+    cx = pad + reach(sides[1][1]) + cw / 2
+    W, cy = cx + cw / 2 + reach(sides[0][1]) + pad, H / 2
+    parts = []
+    color_i = 0
+    for sgn, bs in sides:
+        y = cy - side_h(bs) / 2
+        for b in bs:
+            col = MM_COLORS[color_i % len(MM_COLORS)]
+            color_i += 1
+            bh = block_h(b)
+            by = y + bh / 2
+            x0 = cx + sgn * cw / 2
+            near = x0 + sgn * LINK                   # branch edge facing the centre
+            far = near + sgn * bw(b)                 # branch edge facing the leaves
+            parts.append(f'<path class="mm-link" style="stroke:{col}" d="M{x0:.0f},{cy:.0f} C{x0 + sgn * 26:.0f},{cy:.0f} {near - sgn * 26:.0f},{by:.0f} {near:.0f},{by:.0f}"/>')
+            parts.append(f'<rect class="mm-branch" style="stroke:{col};fill:{col}" x="{min(near, far):.0f}" y="{by - 15:.0f}" width="{bw(b):.0f}" height="30" rx="15"/>')
+            parts.append(f'<text class="mm-btext" x="{(near + far) / 2:.0f}" y="{by + 4.5:.0f}" text-anchor="middle">{html.escape(b["label"])}</text>')
+            for k, c in enumerate(b.get("children", [])):
+                ly = y + ROW * k + ROW / 2
+                lx = far + sgn * TWIG
+                parts.append(f'<path class="mm-link thin" style="stroke:{col}" d="M{far:.0f},{by:.0f} C{far + sgn * 14:.0f},{by:.0f} {lx - sgn * 14:.0f},{ly:.0f} {lx:.0f},{ly:.0f}"/>')
+                parts.append(f'<circle style="fill:{col}" cx="{lx:.0f}" cy="{ly:.0f}" r="3.5"/>')
+                anchor = "start" if sgn > 0 else "end"
+                parts.append(f'<text class="mm-ltext" x="{lx + sgn * 9:.0f}" y="{ly + 4.5:.0f}" text-anchor="{anchor}">{html.escape(c)}</text>')
+            y += bh + GAP
+    parts.append(f'<rect class="mm-center" x="{cx - cw / 2:.0f}" y="{cy - 22:.0f}" width="{cw:.0f}" height="44" rx="22"/>')
+    parts.append(f'<text class="mm-ctext" x="{cx:.0f}" y="{cy + 5.5:.0f}" text-anchor="middle">{html.escape(mm["center"])}</text>')
+    outline = "".join(f'<li><b>{html.escape(b["label"])}</b>: {html.escape(", ".join(b.get("children", [])))}</li>' for b in branches)
+    return (f'<div class="mm-wrap" data-mm-zoom tabindex="0" role="button" aria-label="Open mind map full size"><span class="mm-hint" aria-hidden="true"></span>'
+            f'<svg class="mm-svg" viewBox="0 0 {W:.0f} {H:.0f}" style="--mm-w:{W:.0f}px" role="img" aria-label="Mind map of {html.escape(mm["center"])}">{"".join(parts)}</svg></div>'
+            f'<details class="mm-outline"><summary>Read the map as a list</summary><ul>{outline}</ul></details>')
+
+
+def side_explain(root, track, topic):
+    """Lesson sidebar link to the topic's explainer (empty when the topic has none)."""
+    if not topic.get("explain"):
+        return ""
+    return (f'\n        <a class="side-explain" href="{root}{track["slug"]}/{topic["slug"]}/index.html#explained">'
+            f'{ICON["brain"]}Topic explained: first principles, analogy, mind map</a>')
+
+
+def explainer_html(topic):
+    """The "Topic explained" section appended under a topic's lesson list."""
+    x = topic["explain"]
+    fp, an, ex = x["first_principles"], x["analogy"], x["example"]
+    li = lambda items: "".join(f"<li>{fmt(t)}</li>" for t in items)
+    mapping = "".join(f"<tr><td>{fmt(a)}</td><td>{fmt(b)}</td></tr>" for a, b in an["mapping"])
+    flow = ""
+    if ex.get("flow"):
+        flow = '<div class="cx-flow">' + f'<span class="cx-flow-arrow" aria-hidden="true">{ICON["right"]}</span>'.join(
+            f'<span class="cx-flow-node"><em>{i:02d}</em>{fmt(n)}</span>' for i, n in enumerate(ex["flow"], 1)) + "</div>"
+    steps = "".join(f'<li><b>{fmt(s["label"])}</b><span>{fmt(s["detail"])}</span></li>' for s in ex["steps"])
+    lang = lambda c: f'<span class="cx-code-lang">{html.escape(c["lang"])}</span>' if c.get("lang") else ""
+    codes = "".join(f'<div class="codehilite cx-code">{lang(c)}<pre><code>{html.escape(c["text"])}</code></pre></div>'
+                    for c in ex.get("code", []))
+    outcome = f'<blockquote><p><strong>What you would see:</strong> {fmt(ex["outcome"])}</p></blockquote>' if ex.get("outcome") else ""
+    checks = "".join(f'<details class="cx-check"><summary>{fmt(q["q"])}</summary><div>{paras(q["a"])}</div></details>' for q in x.get("check", []))
+    secs = [
+        ("first-principles", "First principles", f"""
+<h4>The problem, before any tools existed</h4>{paras(fp["problem"])}
+<h4>Ground truths we can't argue with</h4><ul>{li(fp["truths"])}</ul>
+<h4>Build the solution up from those truths</h4><ol class="cx-derive">{li(fp["derivation"])}</ol>"""),
+        ("analogy", "Analogy", f"""
+<div class="cx-analogy"><p class="mono-label">{fmt(an["title"])}</p>{paras(an["story"])}</div>
+<div class="table-wrapper"><table><thead><tr><th>In the analogy</th><th>In the real system</th></tr></thead><tbody>{mapping}</tbody></table></div>
+<p class="cx-breaks"><strong>Where the analogy breaks:</strong> {fmt(an["breaks"])}</p>"""),
+        ("mind-map", "Mind map", mindmap_svg(x["mindmap"])),
+        ("example", "Worked example", f"""
+<h4>{fmt(ex["title"])}</h4>{paras(ex["scenario"])}{flow}<ol class="cx-steps">{steps}</ol>{codes}{outcome}"""),
+        ("summary", "Summary: the core of it", f"""
+<p class="cx-core">{fmt(x["core"])}</p><ul>{li(x["summary"]["points"])}</ul>
+{f'<h4>Check yourself</h4>{checks}' if checks else ''}"""),
+    ]
+    nav = "".join(f'<a href="#x-{sid}"><em>{i:02d}</em>{t}</a>' for i, (sid, t, _) in enumerate(secs, 1))
+    body = "".join(f'<section class="cx-sec" id="x-{sid}"><h3><span class="cx-num">{i:02d}</span>{t}</h3>{inner}</section>'
+                   for i, (sid, t, inner) in enumerate(secs, 1))
+    return f"""
+  <section class="cx-explain" id="explained" aria-labelledby="explained-h">
+  <div class="cx-head">
+    <p class="mono-label">Topic explained · from first principles</p>
+    <h2 id="explained-h">The core of {topic['title']}</h2>
+    <p class="cx-lede">{fmt(x["core"])}</p>
+    <nav class="cx-nav" aria-label="Explainer sections">{nav}</nav>
+  </div>
+  <div class="prose">{body}</div>
+</section>"""
+
+
 def render_topic(track, ti, topic):
     root = "../../"
     pre = f"{track['slug']}/{topic['slug']}/"
@@ -757,7 +902,7 @@ def render_topic(track, ti, topic):
         f"Topic {ti + 1} of {len(track['topics'])}", topic['title'],
         f"{len(topic['lessons'])} lessons · {fmt_minutes(sum(l['minutes'] for l in topic['lessons']))}", actions)}
 <section class="wrap narrow section">
-  <ol class="lesson-list big">{lesson_rows(root, track, topic)}</ol>
+  <ol class="lesson-list big">{lesson_rows(root, track, topic)}</ol>{explainer_html(topic) if topic.get("explain") else ""}
   {nav}
 </section>
 </main>"""
@@ -810,7 +955,7 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
       <div class="side-topic">
         <p class="mono-label">Topic {ti + 1} / {len(track['topics'])}</p>
         <a class="side-topic-title" href="{root}{track['slug']}/{topic['slug']}/index.html">{topic['title']}</a>
-        {progress(f"{track['slug']}/{topic['slug']}/", len(topic['lessons']))}
+        {progress(f"{track['slug']}/{topic['slug']}/", len(topic['lessons']))}{side_explain(root, track, topic)}
       </div>
       <ol class="lesson-list side">{lesson_rows(root, track, topic, lesson)}</ol>
       <details class="side-more"><summary>All topics in this track {ICON['chev']}</summary><ol>{other_topics}</ol></details>
