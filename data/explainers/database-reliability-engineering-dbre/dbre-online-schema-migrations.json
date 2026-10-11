@@ -1,0 +1,849 @@
+{
+  "introduction-the-alter-table-nightmare": {
+    "core": "A plain ALTER TABLE on a huge MySQL table locks it, copies every row and swaps it in, which can mean hours of downtime. Online migration tools instead build the new table beside the old one while traffic continues.",
+    "first_principles": {
+      "problem": "Adding a column to a 500 GB users table with plain `ALTER TABLE` locks the table, copies 100 M rows (about 4 hours), swaps and unlocks. For those hours nobody can sign up or log in. The duration is unpredictable and you can't safely abort halfway.",
+      "truths": [
+        "Copying a table takes time proportional to its size.",
+        "An exclusive lock blocks every write while it's held.",
+        "A rename is instant."
+      ],
+      "derivation": [
+        "Don't change the table in place.",
+        "**Build a new version alongside** it, copying in small chunks.",
+        "**Keep it in sync** with live writes.",
+        "**Swap atomically** with a rename at the end."
+      ]
+    },
+    "analogy": {
+      "title": "Renovating a kitchen that never closes",
+      "story": "You can't shut the restaurant, so you build a new kitchen next door while the old one keeps cooking, then switch the doors overnight.",
+      "mapping": [
+        [
+          "Old kitchen still cooking",
+          "Original table serving traffic"
+        ],
+        [
+          "New kitchen next door",
+          "Shadow / ghost table"
+        ],
+        [
+          "Switching the doors",
+          "Atomic rename"
+        ],
+        [
+          "Closing the restaurant",
+          "Locking ALTER TABLE"
+        ]
+      ],
+      "breaks": "Building next door doesn't slow down the old kitchen. The copy and sync do add load to the live database, so they must be throttled."
+    },
+    "mindmap": {
+      "center": "The ALTER TABLE Problem",
+      "branches": [
+        {
+          "label": "Plain ALTER (MySQL)",
+          "children": [
+            "Global lock",
+            "Rebuild & copy",
+            "Swap, unlock"
+          ]
+        },
+        {
+          "label": "Impact",
+          "children": [
+            "Hours of downtime",
+            "Unpredictable",
+            "Hard to abort"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Shadow table",
+            "Sync writes",
+            "Atomic swap"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "gh-ost",
+            "pt-online-schema-change"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adding preferred_language to 500 GB of users",
+      "scenario": "The naive way versus the online way.",
+      "flow": [
+        "Naive: lock 4 h",
+        "Online: copy in background",
+        "Sync live writes",
+        "Rename in ms"
+      ],
+      "steps": [
+        {
+          "label": "Naive",
+          "detail": "4+ hours of failed sign-ups and logins."
+        },
+        {
+          "label": "Online",
+          "detail": "A ghost table is built in the background for hours while the site works normally."
+        },
+        {
+          "label": "Cutover",
+          "detail": "A sub-second swap when the ghost has caught up."
+        }
+      ],
+      "code": [],
+      "outcome": "the same schema change with no outage."
+    },
+    "summary": {
+      "points": [
+        "Plain ALTER on huge tables = downtime.",
+        "Build beside, sync, swap.",
+        "Name gh-ost or pt-osc in interviews."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's wrong with 'schedule a maintenance window' as the answer?",
+        "a": "It accepts hours of downtime that online tools avoid, and the duration is unpredictable."
+      }
+    ]
+  },
+  "the-shadow-table-strategy-the-ghost": {
+    "core": "Every online migration tool follows the same five steps: create a ghost table with the new schema, backfill in chunks, sync ongoing writes, atomically rename, then drop the old one.",
+    "first_principles": {
+      "problem": "We need to change a table's shape without locking it, so we need a repeatable recipe that keeps data correct while users keep writing.",
+      "truths": [
+        "Copying in small chunks avoids saturating I/O.",
+        "Rows change while you copy them.",
+        "Swapping names is atomic and instant."
+      ],
+      "derivation": [
+        "**Create ghost**: an empty table with the new schema.",
+        "**Backfill**: copy existing rows in chunks (e.g. 1,000) to limit load.",
+        "**Sync**: apply concurrent INSERT, UPDATE and DELETE to the ghost. This is the hard part.",
+        "**Cutover**: `users` → `users_old`, `_users_gho` → `users`, atomically.",
+        "**Cleanup**: drop the old table later."
+      ]
+    },
+    "analogy": {
+      "title": "Moving house while still living there",
+      "story": "You set up the new house (ghost), move boxes over a few at a time (backfill), forward any new mail and purchases to the new address (sync), then hand over the keys in one moment (cutover) and clear the old place (cleanup).",
+      "mapping": [
+        [
+          "New house",
+          "Ghost table"
+        ],
+        [
+          "Moving boxes gradually",
+          "Chunked backfill"
+        ],
+        [
+          "Forwarding new mail",
+          "Sync live writes"
+        ],
+        [
+          "Handing over keys",
+          "Atomic rename"
+        ],
+        [
+          "Clearing the old place",
+          "Drop old table"
+        ]
+      ],
+      "breaks": "Mail forwarding is reliable. Sync is where tools differ, triggers vs binlog, and that choice changes load and controllability."
+    },
+    "mindmap": {
+      "center": "Shadow Table",
+      "branches": [
+        {
+          "label": "1 Create",
+          "children": [
+            "Ghost with new schema"
+          ]
+        },
+        {
+          "label": "2 Backfill",
+          "children": [
+            "Chunks of ~1,000",
+            "Limit I/O"
+          ]
+        },
+        {
+          "label": "3 Sync",
+          "children": [
+            "Capture live writes",
+            "Triggers or binlog"
+          ]
+        },
+        {
+          "label": "4 Cutover",
+          "children": [
+            "Atomic RENAME"
+          ]
+        },
+        {
+          "label": "5 Cleanup",
+          "children": [
+            "Drop old table"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A row that changes mid-copy",
+      "scenario": "Row 50,000 is copied at 10:00 and then updated by a user at 10:05.",
+      "flow": [
+        "10:00 row copied",
+        "10:05 user updates row",
+        "Sync applies update",
+        "Ghost row correct"
+      ],
+      "steps": [
+        {
+          "label": "Without sync",
+          "detail": "The ghost keeps the 10:00 value and the update would be lost at cutover."
+        },
+        {
+          "label": "With sync",
+          "detail": "The 10:05 change is replayed onto the ghost."
+        },
+        {
+          "label": "Cutover",
+          "detail": "Both tables agree, then the swap happens."
+        }
+      ],
+      "code": [],
+      "outcome": "you see why the sync step decides whether the migration is correct."
+    },
+    "summary": {
+      "points": [
+        "Five steps: create, backfill, sync, cutover, cleanup.",
+        "Chunking protects production.",
+        "Sync is the hard part."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why backfill in chunks instead of one big INSERT … SELECT?",
+        "a": "One huge statement would saturate I/O, hold locks or snapshots for hours, and cause replication lag. Chunks keep load bounded and pausable."
+      }
+    ]
+  },
+  "approach-1-trigger-based-sync-pt-online-schema-change": {
+    "core": "pt-online-schema-change keeps the ghost in sync with AFTER INSERT/UPDATE/DELETE triggers that mirror each write inside the same transaction. It's always consistent, but it doubles write work and can't be paused.",
+    "first_principles": {
+      "problem": "During backfill, users keep writing. We need every change mirrored to the ghost table, ideally with no external process to run or monitor.",
+      "truths": [
+        "Triggers run automatically inside the writing transaction.",
+        "Anything inside the transaction adds to its cost and lock time.",
+        "A trigger fires on every write, whatever the server load."
+      ],
+      "derivation": [
+        "Create **AFTER INSERT/UPDATE/DELETE triggers** on the original table.",
+        "Each trigger writes the same change to the ghost (`REPLACE INTO`) **in the same transaction**, so there's no lag and it's always consistent.",
+        "Pay **write amplification**: every user write becomes two, plus extra row locks.",
+        "Accept you **can't pause** triggers when the server struggles."
+      ]
+    },
+    "analogy": {
+      "title": "A carbon-copy receipt book",
+      "story": "Every receipt you write automatically produces a copy underneath. The copy is always identical and nothing gets missed, but every receipt takes more pressure to write, and you can't stop the copy being made when you're rushed.",
+      "mapping": [
+        [
+          "Carbon copy",
+          "Trigger writing to ghost"
+        ],
+        [
+          "Always identical",
+          "Same-transaction consistency"
+        ],
+        [
+          "More pressure per receipt",
+          "Write amplification"
+        ],
+        [
+          "Can't stop the copy",
+          "Can't pause triggers"
+        ]
+      ],
+      "breaks": "Carbon paper doesn't lock the receipt book. Triggers take row locks, so on hot tables they increase contention and latency for every user."
+    },
+    "mindmap": {
+      "center": "pt-osc (Triggers)",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "AFTER I/U/D triggers",
+            "REPLACE INTO ghost",
+            "Same transaction"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Always consistent",
+            "No external stream",
+            "No binlog needed"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "2× writes",
+            "More lock contention",
+            "Can't pause"
+          ]
+        },
+        {
+          "label": "Danger",
+          "children": [
+            "Already-busy DB tips over"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A database already at 85% CPU",
+      "scenario": "5,000 writes/s on the table being migrated.",
+      "flow": [
+        "Install triggers",
+        "5,000 → 10,000 writes/s",
+        "CPU saturates",
+        "Latency spikes"
+      ],
+      "steps": [
+        {
+          "label": "Doubling",
+          "detail": "Every write now also writes the ghost, doubling the write workload."
+        },
+        {
+          "label": "Locks",
+          "detail": "Trigger writes hold row locks longer, so contention rises."
+        },
+        {
+          "label": "Lesson",
+          "detail": "On write-heavy, busy databases prefer binlog-based tools."
+        }
+      ],
+      "code": [],
+      "outcome": "you can predict when trigger-based migration is safe (moderate write load) and when it isn't."
+    },
+    "summary": {
+      "points": [
+        "Triggers mirror writes synchronously.",
+        "Consistent but heavy.",
+        "Can't throttle or pause."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is pt-osc still a reasonable choice?",
+        "a": "When write load is moderate, or when binary logging (ROW format) isn't available for a binlog-based tool."
+      }
+    ]
+  },
+  "approach-2-binlog-based-sync-gh-ost": {
+    "core": "gh-ost pretends to be a replica, reads row changes from MySQL's binlog, and applies them to the ghost asynchronously. No triggers means no extra work in user transactions, and it can throttle or pause itself based on server health.",
+    "first_principles": {
+      "problem": "Trigger-based sync puts extra work inside every user write and can't back off when the server struggles. We want sync that's outside the user's transaction and controllable.",
+      "truths": [
+        "MySQL already records every committed row change in the binlog.",
+        "Replicas consume that log asynchronously.",
+        "Asynchronous work can be paused without affecting the writer."
+      ],
+      "derivation": [
+        "Connect as a **fake replica** and stream binlog events (requires `binlog_format=ROW`, replication privileges).",
+        "Translate each event on the original table into a write on the **ghost**.",
+        "Do it **asynchronously**, so user writes run at full speed.",
+        "**Throttle** on replica lag, CPU, thread counts or a flag file, and **pause/resume** at will.",
+        "Test safely with `--test-on-replica`, and accept a tiny lag that the cutover must drain."
+      ]
+    },
+    "analogy": {
+      "title": "A stenographer listening in",
+      "story": "Instead of every speaker having to write on two notepads, a stenographer in the corner listens and transcribes everything into the new record. If the room gets too noisy, the stenographer pauses and catches up later, and the speakers never notice.",
+      "mapping": [
+        [
+          "Stenographer",
+          "gh-ost"
+        ],
+        [
+          "Listening to the room",
+          "Reading the binlog"
+        ],
+        [
+          "Transcribing into new record",
+          "Applying events to ghost"
+        ],
+        [
+          "Pausing when noisy",
+          "Throttling on lag / load"
+        ]
+      ],
+      "breaks": "A stenographer can be slightly behind forever. At cutover gh-ost must catch up completely, which needs a brief write lock."
+    },
+    "mindmap": {
+      "center": "gh-ost (Binlog)",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "Fake replica",
+            "Parse binlog",
+            "Apply to ghost"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "No triggers",
+            "Async",
+            "Self-throttling",
+            "Pause / test on replica"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "log_bin=ON",
+            "binlog_format=ROW",
+            "Replication privileges"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Small lag",
+            "Brief cutover pause"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Migrating during traffic peaks",
+      "scenario": "Replica lag climbs to 3 s during a sale while gh-ost is copying.",
+      "flow": [
+        "Lag > --max-lag-millis",
+        "gh-ost pauses backfill",
+        "App writes unaffected",
+        "Lag recovers",
+        "gh-ost resumes"
+      ],
+      "steps": [
+        {
+          "label": "Threshold",
+          "detail": "`--max-lag-millis=1500` tells gh-ost to back off above 1.5 s of lag."
+        },
+        {
+          "label": "Pause",
+          "detail": "Copying stops while users write at full speed."
+        },
+        {
+          "label": "Resume",
+          "detail": "When lag falls, copying continues from where it stopped."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "gh-ost --host=replica-1 --database=app --table=users \\\n  --alter=\"ADD COLUMN preferred_language VARCHAR(50)\" \\\n  --max-lag-millis=1500 --chunk-size=1000 --execute"
+        }
+      ],
+      "outcome": "the migration bends around production load instead of fighting it."
+    },
+    "summary": {
+      "points": [
+        "Binlog streaming instead of triggers.",
+        "Async means it can throttle and pause.",
+        "Needs ROW binlogs and replication privileges."
+      ]
+    },
+    "check": [
+      {
+        "q": "Key difference between pt-osc and gh-ost?",
+        "a": "Where sync happens: pt-osc uses triggers inside the user transaction (synchronous). gh-ost uses binlog streaming outside it (asynchronous, throttleable)."
+      }
+    ]
+  },
+  "the-cutover-the-moment-of-truth": {
+    "core": "At cutover gh-ost briefly locks the original table, drains the last binlog events into the ghost, renames both tables atomically, and unlocks. Users see a short latency blip, lose no writes, and the lock lasts as long as the binlog lag, not as long as the table size.",
+    "first_principles": {
+      "problem": "Because gh-ost syncs asynchronously, the ghost is always a few hundred milliseconds behind. Renaming immediately would lose those last writes. We need to stop writes just long enough to catch up, then swap.",
+      "truths": [
+        "Multi-table RENAME in MySQL is atomic.",
+        "Queued writes wait rather than fail while a lock is held.",
+        "The remaining work at cutover equals the current lag."
+      ],
+      "derivation": [
+        "**Lock** the original table for writes. Application writes queue.",
+        "**Drain** the remaining binlog events into the ghost (milliseconds).",
+        "**Rename** both tables atomically: `users → users_old`, `_users_gho → users`.",
+        "**Unlock**: queued writes run against the new table.",
+        "Optionally **postpone** cutover with a flag file to pick the moment."
+      ]
+    },
+    "analogy": {
+      "title": "Switching trains at a station",
+      "story": "Passengers are briefly held at the platform gate while the last carriage is coupled to the new train. Then the gate opens onto the new train. They wait a moment but nobody is left behind.",
+      "mapping": [
+        [
+          "Holding the gate",
+          "LOCK TABLES … WRITE"
+        ],
+        [
+          "Coupling the last carriage",
+          "Draining binlog events"
+        ],
+        [
+          "Gate opens onto the new train",
+          "Atomic RENAME + unlock"
+        ],
+        [
+          "Choosing departure time",
+          "Postpone cut-over flag"
+        ]
+      ],
+      "breaks": "Train coupling takes the same time for a long or short train. Cutover is also size-independent, but it grows with replication lag, so cut over when lag is low."
+    },
+    "mindmap": {
+      "center": "Cutover",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Lock writes",
+            "Drain binlog",
+            "Atomic rename",
+            "Unlock"
+          ]
+        },
+        {
+          "label": "User impact",
+          "children": [
+            "200–500 ms blip",
+            "No errors, no loss"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "--postpone-cut-over-flag-file",
+            "Off-peak timing"
+          ]
+        },
+        {
+          "label": "Insight",
+          "children": [
+            "Lock ∝ binlog lag",
+            "Not table size"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 2 TB table cut over at 3 a.m.",
+      "scenario": "The backfill finished at 4 p.m., and a flag file postponed the cutover.",
+      "flow": [
+        "Backfill done 4 p.m.",
+        "Wait (flag file)",
+        "3 a.m. delete flag",
+        "Lock + drain ~50 ms",
+        "Rename, unlock"
+      ],
+      "steps": [
+        {
+          "label": "Wait",
+          "detail": "gh-ost keeps syncing and stays ready."
+        },
+        {
+          "label": "Trigger",
+          "detail": "Deleting the flag file starts the cutover in the quiet window."
+        },
+        {
+          "label": "Duration",
+          "detail": "About 50 ms of lag means about a 50 ms lock, regardless of 2 TB size."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "gh-ost ... --postpone-cut-over-flag-file=/tmp/ghost.postpone --execute\n# later, when ready:\nrm /tmp/ghost.postpone"
+        }
+      ],
+      "outcome": "a predictable, near-invisible swap at a time you choose."
+    },
+    "summary": {
+      "points": [
+        "Lock, drain, rename, unlock.",
+        "No lost writes, just a brief wait.",
+        "Cutover time depends on lag, not size."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is gh-ost's cutover time independent of table size?",
+        "a": "The work left at cutover is only the unapplied binlog events (the lag). The data copy already happened in the background."
+      }
+    ]
+  },
+  "schema-migration-compatibility-what-your-application-must-handle": {
+    "core": "During a rolling deploy, old and new app code run against the same schema, so every schema change must work for both. Additive changes are safe. Drops, renames and new NOT NULL columns need expand → migrate → contract.",
+    "first_principles": {
+      "problem": "Migration tools handle the database side, but your 20 app servers don't update at the same instant. For a while some run old code and some new. A column dropped or renamed too early makes the old servers fail immediately.",
+      "truths": [
+        "Rolling deploys mean mixed code versions for a while.",
+        "Old code ignores columns it doesn't know.",
+        "Old code fails on columns that disappear or become required."
+      ],
+      "derivation": [
+        "Classify the change: **backward-compatible** (add nullable or defaulted column, add index, widen VARCHAR) or **incompatible** (drop, rename, NOT NULL without default, narrow a type).",
+        "Ship compatible changes freely.",
+        "For incompatible ones use **expand → migrate → contract**: add new, dual-write, backfill, switch reads, drop old later.",
+        "Make each step independently deployable and **rollback-able**."
+      ]
+    },
+    "analogy": {
+      "title": "Changing a form at a busy office",
+      "story": "Adding an optional box to a form is fine: old staff ignore it. Removing a box that old staff still fill in, or making a new box mandatory before they know about it, causes every one of their submissions to be rejected. So you add the new box first, train everyone, then remove the old one.",
+      "mapping": [
+        [
+          "Optional new box",
+          "Nullable / defaulted column"
+        ],
+        [
+          "Removing a box in use",
+          "Dropping a column"
+        ],
+        [
+          "New mandatory box",
+          "NOT NULL without default"
+        ],
+        [
+          "Add, train, then remove",
+          "Expand → migrate → contract"
+        ]
+      ],
+      "breaks": "Staff get retrained once. In software, every rollback can bring old code back, so the old schema shape must keep working until you're sure."
+    },
+    "mindmap": {
+      "center": "App Compatibility",
+      "branches": [
+        {
+          "label": "Window",
+          "children": [
+            "Rolling deploy",
+            "Old + new code"
+          ]
+        },
+        {
+          "label": "Safe",
+          "children": [
+            "Add nullable column",
+            "Add default",
+            "Add index",
+            "Widen VARCHAR"
+          ]
+        },
+        {
+          "label": "Dangerous",
+          "children": [
+            "Drop",
+            "Rename",
+            "NOT NULL no default",
+            "Narrow type"
+          ]
+        },
+        {
+          "label": "Expand-contract",
+          "children": [
+            "Add + dual-write",
+            "Backfill",
+            "Read new, drop old"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Renaming fullname → display_name",
+      "scenario": "20 servers are deployed one by one.",
+      "flow": [
+        "Add display_name",
+        "Write both",
+        "Backfill",
+        "Read display_name",
+        "Drop fullname later"
+      ],
+      "steps": [
+        {
+          "label": "Expand",
+          "detail": "Add a nullable `display_name`. Deploy code writing both columns."
+        },
+        {
+          "label": "Migrate",
+          "detail": "Backfill `display_name` from `fullname` in batches."
+        },
+        {
+          "label": "Contract",
+          "detail": "Deploy reads from `display_name`, then drop `fullname` in a later release."
+        }
+      ],
+      "code": [],
+      "outcome": "no server ever sees a schema it can't handle, and each step can be rolled back."
+    },
+    "summary": {
+      "points": [
+        "Assume old and new code coexist.",
+        "Additive is safe, destructive needs sequencing.",
+        "Expand → migrate → contract."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is adding a NOT NULL column without default dangerous?",
+        "a": "Old code inserting rows doesn't supply the column, so every insert violates the constraint and fails."
+      }
+    ]
+  },
+  "online-schema-migrations-in-postgresql": {
+    "core": "Postgres can do many schema changes instantly (nullable columns, defaults since v11). For the rest, use CREATE INDEX CONCURRENTLY, NOT VALID + VALIDATE constraints, or tools like pgroll that automate expand–contract.",
+    "first_principles": {
+      "problem": "Postgres isn't MySQL: some ALTERs are instant and others still lock or rewrite the table. You need to know which is which, and the Postgres-native ways around the dangerous ones.",
+      "truths": [
+        "Metadata-only changes are instant.",
+        "Rewrites and full validations take time and locks.",
+        "Validation can be separated from enforcement on new rows."
+      ],
+      "derivation": [
+        "Know the **instant** ones: add a nullable column, add a column with a default (PG 11+), some type changes.",
+        "Know the **dangerous** ones: rewriting type changes, adding NOT NULL to existing data, validating constraints across all rows.",
+        "Build indexes with **CREATE INDEX CONCURRENTLY**: slower (two passes) but never blocks writes.",
+        "Add NOT NULL safely: nullable column, backfill, `CHECK … NOT VALID` (instant), then **VALIDATE CONSTRAINT** (weaker lock).",
+        "For complex changes, let **pgroll** (or pg-osc) run expand–contract with views and triggers."
+      ]
+    },
+    "analogy": {
+      "title": "Upgrading a house's rules",
+      "story": "Some changes are just a new sign on the door (instant). Others mean inspecting every room (validation). Postgres lets you put up the rule for new guests immediately (NOT VALID) and inspect the existing rooms later without closing the house (VALIDATE).",
+      "mapping": [
+        [
+          "New sign on the door",
+          "Metadata-only ALTER"
+        ],
+        [
+          "Inspecting every room",
+          "Full validation scan"
+        ],
+        [
+          "Rule for new guests now",
+          "CHECK … NOT VALID"
+        ],
+        [
+          "Inspecting later, house open",
+          "VALIDATE CONSTRAINT"
+        ],
+        [
+          "Building an extension without closing",
+          "CREATE INDEX CONCURRENTLY"
+        ]
+      ],
+      "breaks": "A building inspector doesn't fail halfway. CREATE INDEX CONCURRENTLY can fail and leave an INVALID index you must drop and retry."
+    },
+    "mindmap": {
+      "center": "Postgres Migrations",
+      "branches": [
+        {
+          "label": "Instant",
+          "children": [
+            "Nullable column",
+            "Default (PG 11+)"
+          ]
+        },
+        {
+          "label": "Locking",
+          "children": [
+            "Rewriting type change",
+            "NOT NULL on existing",
+            "Full validation"
+          ]
+        },
+        {
+          "label": "Indexes",
+          "children": [
+            "CREATE INDEX CONCURRENTLY",
+            "2× time, no write block"
+          ]
+        },
+        {
+          "label": "Constraints",
+          "children": [
+            "NOT VALID",
+            "VALIDATE separately"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "pgroll",
+            "pg-osc"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adding a required column safely",
+      "scenario": "`orders` needs a non-null `channel` column. The table has 300 M rows.",
+      "flow": [
+        "ADD COLUMN nullable",
+        "Backfill in batches",
+        "CHECK NOT VALID",
+        "VALIDATE CONSTRAINT",
+        "Index CONCURRENTLY"
+      ],
+      "steps": [
+        {
+          "label": "Add",
+          "detail": "Nullable column, instant."
+        },
+        {
+          "label": "Backfill",
+          "detail": "Batched UPDATEs, watching replication lag."
+        },
+        {
+          "label": "Enforce",
+          "detail": "`CHECK (channel IS NOT NULL) NOT VALID` is instant and applies to new rows."
+        },
+        {
+          "label": "Validate",
+          "detail": "`VALIDATE CONSTRAINT` scans existing rows without blocking writes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SET lock_timeout = '3s';\nALTER TABLE orders ADD COLUMN channel text;\n-- backfill in batches ...\nALTER TABLE orders ADD CONSTRAINT channel_nn CHECK (channel IS NOT NULL) NOT VALID;\nALTER TABLE orders VALIDATE CONSTRAINT channel_nn;\nCREATE INDEX CONCURRENTLY orders_channel_idx ON orders (channel);"
+        }
+      ],
+      "outcome": "a required, indexed column on a 300 M-row table with no blocking."
+    },
+    "summary": {
+      "points": [
+        "Know which ALTERs are instant.",
+        "CONCURRENTLY for indexes.",
+        "NOT VALID + VALIDATE for constraints."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does CREATE INDEX CONCURRENTLY take about twice as long?",
+        "a": "It builds the index, then makes another pass to catch rows changed during the build, then validates, all without blocking writes."
+      }
+    ]
+  }
+}

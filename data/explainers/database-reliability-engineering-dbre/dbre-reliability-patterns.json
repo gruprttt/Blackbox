@@ -1,0 +1,603 @@
+{
+  "introduction-defensive-driving-for-databases": {
+    "core": "The database is the shared power station of your system: when it fails everything fails. Reliability patterns protect it from the clients around it, and anti-patterns are shortcuts that only break at scale.",
+    "first_principles": {
+      "problem": "Web servers and microservices can fail and be replaced individually, but they all depend on one database. Applications often ignore its limits: they retry endlessly, run unbounded scans, and use it for jobs it wasn't built for. Any one of those can turn into a full outage.",
+      "truths": [
+        "A shared dependency turns local problems into global ones.",
+        "Applications don't naturally limit the load they create.",
+        "Many dangerous designs only show up at scale."
+      ],
+      "derivation": [
+        "Treat the database as a **protected resource**, not an infinite one.",
+        "Apply **patterns**: limit concurrency, cut off failing traffic, cancel abandoned work.",
+        "Spot **anti-patterns** early, before they become 3 a.m. incidents."
+      ]
+    },
+    "analogy": {
+      "title": "A city's power station",
+      "story": "Buildings have generators and can share load with neighbours, but if the central station goes down, the whole city goes dark. You protect it with breakers, load shedding and rules about who can draw how much.",
+      "mapping": [
+        [
+          "Buildings",
+          "App servers / services"
+        ],
+        [
+          "Central power station",
+          "Database"
+        ],
+        [
+          "Breakers & load shedding",
+          "Reliability patterns"
+        ],
+        [
+          "Illegal wiring that works until it doesn't",
+          "Anti-patterns"
+        ]
+      ],
+      "breaks": "Power stations have regulators. Databases rely on engineers adding these protections explicitly, because none come by default."
+    },
+    "mindmap": {
+      "center": "Defensive Databases",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Shared dependency",
+            "Single blast radius"
+          ]
+        },
+        {
+          "label": "Threats",
+          "children": [
+            "Endless retries",
+            "Unbounded scans",
+            "Misused workloads"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Circuit breaking",
+            "Deadlines",
+            "Admission control"
+          ]
+        },
+        {
+          "label": "Anti-patterns",
+          "children": [
+            "Queue in DB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One service takes down everything",
+      "scenario": "A reporting service's slow query fills the shared connection pool, and login, checkout and search all fail.",
+      "flow": [
+        "Slow report query",
+        "Pool exhausted",
+        "Unrelated requests time out",
+        "Full outage"
+      ],
+      "steps": [
+        {
+          "label": "Cause",
+          "detail": "Nothing limited how much of the shared database one feature could consume."
+        },
+        {
+          "label": "Patterns",
+          "detail": "Separate pools, deadlines and breakers would have contained it to reports."
+        }
+      ],
+      "code": [],
+      "outcome": "you start designing for containment, so one bad actor can't sink the database."
+    },
+    "summary": {
+      "points": [
+        "The DB is the power station.",
+        "Protect it from clients.",
+        "Recognise anti-patterns early."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do local redundancies (more app servers) not help when the DB is overloaded?",
+        "a": "They all share the same database, so more app servers just send it more load."
+      }
+    ]
+  },
+  "the-anti-pattern-queue-in-database": {
+    "core": "Using a table as a job queue works at small scale but breaks at large scale: constant polling, heavy MVCC churn and lock bookkeeping on a hot table. Use a real broker (SQS, RabbitMQ, Kafka, Redis-based).",
+    "first_principles": {
+      "problem": "A `jobs` table with a status column and workers polling `FOR UPDATE SKIP LOCKED` is simple and transactional. With 500 workers polling every second and thousands of jobs churning through PENDING → PROCESSING → DONE, the database spends its effort on the queue instead of real queries.",
+      "truths": [
+        "Polling costs a full query even when the answer is \"nothing\".",
+        "Every UPDATE or DELETE in Postgres leaves a dead tuple.",
+        "Brokers are designed for short-lived, high-churn messages."
+      ],
+      "derivation": [
+        "Recognise three costs: **polling QPS** (500 workers = 500 queries/s of no value), **MVCC bloat** (each state change leaves dead tuples, so autovacuum struggles) and **lock overhead** on a hot table.",
+        "Move ephemeral work to a **message broker** built for it (push delivery, no MVCC, many consumers).",
+        "Keep the relational database for **durable, relational data**.",
+        "If you must use a table at small scale, use `SKIP LOCKED`, short transactions and aggressive autovacuum."
+      ]
+    },
+    "analogy": {
+      "title": "Using the company archive as a to-do inbox",
+      "story": "Every few seconds, 500 people walk to the archive room to check if there's a new task, stamp it \"in progress\", then \"done\", leaving every old version on the shelf. The archive staff spend all day tidying shelves instead of handling real requests.",
+      "mapping": [
+        [
+          "Walking to check for tasks",
+          "Polling queries"
+        ],
+        [
+          "Re-stamping and keeping old copies",
+          "UPDATE → dead tuples"
+        ],
+        [
+          "Staff tidying shelves",
+          "Autovacuum pressure"
+        ],
+        [
+          "Proper inbox system",
+          "Message broker"
+        ]
+      ],
+      "breaks": "An archive room can hire more staff. A database's vacuum and lock manager compete with the real workload on the same server."
+    },
+    "mindmap": {
+      "center": "Queue-in-DB Anti-Pattern",
+      "branches": [
+        {
+          "label": "Temptation",
+          "children": [
+            "jobs table",
+            "Reuse existing DB",
+            "Transactional"
+          ]
+        },
+        {
+          "label": "Polling",
+          "children": [
+            "Empty queries",
+            "500 workers = 500 QPS"
+          ]
+        },
+        {
+          "label": "MVCC churn",
+          "children": [
+            "Dead tuples",
+            "Vacuum pressure",
+            "Bloat"
+          ]
+        },
+        {
+          "label": "Locks",
+          "children": [
+            "Hot table",
+            "Lock bookkeeping"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "SQS / RabbitMQ / Kafka",
+            "Redis + Sidekiq / Celery"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A jobs table that grew 40× its size",
+      "scenario": "Email and image jobs at 2,000 per minute. The jobs table is 30 GB but holds 5,000 live rows.",
+      "flow": [
+        "High churn",
+        "Dead tuples pile up",
+        "Table bloats",
+        "Polling slows",
+        "Move to SQS"
+      ],
+      "steps": [
+        {
+          "label": "Diagnose",
+          "detail": "`n_dead_tup` is huge compared with `n_live_tup`, and autovacuum runs constantly on `jobs`."
+        },
+        {
+          "label": "Migrate",
+          "detail": "Producers publish to SQS and workers long-poll SQS, not Postgres."
+        },
+        {
+          "label": "Result",
+          "detail": "The DB loses thousands of polling QPS and its biggest source of bloat."
+        }
+      ],
+      "code": [],
+      "outcome": "the database goes back to serving relational queries, and the queue scales independently."
+    },
+    "summary": {
+      "points": [
+        "Polling = pure overhead.",
+        "Queue churn = MVCC bloat.",
+        "Use a broker for ephemeral work."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does MVCC make a DB queue especially costly in Postgres?",
+        "a": "Each status change creates a new row version and a dead tuple, so a high-churn queue generates constant vacuum work and bloat."
+      }
+    ]
+  },
+  "the-pattern-circuit-breaking-bad-queries": {
+    "core": "A circuit breaker watches errors and latency, and when a threshold is crossed it fails requests instantly for a while, giving the database room to recover. Then it tests with one request before reopening.",
+    "first_principles": {
+      "problem": "One slow query (5 s instead of 5 ms) makes users refresh, duplicates pile up, the connection pool fills, fast queries time out, CPU hits 100%, and the whole app goes down. Not because of the query alone, but because it ate every shared resource.",
+      "truths": [
+        "Slow failures consume resources while they wait.",
+        "Retries and refreshes multiply load during trouble.",
+        "A quiet period lets an overloaded system drain."
+      ],
+      "derivation": [
+        "**Closed**: let traffic through and measure error rate and latency.",
+        "**Open**: past a threshold (e.g. > 30% of calls slower than 2 s in 10 s), reject immediately with a fast error (503) and don't touch the DB.",
+        "**Half-open**: after a cooldown (e.g. 15 s), allow one trial request. Success closes the breaker, failure reopens it.",
+        "Prefer **failing fast** to failing slow, for users and for the database."
+      ]
+    },
+    "analogy": {
+      "title": "A household fuse box",
+      "story": "When one circuit draws too much, its breaker trips and cuts only that circuit, protecting the rest of the house. After a while you flip it back on to test. If it trips again, the fault is still there.",
+      "mapping": [
+        [
+          "Normal power",
+          "Closed"
+        ],
+        [
+          "Tripped breaker",
+          "Open: fail fast"
+        ],
+        [
+          "Flipping it back to test",
+          "Half-open trial request"
+        ],
+        [
+          "Rest of the house still powered",
+          "Other features keep working"
+        ]
+      ],
+      "breaks": "A fuse reacts to current instantly. Software breakers react to statistics over a window, so thresholds and windows must be tuned to avoid flapping."
+    },
+    "mindmap": {
+      "center": "Circuit Breaker",
+      "branches": [
+        {
+          "label": "Death spiral",
+          "children": [
+            "Slow query",
+            "Retries",
+            "Pool full",
+            "Outage"
+          ]
+        },
+        {
+          "label": "Closed",
+          "children": [
+            "Traffic flows",
+            "Monitor errors / latency"
+          ]
+        },
+        {
+          "label": "Open",
+          "children": [
+            "Reject instantly",
+            "DB drains"
+          ]
+        },
+        {
+          "label": "Half-open",
+          "children": [
+            "One trial",
+            "Close or reopen"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "App layer",
+            "Proxy (ProxySQL, Envoy)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A bad deploy with a missing index",
+      "scenario": "The order-history page query jumps to 5 s at 14:00.",
+      "flow": [
+        "Latency > 2 s for 30%",
+        "Breaker opens",
+        "Page returns 503 fast",
+        "Pool frees, DB recovers",
+        "Half-open trial",
+        "Fix deployed, closes"
+      ],
+      "steps": [
+        {
+          "label": "Trip",
+          "detail": "Within 10 s of the spike, the breaker opens for order history only."
+        },
+        {
+          "label": "Contain",
+          "detail": "Login and checkout keep their connections and stay healthy."
+        },
+        {
+          "label": "Recover",
+          "detail": "Trials keep failing until the fix ships, then the breaker closes."
+        }
+      ],
+      "code": [],
+      "outcome": "one broken page shows an error, instead of the whole site going down."
+    },
+    "summary": {
+      "points": [
+        "Fail fast beats fail slow.",
+        "Closed → open → half-open.",
+        "Contain blast radius per feature."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is an immediate 503 better than a 30 s timeout?",
+        "a": "The user gets a quick answer, and the request doesn't hold a connection or CPU while the database is struggling."
+      }
+    ]
+  },
+  "the-pattern-deadline-propagation": {
+    "core": "Pass the original request's absolute deadline down every hop, and set each database query's timeout to the time left, so the database stops working the moment nobody is waiting for the answer.",
+    "first_principles": {
+      "problem": "User → Service A (2 s timeout) → Service B (10 s) → DB (8 s query). At 2 s, A gives up and the user sees an error, but B and the database keep working until 8 s on a result nobody will ever read. Multiply that by thousands and these zombie queries crowd out live ones.",
+      "truths": [
+        "Timeouts set independently per layer don't agree.",
+        "Work completed after the caller has gone is pure waste.",
+        "Databases can cancel a query after a time limit."
+      ],
+      "derivation": [
+        "Record an **absolute deadline** when the request enters (now + 5 s).",
+        "**Pass it along** every hop (an HTTP header or gRPC context).",
+        "Each service computes **remaining = deadline − now** and gives up early if it's ≤ 0.",
+        "Set `SET LOCAL statement_timeout = remaining` for the query, so the DB cancels exactly when the client would.",
+        "Combine with **circuit breakers**: deadlines stop wasted work per request, and breakers stop sustained failure."
+      ]
+    },
+    "analogy": {
+      "title": "A pizza order with a delivery promise",
+      "story": "The customer says \"if it's not here by 8:00, I'm cancelling\". If the shop passes that time to the kitchen and the driver, nobody keeps cooking or driving at 8:05. Without it, the kitchen bakes a pizza for a customer who's already gone.",
+      "mapping": [
+        [
+          "\"Here by 8:00\"",
+          "Absolute deadline"
+        ],
+        [
+          "Telling kitchen and driver",
+          "Propagating the deadline"
+        ],
+        [
+          "Stopping at 8:00",
+          "statement_timeout = remaining"
+        ],
+        [
+          "Pizza for nobody",
+          "Zombie query"
+        ]
+      ],
+      "breaks": "A kitchen can see the clock. Each service must explicitly read and honour the deadline header, and one service that ignores it brings the zombies back."
+    },
+    "mindmap": {
+      "center": "Deadline Propagation",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Mismatched timeouts",
+            "Zombie queries"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Absolute deadline",
+            "Header / gRPC context",
+            "Remaining time"
+          ]
+        },
+        {
+          "label": "Database",
+          "children": [
+            "SET LOCAL statement_timeout",
+            "Cancel exactly on time"
+          ]
+        },
+        {
+          "label": "Pairs with",
+          "children": [
+            "Circuit breakers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A request with 5 s of patience",
+      "scenario": "The user request arrives at 14:23:02.000 with a deadline of 14:23:07.000.",
+      "flow": [
+        "Deadline 14:23:07",
+        "Service A → B with header",
+        "B: 4.8 s left",
+        "SET LOCAL statement_timeout 4800ms",
+        "DB cancels on time"
+      ],
+      "steps": [
+        {
+          "label": "Header",
+          "detail": "`X-Request-Deadline: 2026-10-11T14:23:07Z` travels with the call."
+        },
+        {
+          "label": "Budget",
+          "detail": "B computes the remaining time minus a small margin for its own processing."
+        },
+        {
+          "label": "Enforce",
+          "detail": "The query is cancelled by Postgres if it would outlive the user."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN;\nSET LOCAL statement_timeout = '4800ms';   -- remaining budget for this request\nSELECT ... ;\nCOMMIT;"
+        }
+      ],
+      "outcome": "no work is done after the user has gone, which frees connections and CPU for live requests."
+    },
+    "summary": {
+      "points": [
+        "One absolute deadline per request.",
+        "Every hop honours the remaining time.",
+        "Complements circuit breakers."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why SET LOCAL instead of SET?",
+        "a": "SET LOCAL lasts only for the current transaction, so the timeout doesn't leak to other requests sharing that pooled connection."
+      }
+    ]
+  },
+  "the-pattern-connection-pool-sizing-and-admission-control": {
+    "core": "A database does its best work with roughly cores × 2 + spindles active connections. Size the pool small and let a pooler queue or reject the rest (admission control), instead of adding connections when things slow down.",
+    "first_principles": {
+      "problem": "When the database slows, the instinct is to raise the pool from 100 to 500. But the server has, say, 16 cores. 500 concurrent queries mean context switching, lock-manager overhead and memory pressure, so throughput goes down.",
+      "truths": [
+        "Only about as many queries as there are cores can truly run at once.",
+        "Each extra concurrent query adds coordination overhead.",
+        "Queuing briefly is cheaper than thrashing."
+      ],
+      "derivation": [
+        "Size the real pool near **(cores × 2) + effective spindles** (16 cores + SSD ≈ 33).",
+        "Put **PgBouncer** in front: thousands of app connections share that small pool (transaction mode).",
+        "**Queue** briefly when all connections are busy, and **reject fast** past `query_wait_timeout` or `max_client_conn`.",
+        "When the pool saturates, **find the slow queries**. Don't grow the pool."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant kitchen with 16 cooks",
+      "story": "Seating 500 guests at once doesn't make 16 cooks faster: orders pile up, cooks trip over each other, and everything slows. A host who seats people as tables free up, and turns people away politely when the wait is too long, keeps the kitchen at full speed.",
+      "mapping": [
+        [
+          "16 cooks",
+          "16 CPU cores"
+        ],
+        [
+          "Tables in use",
+          "Active DB connections"
+        ],
+        [
+          "Host managing the queue",
+          "PgBouncer admission control"
+        ],
+        [
+          "Turning people away",
+          "Fast rejection"
+        ],
+        [
+          "Seating 500 at once",
+          "Oversized pool"
+        ]
+      ],
+      "breaks": "Diners understand waiting. Applications need explicit timeouts and errors, or they'll just keep retrying and add load."
+    },
+    "mindmap": {
+      "center": "Pool Sizing & Admission",
+      "branches": [
+        {
+          "label": "Myth",
+          "children": [
+            "More connections = faster"
+          ]
+        },
+        {
+          "label": "Reality",
+          "children": [
+            "Context switching",
+            "Lock overhead",
+            "Throughput ↓"
+          ]
+        },
+        {
+          "label": "Formula",
+          "children": [
+            "cores × 2 + spindles",
+            "16 cores → ~33"
+          ]
+        },
+        {
+          "label": "Admission control",
+          "children": [
+            "PgBouncer queue",
+            "query_wait_timeout",
+            "max_client_conn"
+          ]
+        },
+        {
+          "label": "Diagnose",
+          "children": [
+            "SHOW POOLS cl_waiting",
+            "pg_stat_activity waits"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "1,000 app threads on a 16-core Postgres",
+      "scenario": "The pool was raised to 500 last week and latency got worse.",
+      "flow": [
+        "Pool 500: thrashing",
+        "PgBouncer: real pool 33",
+        "Excess queued ≤ 2 s",
+        "Throughput ↑, latency ↓"
+      ],
+      "steps": [
+        {
+          "label": "Shrink",
+          "detail": "PgBouncer `default_pool_size = 33`, `pool_mode = transaction`."
+        },
+        {
+          "label": "Queue",
+          "detail": "Up to 1,000 clients wait their turn, and `query_wait_timeout` rejects stragglers fast."
+        },
+        {
+          "label": "Find the cause",
+          "detail": "`SHOW POOLS` showed `cl_waiting` rising because of one slow query, so fix that query."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[pgbouncer]\npool_mode          = transaction\ndefault_pool_size  = 33\nmax_client_conn    = 1000\nquery_wait_timeout = 2"
+        }
+      ],
+      "outcome": "the database runs at its efficient concurrency, and overload turns into brief queuing or fast errors, not collapse."
+    },
+    "summary": {
+      "points": [
+        "Small pools beat big ones.",
+        "Queue or reject excess (admission control).",
+        "A saturated pool means slow queries, not too few connections."
+      ]
+    },
+    "check": [
+      {
+        "q": "Database is slow and the pool is saturated. Should you raise the pool size?",
+        "a": "Usually no. Find the slow queries holding connections. More connections add contention and make throughput worse."
+      }
+    ]
+  }
+}
