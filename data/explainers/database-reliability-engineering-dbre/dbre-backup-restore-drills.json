@@ -1,0 +1,727 @@
+{
+  "introduction-schrodingers-backup": {
+    "core": "A backup you've never restored is both valid and broken until you try it. You don't have backups, you have restores, so a DBRE proves recovery with scheduled, automated restore drills.",
+    "first_principles": {
+      "problem": "Backup jobs go green for years. Then disaster strikes and the files turn out to be empty, truncated, encrypted with a lost key, or take three weeks to restore when the business needed three hours. Nobody ever ran the restore.",
+      "truths": [
+        "A successful backup job proves only that a file was written.",
+        "Failures hide until you read the file back.",
+        "Unpractised procedures fail under pressure."
+      ],
+      "derivation": [
+        "Treat the **restore** as the real product, not the backup.",
+        "**Restore regularly** into an isolated environment.",
+        "**Validate** the restored data, not just the exit code.",
+        "**Time** it, so you know your real recovery time."
+      ]
+    },
+    "analogy": {
+      "title": "The spare tyre you never checked",
+      "story": "You feel safe with a spare in the boot, but if you've never checked its pressure, you'll find out it's flat exactly when you have a puncture on the motorway.",
+      "mapping": [
+        [
+          "Spare tyre",
+          "Backup file"
+        ],
+        [
+          "Checking the pressure",
+          "Restore drill"
+        ],
+        [
+          "Puncture on the motorway",
+          "Production incident"
+        ],
+        [
+          "Flat spare",
+          "Corrupt / unusable backup"
+        ]
+      ],
+      "breaks": "A tyre check takes a minute. A full restore of a big database takes hours, which is exactly why you must measure it before you need it."
+    },
+    "mindmap": {
+      "center": "Schrödinger's Backup",
+      "branches": [
+        {
+          "label": "Myth",
+          "children": [
+            "Green backup job = safe"
+          ]
+        },
+        {
+          "label": "Failure modes",
+          "children": [
+            "Empty / truncated",
+            "Lost key",
+            "Too slow to restore"
+          ]
+        },
+        {
+          "label": "Truth",
+          "children": [
+            "Only restores count"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Automated drills",
+            "Validate",
+            "Time it"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"How do you know your backups work?\"",
+      "scenario": "An interview question, and a real incident question.",
+      "flow": [
+        "Wrong: job succeeds",
+        "Right: scheduled restore",
+        "Isolated env",
+        "Validation checks",
+        "Timed report"
+      ],
+      "steps": [
+        {
+          "label": "Weak answer",
+          "detail": "\"The backup job is green.\""
+        },
+        {
+          "label": "Strong answer",
+          "detail": "\"We restore automatically every week into isolation, run data checks, and track the duration against RTO.\""
+        }
+      ],
+      "code": [],
+      "outcome": "confidence based on evidence, not hope."
+    },
+    "summary": {
+      "points": [
+        "You only have restores.",
+        "Drill, validate, time.",
+        "Untested backups are faith."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a successful backup exit code not enough?",
+        "a": "It doesn't prove the file is complete, readable, decryptable or restorable within the time the business needs."
+      }
+    ]
+  },
+  "logical-backups-the-portable-approach": {
+    "core": "A logical backup (pg_dump, mysqldump) exports data as SQL or rows, so it's portable across versions and selective per table, but restores are slow (every row and index rebuilt) and it's only a snapshot, with no point-in-time recovery.",
+    "first_principles": {
+      "problem": "We need copies of data that can move between database versions, be inspected, or restore just one table. Raw binary files can't do that.",
+      "truths": [
+        "SQL statements describe data independently of storage format.",
+        "Replaying statements and rebuilding indexes takes time.",
+        "A dump captures one moment only."
+      ],
+      "derivation": [
+        "Export **meaning, not bytes**: `CREATE` and `INSERT` statements, or a compressed custom format (`pg_dump -Fc`).",
+        "Restore by re-executing, with **parallel workers** (`pg_restore -j 4`) to speed it up.",
+        "Use it for **major-version upgrades, migrations and single-table restores**.",
+        "Accept **slow restores** at TB scale, **no PITR**, and scan load on production while dumping."
+      ]
+    },
+    "analogy": {
+      "title": "Retyping a book from a transcript",
+      "story": "A logical backup is a full transcript of the book. Anyone can retype it in any typeface or format (portable), and you can retype just chapter 3. But retyping a 10,000-page book takes a very long time.",
+      "mapping": [
+        [
+          "Transcript",
+          "SQL dump"
+        ],
+        [
+          "Any typeface",
+          "Any Postgres version"
+        ],
+        [
+          "Retyping one chapter",
+          "Single-table restore"
+        ],
+        [
+          "Retyping takes days",
+          "Slow restore at scale"
+        ]
+      ],
+      "breaks": "Transcribing a book doesn't disturb its readers. pg_dump reads every page and can evict hot data from the buffer cache, so run it off a replica if possible."
+    },
+    "mindmap": {
+      "center": "Logical Backups",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "pg_dump / pg_restore",
+            "mysqldump"
+          ]
+        },
+        {
+          "label": "Format",
+          "children": [
+            "SQL / custom -Fc",
+            "Parallel restore -j"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Portable across versions",
+            "Selective",
+            "Readable"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Slow at scale",
+            "No PITR",
+            "Scan load"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Upgrading Postgres 13 → 16",
+      "scenario": "Physical files can't move between major versions.",
+      "flow": [
+        "pg_dump -Fc from PG 13",
+        "createdb on PG 16",
+        "pg_restore -j 4",
+        "Validate, switch app"
+      ],
+      "steps": [
+        {
+          "label": "Dump",
+          "detail": "Custom-format dump, ideally from a replica."
+        },
+        {
+          "label": "Restore",
+          "detail": "Parallel restore into the new major version."
+        },
+        {
+          "label": "Verify",
+          "detail": "Row counts and spot checks before cutover."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "pg_dump -Fc -d app -f app.dump\ncreatedb -h pg16 app\npg_restore -h pg16 -d app -j 4 app.dump"
+        }
+      ],
+      "outcome": "data moves cleanly across a version boundary that binary backups can't cross."
+    },
+    "summary": {
+      "points": [
+        "Logical = portable, selective.",
+        "Slow to restore large data.",
+        "No point-in-time recovery."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a logical backup give you the state at 10:42:17?",
+        "a": "It's a snapshot of one moment (when the dump ran). There's no change log to replay to an arbitrary second."
+      }
+    ]
+  },
+  "physical-backups-the-speed-demons": {
+    "core": "A physical backup copies the database's raw files (base backup) and continuously archives WAL. Restores are fast and support point-in-time recovery, but backups are tied to the same major version and usually restore whole clusters.",
+    "first_principles": {
+      "problem": "Re-executing millions of INSERTs and rebuilding indexes can take days at terabyte scale, far beyond any reasonable recovery time. And snapshots alone can't recover to the second before a mistake.",
+      "truths": [
+        "Copying files is much faster than replaying SQL.",
+        "The WAL records every change in order.",
+        "Binary formats are specific to versions and platforms."
+      ],
+      "derivation": [
+        "Take a periodic **base backup** of the data directory (pgBackRest, WAL-G, XtraBackup).",
+        "Turn on **archive_mode** and ship every WAL segment off-site with `archive_command`.",
+        "Restore = copy the base, then **replay WAL**, which gives fast recovery and **PITR**.",
+        "Accept: **same major version only**, mostly **all-or-nothing**, more **operational setup**.",
+        "Use **both**: physical for disaster recovery, logical for migrations and single tables."
+      ]
+    },
+    "analogy": {
+      "title": "Photocopying the pages vs. retyping the book",
+      "story": "A physical backup is a perfect photocopy of every page, which is fast to reproduce. Keep a diary of every edit made since (WAL), and you can recreate the book exactly as it was at any moment. But the photocopies only fit the same binder (version).",
+      "mapping": [
+        [
+          "Photocopy of pages",
+          "Base backup (binary)"
+        ],
+        [
+          "Diary of every edit",
+          "Archived WAL"
+        ],
+        [
+          "Recreate at any moment",
+          "Point-in-time recovery"
+        ],
+        [
+          "Only fits the same binder",
+          "Same major version"
+        ]
+      ],
+      "breaks": "Photocopies are instant to read. Replaying WAL is fast but not instant, so days of WAL since the last base backup still take hours to apply."
+    },
+    "mindmap": {
+      "center": "Physical Backups",
+      "branches": [
+        {
+          "label": "Base backup",
+          "children": [
+            "Data directory copy",
+            "pgBackRest / WAL-G / XtraBackup"
+          ]
+        },
+        {
+          "label": "WAL archiving",
+          "children": [
+            "archive_mode",
+            "archive_command",
+            "Off-site"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Fast restore",
+            "PITR",
+            "Consistent, no locks"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Version-specific",
+            "Whole cluster",
+            "Ops complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Setting up WAL-G to S3",
+      "scenario": "Production Postgres: nightly base backups plus continuous WAL.",
+      "flow": [
+        "archive_mode = on",
+        "archive_command → wal-g wal-push",
+        "Nightly backup-push",
+        "S3 holds base + WAL"
+      ],
+      "steps": [
+        {
+          "label": "WAL",
+          "detail": "Every finished WAL segment is pushed to S3 within seconds."
+        },
+        {
+          "label": "Base",
+          "detail": "A nightly base backup bounds how much WAL a restore must replay."
+        },
+        {
+          "label": "Restore",
+          "detail": "Fetch the base, replay WAL, recover to any second in the window."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# postgresql.conf\narchive_mode    = on\narchive_command = 'wal-g wal-push %p'\n# cron: wal-g backup-push $PGDATA   (nightly)"
+        }
+      ],
+      "outcome": "recovery measured in hours instead of days, to any chosen second."
+    },
+    "summary": {
+      "points": [
+        "Base backup + WAL archive.",
+        "Fast restore, PITR.",
+        "Version-locked; use logical for portability."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you still use a logical backup?",
+        "a": "For major-version upgrades, cross-platform migrations, or restoring a single table."
+      }
+    ]
+  },
+  "point-in-time-recovery-pitr-mechanics": {
+    "core": "PITR restores the last base backup and replays archived WAL up to a chosen moment (e.g. one second before a DROP TABLE), then promotes. It only works if the WAL archive has no gaps.",
+    "first_principles": {
+      "problem": "Someone runs `DROP TABLE users;` at 10:00:00 and it's noticed at 10:05. Restoring last night's backup loses ten hours of orders and sign-ups. We need the state at 09:59:59.",
+      "truths": [
+        "The base backup is a known-good starting point.",
+        "WAL replays every change in order.",
+        "Replay can stop at any timestamp."
+      ],
+      "derivation": [
+        "**Fetch the base backup** from before the target time.",
+        "**Download WAL** from the base up to the target.",
+        "**Replay** in order and **stop at `recovery_target_time`**.",
+        "**Promote** to read-write.",
+        "Guard the **WAL retention window** and **archive continuity**: a missing segment stops replay at that gap."
+      ]
+    },
+    "analogy": {
+      "title": "Rewinding a recorded game",
+      "story": "Load last night's saved game, then fast-forward the recording of every move and stop the instant before the fatal mistake. If a chunk of the recording is missing, you can't fast-forward past it.",
+      "mapping": [
+        [
+          "Saved game",
+          "Base backup"
+        ],
+        [
+          "Recording of moves",
+          "WAL archive"
+        ],
+        [
+          "Stop before the mistake",
+          "recovery_target_time"
+        ],
+        [
+          "Missing recording chunk",
+          "WAL gap"
+        ],
+        [
+          "Resume playing",
+          "Promote"
+        ]
+      ],
+      "breaks": "A game recording is tiny. WAL for a busy database can be hundreds of GB per day, so replay time is often the biggest part of recovery."
+    },
+    "mindmap": {
+      "center": "PITR",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Fetch base",
+            "Fetch WAL",
+            "Replay",
+            "Stop at target",
+            "Promote"
+          ]
+        },
+        {
+          "label": "Config (PG12+)",
+          "children": [
+            "recovery.signal",
+            "restore_command",
+            "recovery_target_time"
+          ]
+        },
+        {
+          "label": "Window",
+          "children": [
+            "WAL retention",
+            "e.g. 30 days"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "WAL gaps",
+            "Monitor archive integrity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Undoing DROP TABLE at 10:00:00",
+      "scenario": "Base backup at midnight, WAL archived continuously.",
+      "flow": [
+        "Restore midnight base",
+        "Replay WAL",
+        "Stop at 09:59:59",
+        "Promote",
+        "Recover users table"
+      ],
+      "steps": [
+        {
+          "label": "Isolate",
+          "detail": "Restore onto a new server so production keeps running."
+        },
+        {
+          "label": "Target",
+          "detail": "Stop at 09:59:59, one second before the drop."
+        },
+        {
+          "label": "Recover",
+          "detail": "Copy the `users` table back into production."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# on the restore server (PostgreSQL 12+), plus an empty recovery.signal file\nrestore_command      = 'wal-g wal-fetch %f %p'\nrecovery_target_time = '2026-10-11 09:59:59+00'"
+        }
+      ],
+      "outcome": "ten hours of data saved. Only the mistake is undone."
+    },
+    "summary": {
+      "points": [
+        "Base + WAL replay to a target time.",
+        "Restore beside production, then copy back.",
+        "WAL gaps break PITR, so monitor the archive."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is WAL archive monitoring as important as the backup itself?",
+        "a": "A single missing segment stops replay at that point, silently removing PITR for everything after it."
+      }
+    ]
+  },
+  "rto-vs-rpo-defining-success-before-disaster-strikes": {
+    "core": "RPO is how much data you can afford to lose, and it sets backup frequency. RTO is how long you can be down, and it sets the restore mechanism. Agree both with the business before an incident, and prove them by measuring.",
+    "first_principles": {
+      "problem": "Without targets, every incident becomes a negotiation under pressure: \"how long will this take?\" while the CEO is on the phone. Teams often compute RPO correctly but never time a restore, then discover recovery takes 36 hours against a 4-hour expectation.",
+      "truths": [
+        "Data written since the last safe copy can be lost.",
+        "Restore time depends on data size and mechanism.",
+        "Targets agreed in calm beat guesses made in a crisis."
+      ],
+      "derivation": [
+        "**RPO** (time of data loss): daily dump ≈ 24 h, hourly ≈ 1 h, continuous WAL ≈ seconds.",
+        "**RTO** (time to recover): 10 TB via pg_dump is 24–72 h, physical parallel restore 2–6 h, standby failover seconds to minutes.",
+        "Let RPO pick **backup frequency** and RTO pick **restore architecture**.",
+        "Close the **dangerous gap**: measure actual restore time with drills."
+      ]
+    },
+    "analogy": {
+      "title": "Saving your work",
+      "story": "RPO is how often you press Ctrl+S: save every hour and a crash can cost you an hour of work. RTO is how long it takes to get back to work after the crash: reboot, reopen, reload. Fast saving doesn't help if your computer takes a day to reboot.",
+      "mapping": [
+        [
+          "How often you save",
+          "RPO / backup frequency"
+        ],
+        [
+          "Work lost in a crash",
+          "Data loss"
+        ],
+        [
+          "Time to get back to work",
+          "RTO"
+        ],
+        [
+          "Slow reboot",
+          "Slow restore mechanism"
+        ]
+      ],
+      "breaks": "Your laptop's reboot time is constant. Restore time grows as data grows, so an RTO met last year may be missed this year."
+    },
+    "mindmap": {
+      "center": "RTO vs RPO",
+      "branches": [
+        {
+          "label": "RPO",
+          "children": [
+            "Data you can lose",
+            "Drives backup frequency"
+          ]
+        },
+        {
+          "label": "RTO",
+          "children": [
+            "Downtime you can afford",
+            "Drives restore method"
+          ]
+        },
+        {
+          "label": "RPO options",
+          "children": [
+            "Daily dump ~24 h",
+            "WAL ~seconds"
+          ]
+        },
+        {
+          "label": "RTO options",
+          "children": [
+            "Dump: days",
+            "Physical: hours",
+            "Standby: minutes"
+          ]
+        },
+        {
+          "label": "Gap",
+          "children": [
+            "Untested RTO",
+            "Time it"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 5 TB database with RTO 2 h",
+      "scenario": "The team relies on nightly pg_dump.",
+      "flow": [
+        "RPO 24 h (dump)",
+        "Restore 5 TB dump ≈ 30 h",
+        "RTO 2 h impossible",
+        "Physical + WAL + standby"
+      ],
+      "steps": [
+        {
+          "label": "Mismatch",
+          "detail": "pg_dump can't meet a 2-hour RTO at 5 TB, however reliable the dumps are."
+        },
+        {
+          "label": "Redesign",
+          "detail": "Physical backups plus WAL for RPO in seconds, and a warm standby for RTO in minutes."
+        },
+        {
+          "label": "Prove",
+          "detail": "Timed drills confirm the numbers."
+        }
+      ],
+      "code": [],
+      "outcome": "targets drive architecture, and measurements prove the architecture meets them."
+    },
+    "summary": {
+      "points": [
+        "RPO = data loss budget.",
+        "RTO = downtime budget.",
+        "Measure, don't assume."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which mechanism is needed for an RTO of seconds?",
+        "a": "A warm standby replica you can fail over to. Restoring from backup always takes far longer."
+      }
+    ]
+  },
+  "designing-a-restore-drill-what-tested-actually-means": {
+    "core": "A real restore drill answers three questions: did it restore, is the data correct, and is it usable? It runs automatically, in isolation, on a schedule, and reports duration, freshness and check results over time.",
+    "first_principles": {
+      "problem": "\"The restore command exited 0\" isn't proof. Data can be silently missing, stale or broken. Drills that need a human get skipped exactly when things are busiest, which is when backup hygiene drifts.",
+      "truths": [
+        "Technical success ≠ correct data.",
+        "Manual processes get skipped.",
+        "Restore time trends upward as data grows."
+      ],
+      "derivation": [
+        "Check three things: **completion, data integrity, application usability**.",
+        "Restore into an **isolated** environment, with production-grade security, and **tear it down** afterwards.",
+        "**Automate** the five steps: fetch, start, validate, report, teardown. Weekly at least, daily for critical systems.",
+        "**Report** duration (vs RTO), freshness (vs RPO), check results, and the **trend**."
+      ]
+    },
+    "analogy": {
+      "title": "A real fire drill vs. a checklist",
+      "story": "Ticking \"fire exits exist\" on a form isn't a drill. A drill means everyone actually walks out, someone times it, someone counts heads, and the results are compared with last time.",
+      "mapping": [
+        [
+          "Exits exist on a form",
+          "Restore exited 0"
+        ],
+        [
+          "Everyone walks out",
+          "Full restore"
+        ],
+        [
+          "Counting heads",
+          "Data validation"
+        ],
+        [
+          "Timing it",
+          "Duration vs RTO"
+        ],
+        [
+          "Comparing with last time",
+          "Trend report"
+        ]
+      ],
+      "breaks": "Fire drills don't involve sensitive data. A restored database contains production data, so the drill environment needs encryption, access control and teardown."
+    },
+    "mindmap": {
+      "center": "Restore Drill",
+      "branches": [
+        {
+          "label": "Three questions",
+          "children": [
+            "Restored?",
+            "Data correct?",
+            "Usable?"
+          ]
+        },
+        {
+          "label": "Environment",
+          "children": [
+            "Isolated",
+            "Secured",
+            "Torn down"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Fetch",
+            "Start",
+            "Validate",
+            "Report",
+            "Teardown"
+          ]
+        },
+        {
+          "label": "Report",
+          "children": [
+            "Duration vs RTO",
+            "Freshness vs RPO",
+            "Trend"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A weekly automated drill",
+      "scenario": "Critical orders database. RTO 2 h, RPO 5 min.",
+      "flow": [
+        "Sunday 02:00 trigger",
+        "Restore latest + WAL",
+        "Run checks",
+        "Record time & freshness",
+        "Teardown",
+        "Alert on breach"
+      ],
+      "steps": [
+        {
+          "label": "Validate",
+          "detail": "Row counts per table vs production stats, foreign key spot checks, and the latest `created_at` within 5 minutes of the target."
+        },
+        {
+          "label": "Usability",
+          "detail": "Run a few real application queries against the restored DB."
+        },
+        {
+          "label": "Trend",
+          "detail": "Restore time went 70 → 85 → 98 minutes over 3 months, so act before it crosses 120."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "t0=$(date +%s)\nwal-g backup-fetch \"$PGDATA\" LATEST && touch \"$PGDATA/recovery.signal\"\npg_ctl -D \"$PGDATA\" -o \"-p 6543\" -w start\npsql -p 6543 -f checks.sql > report.txt\necho \"restore_seconds=$(( $(date +%s) - t0 ))\" >> report.txt\npg_ctl -D \"$PGDATA\" stop && rm -rf \"$PGDATA\""
+        }
+      ],
+      "outcome": "recoverability is proven every week, and slow drift towards an RTO breach is visible months ahead."
+    },
+    "summary": {
+      "points": [
+        "Restored + correct + usable.",
+        "Automated, isolated, scheduled.",
+        "Track duration trend vs RTO."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why track restore duration over time?",
+        "a": "Data grows, so restores get slower. A rising trend warns you before you actually breach your RTO."
+      }
+    ]
+  }
+}

@@ -1,0 +1,863 @@
+{
+  "introduction-the-declarative-standard": {
+    "core": "SQL is declarative: you describe the result you want and the database's planner decides how to get it. That separation lets the engine pick indexes, join orders and parallelism you'd never hand-code.",
+    "first_principles": {
+      "problem": "In an imperative language you write the loops, lookups and sorting yourself, and you're stuck with that strategy even when the data changes shape. For a DBRE, SQL is also the main diagnostic tool, so you have to read it fluently to tune anything.",
+      "truths": [
+        "The best way to fetch data depends on data size, indexes and statistics.",
+        "The database knows those facts, and your code usually doesn't.",
+        "One description of a result can be executed many ways."
+      ],
+      "derivation": [
+        "Describe **what** you want (`SELECT … WHERE …`), not **how**.",
+        "Let the **planner** choose indexes, join algorithms and order using statistics.",
+        "The same query adapts as data grows, with no code change.",
+        "To tune performance, read the **plan** (`EXPLAIN`) rather than rewriting loops."
+      ]
+    },
+    "analogy": {
+      "title": "Ordering at a restaurant",
+      "story": "You say \"the pasta, please\". You don't walk into the kitchen and explain how to boil water. The kitchen picks the pans and order of work based on what it has.",
+      "mapping": [
+        [
+          "Menu order",
+          "SQL statement"
+        ],
+        [
+          "Kitchen deciding how",
+          "Query planner"
+        ],
+        [
+          "Ingredients available",
+          "Indexes, statistics"
+        ],
+        [
+          "Recipe actually used",
+          "Execution plan"
+        ]
+      ],
+      "breaks": "A kitchen rarely misreads an order. The planner can choose badly when statistics are stale, which is why DBREs read plans."
+    },
+    "mindmap": {
+      "center": "Declarative SQL",
+      "branches": [
+        {
+          "label": "Imperative",
+          "children": [
+            "How: loops & steps"
+          ]
+        },
+        {
+          "label": "Declarative",
+          "children": [
+            "What: the result"
+          ]
+        },
+        {
+          "label": "Planner",
+          "children": [
+            "Indexes",
+            "Join order",
+            "Statistics"
+          ]
+        },
+        {
+          "label": "DBRE use",
+          "children": [
+            "Diagnose slow queries",
+            "Read EXPLAIN"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same query, two plans",
+      "scenario": "`SELECT * FROM users WHERE country = 'France'` on 1,000 rows, then on 100 M rows.",
+      "flow": [
+        "Small table → Seq Scan",
+        "Data grows",
+        "Planner switches to Index Scan",
+        "Same SQL"
+      ],
+      "steps": [
+        {
+          "label": "Small",
+          "detail": "Scanning 1,000 rows is cheapest, so the planner picks a sequential scan."
+        },
+        {
+          "label": "Large",
+          "detail": "With an index and 100 M rows, the planner picks an index scan."
+        },
+        {
+          "label": "Point",
+          "detail": "The SQL never changed. The engine adapted."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "EXPLAIN SELECT * FROM users WHERE country = 'France';"
+        }
+      ],
+      "outcome": "you describe results, and the database keeps finding the fastest path as things change."
+    },
+    "summary": {
+      "points": [
+        "SQL = what, not how.",
+        "The planner picks the plan.",
+        "Read plans to diagnose."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does declarativeness help performance?",
+        "a": "The engine can reorder joins, choose indexes and parallelise independently of how the query was written."
+      }
+    ]
+  },
+  "the-anatomy-of-a-select-statement": {
+    "core": "A SELECT is written as SELECT → FROM → WHERE → ORDER BY → LIMIT, but evaluated FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY → LIMIT. That order explains most \"why doesn't this work\" surprises.",
+    "first_principles": {
+      "problem": "New SQL writers hit confusing errors: an alias that \"doesn't exist\" in WHERE, an aggregate rejected in WHERE. The reason is that SQL is written in one order and executed in another.",
+      "truths": [
+        "You must have rows before you can filter them.",
+        "You must group before you can filter groups.",
+        "Output columns (and aliases) exist only after SELECT runs."
+      ],
+      "derivation": [
+        "**FROM / JOIN**: assemble source rows.",
+        "**WHERE**: filter individual rows.",
+        "**GROUP BY → HAVING**: collapse into groups, then filter groups.",
+        "**SELECT**: compute output columns and aliases.",
+        "**ORDER BY → LIMIT**: sort and truncate. Always use LIMIT when exploring big tables, and name columns rather than `*`."
+      ]
+    },
+    "analogy": {
+      "title": "Making a fruit salad",
+      "story": "Get fruit from the store (FROM), throw away bruised pieces (WHERE), sort into bowls by type (GROUP BY), discard bowls with too little (HAVING), cut and plate (SELECT), arrange nicely (ORDER BY), serve only 10 plates (LIMIT). You can't throw out \"plates\" before you've made any.",
+      "mapping": [
+        [
+          "Getting fruit",
+          "FROM / JOIN"
+        ],
+        [
+          "Discarding bruised pieces",
+          "WHERE"
+        ],
+        [
+          "Bowls by type",
+          "GROUP BY"
+        ],
+        [
+          "Discarding small bowls",
+          "HAVING"
+        ],
+        [
+          "Plating",
+          "SELECT"
+        ],
+        [
+          "Serving 10 plates",
+          "LIMIT"
+        ]
+      ],
+      "breaks": "Cooks can improvise the order. SQL's logical order is fixed (the optimiser may physically reorder work, but results must match this logical order)."
+    },
+    "mindmap": {
+      "center": "SELECT Anatomy",
+      "branches": [
+        {
+          "label": "Clauses",
+          "children": [
+            "SELECT",
+            "FROM",
+            "WHERE",
+            "ORDER BY",
+            "LIMIT"
+          ]
+        },
+        {
+          "label": "Logical order",
+          "children": [
+            "FROM/JOIN → WHERE",
+            "→ GROUP BY → HAVING",
+            "→ SELECT → ORDER BY → LIMIT"
+          ]
+        },
+        {
+          "label": "Consequences",
+          "children": [
+            "No alias in WHERE",
+            "Aggregates in HAVING"
+          ]
+        },
+        {
+          "label": "Habits",
+          "children": [
+            "Name columns",
+            "LIMIT big tables"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"column dbl does not exist\"",
+      "scenario": "`SELECT amount * 2 AS dbl FROM orders WHERE dbl > 100;` fails.",
+      "flow": [
+        "FROM orders",
+        "WHERE dbl > 100 ✗ (no alias yet)",
+        "Fix: WHERE amount*2 > 100",
+        "Or wrap in a CTE"
+      ],
+      "steps": [
+        {
+          "label": "Why",
+          "detail": "WHERE runs before SELECT creates `dbl`."
+        },
+        {
+          "label": "Fix 1",
+          "detail": "Repeat the expression in WHERE."
+        },
+        {
+          "label": "Fix 2",
+          "detail": "Compute it in a CTE or subquery, then filter on it outside."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT amount * 2 AS dbl FROM orders WHERE amount * 2 > 100 ORDER BY dbl DESC LIMIT 10;"
+        }
+      ],
+      "outcome": "errors that looked arbitrary become predictable from the logical order."
+    },
+    "summary": {
+      "points": [
+        "Written order ≠ evaluation order.",
+        "WHERE before SELECT, HAVING after GROUP BY.",
+        "Name columns, LIMIT exploration."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can ORDER BY use a SELECT alias but WHERE can't?",
+        "a": "ORDER BY runs after SELECT has computed the aliases, while WHERE runs before."
+      }
+    ]
+  },
+  "joins-connecting-the-dots": {
+    "core": "Normalised data is split across tables, and JOINs reassemble it on matching keys. INNER keeps only matches, LEFT/RIGHT keep one side, FULL keeps both, and CROSS makes every combination (dangerous by accident).",
+    "first_principles": {
+      "problem": "Users live in one table and orders in another, so \"what did Alice buy?\" needs both. You need precise control over what happens to rows that have no match on the other side.",
+      "truths": [
+        "Related facts are linked by key columns.",
+        "Some rows have no partner on the other side.",
+        "NULL never equals NULL in SQL."
+      ],
+      "derivation": [
+        "**INNER JOIN**: rows with a match on both sides only.",
+        "**LEFT JOIN**: all left rows, and NULLs where there's no right match. (RIGHT is the mirror, usually rewritten as LEFT.)",
+        "**FULL OUTER**: all rows from both, useful to find mismatches.",
+        "**CROSS JOIN**: every pairing (n × m rows). Beware a missing ON in old `FROM a, b` syntax.",
+        "Remember **NULL join keys never match**."
+      ]
+    },
+    "analogy": {
+      "title": "Matching guests to dinner tables",
+      "story": "INNER: list only guests who have a table. LEFT: list every guest, with their table or \"none\". FULL: list every guest and every table, matched where possible. CROSS: seat every guest at every table, which is absurd and enormous.",
+      "mapping": [
+        [
+          "Guests with a table",
+          "INNER JOIN"
+        ],
+        [
+          "All guests, table or none",
+          "LEFT JOIN"
+        ],
+        [
+          "All guests and all tables",
+          "FULL OUTER JOIN"
+        ],
+        [
+          "Everyone at every table",
+          "CROSS JOIN"
+        ]
+      ],
+      "breaks": "A seating chart can't explode in size. An accidental CROSS JOIN of two 10,000-row tables returns 100 million rows and can overload the database."
+    },
+    "mindmap": {
+      "center": "Joins",
+      "branches": [
+        {
+          "label": "INNER",
+          "children": [
+            "Matches only"
+          ]
+        },
+        {
+          "label": "LEFT / RIGHT",
+          "children": [
+            "Keep one side",
+            "NULL for no match"
+          ]
+        },
+        {
+          "label": "FULL OUTER",
+          "children": [
+            "Keep both",
+            "Find mismatches"
+          ]
+        },
+        {
+          "label": "CROSS",
+          "children": [
+            "n × m rows",
+            "Accidental explosions"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "NULL ≠ NULL",
+            "Missing ON clause"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Users who never ordered",
+      "scenario": "Find users with no orders at all.",
+      "flow": [
+        "users LEFT JOIN orders",
+        "No match → orders.id NULL",
+        "WHERE orders.id IS NULL",
+        "Users with no orders"
+      ],
+      "steps": [
+        {
+          "label": "LEFT JOIN",
+          "detail": "Keep every user, attaching orders where they exist."
+        },
+        {
+          "label": "Filter",
+          "detail": "Users without orders have NULL order columns."
+        },
+        {
+          "label": "Result",
+          "detail": "An \"anti-join\": exactly the non-buyers."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT u.id, u.name\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nWHERE o.id IS NULL;"
+        }
+      ],
+      "outcome": "you can answer questions about both presence and absence of related data."
+    },
+    "summary": {
+      "points": [
+        "INNER = matches only, LEFT = keep left.",
+        "FULL finds mismatches.",
+        "Beware CROSS JOIN explosions and NULL keys."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to rows with NULL in the join column in an INNER JOIN?",
+        "a": "They're excluded, because NULL = NULL is not true, so they never match."
+      }
+    ]
+  },
+  "aggregation-group-by-and-having": {
+    "core": "GROUP BY collapses rows sharing a value into one summary row computed by aggregate functions. WHERE filters rows before grouping and HAVING filters groups after, so push every possible filter into WHERE.",
+    "first_principles": {
+      "problem": "Individual rows are facts, but the questions are patterns: total spend per customer, orders per day. And you often need to filter both the input rows and the resulting groups.",
+      "truths": [
+        "Summaries need rows grouped by a key.",
+        "Aggregates only exist after grouping.",
+        "Filtering earlier means less work later."
+      ],
+      "derivation": [
+        "**GROUP BY** key, then compute `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` per group (`COUNT(col)` ignores NULLs, `COUNT(*)` doesn't).",
+        "Use **WHERE** for conditions on raw columns, before grouping.",
+        "Use **HAVING** for conditions on aggregates, after grouping.",
+        "Prefer **WHERE** whenever possible, because fewer rows go into grouping."
+      ]
+    },
+    "analogy": {
+      "title": "Counting votes",
+      "story": "First throw out invalid ballots (WHERE). Then sort valid ballots into piles per candidate (GROUP BY) and count each pile (COUNT). Finally only announce candidates with more than 1,000 votes (HAVING).",
+      "mapping": [
+        [
+          "Throwing out invalid ballots",
+          "WHERE"
+        ],
+        [
+          "Piles per candidate",
+          "GROUP BY"
+        ],
+        [
+          "Counting each pile",
+          "Aggregate function"
+        ],
+        [
+          "Announcing only big piles",
+          "HAVING"
+        ]
+      ],
+      "breaks": "Vote counters can recount. In SQL, putting a row-level filter in HAVING still works but does more work, because grouping happens on rows you'll discard."
+    },
+    "mindmap": {
+      "center": "Aggregation",
+      "branches": [
+        {
+          "label": "Functions",
+          "children": [
+            "COUNT(*) / COUNT(col)",
+            "SUM, AVG",
+            "MIN, MAX"
+          ]
+        },
+        {
+          "label": "GROUP BY",
+          "children": [
+            "Collapse by key"
+          ]
+        },
+        {
+          "label": "WHERE",
+          "children": [
+            "Rows, before grouping",
+            "No aggregates"
+          ]
+        },
+        {
+          "label": "HAVING",
+          "children": [
+            "Groups, after",
+            "Aggregates allowed"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Filter early in WHERE"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Big spenders in 2023",
+      "scenario": "Customers who spent more than $500 counting only 2023 orders.",
+      "flow": [
+        "WHERE order_date ≥ 2023",
+        "GROUP BY user_id",
+        "SUM(amount)",
+        "HAVING SUM > 500"
+      ],
+      "steps": [
+        {
+          "label": "Rows",
+          "detail": "WHERE drops pre-2023 orders before any grouping."
+        },
+        {
+          "label": "Groups",
+          "detail": "One row per user with their 2023 total."
+        },
+        {
+          "label": "Filter groups",
+          "detail": "HAVING keeps totals over 500."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT user_id, SUM(amount) AS total_spent\nFROM orders\nWHERE order_date >= '2023-01-01'\nGROUP BY user_id\nHAVING SUM(amount) > 500\nORDER BY total_spent DESC;"
+        }
+      ],
+      "outcome": "a correct summary computed with as little work as possible."
+    },
+    "summary": {
+      "points": [
+        "GROUP BY + aggregates summarise.",
+        "WHERE filters rows, HAVING filters groups.",
+        "Push filters into WHERE."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you write WHERE SUM(amount) > 500?",
+        "a": "WHERE runs before grouping, so the sum doesn't exist yet. Use HAVING."
+      }
+    ]
+  },
+  "common-table-expressions-ctes": {
+    "core": "A CTE (`WITH name AS (…)`) names an intermediate result so complex queries read as a series of steps. Recursive CTEs repeatedly join a result to itself to walk hierarchies like org charts, with a depth guard against cycles.",
+    "first_principles": {
+      "problem": "Nested subqueries inside subqueries are hard to read, debug or review. And SQL needs a way to follow parent/child links of unknown depth (manager chains, folder trees).",
+      "truths": [
+        "Humans understand named steps better than nested brackets.",
+        "Hierarchies have unknown depth.",
+        "Cyclic data makes naive recursion infinite."
+      ],
+      "derivation": [
+        "Name each step with **WITH**: `completed_orders`, then `regional_totals`, then `top_regions`.",
+        "Reference earlier CTEs from later ones like variables.",
+        "For hierarchies, use **WITH RECURSIVE**: a **base case**, then `UNION ALL` with a **recursive case** that joins to the CTE itself.",
+        "Stop when no new rows appear, and add a **depth limit** to survive cycles."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe with named steps",
+      "story": "Instead of one long sentence, a recipe says: \"make the dough; make the filling; assemble dough + filling; bake\". A recursive step is like \"keep folding the dough in half until it's thin enough\", with a limit so you don't fold forever.",
+      "mapping": [
+        [
+          "Named recipe steps",
+          "CTEs"
+        ],
+        [
+          "Using an earlier step's output",
+          "Referencing a previous CTE"
+        ],
+        [
+          "Repeat until thin",
+          "Recursive CTE"
+        ],
+        [
+          "Max number of folds",
+          "Depth guard"
+        ]
+      ],
+      "breaks": "Recipes don't loop back on themselves. Data can (A reports to B, B reports to A), so recursion without a guard never ends."
+    },
+    "mindmap": {
+      "center": "CTEs",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Readable steps",
+            "No deep nesting"
+          ]
+        },
+        {
+          "label": "Syntax",
+          "children": [
+            "WITH a AS (…), b AS (…)",
+            "Reference earlier CTEs"
+          ]
+        },
+        {
+          "label": "Recursive",
+          "children": [
+            "Base case",
+            "UNION ALL",
+            "Recursive case"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Depth counter",
+            "Cycle guard"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Everyone under a manager",
+      "scenario": "Find all direct and indirect reports of manager 1.",
+      "flow": [
+        "Base: employee 1",
+        "Join reports → depth 2",
+        "Join their reports → depth 3",
+        "Stop: no new rows"
+      ],
+      "steps": [
+        {
+          "label": "Base",
+          "detail": "Start with the manager row at depth 1."
+        },
+        {
+          "label": "Recurse",
+          "detail": "Add employees whose manager is already in the result, with depth + 1."
+        },
+        {
+          "label": "Guard",
+          "detail": "`WHERE ot.depth < 20` prevents infinite loops on bad data."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "WITH RECURSIVE org AS (\n  SELECT id, name, manager_id, 1 AS depth FROM employees WHERE id = 1\n  UNION ALL\n  SELECT e.id, e.name, e.manager_id, org.depth + 1\n  FROM employees e JOIN org ON e.manager_id = org.id\n  WHERE org.depth < 20\n)\nSELECT * FROM org ORDER BY depth;"
+        }
+      ],
+      "outcome": "readable multi-step queries, plus hierarchy traversal that's safe on messy data."
+    },
+    "summary": {
+      "points": [
+        "CTEs name steps.",
+        "Recursive CTEs walk hierarchies.",
+        "Always guard recursion depth."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two parts of a recursive CTE?",
+        "a": "The base case (starting rows) and the recursive case (rows derived from previous results), joined with UNION ALL."
+      }
+    ]
+  },
+  "window-functions-the-power-user-tool": {
+    "core": "Window functions compute aggregates or rankings across related rows (`OVER (PARTITION BY … ORDER BY …)`) without collapsing them, which gives running totals, top-N per group and comparisons to neighbouring rows.",
+    "first_principles": {
+      "problem": "GROUP BY destroys detail: group orders by customer and the individual orders are gone. But many questions need both the row and an aggregate around it: a running balance, each order's rank for its customer.",
+      "truths": [
+        "Some calculations depend on a row's neighbours.",
+        "Groups and orderings can be defined per calculation.",
+        "Keeping rows intact preserves detail."
+      ],
+      "derivation": [
+        "Add **OVER()** to an aggregate to compute it over a window while keeping every row.",
+        "**PARTITION BY** to reset per group (per customer), and **ORDER BY** to accumulate in order (running totals).",
+        "Rank with **ROW_NUMBER** (unique), **RANK** (ties share, gaps after) and **DENSE_RANK** (ties share, no gaps).",
+        "Top-N per group: rank in a CTE, then filter `rn <= N`."
+      ]
+    },
+    "analogy": {
+      "title": "A running bank statement",
+      "story": "Each line on a bank statement still shows the individual transaction, but the right-hand column shows the balance so far. That column is a window function: it looks back over earlier rows without merging them.",
+      "mapping": [
+        [
+          "Each transaction line",
+          "Individual row kept"
+        ],
+        [
+          "Running balance column",
+          "SUM(…) OVER (ORDER BY date)"
+        ],
+        [
+          "Separate statement per account",
+          "PARTITION BY account"
+        ],
+        [
+          "Biggest-transactions ranking",
+          "RANK() / ROW_NUMBER()"
+        ]
+      ],
+      "breaks": "Bank statements are always in date order. In SQL you must define the window's ORDER BY explicitly, or running totals become meaningless."
+    },
+    "mindmap": {
+      "center": "Window Functions",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Aggregate without collapsing",
+            "OVER()"
+          ]
+        },
+        {
+          "label": "PARTITION BY",
+          "children": [
+            "Reset per group"
+          ]
+        },
+        {
+          "label": "ORDER BY",
+          "children": [
+            "Running / cumulative"
+          ]
+        },
+        {
+          "label": "Ranking",
+          "children": [
+            "ROW_NUMBER",
+            "RANK (gaps)",
+            "DENSE_RANK (no gaps)"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Running totals",
+            "Top-N per group",
+            "LAG / LEAD"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Top 3 orders per customer",
+      "scenario": "Each customer's three largest orders, with ties handled.",
+      "flow": [
+        "Rank per user by amount DESC",
+        "CTE ranked",
+        "WHERE rn ≤ 3",
+        "3 rows per user"
+      ],
+      "steps": [
+        {
+          "label": "Rank",
+          "detail": "`ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC)`."
+        },
+        {
+          "label": "Filter",
+          "detail": "Keep `rn <= 3` in the outer query."
+        },
+        {
+          "label": "Ties",
+          "detail": "Use DENSE_RANK if tied amounts should all be included."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "WITH ranked AS (\n  SELECT user_id, id, amount,\n         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn\n  FROM orders\n)\nSELECT * FROM ranked WHERE rn <= 3;"
+        }
+      ],
+      "outcome": "per-group top-N and running calculations in a single readable query."
+    },
+    "summary": {
+      "points": [
+        "OVER() keeps rows.",
+        "PARTITION BY resets, ORDER BY accumulates.",
+        "RANK leaves gaps, DENSE_RANK doesn't."
+      ]
+    },
+    "check": [
+      {
+        "q": "RANK vs DENSE_RANK with two rows tied for 1st?",
+        "a": "RANK gives 1, 1, 3. DENSE_RANK gives 1, 1, 2."
+      }
+    ]
+  },
+  "normalization-organizing-data-for-integrity": {
+    "core": "Normalisation stores each fact exactly once (1NF atomic values, 2NF whole-key dependency, 3NF no transitive dependency) to prevent update, insert and delete anomalies. Denormalise deliberately when read speed matters more.",
+    "first_principles": {
+      "problem": "One flat orders table repeats each customer's email on every order. Change an email and you must update many rows (miss one and data disagrees). Delete Bob's only order and Bob disappears. You can't add a product until someone orders it.",
+      "truths": [
+        "Copies of the same fact can drift apart.",
+        "Facts about different things shouldn't depend on each other's rows.",
+        "Joins cost read time."
+      ],
+      "derivation": [
+        "**1NF**: one atomic value per column (no lists), so split repeating items into rows.",
+        "**2NF**: non-key columns depend on the **whole** composite key, so move partial dependencies out.",
+        "**3NF**: non-key columns depend **only on the key**, not on other non-key columns (zip → city moves out).",
+        "\"The key, the whole key, and nothing but the key.\"",
+        "**Denormalise** on purpose (warehouses, hot read paths) and accept the write complexity."
+      ]
+    },
+    "analogy": {
+      "title": "A contacts app vs. writing addresses on every letter",
+      "story": "If you write a friend's address on every letter in your outbox, a move means correcting every letter, and some will be missed. A contacts app stores the address once, and letters just refer to the contact.",
+      "mapping": [
+        [
+          "Address on every letter",
+          "Redundant columns"
+        ],
+        [
+          "Missing one letter on a move",
+          "Update anomaly"
+        ],
+        [
+          "Contacts app entry",
+          "Separate normalised table"
+        ],
+        [
+          "Letter refers to contact",
+          "Foreign key"
+        ]
+      ],
+      "breaks": "Looking up a contact is instant. Joins at large scale aren't, which is why analytics systems often deliberately denormalise."
+    },
+    "mindmap": {
+      "center": "Normalisation",
+      "branches": [
+        {
+          "label": "Anomalies",
+          "children": [
+            "Update",
+            "Insert",
+            "Delete"
+          ]
+        },
+        {
+          "label": "1NF",
+          "children": [
+            "Atomic values",
+            "No lists"
+          ]
+        },
+        {
+          "label": "2NF",
+          "children": [
+            "Whole composite key"
+          ]
+        },
+        {
+          "label": "3NF",
+          "children": [
+            "No transitive deps",
+            "Key only"
+          ]
+        },
+        {
+          "label": "Denormalise",
+          "children": [
+            "Warehouses",
+            "Hot reads",
+            "Write complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Splitting a flat orders table",
+      "scenario": "Columns: OrderID, CustomerName, CustomerEmail, Product, Price, OrderDate.",
+      "flow": [
+        "Flat table",
+        "customers(id, name, email)",
+        "products(id, name, price)",
+        "orders(id, customer_id, product_id, date)"
+      ],
+      "steps": [
+        {
+          "label": "Customers",
+          "detail": "Email is stored once, so changing it is one UPDATE."
+        },
+        {
+          "label": "Products",
+          "detail": "Products can exist before anyone orders them."
+        },
+        {
+          "label": "Orders",
+          "detail": "Deleting an order no longer deletes the customer."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE TABLE customers (id bigint PRIMARY KEY, name text, email text UNIQUE);\nCREATE TABLE products  (id bigint PRIMARY KEY, name text, price numeric);\nCREATE TABLE orders    (id bigint PRIMARY KEY,\n                        customer_id bigint REFERENCES customers,\n                        product_id  bigint REFERENCES products,\n                        ordered_at  timestamptz);"
+        }
+      ],
+      "outcome": "every fact lives in one place, so updates can't leave contradictions behind."
+    },
+    "summary": {
+      "points": [
+        "One fact, one place.",
+        "1NF → 2NF → 3NF remove specific anomalies.",
+        "Denormalise deliberately for reads."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which normal form does storing City next to ZipCode in Users violate?",
+        "a": "3NF: City depends on ZipCode (a non-key column), not directly on the user's key."
+      }
+    ]
+  }
+}
