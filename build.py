@@ -280,6 +280,9 @@ def load():
         explain = load_explainers(track["slug"])
         for t in track["topics"]:
             t["explain"] = explain.get(t["slug"])
+            per_lesson = load_explainers(f'{track["slug"]}/{t["slug"]}')
+            for l in t["lessons"]:
+                l["explain"] = per_lesson.get(l["slug"])
         tracks.append(track)
     tracks.sort(key=lambda t: t["chapter"])
     for i, t in enumerate(tracks):
@@ -754,7 +757,8 @@ def render_track(track):
 # ───────────────────────────── topic explainers ─────────────────────────────
 # data/explainers/<track-slug>.json adds a "Topic explained" section under a topic's lessons:
 # first principles, an analogy, a mind map, a worked example and a summary. Keys are topic slugs.
-# The lessons themselves are left untouched.
+# data/explainers/<track-slug>/<topic-slug>.json does the same per lesson (keys are lesson slugs);
+# it's folded at the end of the lesson. The lesson text itself is left untouched.
 
 MM_COLORS = ["#5b8cff", "#2dd4bf", "#fb923c", "#a78bfa", "#f472b6", "#a3e635", "#fbbf24", "#38bdf8"]
 
@@ -838,20 +842,30 @@ def mindmap_svg(mm):
             f'<details class="mm-outline"><summary>Read the map as a list</summary><ul>{outline}</ul></details>')
 
 
-def side_explain(root, track, topic):
+def lesson_explainer(topic, lesson):
+    """The lesson's own explainer, folded at the end of the page; falls back to the topic's."""
+    if lesson.get("explain"):
+        return explainer_html(lesson["explain"], lesson["title"], collapsible=True, scope="lesson")
+    if topic.get("explain"):
+        return explainer_html(topic["explain"], topic["title"], collapsible=True, scope="topic")
+    return ""
+
+
+def side_explain(root, track, topic, lesson):
     """Lesson sidebar link that opens the folded explainer on the same page (empty when there's none)."""
-    if not topic.get("explain"):
+    if not (lesson.get("explain") or topic.get("explain")):
         return ""
+    scope = "lesson" if lesson.get("explain") else "topic"
     return (f'\n        <a class="side-explain" href="#explained" data-explain-open>'
-            f'{ICON["brain"]}Explain this topic: first principles, analogy, mind map</a>')
+            f'{ICON["brain"]}Explain this {scope}: first principles, analogy, mind map</a>')
 
 
-def explainer_html(topic, collapsible=False):
-    """The "Topic explained" section: under a topic's lesson list, or folded at the end of each lesson."""
-    x = topic["explain"]
+def explainer_html(x, title, collapsible=False, scope="topic"):
+    """A first-principles explainer: open under a topic's lesson list, or folded at the end of a lesson."""
     fp, an, ex = x["first_principles"], x["analogy"], x["example"]
     li = lambda items: "".join(f"<li>{fmt(t)}</li>" for t in items)
     mapping = "".join(f"<tr><td>{fmt(a)}</td><td>{fmt(b)}</td></tr>" for a, b in an["mapping"])
+    truths = f"<h4>Ground truths we can't argue with</h4><ul>{li(fp['truths'])}</ul>" if fp.get("truths") else ""
     flow = ""
     if ex.get("flow"):
         flow = '<div class="cx-flow">' + f'<span class="cx-flow-arrow" aria-hidden="true">{ICON["right"]}</span>'.join(
@@ -865,7 +879,7 @@ def explainer_html(topic, collapsible=False):
     secs = [
         ("first-principles", "First principles", f"""
 <h4>The problem, before any tools existed</h4>{paras(fp["problem"])}
-<h4>Ground truths we can't argue with</h4><ul>{li(fp["truths"])}</ul>
+{truths}
 <h4>Build the solution up from those truths</h4><ol class="cx-derive">{li(fp["derivation"])}</ol>"""),
         ("analogy", "Analogy", f"""
 <div class="cx-analogy"><p class="mono-label">{fmt(an["title"])}</p>{paras(an["story"])}</div>
@@ -882,8 +896,8 @@ def explainer_html(topic, collapsible=False):
     body = "".join(f'<section class="cx-sec" id="x-{sid}"><h3><span class="cx-num">{i:02d}</span>{t}</h3>{inner}</section>'
                    for i, (sid, t, inner) in enumerate(secs, 1))
     inner = f"""<div class="cx-head">
-    <p class="mono-label">Topic explained · from first principles</p>
-    <h2>The core of {topic['title']}</h2>
+    <p class="mono-label">{scope.title()} explained · from first principles</p>
+    <h2>The core of {title}</h2>
     <p class="cx-lede">{fmt(x["core"])}</p>
     <nav class="cx-nav" aria-label="Explainer sections">{nav}</nav>
   </div>
@@ -891,7 +905,7 @@ def explainer_html(topic, collapsible=False):
     if collapsible:
         return f"""
       <details class="cx-explain cx-fold" id="explained" data-explain>
-        <summary>{ICON["brain"]}<span><b>Explain this topic from first principles</b><em>First principles · analogy · mind map · worked example · summary</em></span>{ICON["chev"]}</summary>
+        <summary>{ICON["brain"]}<span><b>Explain this {scope} from first principles</b><em>First principles · analogy · mind map · worked example · summary</em></span>{ICON["chev"]}</summary>
         {inner}
       </details>"""
     return f"""
@@ -916,7 +930,7 @@ def render_topic(track, ti, topic):
         f"Topic {ti + 1} of {len(track['topics'])}", topic['title'],
         f"{len(topic['lessons'])} lessons · {fmt_minutes(sum(l['minutes'] for l in topic['lessons']))}", actions)}
 <section class="wrap narrow section">
-  <ol class="lesson-list big">{lesson_rows(root, track, topic)}</ol>{explainer_html(topic) if topic.get("explain") else ""}
+  <ol class="lesson-list big">{lesson_rows(root, track, topic)}</ol>{explainer_html(topic["explain"], topic["title"]) if topic.get("explain") else ""}
   {nav}
 </section>
 </main>"""
@@ -969,7 +983,7 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
       <div class="side-topic">
         <p class="mono-label">Topic {ti + 1} / {len(track['topics'])}</p>
         <a class="side-topic-title" href="{root}{track['slug']}/{topic['slug']}/index.html">{topic['title']}</a>
-        {progress(f"{track['slug']}/{topic['slug']}/", len(topic['lessons']))}{side_explain(root, track, topic)}
+        {progress(f"{track['slug']}/{topic['slug']}/", len(topic['lessons']))}{side_explain(root, track, topic, lesson)}
       </div>
       <ol class="lesson-list side">{lesson_rows(root, track, topic, lesson)}</ol>
       <details class="side-more"><summary>All topics in this track {ICON['chev']}</summary><ol>{other_topics}</ol></details>
@@ -992,7 +1006,7 @@ def render_lesson(track, ti, topic, li, lesson, prev, nxt, flat_index, total):
           <span class="domain-tag" style="--c:{track['color']}"><i></i>{track['domain']['name']}</span>
         </div>
       </header>
-      <div class="prose">{content}</div>{explainer_html(topic, collapsible=True) if topic.get("explain") else ""}
+      <div class="prose">{content}</div>{lesson_explainer(topic, lesson)}
       <div class="lesson-foot">
         <button class="btn btn-complete" data-complete>
           <span class="when-todo">{ICON['check']}Mark as complete</span>

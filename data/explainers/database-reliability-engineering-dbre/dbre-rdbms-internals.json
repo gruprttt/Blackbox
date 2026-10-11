@@ -1,0 +1,1272 @@
+{
+  "introduction-the-magic-box-vs-reality": {
+    "core": "A DBRE can't treat the database as magic, because every slow query, full disk or post-crash surprise is caused by a specific internal mechanism you can name, measure and fix.",
+    "first_principles": {
+      "problem": "To an application developer the database is a black box: SQL goes in, correct rows come out. That works until it doesn't. Queries slow down for no visible reason, the disk fills up overnight, or data looks odd after a crash.\n\nAt that point \"restart it and hope\" is the only option for someone who doesn't know what's inside. Knowing the machinery turns guesswork into diagnosis.",
+      "truths": [
+        "Every symptom (slowness, disk growth, odd data) has a physical cause inside the engine.",
+        "You can only fix what you can explain.",
+        "The core machinery (pages, buffer pool, WAL, indexes, MVCC, vacuum) is shared by Postgres, MySQL, Oracle and SQL Server."
+      ],
+      "derivation": [
+        "Treat the database as a set of mechanisms, not a box: storage, caching, logging, indexing, concurrency and cleanup.",
+        "For every mechanism, learn **what it guarantees** and **what it costs**.",
+        "Map each production symptom back to the mechanism that causes it, then fix the root cause instead of restarting."
+      ]
+    },
+    "analogy": {
+      "title": "A driver vs. a mechanic",
+      "story": "A driver only needs to know the pedals and the steering wheel. When the car makes a strange noise, the driver pulls over and calls for help.\n\nA mechanic knows the engine, the gearbox and the brakes, so the same noise tells them exactly which part is failing and what to replace. A DBRE is the database's mechanic.",
+      "mapping": [
+        [
+          "Driver",
+          "Application developer"
+        ],
+        [
+          "Mechanic",
+          "DBRE"
+        ],
+        [
+          "Strange noise",
+          "Slow query, disk growth, inconsistency"
+        ],
+        [
+          "Engine parts",
+          "Pages, buffer pool, WAL, B+ trees, MVCC, vacuum"
+        ]
+      ],
+      "breaks": "Cars come with a manual and warning lights. Databases expose their internals through system views (`pg_stat_*`), and you have to know which ones to look at."
+    },
+    "mindmap": {
+      "center": "The DBRE view",
+      "branches": [
+        {
+          "label": "Developer view",
+          "children": [
+            "SQL in, rows out",
+            "\"It's magic\""
+          ]
+        },
+        {
+          "label": "DBRE view",
+          "children": [
+            "Know the mechanisms",
+            "Root cause, not restart"
+          ]
+        },
+        {
+          "label": "Machinery",
+          "children": [
+            "Pages & buffer pool",
+            "WAL",
+            "Indexes",
+            "MVCC & vacuum"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Slow queries",
+            "Disk filling",
+            "Odd data after crash"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same symptom, two responses",
+      "scenario": "The database CPU is at 100% and the API is timing out.",
+      "flow": [
+        "Symptom: CPU 100%",
+        "Black-box response: restart",
+        "DBRE response: look inside",
+        "Root cause found",
+        "Real fix"
+      ],
+      "steps": [
+        {
+          "label": "Black box",
+          "detail": "Restarting clears it for an hour, then it comes back. Nothing was learned."
+        },
+        {
+          "label": "Look inside",
+          "detail": "`pg_stat_statements` shows one query is using 70% of CPU, doing a sequential scan on a 40 M-row table."
+        },
+        {
+          "label": "Root cause",
+          "detail": "A recent deploy removed the filter that matched an index."
+        },
+        {
+          "label": "Fix",
+          "detail": "Restore the filter or add the matching index, and the CPU drops to normal permanently."
+        }
+      ],
+      "code": [],
+      "outcome": "the incident ends with a known cause and a permanent fix, not a restart and a hope."
+    },
+    "summary": {
+      "points": [
+        "\"It's magic\" isn't acceptable for a DBRE.",
+        "Every symptom maps to a mechanism.",
+        "The principles are the same across Postgres, MySQL, Oracle and SQL Server."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is restarting a database a poor default fix?",
+        "a": "It hides the symptom without removing the cause, so the problem returns, and you lose the evidence needed to diagnose it."
+      }
+    ]
+  },
+  "acid-properties-the-contract": {
+    "core": "ACID is the contract a database signs with every application: all-or-nothing, rules always hold, no interference, and committed means kept forever.",
+    "first_principles": {
+      "problem": "Real actions take several writes. A money transfer is a debit and a credit. If the power fails between them, money vanishes. If two people buy the last ticket at once, both may succeed.\n\nEvery application would have to solve crashes and concurrency by itself, unless the database promises to do it.",
+      "truths": [
+        "A crash can happen between any two steps.",
+        "Many transactions run at the same time on the same data.",
+        "Business rules (constraints) must never be broken.",
+        "Once a client is told \"success\", it acts on it."
+      ],
+      "derivation": [
+        "Treat a group of operations as one unit that fully happens or fully doesn't: **Atomicity**.",
+        "Reject any transaction that would break a declared rule: **Consistency**.",
+        "Make concurrent transactions behave as if they ran one at a time: **Isolation**.",
+        "Once committed, survive any crash: **Durability**.",
+        "Notice the tension: atomicity needs *undo*, durability needs *never lose*. The WAL satisfies both."
+      ]
+    },
+    "analogy": {
+      "title": "A notary's contract",
+      "story": "A notary only stamps a contract when every clause is signed (atomic), every clause is legal (consistent), nobody else can edit it while it's being signed (isolated), and once stamped it's filed in the archive forever (durable).",
+      "mapping": [
+        [
+          "All clauses signed or none",
+          "Atomicity"
+        ],
+        [
+          "Only legal clauses",
+          "Consistency (constraints)"
+        ],
+        [
+          "No edits during signing",
+          "Isolation"
+        ],
+        [
+          "Filed in the archive",
+          "Durability"
+        ],
+        [
+          "The stamp",
+          "COMMIT"
+        ]
+      ],
+      "breaks": "A notary handles one contract at a time. A database handles thousands at once, so isolation is a spectrum (isolation levels), not a yes/no."
+    },
+    "mindmap": {
+      "center": "ACID",
+      "branches": [
+        {
+          "label": "Atomicity",
+          "children": [
+            "All or nothing",
+            "Rollback on failure"
+          ]
+        },
+        {
+          "label": "Consistency",
+          "children": [
+            "Constraints, FKs, types",
+            "Invalid → rejected"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Concurrent ≈ serial",
+            "Hardest: a spectrum"
+          ]
+        },
+        {
+          "label": "Durability",
+          "children": [
+            "Committed = permanent",
+            "write() vs fsync()"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The $10 transfer and the last ticket",
+      "scenario": "Two classic failures that ACID prevents.",
+      "flow": [
+        "Debit A",
+        "Power fails",
+        "Rollback on restart",
+        "No money lost"
+      ],
+      "steps": [
+        {
+          "label": "Atomicity",
+          "detail": "Power fails after debiting A but before crediting B. On restart the debit is rolled back, so no money vanishes."
+        },
+        {
+          "label": "Consistency",
+          "detail": "A transaction leaving `email` NULL with a `NOT NULL` constraint is rejected entirely."
+        },
+        {
+          "label": "Isolation",
+          "detail": "Two buyers read \"1 ticket left\". Isolation makes sure only one purchase succeeds."
+        },
+        {
+          "label": "Durability",
+          "detail": "After COMMIT returns, the change survives even a crash 1 ms later."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN;\nUPDATE accounts SET balance = balance - 10 WHERE id = 'A';\nUPDATE accounts SET balance = balance + 10 WHERE id = 'B';\nCOMMIT;   -- both or neither"
+        }
+      ],
+      "outcome": "partial transfers and oversold tickets become impossible, without the application handling any of it."
+    },
+    "summary": {
+      "points": [
+        "ACID = all-or-nothing, rules hold, no interference, committed is forever.",
+        "Isolation is the hardest because it's a trade-off spectrum.",
+        "Durability depends on `fsync`, not just `write`."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which ACID property is hardest to implement, and why?",
+        "a": "Isolation. It exists on a spectrum of levels that trade correctness against performance and require careful conflict handling."
+      }
+    ]
+  },
+  "how-data-is-physically-stored-pages-and-heap-files": {
+    "core": "Databases read and write whole fixed-size pages (8 KB in Postgres, 16 KB in InnoDB), and table rows live unordered in heap files made of those pages.",
+    "first_principles": {
+      "problem": "Disks don't deal in rows. They deal in blocks. Reading one byte means reading a whole block, so a database that fetched rows one at a time would waste enormous amounts of I/O.\n\nThe database needs a unit of storage that matches how hardware works, and a way to find free space for new rows quickly.",
+      "truths": [
+        "Storage hardware reads and writes fixed-size blocks.",
+        "Reading part of a block costs the same as reading all of it.",
+        "Rows vary in size and are inserted, updated and deleted constantly."
+      ],
+      "derivation": [
+        "Make the **page** (8 KB / 16 KB) the unit of all I/O. One row requested means its whole page is read.",
+        "Store a table as a **heap file**: an unordered set of pages. New rows go wherever there's free space.",
+        "Inside a page: a **header** (free space, checksum, LSN), **item pointers** growing down, and **tuples** growing up, with free space between.",
+        "Leave room on purpose with **FILLFACTOR** so updates can stay on the same page (HOT updates) instead of splitting."
+      ]
+    },
+    "analogy": {
+      "title": "Pages in a book",
+      "story": "You can't read a single sentence without opening its page. And in this book, new paragraphs are written wherever there's blank space, not in any order. A contents strip at the top of each page tells you where each paragraph starts.",
+      "mapping": [
+        [
+          "A page of the book",
+          "8 KB database page"
+        ],
+        [
+          "Blank space on a page",
+          "Free space"
+        ],
+        [
+          "Contents strip at the top",
+          "Item (line) pointers"
+        ],
+        [
+          "Paragraphs",
+          "Row tuples"
+        ],
+        [
+          "Book with no ordering",
+          "Heap file"
+        ]
+      ],
+      "breaks": "Crossed-out paragraphs in a book are obviously garbage. In a database, deleted rows stay on the page as dead tuples until vacuum reclaims them, so the file doesn't shrink."
+    },
+    "mindmap": {
+      "center": "Pages & Heap Files",
+      "branches": [
+        {
+          "label": "Page",
+          "children": [
+            "8 KB (PG) / 16 KB (InnoDB)",
+            "Unit of I/O"
+          ]
+        },
+        {
+          "label": "Page layout",
+          "children": [
+            "Header (LSN, checksum)",
+            "Item pointers ↓",
+            "Tuples ↑"
+          ]
+        },
+        {
+          "label": "Heap file",
+          "children": [
+            "Unordered rows",
+            "First free space"
+          ]
+        },
+        {
+          "label": "Why it matters",
+          "children": [
+            "Page bloat",
+            "Page splits",
+            "FILLFACTOR / HOT"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reading one row costs a whole page",
+      "scenario": "`SELECT * FROM users WHERE id = 42` returns one 200-byte row.",
+      "flow": [
+        "Find page holding row 42",
+        "Read 8 KB page",
+        "Follow item pointer",
+        "Return 200-byte tuple"
+      ],
+      "steps": [
+        {
+          "label": "Locate",
+          "detail": "The index gives a TID like `(1234, 7)`: page 1234, item 7."
+        },
+        {
+          "label": "Read",
+          "detail": "The whole 8 KB page 1234 is read into memory, about 40× more bytes than the row."
+        },
+        {
+          "label": "Extract",
+          "detail": "Item pointer 7 gives the offset and length of the tuple inside the page."
+        },
+        {
+          "label": "Tune",
+          "detail": "For a frequently updated table, `FILLFACTOR = 70` leaves space so updates stay on the same page."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT ctid, * FROM users WHERE id = 42;      -- ctid = (page, item)\nALTER TABLE sessions SET (fillfactor = 70);   -- room for in-page (HOT) updates"
+        }
+      ],
+      "outcome": "you can see that I/O is counted in pages, not rows, which explains bloat, page splits and why fillfactor helps."
+    },
+    "summary": {
+      "points": [
+        "The page is the atomic unit of I/O.",
+        "Heap files are unordered.",
+        "Bloat, page splits and FILLFACTOR all come from the page layout."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a table be 10 GB on disk with only 2 GB of live data?",
+        "a": "Dead tuples and free space inside pages still occupy the file. Plain VACUUM marks space reusable but doesn't shrink the file."
+      }
+    ]
+  },
+  "the-io-bottleneck-buffer-pools": {
+    "core": "The buffer pool is a RAM cache of disk pages that lets most reads and writes happen at memory speed, with dirty pages flushed to disk later.",
+    "first_principles": {
+      "problem": "A busy database runs thousands of queries per second, each touching dozens of pages. Disk is 10–100× slower than RAM even on NVMe, and far slower on spinning disks.\n\nIf every page access went to disk, the database couldn't keep up.",
+      "truths": [
+        "RAM is nanoseconds and volatile. Disk is micro- to milliseconds and persistent.",
+        "The same hot pages are accessed again and again.",
+        "Memory is finite, so some pages must leave the cache."
+      ],
+      "derivation": [
+        "Reserve a large chunk of RAM as a **buffer pool** (`shared_buffers`, `innodb_buffer_pool_size`).",
+        "On read: **hit** = return from RAM, **miss** = load from disk into the pool, then return.",
+        "On write: modify the page in RAM (now **dirty**), and let the **checkpointer** flush it later.",
+        "When full, evict cold pages with **clock sweep**: recently used pages carry a usage count that protects them.",
+        "Watch the **hit ratio**. Above 99% is healthy, below 95% is a warning."
+      ]
+    },
+    "analogy": {
+      "title": "A desk vs. the filing room",
+      "story": "You keep the files you're working on spread on your desk (fast), and everything else in the filing room down the hall (slow). When the desk is full, the file you haven't touched for longest goes back to the filing room. Changes you make on the desk are carried back to the filing room in batches.",
+      "mapping": [
+        [
+          "Desk",
+          "Buffer pool (RAM)"
+        ],
+        [
+          "Filing room",
+          "Disk"
+        ],
+        [
+          "File already on the desk",
+          "Cache hit"
+        ],
+        [
+          "Walking to the filing room",
+          "Cache miss"
+        ],
+        [
+          "Edited file not yet returned",
+          "Dirty page"
+        ],
+        [
+          "Batch return trip",
+          "Checkpoint"
+        ]
+      ],
+      "breaks": "A desk doesn't lose your edits if the lights go out. RAM does, which is why dirty pages need the WAL (next lesson)."
+    },
+    "mindmap": {
+      "center": "Buffer Pool",
+      "branches": [
+        {
+          "label": "Speed gap",
+          "children": [
+            "RAM ns, volatile",
+            "Disk µs–ms, durable"
+          ]
+        },
+        {
+          "label": "Reads",
+          "children": [
+            "Hit → RAM",
+            "Miss → disk → pool"
+          ]
+        },
+        {
+          "label": "Writes",
+          "children": [
+            "Dirty pages",
+            "Checkpointer flushes"
+          ]
+        },
+        {
+          "label": "Eviction",
+          "children": [
+            "Clock sweep",
+            "Usage count"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "Hit ratio > 99%",
+            "< 95% warning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnosing a falling hit ratio",
+      "scenario": "Query latency doubled this month. The table grew from 20 GB to 60 GB, while `shared_buffers` stayed at 4 GB.",
+      "flow": [
+        "Latency up",
+        "Hit ratio 99.6% → 91%",
+        "Working set > pool",
+        "Raise shared_buffers / fix scans",
+        "Hit ratio back > 99%"
+      ],
+      "steps": [
+        {
+          "label": "Measure",
+          "detail": "The hit ratio from `pg_statio_user_tables` has dropped to 91%: about 1 in 11 page reads goes to disk."
+        },
+        {
+          "label": "Explain",
+          "detail": "The hot working set no longer fits in 4 GB, so pages are constantly evicted and re-read."
+        },
+        {
+          "label": "Fix",
+          "detail": "Raise `shared_buffers` (often about 25% of RAM) and look for full scans that flood the cache."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT relname,\n       round(100.0 * heap_blks_hit / nullif(heap_blks_hit + heap_blks_read, 0), 2) AS hit_pct\nFROM pg_statio_user_tables ORDER BY heap_blks_read DESC LIMIT 5;"
+        }
+      ],
+      "outcome": "most page reads return from memory again, and latency returns to normal."
+    },
+    "summary": {
+      "points": [
+        "Buffer pool = RAM cache of pages.",
+        "Writes make pages dirty, and the checkpointer flushes them later.",
+        "Watch the hit ratio: > 99% is good."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to a dirty page if the server loses power?",
+        "a": "The in-memory change is lost. That's why every change is first recorded in the WAL on disk."
+      }
+    ]
+  },
+  "ensuring-durability-the-write-ahead-log-wal": {
+    "core": "Log first, data later: every change is appended to the WAL and fsync'd at commit, so a crash can always be repaired by replaying the log.",
+    "first_principles": {
+      "problem": "Writes go to pages in RAM and reach disk later. That's fast, but RAM is volatile, so a power cut before the flush loses committed data and breaks durability.\n\nWriting every changed page straight to disk at commit would fix that, but random page writes are far too slow.",
+      "truths": [
+        "RAM is lost on power failure.",
+        "Sequential appends are far faster than random writes.",
+        "`write()` alone may leave data in the OS cache. Only `fsync()` reaches disk."
+      ],
+      "derivation": [
+        "Before changing a data page, append a **description of the change** to the WAL.",
+        "At commit, **fsync the WAL**, then tell the client \"COMMIT\".",
+        "Let the **checkpointer** write dirty data pages later, in the background.",
+        "After a crash, **REDO**: start at the last checkpoint and replay the WAL forward.",
+        "Reuse the same log for **streaming replication**: a standby is doing continuous crash recovery."
+      ]
+    },
+    "analogy": {
+      "title": "A ship's logbook",
+      "story": "The captain doesn't redraw the chart after every course change. They write \"14:02 turned 10° east\" in the logbook immediately. If the chart is lost overboard, a new one can be rebuilt from the last saved chart plus the logbook entries since then.",
+      "mapping": [
+        [
+          "Logbook entry",
+          "WAL record"
+        ],
+        [
+          "Writing it immediately",
+          "fsync at commit"
+        ],
+        [
+          "Redrawing the chart later",
+          "Checkpoint"
+        ],
+        [
+          "Rebuilding from the log",
+          "REDO recovery"
+        ],
+        [
+          "A second ship copying the log",
+          "Streaming replica"
+        ]
+      ],
+      "breaks": "A logbook never gets a half-written entry. A disk write can be torn mid-record, so WAL records carry checksums and a torn tail is discarded on recovery."
+    },
+    "mindmap": {
+      "center": "Write-Ahead Log",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Dirty pages in RAM",
+            "Crash loses them"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Log first, data later",
+            "Sequential append"
+          ]
+        },
+        {
+          "label": "Commit",
+          "children": [
+            "WAL buffer → fsync",
+            "Then ack client"
+          ]
+        },
+        {
+          "label": "Recovery",
+          "children": [
+            "Last checkpoint",
+            "Replay WAL (REDO)"
+          ]
+        },
+        {
+          "label": "Bonus",
+          "children": [
+            "Streaming replication",
+            "PITR, CDC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A crash 1 ms after COMMIT",
+      "scenario": "A client gets COMMIT OK for an UPDATE, then the server loses power before the checkpointer runs.",
+      "flow": [
+        "Change page in RAM",
+        "WAL record → buffer",
+        "fsync WAL",
+        "COMMIT OK",
+        "Crash",
+        "Replay WAL → row restored"
+      ],
+      "steps": [
+        {
+          "label": "Before crash",
+          "detail": "The WAL record is on disk (fsync'd). The data page is not."
+        },
+        {
+          "label": "Restart",
+          "detail": "Postgres logs \"database system was not properly shut down; automatic recovery in progress\"."
+        },
+        {
+          "label": "REDO",
+          "detail": "It replays WAL from the last checkpoint and reapplies the UPDATE."
+        },
+        {
+          "label": "Open",
+          "detail": "Only then does it accept connections, with the committed change present."
+        }
+      ],
+      "code": [],
+      "outcome": "the client's \"success\" was true. The change survived, rebuilt from the log."
+    },
+    "summary": {
+      "points": [
+        "Commit = WAL fsync'd, not data page written.",
+        "Sequential WAL writes make durability cheap.",
+        "Recovery = replay the WAL from the last checkpoint.",
+        "Replication is the same replay, running forever."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is writing the WAL faster than writing data pages at commit?",
+        "a": "The WAL is a sequential append of small records. Data pages are scattered across files, which means random writes of whole pages."
+      }
+    ]
+  },
+  "indexing-for-speed-b-trees-and-b-trees": {
+    "core": "An index is a sorted structure that turns a full scan into a few page reads. Databases use B+ trees because routing-only inner nodes make the tree shallow and linked leaves make ranges fast.",
+    "first_principles": {
+      "problem": "Finding one row in an unordered heap means reading every page: a full table scan. On a 100-million-row table that's hopelessly slow.\n\nWe need a structure that finds any key in a handful of disk reads and also handles ranges efficiently.",
+      "truths": [
+        "Binary search on sorted data takes log₂(N) steps (20 for a million rows).",
+        "Disk is read in pages, so the goal is fewer page reads, not fewer comparisons.",
+        "Range queries (`BETWEEN`, `>`) are extremely common."
+      ],
+      "derivation": [
+        "Keep a separate **sorted** copy of the indexed column with pointers back to the heap.",
+        "Make it a **balanced tree** with many keys per node (one node = one page), so it stays shallow.",
+        "Put **only keys in inner nodes** (B+ tree), so about 200 keys fit per page instead of 50 and trees are 3–4 levels deep even at hundreds of millions of rows.",
+        "Store all row pointers in **leaves linked as a list**, so a range is one descent plus a sequential walk."
+      ]
+    },
+    "analogy": {
+      "title": "A building directory",
+      "story": "The lobby sign says \"Floors 1–10: A–F, 11–20: G–M…\". On the right floor, a corridor sign narrows it further, and the office doors are in alphabetical order along one long corridor. To visit everyone from Smith to Taylor, you find Smith's door once and just keep walking.",
+      "mapping": [
+        [
+          "Lobby and corridor signs",
+          "Inner (routing) nodes"
+        ],
+        [
+          "Office doors",
+          "Leaf entries with row pointers"
+        ],
+        [
+          "One long corridor",
+          "Linked leaf list"
+        ],
+        [
+          "Walking Smith → Taylor",
+          "Range scan"
+        ],
+        [
+          "Reading every office",
+          "Full table scan"
+        ]
+      ],
+      "breaks": "Buildings don't grow new floors when someone moves in. B+ trees split pages on insert, and those splits are a source of write amplification and bloat."
+    },
+    "mindmap": {
+      "center": "B+ Tree Index",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Full table scan",
+            "O(N) page reads"
+          ]
+        },
+        {
+          "label": "Idea",
+          "children": [
+            "Sorted + binary search",
+            "O(log N)"
+          ]
+        },
+        {
+          "label": "B-Tree",
+          "children": [
+            "Data in all nodes",
+            "Can stop early"
+          ]
+        },
+        {
+          "label": "B+ Tree",
+          "children": [
+            "Keys only inside",
+            "Data at leaves",
+            "Leaves linked"
+          ]
+        },
+        {
+          "label": "Wins",
+          "children": [
+            "Shallow (3–4 levels)",
+            "Fast ranges",
+            "Sequential full scan"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A range query on 200 M rows",
+      "scenario": "`SELECT * FROM users WHERE id BETWEEN 100 AND 500;`",
+      "flow": [
+        "Root page",
+        "Inner page",
+        "Leaf with id=100",
+        "Walk linked leaves",
+        "Stop after id=500"
+      ],
+      "steps": [
+        {
+          "label": "Descend",
+          "detail": "3 page reads from root to the leaf holding `id = 100`."
+        },
+        {
+          "label": "Walk",
+          "detail": "Follow leaf links rightward, collecting 401 pointers across a few leaf pages."
+        },
+        {
+          "label": "Fetch",
+          "detail": "Read the heap pages for those rows."
+        },
+        {
+          "label": "Compare",
+          "detail": "Without the index it's a sequential scan of about 200 M rows."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "EXPLAIN SELECT * FROM users WHERE id BETWEEN 100 AND 500;\n-- Index Scan using users_pkey on users  (cost=0.57..1450.02 rows=401)"
+        }
+      ],
+      "outcome": "a few dozen page reads instead of millions."
+    },
+    "summary": {
+      "points": [
+        "Indexes trade write cost for read speed.",
+        "B+ trees: keys-only inner nodes → shallow trees.",
+        "Linked leaves make range queries a single walk."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are B+ trees shallower than classic B-trees for the same data?",
+        "a": "Inner nodes hold only keys, not data pointers, so many more fit per page, which means a higher fan-out and fewer levels."
+      }
+    ]
+  },
+  "concurrency-without-locking-introduction-to-mvcc": {
+    "core": "MVCC keeps old row versions so readers see a stable snapshot while writers create new versions: readers never block writers, writers never block readers.",
+    "first_principles": {
+      "problem": "Isolation with plain locks means readers take shared locks and writers need exclusive ones. A long report blocks all writes to a table, and writes block readers. At high traffic, these waits cascade into an outage.\n\nWe want isolation without readers and writers queuing behind each other.",
+      "truths": [
+        "Most workloads are read-heavy.",
+        "A reader only needs a consistent view, not necessarily the newest one.",
+        "Storage is cheap compared with waiting."
+      ],
+      "derivation": [
+        "Never update a row in place. **Write a new version** and keep the old one.",
+        "Readers read the version that matches **when their transaction started**.",
+        "Writers create versions without waiting for readers, and only writers to the *same row* wait for each other.",
+        "Pay the bill later: old versions become **dead tuples** that vacuum must clean up."
+      ]
+    },
+    "analogy": {
+      "title": "Newspaper editions",
+      "story": "When the newspaper prints a correction, it doesn't recall the copies people are reading. It prints a new edition. Readers finish the edition they picked up, and new readers get the new one. Old editions pile up until they're recycled.",
+      "mapping": [
+        [
+          "Edition",
+          "Row version"
+        ],
+        [
+          "Reader keeps their edition",
+          "Snapshot read"
+        ],
+        [
+          "Printing a new edition",
+          "UPDATE creates a new version"
+        ],
+        [
+          "Pile of old editions",
+          "Dead tuples"
+        ],
+        [
+          "Recycling",
+          "VACUUM"
+        ]
+      ],
+      "breaks": "Two editors printing a correction to the same article at once still clash. MVCC removes reader/writer conflicts, not writer/writer ones."
+    },
+    "mindmap": {
+      "center": "MVCC",
+      "branches": [
+        {
+          "label": "Locking problem",
+          "children": [
+            "Readers block writers",
+            "Writers block readers"
+          ]
+        },
+        {
+          "label": "Insight",
+          "children": [
+            "Keep old versions",
+            "New version per write"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Readers never block writers",
+            "Writers never block readers",
+            "Writers block writers"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Dead tuples",
+            "Bloat → VACUUM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A long report during peak writes",
+      "scenario": "A 20-minute analytics query reads `orders` while checkout updates `orders` 500 times per second.",
+      "flow": [
+        "Report starts (snapshot)",
+        "Checkout updates rows",
+        "New versions written",
+        "Report reads old versions",
+        "No one waits"
+      ],
+      "steps": [
+        {
+          "label": "With locks",
+          "detail": "The report's shared locks would block every checkout UPDATE for 20 minutes."
+        },
+        {
+          "label": "With MVCC",
+          "detail": "Updates write new row versions. The report keeps reading the versions from its snapshot."
+        },
+        {
+          "label": "Cost",
+          "detail": "Old versions can't be cleaned until the report finishes, so dead tuples temporarily accumulate."
+        }
+      ],
+      "code": [],
+      "outcome": "checkout stays fast and the report gets a consistent view. The price is temporary bloat."
+    },
+    "summary": {
+      "points": [
+        "\"Readers never block writers, writers never block readers.\"",
+        "UPDATE = new version and DELETE = mark old, never in place.",
+        "Dead tuples are the price, and VACUUM pays it."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does MVCC remove all locking?",
+        "a": "No. Two transactions updating the same row still conflict, and one must wait or fail."
+      }
+    ]
+  },
+  "mvcc-in-action-snapshots-and-visibility-rules": {
+    "core": "Every row version is stamped with the transaction that created it (xmin) and the one that removed it (xmax). A snapshot plus a simple visibility rule decides which version each transaction sees.",
+    "first_principles": {
+      "problem": "MVCC keeps several versions of each row. When a transaction reads, the database must decide, quickly and for every row, which version this transaction is allowed to see.\n\nIt needs a precise, cheap rule that gives every transaction a consistent picture of the database.",
+      "truths": [
+        "Transactions get increasing IDs (XIDs).",
+        "At any moment some transactions are committed and some are still in progress.",
+        "A consistent view means seeing exactly what was committed at one point in time."
+      ],
+      "derivation": [
+        "Stamp each row version with **xmin** (creator XID) and **xmax** (deleter or updater XID, 0 if current).",
+        "At start, take a **snapshot**: your XID and the list of in-progress XIDs.",
+        "Rule: visible if **xmin committed before the snapshot** and (**xmax = 0** or xmax **hadn't committed** at snapshot time).",
+        "Result: each transaction lives in a consistent \"bubble of time\": **snapshot isolation**."
+      ]
+    },
+    "analogy": {
+      "title": "A photo of the scoreboard",
+      "story": "When you take a photo of a scoreboard, the score in your photo never changes, even as the game goes on. Every score on the board was posted by a referee (xmin) and replaced by a later one (xmax). Your photo shows the scores that had been posted, and not yet replaced, at the moment you pressed the shutter.",
+      "mapping": [
+        [
+          "The photo",
+          "Snapshot"
+        ],
+        [
+          "Referee who posted a score",
+          "xmin"
+        ],
+        [
+          "Referee who replaced it",
+          "xmax"
+        ],
+        [
+          "Score visible in your photo",
+          "Visible row version"
+        ],
+        [
+          "Game continuing",
+          "Other transactions committing"
+        ]
+      ],
+      "breaks": "A photo is free to keep. A snapshot held for hours stops vacuum from removing versions it might need, so long transactions cause bloat."
+    },
+    "mindmap": {
+      "center": "Snapshots & Visibility",
+      "branches": [
+        {
+          "label": "Hidden columns",
+          "children": [
+            "xmin: creator",
+            "xmax: remover (0 = live)"
+          ]
+        },
+        {
+          "label": "Snapshot",
+          "children": [
+            "My XID",
+            "In-progress XIDs"
+          ]
+        },
+        {
+          "label": "Visibility rule",
+          "children": [
+            "xmin committed before",
+            "xmax 0 or not yet committed"
+          ]
+        },
+        {
+          "label": "Outcome",
+          "children": [
+            "Consistent bubble",
+            "Snapshot isolation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Transaction A keeps seeing 'original'",
+      "scenario": "A (XID 100) and B (XID 101) run concurrently on one row.",
+      "flow": [
+        "A: SELECT → 'original'",
+        "B: UPDATE → 'updated'",
+        "B: COMMIT",
+        "A: SELECT → still 'original'",
+        "A: COMMIT"
+      ],
+      "steps": [
+        {
+          "label": "Before",
+          "detail": "One version: `{xmin=99, xmax=0, 'original'}`."
+        },
+        {
+          "label": "B updates",
+          "detail": "The old version gets `xmax=101` and a new `{xmin=101, xmax=0, 'updated'}` appears."
+        },
+        {
+          "label": "A reads again",
+          "detail": "XID 101 was in progress when A's snapshot was taken, so for A the old version is still live and the new one is invisible."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT xmin, xmax, id, val FROM mvcc_demo;\n--  xmin | xmax | id |   val\n--   742 |    0 |  1 | original"
+        }
+      ],
+      "outcome": "A sees one consistent world for its whole life, even though B committed in the middle."
+    },
+    "summary": {
+      "points": [
+        "xmin = creator, xmax = remover.",
+        "Snapshot = my XID + in-progress list.",
+        "Visibility = committed before me and not removed before me."
+      ]
+    },
+    "check": [
+      {
+        "q": "Under Read Committed, would A's second SELECT see 'updated'?",
+        "a": "Yes. Read Committed takes a new snapshot per statement, so the second SELECT sees B's committed change."
+      }
+    ]
+  },
+  "isolation-levels-tuning-the-strictness": {
+    "core": "Isolation levels let you choose how many concurrency anomalies to prevent. Stricter levels give fewer surprises but cost more overhead and retries.",
+    "first_principles": {
+      "problem": "Perfect isolation (every transaction behaves as if alone) is expensive: more conflict checking, more aborted transactions, more waiting. Many workloads don't need it.\n\nSo databases offer levels, and you need to know exactly which anomalies each one still allows.",
+      "truths": [
+        "Each stronger guarantee costs throughput or retries.",
+        "Different transactions in one app need different guarantees.",
+        "Anomalies are specific and nameable: dirty, non-repeatable, phantom, serialization."
+      ],
+      "derivation": [
+        "Block **dirty reads** by never showing uncommitted data: **Read Committed** (Postgres default, fresh snapshot per statement).",
+        "Block **non-repeatable reads** with one snapshot for the whole transaction: **Repeatable Read**.",
+        "Block **serialization anomalies** by detecting dangerous read/write patterns and aborting one transaction: **Serializable**.",
+        "Set it **per transaction** where needed, and make apps **retry** serialization failures."
+      ]
+    },
+    "analogy": {
+      "title": "Exam room rules",
+      "story": "Loose rules: you can glance at a neighbour's unfinished answers (dirty reads). Stricter: only finished, handed-in answers are visible. Stricter still: you get a frozen photocopy of the board when the exam starts. Strictest: the invigilator cancels your paper if your answers only make sense because of someone else's at the same time, and you resit.",
+      "mapping": [
+        [
+          "Glancing at unfinished answers",
+          "Dirty read (Read Uncommitted)"
+        ],
+        [
+          "Only handed-in answers",
+          "Read Committed"
+        ],
+        [
+          "Frozen photocopy at start",
+          "Repeatable Read / snapshot"
+        ],
+        [
+          "Paper cancelled, resit",
+          "Serializable abort + retry"
+        ]
+      ],
+      "breaks": "A resit is rare and costly. Serialization failures can be frequent under contention, so retries must be cheap and automatic."
+    },
+    "mindmap": {
+      "center": "Isolation Levels",
+      "branches": [
+        {
+          "label": "Anomalies",
+          "children": [
+            "Dirty read",
+            "Non-repeatable",
+            "Phantom",
+            "Serialization"
+          ]
+        },
+        {
+          "label": "Read Committed",
+          "children": [
+            "PG default",
+            "Snapshot per statement"
+          ]
+        },
+        {
+          "label": "Repeatable Read",
+          "children": [
+            "One snapshot per txn",
+            "Holds back vacuum"
+          ]
+        },
+        {
+          "label": "Serializable",
+          "children": [
+            "No anomalies",
+            "May abort → retry"
+          ]
+        },
+        {
+          "label": "How to set",
+          "children": [
+            "SET TRANSACTION …",
+            "default_transaction_isolation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A month-end report that must add up",
+      "scenario": "A report runs 5 queries over ledger tables while payments keep posting.",
+      "flow": [
+        "Read Committed → totals disagree",
+        "Switch to Repeatable Read",
+        "One snapshot for all 5 queries",
+        "Totals reconcile"
+      ],
+      "steps": [
+        {
+          "label": "Problem",
+          "detail": "Under Read Committed each query sees a newer snapshot, so totals from query 1 and query 5 don't reconcile."
+        },
+        {
+          "label": "Fix",
+          "detail": "Run the report in `REPEATABLE READ`: all five queries see the same instant."
+        },
+        {
+          "label": "Cost",
+          "detail": "The long snapshot delays vacuum. Run it on a replica if it's long."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN ISOLATION LEVEL REPEATABLE READ;\nSELECT sum(amount) FROM payments WHERE month = '2026-09';\nSELECT sum(amount) FROM ledger   WHERE month = '2026-09';\nCOMMIT;"
+        }
+      ],
+      "outcome": "the report is internally consistent, at the cost of holding one snapshot for its duration."
+    },
+    "summary": {
+      "points": [
+        "Read Committed: no dirty reads, per-statement snapshot.",
+        "Repeatable Read: one snapshot per transaction.",
+        "Serializable: no anomalies, so the app must retry."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a long Repeatable Read transaction cause bloat?",
+        "a": "Its snapshot may still need old row versions, so vacuum can't remove dead tuples newer than the snapshot until it ends."
+      }
+    ]
+  },
+  "the-mvcc-hangover-bloat-and-vacuuming": {
+    "core": "MVCC leaves dead row versions behind. VACUUM reclaims their space and freezes old transaction IDs, and if it falls behind you get bloat and, eventually, a wraparound shutdown.",
+    "first_principles": {
+      "problem": "Every UPDATE and DELETE leaves a dead tuple. On busy tables they pile up: tables and indexes grow, scans read garbage, and the planner gets misleading statistics.\n\nWorse, transaction IDs are 32-bit. After about 2 billion transactions they wrap around, and rows with very old XIDs would suddenly look like they're \"from the future\".",
+      "truths": [
+        "Dead tuples occupy space until something removes them.",
+        "Cleanup must not block normal traffic.",
+        "XIDs are finite (32-bit) and are compared in a circle."
+      ],
+      "derivation": [
+        "Run **VACUUM** to find tuples no transaction can see and mark their space reusable, online, without blocking.",
+        "Use **VACUUM FULL** only for severe bloat: it rewrites the table and returns space to the OS, but takes an exclusive lock.",
+        "Automate it with **autovacuum**, triggered by dead-tuple thresholds.",
+        "**Freeze** old rows so their XIDs no longer matter. Anti-wraparound vacuums do this, and you must monitor `age(datfrozenxid)`."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant's dirty dishes",
+      "story": "Every meal served leaves dirty plates. Busboys clear them continuously while customers keep eating (VACUUM). Once in a while the whole dining room is closed for a deep clean (VACUUM FULL). If nobody clears for weeks, you run out of tables, and eventually the health inspector shuts the restaurant down (wraparound).",
+      "mapping": [
+        [
+          "Dirty plates",
+          "Dead tuples"
+        ],
+        [
+          "Busboys clearing during service",
+          "VACUUM / autovacuum"
+        ],
+        [
+          "Closing for a deep clean",
+          "VACUUM FULL (exclusive lock)"
+        ],
+        [
+          "Running out of tables",
+          "Bloat"
+        ],
+        [
+          "Health inspector shutdown",
+          "XID wraparound protection"
+        ]
+      ],
+      "breaks": "Busboys can clear any plate. VACUUM can't remove versions an open transaction might still see, so one forgotten long transaction blocks cleanup everywhere."
+    },
+    "mindmap": {
+      "center": "Bloat & Vacuum",
+      "branches": [
+        {
+          "label": "Dead tuples",
+          "children": [
+            "UPDATE → old version",
+            "DELETE → marked"
+          ]
+        },
+        {
+          "label": "Bloat",
+          "children": [
+            "Table & index growth",
+            "Slower scans",
+            "Bad stats"
+          ]
+        },
+        {
+          "label": "VACUUM",
+          "children": [
+            "Online",
+            "Space reusable",
+            "File doesn't shrink"
+          ]
+        },
+        {
+          "label": "VACUUM FULL",
+          "children": [
+            "Rewrites table",
+            "Exclusive lock"
+          ]
+        },
+        {
+          "label": "Wraparound",
+          "children": [
+            "32-bit XIDs",
+            "Freeze old rows",
+            "Alert at ~1.5 B age"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Catching bloat and wraparound early",
+      "scenario": "A weekly health check on a busy Postgres cluster.",
+      "flow": [
+        "Rank tables by dead %",
+        "Dead > 20% → tune autovacuum",
+        "Check datfrozenxid age",
+        "Age > 1.5 B → alert"
+      ],
+      "steps": [
+        {
+          "label": "Bloat",
+          "detail": "`orders` shows 35% dead tuples and a `last_autovacuum` from 4 days ago, so autovacuum isn't keeping up."
+        },
+        {
+          "label": "Fix",
+          "detail": "Lower its scale factor so vacuum runs sooner and in smaller passes."
+        },
+        {
+          "label": "Wraparound",
+          "detail": "Database age is 1.6 B, so investigate which table has an old `relfrozenxid` and what blocks its vacuum."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT relname, n_dead_tup,\n       round(100.0 * n_dead_tup / nullif(n_live_tup + n_dead_tup, 0), 1) AS dead_pct, last_autovacuum\nFROM pg_stat_user_tables ORDER BY dead_pct DESC NULLS LAST LIMIT 5;\n\nSELECT datname, age(datfrozenxid) FROM pg_database ORDER BY 2 DESC;"
+        }
+      ],
+      "outcome": "bloat is caught and tuned away, and wraparound risk is spotted months before it could stop writes."
+    },
+    "summary": {
+      "points": [
+        "Dead tuples are MVCC's bill, and VACUUM pays it.",
+        "VACUUM is online and VACUUM FULL locks, so use it sparingly.",
+        "Never vacuuming → bloat, then wraparound shutdown."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if you never vacuum a PostgreSQL database?",
+        "a": "Tables and indexes bloat and slow down. Eventually XID wraparound protection makes Postgres refuse new transactions to prevent data corruption."
+      }
+    ]
+  }
+}
