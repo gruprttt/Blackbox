@@ -1,0 +1,747 @@
+{
+  "introduction-bridging-the-sql-and-nosql-divide": {
+    "core": "NewSQL rebuilds the database from scratch (consensus replication, distributed transactions, careful timekeeping) so you no longer have to choose between ACID SQL on one box and scalable but eventually consistent NoSQL.",
+    "first_principles": {
+      "problem": "For years the choice was binary. SQL gives transactions and joins but can't spread writes across servers. NoSQL spreads writes but gives up transactions and often consistency. Domains like payments and inventory need both correctness and scale.",
+      "truths": [
+        "Read replicas don't scale writes, because every write still hits one primary.",
+        "Correctness-critical domains can't accept eventual consistency.",
+        "Consensus algorithms let a group of machines agree safely."
+      ],
+      "derivation": [
+        "Split data into ranges and spread them across nodes, which **scales writes**.",
+        "Replicate each range with **consensus** (Paxos/Raft), which keeps it **correct and available** through failures.",
+        "Coordinate multi-range changes with **distributed transactions**, which keeps **ACID**.",
+        "Keep a **SQL interface** so applications don't have to change how they think."
+      ]
+    },
+    "analogy": {
+      "title": "Many filing cabinets that act as one",
+      "story": "A classic database is one perfectly organised cabinet. NoSQL is many cabinets that don't always agree. NewSQL is many cabinets with a strict protocol: every drawer is mirrored in three cabinets that vote on each change, and a coordinator makes multi-drawer changes happen all at once.",
+      "mapping": [
+        [
+          "Many cabinets",
+          "Many nodes"
+        ],
+        [
+          "Drawer mirrored in three",
+          "Range replicated 3×"
+        ],
+        [
+          "Voting on each change",
+          "Consensus (Raft/Paxos)"
+        ],
+        [
+          "All-at-once multi-drawer change",
+          "Distributed transaction"
+        ],
+        [
+          "Same request forms",
+          "SQL interface"
+        ]
+      ],
+      "breaks": "Voting cabinets in one room agree instantly. Across regions every vote is a long network round trip, so NewSQL writes are slower than a single box."
+    },
+    "mindmap": {
+      "center": "NewSQL",
+      "branches": [
+        {
+          "label": "SQL world",
+          "children": [
+            "ACID, joins",
+            "Vertical only"
+          ]
+        },
+        {
+          "label": "NoSQL world",
+          "children": [
+            "Horizontal scale",
+            "Weaker guarantees"
+          ]
+        },
+        {
+          "label": "NewSQL",
+          "children": [
+            "Ranges + consensus",
+            "Distributed txns",
+            "SQL interface"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Spanner",
+            "CockroachDB",
+            "TiDB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"Why not Postgres with replicas?\"",
+      "scenario": "A payments company's write volume exceeds the largest Postgres primary.",
+      "flow": [
+        "Primary write-bound",
+        "Replicas don't help writes",
+        "NewSQL: writes spread across ranges",
+        "ACID kept"
+      ],
+      "steps": [
+        {
+          "label": "Replicas",
+          "detail": "They add read capacity only, and every payment write still goes to one primary."
+        },
+        {
+          "label": "NewSQL",
+          "detail": "Payment rows live in many ranges on many nodes, each with its own Raft leader, so writes scale out."
+        },
+        {
+          "label": "Correctness",
+          "detail": "Transfers touching two ranges stay atomic via distributed commit."
+        }
+      ],
+      "code": [],
+      "outcome": "write capacity grows with the cluster without giving up transactions."
+    },
+    "summary": {
+      "points": [
+        "NewSQL = NoSQL scale + SQL/ACID.",
+        "Achieved by redesign, not bolt-ons.",
+        "Replicas scale reads, NewSQL scales writes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does NewSQL scale that read replicas can't?",
+        "a": "Writes. They're distributed across many nodes via sharded ranges and consensus instead of one primary."
+      }
+    ]
+  },
+  "the-google-spanner-revolution": {
+    "core": "Spanner shards data into key-range tablets, replicates each with Paxos across zones, lets you pin data to regions, and orders transactions globally with TrueTime.",
+    "first_principles": {
+      "problem": "Google needed one database across hundreds of data centres, holding petabytes, serving millions of requests per second, and with a strict guarantee: if transaction A commits before B starts, everyone in the world sees A before B. No existing system offered all of that.",
+      "truths": [
+        "Data must be split to scale, and splits must move as data grows.",
+        "Any replica may fail, so a majority must agree on writes.",
+        "Laws and latency both care where data physically lives."
+      ],
+      "derivation": [
+        "Split tables into **tablets by key range**, auto-split and rebalanced, with no manual resharding.",
+        "Replicate each tablet with **Paxos**: a write commits when a majority accepts it.",
+        "**Geo-partition**: pin rows to regions for GDPR and low latency.",
+        "Solve global ordering with **TrueTime** (next lesson)."
+      ]
+    },
+    "analogy": {
+      "title": "An international library network",
+      "story": "Books are grouped by shelf ranges (tablets), and each range is held by three branches in different cities that vote on every change (Paxos). European readers' books stay in European branches (geo-partitioning). New shelves are split off automatically as a range grows.",
+      "mapping": [
+        [
+          "Shelf range",
+          "Tablet"
+        ],
+        [
+          "Three branches voting",
+          "Paxos replication"
+        ],
+        [
+          "Books kept in Europe",
+          "Geo-partitioning"
+        ],
+        [
+          "Automatic shelf split",
+          "Tablet split / rebalance"
+        ]
+      ],
+      "breaks": "Libraries can tolerate a branch being a day behind. Spanner can't, because every committed write must be visible in the correct order everywhere."
+    },
+    "mindmap": {
+      "center": "Google Spanner",
+      "branches": [
+        {
+          "label": "Goal",
+          "children": [
+            "Global scale",
+            "External consistency"
+          ]
+        },
+        {
+          "label": "Sharding",
+          "children": [
+            "Range tablets",
+            "Auto split"
+          ]
+        },
+        {
+          "label": "Replication",
+          "children": [
+            "Paxos",
+            "Majority commit"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Geo-partitioning",
+            "GDPR, latency"
+          ]
+        },
+        {
+          "label": "Secret sauce",
+          "children": [
+            "TrueTime"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "EU users' data stays in the EU",
+      "scenario": "A global app must keep EU citizens' rows in EU data centres.",
+      "flow": [
+        "Users table split by range",
+        "EU ranges placed in EU zones",
+        "Paxos replicas within EU",
+        "EU reads served locally"
+      ],
+      "steps": [
+        {
+          "label": "Placement",
+          "detail": "Rows for EU users are partitioned and their replicas are placed only in EU regions."
+        },
+        {
+          "label": "Replication",
+          "detail": "Each EU tablet has replicas in several EU zones voting via Paxos."
+        },
+        {
+          "label": "Benefit",
+          "detail": "Compliance plus low-latency reads for EU users."
+        }
+      ],
+      "code": [],
+      "outcome": "one logical database that respects data residency and survives zone failures."
+    },
+    "summary": {
+      "points": [
+        "Range tablets auto-split.",
+        "Paxos majority = durable, available writes.",
+        "Geo-partitioning for law and latency."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Spanner need a majority, not all replicas, to commit?",
+        "a": "So the system keeps working when a minority of replicas is down or slow, while still guaranteeing any two majorities overlap."
+      }
+    ]
+  },
+  "truetime-spanners-secret-weapon": {
+    "core": "TrueTime admits clocks are uncertain and bounds the error (ε, a few ms) with GPS and atomic clocks. Spanner then waits out ε before acknowledging a commit, so timestamp order equals real-time order.",
+    "first_principles": {
+      "problem": "Server clocks drift. If T1 commits on server A at 10:00:00.100 and T2 on server B at 10:00:00.050, you can't tell which really happened first. Without trustworthy time, you can't order transactions globally.",
+      "truths": [
+        "No clock is exact, but its error can be bounded.",
+        "Better hardware (GPS, atomic clocks) means a smaller bound.",
+        "If you wait longer than the error bound, the ordering is no longer ambiguous."
+      ],
+      "derivation": [
+        "Return time as an **interval** `[earliest, latest]` that's guaranteed to contain true time.",
+        "Keep ε tiny (< 7 ms) with **GPS and atomic clocks** in every data centre.",
+        "On commit, take a timestamp and **wait until `TT.after(ts)` is true** (commit wait).",
+        "Now any transaction that starts later gets a larger timestamp: **external consistency**.",
+        "Pay about ε of extra latency on every write."
+      ]
+    },
+    "analogy": {
+      "title": "Waiting out a stopwatch's error",
+      "story": "A race official's stopwatch is accurate to ±5 ms. To be certain runner A finished before runner B started, the official waits 5 ms after A's finish before signalling B's start. Then no measurement error can make the order look reversed.",
+      "mapping": [
+        [
+          "Stopwatch ±5 ms",
+          "TrueTime ε"
+        ],
+        [
+          "Time interval reading",
+          "[earliest, latest]"
+        ],
+        [
+          "Waiting 5 ms before signalling",
+          "Commit wait"
+        ],
+        [
+          "Order can't be reversed",
+          "External consistency"
+        ]
+      ],
+      "breaks": "An official can use one stopwatch. Spanner has thousands of servers, which is why it needs synchronised GPS/atomic hardware everywhere to keep ε small."
+    },
+    "mindmap": {
+      "center": "TrueTime",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Clock drift",
+            "Ambiguous ordering"
+          ]
+        },
+        {
+          "label": "API",
+          "children": [
+            "now() → [earliest, latest]",
+            "after(t) / before(t)"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "GPS receivers",
+            "Atomic clocks",
+            "ε < 7 ms"
+          ]
+        },
+        {
+          "label": "Commit wait",
+          "children": [
+            "Wait until after(ts)",
+            "~ε latency per write"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "External consistency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A commit with ε = 4 ms",
+      "scenario": "Transaction T1 commits at TrueTime `[100, 108]`.",
+      "flow": [
+        "Pick ts = 108 (latest)",
+        "Wait until after(108)",
+        "≈ 8 ms later: ack",
+        "Any later txn gets ts > 108"
+      ],
+      "steps": [
+        {
+          "label": "Timestamp",
+          "detail": "Choose `ts = latest = 108`."
+        },
+        {
+          "label": "Wait",
+          "detail": "Block until every server's `earliest` is past 108, which takes roughly 2ε."
+        },
+        {
+          "label": "Ack",
+          "detail": "Now report success. Any transaction that starts afterwards must get a timestamp > 108."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "TT.now()   → { earliest: T - ε, latest: T + ε }\nTT.after(t)  → true if t has definitely passed\ncommit: ts = TT.now().latest; wait until TT.after(ts); ack"
+        }
+      ],
+      "outcome": "global real-time ordering, at the cost of a few milliseconds per write."
+    },
+    "summary": {
+      "points": [
+        "TrueTime = time as a bounded interval.",
+        "Commit wait removes ordering ambiguity.",
+        "Small ε needs special hardware."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Spanner's commit latency depend on clock quality?",
+        "a": "Commit wait lasts about the uncertainty ε, so a less accurate clock means a longer wait on every write."
+      }
+    ]
+  },
+  "cockroachdb-spanner-for-everyone-else": {
+    "core": "CockroachDB brings Spanner's design to commodity hardware: ranges replicated with Raft, hybrid logical clocks instead of atomic clocks, Postgres wire compatibility, and serializable isolation by default.",
+    "first_principles": {
+      "problem": "Spanner needs Google's GPS and atomic-clock infrastructure and runs only on Google Cloud. Most teams want the same guarantees on their own servers or any cloud, without special hardware.",
+      "truths": [
+        "Ordinary servers only have NTP-synced clocks.",
+        "Consensus algorithms can run on any hardware.",
+        "Causality (A caused B) can be tracked in software."
+      ],
+      "derivation": [
+        "Shard data into **ranges**, each replicated by **Raft** (elected leader, replicated log, automatic re-election).",
+        "Replace TrueTime with **hybrid logical clocks**: (physical time, logical counter), advanced on every message.",
+        "Handle the remaining clock uncertainty by **restarting** transactions when needed.",
+        "Offer **serializable** isolation by default and a **survivability** model: RF=3 survives 1 failure, RF=5 survives 2.",
+        "Speak the **Postgres wire protocol** for easy adoption."
+      ]
+    },
+    "analogy": {
+      "title": "A club without a master clock",
+      "story": "Every member writes their own time on each note, and whenever they receive a note stamped later than their own watch, they move their watch forward to match. Causes are always stamped before their effects, even though nobody has a perfect clock.",
+      "mapping": [
+        [
+          "Members' own watches",
+          "Physical clocks (NTP)"
+        ],
+        [
+          "Moving your watch forward",
+          "HLC update on receive"
+        ],
+        [
+          "Cause stamped before effect",
+          "Causal ordering"
+        ],
+        [
+          "Committees of 3 or 5",
+          "Raft replication factor"
+        ]
+      ],
+      "breaks": "Club members can just ask when unsure. CockroachDB restarts the transaction when a value falls inside the clock-uncertainty window, which adds latency."
+    },
+    "mindmap": {
+      "center": "CockroachDB",
+      "branches": [
+        {
+          "label": "Storage",
+          "children": [
+            "Ranges",
+            "Raft per range"
+          ]
+        },
+        {
+          "label": "Time",
+          "children": [
+            "Hybrid logical clocks",
+            "Uncertainty restarts"
+          ]
+        },
+        {
+          "label": "Guarantees",
+          "children": [
+            "Serializable default",
+            "Not full external consistency"
+          ]
+        },
+        {
+          "label": "Survivability",
+          "children": [
+            "RF 3 → lose 1",
+            "RF 5 → lose 2",
+            "Locality labels"
+          ]
+        },
+        {
+          "label": "Compat",
+          "children": [
+            "Postgres wire protocol"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pinning a table to the US",
+      "scenario": "Compliance requires US customer data to stay on US nodes, across 3 US zones.",
+      "flow": [
+        "Nodes labelled by region",
+        "CONFIGURE ZONE constraint",
+        "Replicas placed in US only",
+        "Survives 1 zone loss"
+      ],
+      "steps": [
+        {
+          "label": "Label",
+          "detail": "Start nodes with `--locality=region=us-east,zone=…`."
+        },
+        {
+          "label": "Constrain",
+          "detail": "Configure the table's zone to `+region=us-east` with 3 replicas."
+        },
+        {
+          "label": "Result",
+          "detail": "Raft replicas sit in 3 US zones, so losing one zone keeps the range available."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "ALTER TABLE customers CONFIGURE ZONE USING\n  num_replicas = 3, constraints = '[+region=us-east]';"
+        }
+      ],
+      "outcome": "Spanner-style resilience and placement on ordinary infrastructure."
+    },
+    "summary": {
+      "points": [
+        "Raft instead of Paxos: same goal, easier to reason about.",
+        "HLC instead of TrueTime: causal order, occasional restarts.",
+        "Serializable by default, Spanner is externally consistent."
+      ]
+    },
+    "check": [
+      {
+        "q": "Serializable vs external consistency, what's the difference?",
+        "a": "Serializable means transactions appear in *some* serial order. External consistency additionally requires that order to match real-time order."
+      }
+    ]
+  },
+  "tidb-separation-of-powers": {
+    "core": "TiDB splits the database into independently scalable layers: stateless SQL servers, a Raft-replicated key-value store (TiKV), and a placement brain (PD), plus TiFlash columnar replicas for analytics.",
+    "first_principles": {
+      "problem": "In a monolithic database, compute and storage scale together: you can't add query-processing power without adding storage, or the reverse. Many MySQL shops also want to scale out without rewriting their apps.",
+      "truths": [
+        "Query load and data size grow at different rates.",
+        "Stateless services are trivial to scale horizontally.",
+        "Analytical scans want columnar storage, while transactions want row storage."
+      ],
+      "derivation": [
+        "Make SQL parsing, planning and execution a **stateless layer** (TiDB servers) behind a load balancer.",
+        "Store data in **TiKV**: regions replicated by Raft, with transactions via Percolator-style two-phase commit.",
+        "Centralise metadata and scheduling in the **Placement Driver** (PD, backed by etcd).",
+        "Add **TiFlash** columnar replicas kept in sync via Raft for **HTAP**.",
+        "Speak the **MySQL protocol** to minimise migration effort."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant with separate front of house, kitchen and manager",
+      "story": "Waiters (TiDB servers) take orders and can be added on busy nights without touching the kitchen. The kitchen stations (TiKV) hold and prepare the food, each mirrored for safety. The manager (PD) decides which station handles what. A separate prep line (TiFlash) prepares big catering orders without slowing the kitchen.",
+      "mapping": [
+        [
+          "Waiters",
+          "Stateless TiDB servers"
+        ],
+        [
+          "Kitchen stations",
+          "TiKV regions (Raft)"
+        ],
+        [
+          "Manager",
+          "Placement Driver (PD)"
+        ],
+        [
+          "Catering prep line",
+          "TiFlash (columnar)"
+        ],
+        [
+          "Same menu as before",
+          "MySQL protocol"
+        ]
+      ],
+      "breaks": "Waiters and kitchen are in one building. TiDB layers talk over the network, so each query pays extra hops compared with a single-node MySQL."
+    },
+    "mindmap": {
+      "center": "TiDB",
+      "branches": [
+        {
+          "label": "TiDB server",
+          "children": [
+            "SQL layer",
+            "Stateless",
+            "Scale freely"
+          ]
+        },
+        {
+          "label": "TiKV",
+          "children": [
+            "Regions + Raft",
+            "Percolator 2PC"
+          ]
+        },
+        {
+          "label": "PD",
+          "children": [
+            "Metadata",
+            "Scheduling",
+            "etcd-backed"
+          ]
+        },
+        {
+          "label": "TiFlash",
+          "children": [
+            "Columnar replicas",
+            "HTAP"
+          ]
+        },
+        {
+          "label": "Adoption",
+          "children": [
+            "MySQL compatible"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Black Friday query spike",
+      "scenario": "Query CPU triples for a day, while data size barely changes.",
+      "flow": [
+        "Query CPU ↑",
+        "Add TiDB server nodes",
+        "No data movement",
+        "Remove them after"
+      ],
+      "steps": [
+        {
+          "label": "Compute",
+          "detail": "Add 6 stateless TiDB servers behind the load balancer. They're ready in minutes."
+        },
+        {
+          "label": "Storage",
+          "detail": "TiKV is untouched, so there's no rebalancing."
+        },
+        {
+          "label": "Analytics",
+          "detail": "The sales dashboard queries TiFlash replicas, so transactional traffic isn't slowed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- add a columnar replica for analytical queries\nALTER TABLE orders SET TIFLASH REPLICA 1;"
+        }
+      ],
+      "outcome": "compute scales up and down for the spike without moving data, and analytics stay off the transactional path."
+    },
+    "summary": {
+      "points": [
+        "Compute and storage scale independently.",
+        "TiKV + Raft hold the data, PD places it.",
+        "TiFlash enables HTAP, MySQL compatibility eases migration."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can TiDB servers be added or removed freely?",
+        "a": "They're stateless. All data lives in TiKV, so a TiDB server holds nothing that needs moving."
+      }
+    ]
+  },
+  "choosing-between-newsql-systems": {
+    "core": "Pick a NewSQL system by cloud strategy, protocol and consistency needs: Spanner for managed global external consistency, CockroachDB for self-hosted Postgres-style, TiDB for MySQL migration and HTAP. Design keys to avoid hot ranges.",
+    "first_principles": {
+      "problem": "All three NewSQL systems promise scale with ACID, but they differ in where they run, which protocol they speak, how strong their guarantees are, and what they cost to operate. And all of them share failure modes that catch teams out.",
+      "truths": [
+        "Every NewSQL write waits for a quorum, so latency is higher than single-node.",
+        "Range sharding sends sequential keys to the same range.",
+        "Self-hosting distributed databases needs real expertise."
+      ],
+      "derivation": [
+        "**Spanner**: on GCP, zero-ops, strongest consistency, global users, budget available.",
+        "**CockroachDB**: self-hosted or multi-cloud, Postgres-familiar, serializable, placement control.",
+        "**TiDB**: MySQL migration, HTAP, independent compute/storage scaling.",
+        "Expect **5–50 ms** local and **50–200 ms** cross-region writes.",
+        "Avoid **hot spots**: use UUIDs or hash-prefixed keys instead of auto-increment IDs."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing a delivery company",
+      "story": "All three deliver reliably. One is premium, fully managed and worldwide (Spanner). One you can run with your own vans anywhere (CockroachDB). One plugs into the logistics system you already have and also runs a warehouse (TiDB, MySQL + HTAP). With any of them, if every parcel is addressed to the same depot, that depot jams.",
+      "mapping": [
+        [
+          "Premium managed courier",
+          "Spanner"
+        ],
+        [
+          "Your own vans, any city",
+          "CockroachDB"
+        ],
+        [
+          "Fits your existing system + warehouse",
+          "TiDB (MySQL, TiFlash)"
+        ],
+        [
+          "All parcels to one depot",
+          "Sequential-key hot range"
+        ]
+      ],
+      "breaks": "A jammed depot can hire temporary staff. A hot range is limited by its single Raft leader, and only a better key design fixes it."
+    },
+    "mindmap": {
+      "center": "Choosing NewSQL",
+      "branches": [
+        {
+          "label": "Spanner",
+          "children": [
+            "GCP managed",
+            "External consistency",
+            "Expensive"
+          ]
+        },
+        {
+          "label": "CockroachDB",
+          "children": [
+            "Self-host / multi-cloud",
+            "Postgres protocol",
+            "Serializable"
+          ]
+        },
+        {
+          "label": "TiDB",
+          "children": [
+            "MySQL protocol",
+            "HTAP",
+            "Split compute/storage"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Higher write latency",
+            "Ops complexity"
+          ]
+        },
+        {
+          "label": "Hot spots",
+          "children": [
+            "Sequential keys",
+            "Use UUID / hash prefix"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A SERIAL primary key melts one node",
+      "scenario": "An events table with `id SERIAL` on CockroachDB: one node at 100% CPU and the rest idle.",
+      "flow": [
+        "SERIAL ids",
+        "All inserts → last range",
+        "One leaseholder hot",
+        "Switch to UUID",
+        "Inserts spread"
+      ],
+      "steps": [
+        {
+          "label": "Cause",
+          "detail": "Increasing IDs always land at the end of the key space, which is one range with one leader."
+        },
+        {
+          "label": "Fix",
+          "detail": "Use `gen_random_uuid()` (or hash-sharded indexes) so inserts scatter across ranges."
+        },
+        {
+          "label": "Cost",
+          "detail": "Range scans by ID lose locality, so keep a separate time index if you need it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- hot spot\nCREATE TABLE events (id SERIAL PRIMARY KEY, payload JSONB);\n-- spread writes\nCREATE TABLE events (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, payload JSONB);"
+        }
+      ],
+      "outcome": "write load spreads across the cluster instead of saturating one node."
+    },
+    "summary": {
+      "points": [
+        "Choose by platform, protocol and guarantees.",
+        "NewSQL writes are slower than single-node.",
+        "Sequential keys = hot ranges."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do auto-increment keys hurt range-sharded databases?",
+        "a": "Every new key is the largest so far, so all inserts go to the same final range and its single leader becomes the bottleneck."
+      }
+    ]
+  }
+}

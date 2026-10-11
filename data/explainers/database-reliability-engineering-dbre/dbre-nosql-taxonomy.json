@@ -1,0 +1,782 @@
+{
+  "introduction-why-not-only-sql": {
+    "core": "NoSQL databases deliberately give up some relational guarantees (strong consistency, arbitrary joins, fixed schemas) to gain horizontal scale, throughput and flexibility. Each of the four families is built for one data shape.",
+    "first_principles": {
+      "problem": "Relational databases were designed for one big server and predictable, tabular data. The internet broke both assumptions: billions of users need horizontal scale, and data like posts, sensor readings and optional profile fields doesn't fit rigid tables. Adding a column to a billion-row table can lock it for hours.",
+      "truths": [
+        "Scaling one box vertically has a hard limit.",
+        "Joins and global consistency get expensive across many machines.",
+        "Different access patterns favour different data layouts."
+      ],
+      "derivation": [
+        "Decide which RDBMS guarantees your workload can live without (immediate consistency, cross-table joins, fixed schema).",
+        "Trade them for **horizontal scale, throughput and flexibility**: that's the NoSQL bargain, by design.",
+        "Pick the family whose model matches the access pattern: **key-value, document, wide-column, graph**.",
+        "Keep an RDBMS for data that needs ACID: most real systems use **both** (polyglot persistence)."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet vs. specialised storage",
+      "story": "A relational database is a strict filing cabinet: identical forms, cross-referenced index cards. Perfect for one office, painful for ten thousand offices and documents that don't fit the form. NoSQL is a set of specialised stores: a coat-check, a folder per person, an endless logbook, a wall-sized relationship map.",
+      "mapping": [
+        [
+          "Strict filing cabinet",
+          "RDBMS"
+        ],
+        [
+          "Coat-check",
+          "Key-value"
+        ],
+        [
+          "Folder per person",
+          "Document"
+        ],
+        [
+          "Endless logbook",
+          "Wide-column"
+        ],
+        [
+          "Relationship map",
+          "Graph"
+        ]
+      ],
+      "breaks": "You can't just add filing cabinets to scale an office's rules. NoSQL systems scale by *removing* rules, which means the application takes on responsibilities the RDBMS used to handle."
+    },
+    "mindmap": {
+      "center": "Why NoSQL",
+      "branches": [
+        {
+          "label": "RDBMS limits",
+          "children": [
+            "Vertical scale",
+            "Rigid schema",
+            "Costly ALTER"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Give up joins / strong consistency",
+            "Gain scale, speed, flexibility"
+          ]
+        },
+        {
+          "label": "Families",
+          "children": [
+            "Key-value",
+            "Document",
+            "Wide-column",
+            "Graph"
+          ]
+        },
+        {
+          "label": "In practice",
+          "children": [
+            "Polyglot persistence",
+            "RDBMS for ACID data"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Picking stores for a ride-sharing app",
+      "scenario": "Trips and payments, live driver locations, trip event logs and a referral network.",
+      "flow": [
+        "Payments → Postgres",
+        "Driver locations → Redis",
+        "Trip events → Cassandra",
+        "Referrals → Neo4j"
+      ],
+      "steps": [
+        {
+          "label": "ACID data",
+          "detail": "Payments need multi-row transactions, so they stay relational."
+        },
+        {
+          "label": "Hot, simple lookups",
+          "detail": "Driver location by driver ID, updated every second, fits key-value in RAM."
+        },
+        {
+          "label": "Massive append stream",
+          "detail": "Trip events at millions per hour fit wide-column."
+        },
+        {
+          "label": "Relationships",
+          "detail": "\"Who referred whom, 4 hops deep\" fits a graph."
+        }
+      ],
+      "code": [],
+      "outcome": "each workload sits on the store built for its shape, and only data needing ACID pays for it."
+    },
+    "summary": {
+      "points": [
+        "NoSQL = specialised tools, not replacements.",
+        "The trade-off (fewer guarantees for scale) is deliberate.",
+        "Choose by data model and access pattern, not trend."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is NoSQL better than SQL?",
+        "a": "Neither is better. Most production systems use an RDBMS for transactional data and NoSQL stores for specific high-scale workloads."
+      }
+    ]
+  },
+  "key-value-stores-the-speed-demons": {
+    "core": "A key-value store does one thing: give it a key, get a value, with no schema or relationships. That simplicity (and living in RAM, as Redis does) makes sub-millisecond lookups at millions of requests per second possible.",
+    "first_principles": {
+      "problem": "Many hot operations, like fetching a session, a cached page fragment or a rate-limit counter, are always \"look up this one thing by its ID\". Running them through a relational engine with parsing, planning and locking adds overhead that buys nothing.",
+      "truths": [
+        "A lookup by exact key needs no query planner.",
+        "RAM is far faster than disk.",
+        "RAM is volatile and more expensive per GB."
+      ],
+      "derivation": [
+        "Reduce the model to **key → value** with `SET`, `GET`, `DEL`, `EXPIRE`.",
+        "Keep the data **in RAM** for sub-millisecond latency (Redis).",
+        "Add useful data structures (lists, sets, **sorted sets**, hashes, streams) for leaderboards, queues and counters.",
+        "Add persistence options: **RDB snapshots** (fast restart, may lose recent writes) and **AOF** (log every write, fsync per second or per write).",
+        "Treat it as a **performance layer**, not the source of truth, unless deliberately designed for it."
+      ]
+    },
+    "analogy": {
+      "title": "A coat check",
+      "story": "You hand over your coat and get ticket #42. Later you show #42 and get your coat instantly. The attendant never looks inside the coat. They only match ticket to coat.",
+      "mapping": [
+        [
+          "Ticket number",
+          "Key"
+        ],
+        [
+          "Coat",
+          "Value (opaque)"
+        ],
+        [
+          "Instant hand-back",
+          "O(1) GET"
+        ],
+        [
+          "Coats cleared at closing",
+          "TTL / EXPIRE"
+        ],
+        [
+          "Inventory list photocopied nightly",
+          "RDB snapshot"
+        ]
+      ],
+      "breaks": "A coat check rarely loses coats. Redis without AOF can lose every write since the last snapshot on restart."
+    },
+    "mindmap": {
+      "center": "Key-Value Stores",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "key → value",
+            "SET / GET / DEL / EXPIRE"
+          ]
+        },
+        {
+          "label": "Use cases",
+          "children": [
+            "Sessions",
+            "Caching",
+            "Rate limiting",
+            "Leaderboards"
+          ]
+        },
+        {
+          "label": "Redis",
+          "children": [
+            "In RAM",
+            "Rich data structures"
+          ]
+        },
+        {
+          "label": "Persistence",
+          "children": [
+            "RDB snapshots",
+            "AOF log",
+            "Both"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Cost ∝ RAM",
+            "Not source of truth"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Per-user rate limiting",
+      "scenario": "Allow 100 API requests per user per minute.",
+      "flow": [
+        "Request",
+        "INCR ratelimit:{user}:{minute}",
+        "First hit → EXPIRE 60",
+        "> 100 → 429"
+      ],
+      "steps": [
+        {
+          "label": "Count",
+          "detail": "`INCR` is atomic, so concurrent requests never lose counts."
+        },
+        {
+          "label": "Expire",
+          "detail": "Set a 60-second TTL so old windows clean themselves up."
+        },
+        {
+          "label": "Decide",
+          "detail": "If the count exceeds 100, reject with HTTP 429."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "key = f\"ratelimit:{user_id}:{int(time.time() // 60)}\"\ncount = redis.incr(key)\nif count == 1:\n    redis.expire(key, 60)\nif count > 100:\n    return 429"
+        }
+      ],
+      "outcome": "rate limiting costs about 1 ms per request and never touches the main database."
+    },
+    "summary": {
+      "points": [
+        "Simplest model → fastest lookups.",
+        "Redis = in-memory data-structure server.",
+        "RDB vs AOF decides what you lose on restart."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you enable AOF with fsync every write?",
+        "a": "When losing even one write on restart is unacceptable and you can accept lower write throughput."
+      }
+    ]
+  },
+  "document-databases-flexibility-first": {
+    "core": "A document database stores a whole object (with nested lists and optional fields) as one JSON/BSON document, removing the joins needed to reassemble it and letting each record have its own shape.",
+    "first_principles": {
+      "problem": "Developers think in objects: a user with addresses and preferences. A relational schema splits that across several tables and reassembles it with joins on every read, and every new optional field is a schema migration. That mismatch slows teams down.",
+      "truths": [
+        "Data read together should be stored together.",
+        "Real-world records often have optional or varying fields.",
+        "Unconstrained flexibility leads to inconsistent data."
+      ],
+      "derivation": [
+        "Store each object as **one document**: nested arrays and sub-objects included.",
+        "Group documents in **collections** with no enforced common schema.",
+        "Query nested fields directly (`addresses.city`) and use aggregation pipelines for analytics.",
+        "Add **schema validation** so flexibility is intentional, not accidental drift.",
+        "Design documents so you rarely need **multi-document transactions** (they exist since 4.0 but cost performance)."
+      ]
+    },
+    "analogy": {
+      "title": "A personal folder per customer",
+      "story": "Instead of a ledger of names, a ledger of addresses and a ledger of preferences that you must cross-reference, each customer has one folder holding everything about them. Some folders have a LinkedIn page, some don't. That's fine.",
+      "mapping": [
+        [
+          "Folder",
+          "Document"
+        ],
+        [
+          "Filing drawer",
+          "Collection"
+        ],
+        [
+          "Different contents per folder",
+          "Schema flexibility"
+        ],
+        [
+          "Cross-referencing ledgers",
+          "Relational JOINs"
+        ],
+        [
+          "Folder checklist",
+          "Schema validation"
+        ]
+      ],
+      "breaks": "A folder is easy to update by hand. Changing something that's duplicated across many documents (e.g. a product name embedded in every order) requires updating every copy."
+    },
+    "mindmap": {
+      "center": "Document Databases",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "JSON / BSON docs",
+            "Collections",
+            "Nested fields"
+          ]
+        },
+        {
+          "label": "Strengths",
+          "children": [
+            "No impedance mismatch",
+            "Flexible schema",
+            "Horizontal scale"
+          ]
+        },
+        {
+          "label": "MongoDB",
+          "children": [
+            "find on nested fields",
+            "Aggregation pipeline"
+          ]
+        },
+        {
+          "label": "Discipline",
+          "children": [
+            "Schema validation",
+            "Avoid multi-doc txns"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "Postgres JSONB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A product catalogue with wildly different products",
+      "scenario": "Laptops have CPU and RAM. T-shirts have size and colour. Books have ISBN and author.",
+      "flow": [
+        "One collection: products",
+        "Each doc its own shape",
+        "Query by nested field",
+        "Validate required fields"
+      ],
+      "steps": [
+        {
+          "label": "Model",
+          "detail": "Each product is one document with common fields (name, price) plus type-specific ones."
+        },
+        {
+          "label": "Query",
+          "detail": "`db.products.find({type: 'laptop', 'specs.ram_gb': {$gte: 16}})`, with no joins."
+        },
+        {
+          "label": "Guardrails",
+          "detail": "A JSON Schema validator requires `name` and `price` on every document."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "db.createCollection(\"products\", { validator: { $jsonSchema: {\n  required: [\"name\", \"price\"],\n  properties: { price: { bsonType: \"decimal\", minimum: 0 } }\n}}});\ndb.products.find({ type: \"laptop\", \"specs.ram_gb\": { $gte: 16 } });"
+        }
+      ],
+      "outcome": "each product keeps its natural shape and the essentials are still enforced."
+    },
+    "summary": {
+      "points": [
+        "Store the object as it's used.",
+        "Flexibility needs validation to stay sane.",
+        "Need cross-entity ACID? Consider Postgres JSONB."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you pick Postgres JSONB over MongoDB?",
+        "a": "When you need document flexibility *and* strong multi-entity ACID transactions or relational joins."
+      }
+    ]
+  },
+  "wide-column-stores-the-big-data-heavyweights": {
+    "core": "Wide-column stores (Cassandra, ScyllaDB) partition rows across many equal nodes by a partition key and sort within a partition by a clustering key. Tables are designed around specific queries to absorb massive writes.",
+    "first_principles": {
+      "problem": "Some workloads ingest millions of events per second and store petabytes: IoT readings, logs, financial ticks. No single server can take that, and a primary-replica setup still funnels all writes into one node.",
+      "truths": [
+        "Write volume must be spread across many machines.",
+        "Any single \"master\" is a bottleneck and a single point of failure.",
+        "Queries that must touch every node are slow."
+      ],
+      "derivation": [
+        "Make every node **equal** (no master) and replicate data across several of them.",
+        "Use a **partition key** to decide which node owns a row.",
+        "Use a **clustering key** to sort rows inside a partition, so ranges are fast.",
+        "Design **one table per query** (denormalise), because every query must include the partition key."
+      ]
+    },
+    "analogy": {
+      "title": "A huge spreadsheet split across many offices",
+      "story": "Each office keeps the rows for certain customers (partition). Within each customer's section, rows are sorted by date (clustering). Asking \"last 100 readings of device 7\" means calling one office. Asking \"every reading above 40°C anywhere\" means calling every office.",
+      "mapping": [
+        [
+          "Office owning certain customers",
+          "Node owning a partition"
+        ],
+        [
+          "Customer ID",
+          "Partition key"
+        ],
+        [
+          "Sorted by date within a section",
+          "Clustering key"
+        ],
+        [
+          "Calling every office",
+          "Full scan (cluster-killer)"
+        ]
+      ],
+      "breaks": "Offices can phone each other cheaply. In Cassandra, queries without the partition key fan out to every node, which can degrade the whole cluster."
+    },
+    "mindmap": {
+      "center": "Wide-Column Stores",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Map<RowKey, Map<Col, Val>>",
+            "Rows with different columns"
+          ]
+        },
+        {
+          "label": "Built for",
+          "children": [
+            "Massive writes",
+            "Petabytes",
+            "Time-series"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "Partition key → node",
+            "Clustering key → order"
+          ]
+        },
+        {
+          "label": "Modelling",
+          "children": [
+            "Query-driven",
+            "Denormalise",
+            "Always use partition key"
+          ]
+        },
+        {
+          "label": "Systems",
+          "children": [
+            "Cassandra",
+            "ScyllaDB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "IoT readings by device",
+      "scenario": "10 million devices each send a reading every 10 seconds.",
+      "flow": [
+        "Partition by device_id",
+        "Cluster by reading_time DESC",
+        "Write spreads over all nodes",
+        "Read: one partition, newest first"
+      ],
+      "steps": [
+        {
+          "label": "Writes",
+          "detail": "Device IDs hash across the ring, so load spreads evenly."
+        },
+        {
+          "label": "Reads",
+          "detail": "\"Last 100 readings for device_001\" reads one partition, already sorted newest first."
+        },
+        {
+          "label": "Anti-pattern",
+          "detail": "\"All readings above 40°C\" has no partition key, so it's a full scan. Build a separate table for that query."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE TABLE sensor_readings (\n  device_id text, reading_time timestamp, temperature float,\n  PRIMARY KEY (device_id, reading_time)\n) WITH CLUSTERING ORDER BY (reading_time DESC);\n\nSELECT * FROM sensor_readings WHERE device_id = 'device_001' LIMIT 100;"
+        }
+      ],
+      "outcome": "millions of writes per second, and fast per-device reads."
+    },
+    "summary": {
+      "points": [
+        "Partition key = which node, clustering key = order within.",
+        "Model one table per query.",
+        "Every query must include the partition key."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a full table scan so dangerous in Cassandra?",
+        "a": "It must contact every node and read every partition, consuming cluster-wide I/O and hurting all other traffic."
+      }
+    ]
+  },
+  "wide-column-internals-lsm-trees-sstables": {
+    "core": "LSM trees make writes fast by appending: commit log for durability, MemTable in memory, immutable sorted SSTables on flush. Bloom filters keep reads cheap and compaction cleans up afterwards.",
+    "first_principles": {
+      "problem": "B-trees update data in place, so each write is a random disk I/O, which caps write throughput. For write-heavy systems we want every write to be sequential, but that means data for one key may end up in many files.",
+      "truths": [
+        "Sequential writes are much faster than random writes.",
+        "Immutable files are simple and safe to write.",
+        "Reading many files for one key is slow unless most can be skipped."
+      ],
+      "derivation": [
+        "Append each write to a **commit log** (durability) and a sorted in-memory **MemTable**.",
+        "When full, flush the MemTable as an immutable, sorted **SSTable**.",
+        "Never edit in place: updates write new versions, deletes write **tombstones**.",
+        "Give each SSTable a **Bloom filter** that says \"definitely not here\", so most files are skipped.",
+        "Merge SSTables in the background (**compaction**: STCS / LCS / TWCS) to drop old versions and tombstones."
+      ]
+    },
+    "analogy": {
+      "title": "A journalist's notebooks",
+      "story": "Every new fact is scribbled into today's notebook in order (fast). Full notebooks go onto a shelf, sorted and never edited. Corrections are new entries, and a deletion is a note saying \"ignore X\". Each notebook has a quick index card saying which names are definitely not inside. At night, old notebooks are merged into clean volumes.",
+      "mapping": [
+        [
+          "Today's notebook",
+          "MemTable"
+        ],
+        [
+          "Shelf of finished notebooks",
+          "SSTables"
+        ],
+        [
+          "\"Ignore X\" note",
+          "Tombstone"
+        ],
+        [
+          "\"Not in here\" card",
+          "Bloom filter"
+        ],
+        [
+          "Nightly merge",
+          "Compaction"
+        ]
+      ],
+      "breaks": "Merging notebooks is free at night. Real compaction competes with live traffic for I/O, and if it falls behind, read latency spikes."
+    },
+    "mindmap": {
+      "center": "LSM Internals",
+      "branches": [
+        {
+          "label": "Write path",
+          "children": [
+            "Commit log",
+            "MemTable",
+            "Flush → SSTable"
+          ]
+        },
+        {
+          "label": "Immutability",
+          "children": [
+            "New versions",
+            "Tombstones"
+          ]
+        },
+        {
+          "label": "Reads",
+          "children": [
+            "MemTable then SSTables",
+            "Bloom filters skip files"
+          ]
+        },
+        {
+          "label": "Compaction",
+          "children": [
+            "STCS: writes",
+            "LCS: reads",
+            "TWCS: time-series"
+          ]
+        },
+        {
+          "label": "Watch",
+          "children": [
+            "Compaction lag",
+            "SSTables per read"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A read for one key across 20 SSTables",
+      "scenario": "Device 42's latest config was updated 3 times over the past week.",
+      "flow": [
+        "Check MemTable",
+        "Bloom filters on 20 SSTables",
+        "18 say 'no'",
+        "Open 2 files",
+        "Newest version wins"
+      ],
+      "steps": [
+        {
+          "label": "MemTable",
+          "detail": "Not there, since the last update was flushed hours ago."
+        },
+        {
+          "label": "Bloom filters",
+          "detail": "18 SSTables are definitely not holding key 42, so they're skipped without disk I/O."
+        },
+        {
+          "label": "Read",
+          "detail": "2 SSTables are opened, and the newest timestamp wins."
+        },
+        {
+          "label": "Later",
+          "detail": "Compaction merges those files so future reads touch one."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nodetool tablestats iot.device_config     # SSTable count, bloom filter false positives\nnodetool compactionstats                   # pending compactions (compaction lag)"
+        }
+      ],
+      "outcome": "writes stay sequential and fast, and reads stay acceptable because most files are never opened."
+    },
+    "summary": {
+      "points": [
+        "Writes: commit log + MemTable → immutable SSTables.",
+        "Bloom filters: no false negatives, so files are safely skipped.",
+        "Monitor compaction lag or reads degrade."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a Bloom filter never cause a missed key?",
+        "a": "It has no false negatives. If it says 'not here', the key is truly absent. It only sometimes says 'maybe' wrongly."
+      }
+    ]
+  },
+  "graph-databases-its-all-about-relationships": {
+    "core": "Graph databases store relationships as first-class pointers, so following connections hop by hop costs time proportional to what you visit, not to the size of the whole dataset.",
+    "first_principles": {
+      "problem": "In SQL, \"friends of friends of friends\" is three self-joins on a billions-row table, and every extra hop multiplies the cost. Relationships are implicit (foreign keys resolved via indexes at query time), which makes deep traversals impractical.",
+      "truths": [
+        "Each SQL join resolves relationships through index lookups.",
+        "Many questions are paths: who is connected to whom, through what.",
+        "Following a stored pointer is cheaper than searching an index."
+      ],
+      "derivation": [
+        "Model entities as **nodes** (labels + properties) and connections as **edges** (type + direction + properties).",
+        "Store edges as **physical pointers** (index-free adjacency).",
+        "Then a traversal costs about **depth × average degree**, independent of total graph size.",
+        "Express patterns visually in **Cypher**: `(a)-[:KNOWS]->(b)`.",
+        "Use it alongside an RDBMS, not instead of one, and keep bulk analytics elsewhere."
+      ]
+    },
+    "analogy": {
+      "title": "A string board in a detective's office",
+      "story": "Photos of people are pinned to a board with strings between those who know each other. To find who's two steps from the suspect, you just follow strings with your finger. You don't search a filing cabinet for every name.",
+      "mapping": [
+        [
+          "Photos",
+          "Nodes"
+        ],
+        [
+          "Strings",
+          "Edges / relationships"
+        ],
+        [
+          "Labels on the strings",
+          "Relationship type + properties"
+        ],
+        [
+          "Following with your finger",
+          "Traversal (index-free adjacency)"
+        ],
+        [
+          "Searching the filing cabinet",
+          "SQL join via index"
+        ]
+      ],
+      "breaks": "A board with a billion photos isn't usable by hand. Graph databases handle the size fine for traversals, but they're poor at \"average age of everyone\" style aggregates."
+    },
+    "mindmap": {
+      "center": "Graph Databases",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Multi-hop JOINs",
+            "Cost multiplies per hop"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Nodes",
+            "Edges",
+            "Properties"
+          ]
+        },
+        {
+          "label": "Why fast",
+          "children": [
+            "Index-free adjacency",
+            "∝ nodes visited"
+          ]
+        },
+        {
+          "label": "Neo4j / Cypher",
+          "children": [
+            "MATCH patterns",
+            "shortestPath"
+          ]
+        },
+        {
+          "label": "Use cases",
+          "children": [
+            "Recommendations",
+            "Fraud rings",
+            "Knowledge graphs",
+            "Dependencies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spotting a fraud ring",
+      "scenario": "Several new accounts share devices and cards with a known fraudulent account.",
+      "flow": [
+        "Start: flagged account",
+        "Follow USED_DEVICE / USED_CARD",
+        "Reach other accounts",
+        "Score shared links",
+        "Flag ring"
+      ],
+      "steps": [
+        {
+          "label": "Model",
+          "detail": "Accounts, devices and cards are nodes. `USED_DEVICE` and `USED_CARD` are edges."
+        },
+        {
+          "label": "Traverse",
+          "detail": "From the flagged account, go out to its devices and cards and back in to other accounts within 2–3 hops."
+        },
+        {
+          "label": "Score",
+          "detail": "Accounts sharing several devices or cards with the flagged one are likely in the ring."
+        }
+      ],
+      "code": [
+        {
+          "lang": "cypher",
+          "text": "MATCH (bad:Account {id: $flagged})-[:USED_DEVICE|USED_CARD*1..2]-(other:Account)\nWHERE other <> bad\nRETURN other.id, count(*) AS shared_links ORDER BY shared_links DESC LIMIT 20;"
+        }
+      ],
+      "outcome": "a query that would be a multi-join nightmare in SQL runs in milliseconds by walking pointers."
+    },
+    "summary": {
+      "points": [
+        "Relationships are stored, not computed.",
+        "Traversal cost ∝ what you visit.",
+        "Great for paths, poor for whole-graph aggregates."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't a 6-hop query slow down as the graph grows from 1 M to 1 B nodes?",
+        "a": "Traversal follows pointers from the start node, so cost depends on the nodes and edges visited, not the total number of nodes."
+      }
+    ]
+  }
+}

@@ -1,0 +1,865 @@
+{
+  "introduction-the-limits-of-a-single-box": {
+    "core": "When one database server runs out of capacity you can buy a bigger box (scale up) or spread the load over many boxes (scale out). Scaling up is simple but capped, and scaling out is unlimited but complex.",
+    "first_principles": {
+      "problem": "Web servers are stateless: add more and put a load balancer in front. A database holds the state, so you can't simply clone it, because every copy must agree on the data.\n\nSo when traffic grows and the database hits 100% CPU, it's usually the first thing to fall over, and the fixes are much harder than for the app tier.",
+      "truths": [
+        "A single machine has a hard upper size.",
+        "Bigger machines cost disproportionately more (2× power ≈ 4× price).",
+        "One machine is a single point of failure.",
+        "Spreading data across machines forces the app to deal with distribution."
+      ],
+      "derivation": [
+        "First, **scale up**: more CPU, RAM, faster disks. No code changes, so exhaust this first.",
+        "When the ceiling or cost bites, **scale out**: spread load across machines.",
+        "Use different tools for different load types: **replicas** for reads, **sharding** for writes, **pooling** for connection overhead."
+      ]
+    },
+    "analogy": {
+      "title": "A growing bakery",
+      "story": "At first you buy a bigger oven (scale up): easy, but there's a largest oven on the market, and one oven breaking stops all baking. Eventually you open more bakeries (scale out). Now you can bake almost without limit, but you need to coordinate recipes, orders and deliveries between them.",
+      "mapping": [
+        [
+          "Bigger oven",
+          "Vertical scaling"
+        ],
+        [
+          "Largest oven on the market",
+          "Hardware ceiling"
+        ],
+        [
+          "More bakeries",
+          "Horizontal scaling"
+        ],
+        [
+          "Coordinating between bakeries",
+          "Distributed-data complexity"
+        ]
+      ],
+      "breaks": "Bakeries can bake independently. Database copies must stay consistent with each other, which is what makes scaling out hard."
+    },
+    "mindmap": {
+      "center": "Scaling a Database",
+      "branches": [
+        {
+          "label": "Why it's hard",
+          "children": [
+            "Stateful",
+            "Can't just clone"
+          ]
+        },
+        {
+          "label": "Scale up",
+          "children": [
+            "Simple",
+            "Non-linear cost",
+            "Hard ceiling, SPOF"
+          ]
+        },
+        {
+          "label": "Scale out",
+          "children": [
+            "Near-unlimited",
+            "Resilient",
+            "Complex"
+          ]
+        },
+        {
+          "label": "Toolbox",
+          "children": [
+            "Replicas → reads",
+            "Sharding → writes",
+            "Pooling → connections"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing the next step",
+      "scenario": "Postgres on 16 vCPU at 90% CPU. Reads are 95% of queries.",
+      "flow": [
+        "90% CPU",
+        "Scale up to 32 vCPU",
+        "Still growing",
+        "Add read replicas",
+        "Shard only if writes saturate"
+      ],
+      "steps": [
+        {
+          "label": "Scale up",
+          "detail": "Move to 32 vCPU: a short maintenance window and no code changes. This buys months."
+        },
+        {
+          "label": "Scale reads",
+          "detail": "Reads dominate, so add replicas before thinking about sharding."
+        },
+        {
+          "label": "Last resort",
+          "detail": "Shard only when writes alone exceed the largest box."
+        }
+      ],
+      "code": [],
+      "outcome": "capacity grows step by step, taking on complexity only when the simpler option runs out."
+    },
+    "summary": {
+      "points": [
+        "Scale up first. It's simple.",
+        "Scale out when you hit the ceiling or need resilience.",
+        "Reads → replicas, writes → shards, connections → pooler."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is the database usually the first bottleneck?",
+        "a": "It's stateful. You can't add identical copies behind a load balancer without solving consistency between them."
+      }
+    ]
+  },
+  "scaling-reads-the-primary-replica-model": {
+    "core": "Send all writes to one primary, stream its WAL to replicas, and serve reads from the replicas, while accounting for replication lag (read-your-own-writes).",
+    "first_principles": {
+      "problem": "Most apps read far more than they write (often 99:1). One server handles both, so reads crowd out everything else. Reads don't change data, so they could be served from copies, but copies are only useful if they stay up to date.",
+      "truths": [
+        "Reads vastly outnumber writes in most apps.",
+        "The primary's WAL already describes every change in order.",
+        "Shipping and replaying changes takes time."
+      ],
+      "derivation": [
+        "Keep **one primary** as the single source of truth for writes.",
+        "**Stream its WAL** to replicas that replay it continuously.",
+        "Route **reads to replicas** and writes to the primary.",
+        "Accept **replication lag**, and route reads that must see a just-made write to the primary (or wait for the replica's replay LSN)."
+      ]
+    },
+    "analogy": {
+      "title": "Library catalog copies",
+      "story": "One head librarian updates the catalog when books arrive. Assistant librarians each hold a copy and answer visitors' questions, and the head librarian phones updates to them. Ask an assistant about a book that arrived 10 seconds ago and they may not know yet.",
+      "mapping": [
+        [
+          "Head librarian",
+          "Primary"
+        ],
+        [
+          "Assistants with copies",
+          "Read replicas"
+        ],
+        [
+          "Phoned updates",
+          "WAL streaming"
+        ],
+        [
+          "\"Not in my copy yet\"",
+          "Replication lag"
+        ],
+        [
+          "Ask the head librarian directly",
+          "Read-your-own-writes routing"
+        ]
+      ],
+      "breaks": "Assistants know when their copy is old. Replicas don't refuse stale reads, so the application must decide which reads can tolerate lag."
+    },
+    "mindmap": {
+      "center": "Primary–Replica",
+      "branches": [
+        {
+          "label": "Primary",
+          "children": [
+            "All writes",
+            "Source of truth"
+          ]
+        },
+        {
+          "label": "Replicas",
+          "children": [
+            "Replay WAL",
+            "Serve reads"
+          ]
+        },
+        {
+          "label": "Lag",
+          "children": [
+            "ms normally",
+            "seconds under load",
+            "Eventual consistency"
+          ]
+        },
+        {
+          "label": "Read-your-writes",
+          "children": [
+            "Post-write reads → primary",
+            "Wait for replay LSN"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The disappearing comment",
+      "scenario": "A user posts a comment, the page refreshes, and the comment isn't there.",
+      "flow": [
+        "INSERT on primary",
+        "Redirect",
+        "SELECT on replica",
+        "Replica 400 ms behind",
+        "Comment missing",
+        "Route to primary for 5 s"
+      ],
+      "steps": [
+        {
+          "label": "Why",
+          "detail": "The read hit a replica that hadn't replayed the INSERT yet."
+        },
+        {
+          "label": "Fix 1",
+          "detail": "After a user writes, pin their reads to the primary for a few seconds."
+        },
+        {
+          "label": "Fix 2",
+          "detail": "Store the commit LSN in the session and only read from a replica once `pg_last_wal_replay_lsn()` has passed it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- primary, after the write\nSELECT pg_current_wal_lsn();          -- e.g. 0/5A3F2C8, store in session\n-- replica, before reading\nSELECT pg_last_wal_replay_lsn() >= '0/5A3F2C8'::pg_lsn AS caught_up;"
+        }
+      ],
+      "outcome": "replicas absorb most reads, and users still see their own changes immediately."
+    },
+    "summary": {
+      "points": [
+        "Writes → primary, reads → replicas.",
+        "Lag is normal, so design for it.",
+        "Read-your-own-writes: route or wait by LSN."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is 'always read from primary' a weak answer?",
+        "a": "It's correct but throws away the replicas' benefit. The senior answer routes only consistency-sensitive reads to the primary."
+      }
+    ]
+  },
+  "managing-replicas-replication-slots": {
+    "core": "A replication slot is a bookmark that makes the primary keep WAL until a replica has consumed it, which saves replicas from needing a rebuild but can fill the primary's disk if a replica disappears.",
+    "first_principles": {
+      "problem": "The primary deletes old WAL to save space. If a replica is offline for two hours and the WAL it needs is gone, the replica is broken and must be rebuilt from a full base backup, which can take hours on a big database.",
+      "truths": [
+        "WAL is produced continuously (sometimes GBs per minute).",
+        "Disk on the primary is finite.",
+        "A replica can only catch up from WAL it hasn't seen."
+      ],
+      "derivation": [
+        "Give each replica a **slot**: the primary promises not to delete WAL the slot still needs.",
+        "Now an offline replica can **catch up** when it returns, with no rebuild.",
+        "But retained WAL **grows without limit** while the replica is gone.",
+        "So **monitor slot lag** (`restart_lsn` vs current LSN), alert early, and **drop the slot** before the primary's disk fills."
+      ]
+    },
+    "analogy": {
+      "title": "Holding mail for someone on holiday",
+      "story": "The post office holds your mail while you're away, so nothing is lost. But if you never come back, the sorting room slowly fills with your letters until it can't operate. At some point the postmaster must stop holding your mail.",
+      "mapping": [
+        [
+          "Holding mail",
+          "Replication slot retaining WAL"
+        ],
+        [
+          "Person on holiday",
+          "Offline replica"
+        ],
+        [
+          "Sorting room filling",
+          "Primary disk filling"
+        ],
+        [
+          "Stop holding mail",
+          "Drop the slot (rebuild replica)"
+        ]
+      ],
+      "breaks": "A full sorting room only delays mail. A full primary disk crashes the primary and stops all writes, which is far worse than rebuilding a replica."
+    },
+    "mindmap": {
+      "center": "Replication Slots",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Primary deletes old WAL",
+            "Replica can't catch up",
+            "Rebuild needed"
+          ]
+        },
+        {
+          "label": "Slot",
+          "children": [
+            "Persistent bookmark",
+            "WAL kept until consumed"
+          ]
+        },
+        {
+          "label": "Danger",
+          "children": [
+            "Retained WAL grows",
+            "Primary disk full",
+            "Write outage"
+          ]
+        },
+        {
+          "label": "Operate",
+          "children": [
+            "Monitor lag_size",
+            "Alert e.g. > 10 GB",
+            "Drop slot if needed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A replica offline over a weekend",
+      "scenario": "A replica's VM died Friday night. By Sunday the primary's disk is 85% full.",
+      "flow": [
+        "Replica dies",
+        "Slot keeps WAL",
+        "Retained WAL 300 GB",
+        "Alert fires",
+        "Drop slot",
+        "Rebuild replica"
+      ],
+      "steps": [
+        {
+          "label": "Detect",
+          "detail": "An alert on slot lag > 10 GB fired Saturday morning, ideally long before the disk got close to full."
+        },
+        {
+          "label": "Decide",
+          "detail": "If the replica can't be fixed quickly, protect the primary."
+        },
+        {
+          "label": "Act",
+          "detail": "Drop the slot so the WAL is freed, then rebuild the replica from a fresh base backup."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT slot_name, active,\n       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS lag_size\nFROM pg_replication_slots;\n\nSELECT pg_drop_replication_slot('replica_1_slot');"
+        }
+      ],
+      "outcome": "the primary stays up, and you pay for it with a replica rebuild, which is the right trade."
+    },
+    "summary": {
+      "points": [
+        "Slots stop replicas from breaking.",
+        "Unconsumed slots retain WAL forever.",
+        "Monitor slot lag, and drop a slot rather than lose the primary."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a crashed primary worse than a broken replica?",
+        "a": "The primary carries all writes, so losing it is an outage. A broken replica only reduces read capacity until it's rebuilt."
+      }
+    ]
+  },
+  "scaling-writes-sharding": {
+    "core": "Sharding splits data across independent servers by a shard key so each server handles only its share of writes. Choosing the key and the strategy (hash, range, directory) decides whether load spreads evenly.",
+    "first_principles": {
+      "problem": "Replicas copy every write, so they can't reduce write load. If writes alone exceed the biggest server, the only way forward is to split the data so different servers own different rows.",
+      "truths": [
+        "Every write must happen on the server that owns that row.",
+        "Load must be spread evenly, or one server becomes the bottleneck.",
+        "Queries that need data from every server are slow."
+      ],
+      "derivation": [
+        "Split rows across **shared-nothing shards**, each owning a subset.",
+        "Pick a **shard key** that most queries include and that spreads writes evenly.",
+        "Map keys to shards: **hash** (even, bad for ranges), **range** (good for ranges, hotspot-prone), or a **directory** (flexible, extra lookup and SPOF).",
+        "Avoid monotonically increasing keys (timestamps), and handle **hot keys** (celebrities) specially."
+      ]
+    },
+    "analogy": {
+      "title": "Post office sorting by postcode",
+      "story": "Instead of one giant post office, each district has its own (shards). The postcode (shard key) decides where a letter goes. Sort by hashed postcode and every office is equally busy. Sort by date posted and today's office is swamped while the others sit idle.",
+      "mapping": [
+        [
+          "District post offices",
+          "Shards"
+        ],
+        [
+          "Postcode",
+          "Shard key"
+        ],
+        [
+          "Even spread of letters",
+          "Hash sharding"
+        ],
+        [
+          "Today's office swamped",
+          "Monotonic-key hotspot"
+        ],
+        [
+          "Lookup book: address → office",
+          "Directory sharding"
+        ]
+      ],
+      "breaks": "Letters rarely need to be read from every office at once. Many queries (\"last 7 days of users\") do, and with hash sharding that becomes a slow scatter-gather."
+    },
+    "mindmap": {
+      "center": "Sharding",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Writes exceed one box",
+            "Replicas don't help"
+          ]
+        },
+        {
+          "label": "Shard key",
+          "children": [
+            "Most important choice",
+            "In most queries",
+            "Even spread"
+          ]
+        },
+        {
+          "label": "Hash",
+          "children": [
+            "Even load",
+            "Bad ranges"
+          ]
+        },
+        {
+          "label": "Range",
+          "children": [
+            "Good ranges",
+            "Hotspots"
+          ]
+        },
+        {
+          "label": "Directory",
+          "children": [
+            "Flexible",
+            "Lookup bottleneck"
+          ]
+        },
+        {
+          "label": "Hot keys",
+          "children": [
+            "Celebrity problem",
+            "Sub-shard, cache"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "user_id vs created_at as the shard key",
+      "scenario": "A social app shards posts across 8 servers.",
+      "flow": [
+        "Shard by created_at",
+        "All new writes → newest shard",
+        "Hotspot",
+        "Shard by hash(user_id)",
+        "Writes spread evenly"
+      ],
+      "steps": [
+        {
+          "label": "created_at",
+          "detail": "Time only moves forward, so 100% of new writes go to one shard."
+        },
+        {
+          "label": "hash(user_id)",
+          "detail": "Active users are spread across all shards, so writes spread evenly."
+        },
+        {
+          "label": "Celebrity",
+          "detail": "One user with 50 M followers still overloads a shard, so give their data special handling."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def shard_for(user_id: int, shards: int = 8) -> int:\n    return hash(user_id) % shards     # even spread; ranges become scatter-gather"
+        }
+      ],
+      "outcome": "write load is shared across all servers instead of hammering one."
+    },
+    "summary": {
+      "points": [
+        "Sharding is the only way to scale writes past one box.",
+        "The shard key is the most important decision.",
+        "Hash = even, range = range-friendly, directory = flexible."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is created_at usually a bad shard key?",
+        "a": "It increases monotonically, so all new writes land on the shard holding the latest range, creating a write hotspot."
+      }
+    ]
+  },
+  "the-pain-of-resharding": {
+    "core": "Changing the number of shards means moving live data. With modulo hashing almost everything moves. Consistent hashing moves only about 1/N, so pick a generous shard count up front.",
+    "first_principles": {
+      "problem": "Data keeps growing, so eventually 4 shards aren't enough. But with `hash(key) % N`, changing N changes the answer for almost every key, so nearly all rows are suddenly on the wrong server, while the app is still reading and writing them.",
+      "truths": [
+        "`hash % N` depends on N, so changing N reshuffles almost everything.",
+        "Moving data between live servers risks reads and writes landing in the wrong place.",
+        "The less data moves, the safer the change."
+      ],
+      "derivation": [
+        "Avoid `% N`: place keys and shards on a **hash ring** (consistent hashing).",
+        "Adding a shard takes over only the arc next to it, so about **1/N** of keys move instead of about 80%.",
+        "Start with **more logical shards** than servers (e.g. 16 or 256), so growing means moving whole shards, not rehashing rows.",
+        "Treat sharding as a **last resort** after caching, tuning, replicas and vertical scaling."
+      ]
+    },
+    "analogy": {
+      "title": "Seats around a round table",
+      "story": "Guests sit at the seat clockwise of their name card on a round table. When a new chair is squeezed in, only the guests between the new chair and the previous one move, and everyone else stays put. With numbered seats (\"seat = ticket number mod chairs\"), adding one chair makes almost everyone change seats.",
+      "mapping": [
+        [
+          "Round table",
+          "Hash ring"
+        ],
+        [
+          "Squeezing in a chair",
+          "Adding a shard"
+        ],
+        [
+          "Only neighbours move",
+          "~1/N of keys move"
+        ],
+        [
+          "Seat = number mod chairs",
+          "hash % N"
+        ],
+        [
+          "Everyone changes seats",
+          "Near-total reshuffle"
+        ]
+      ],
+      "breaks": "Guests move instantly. Real data takes hours to copy, and the app must handle the period where a key's data is partway between servers."
+    },
+    "mindmap": {
+      "center": "Resharding",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "hash % N changes",
+            "Most rows move",
+            "Live traffic"
+          ]
+        },
+        {
+          "label": "Consistent hashing",
+          "children": [
+            "Hash ring",
+            "~1/N moves"
+          ]
+        },
+        {
+          "label": "Plan ahead",
+          "children": [
+            "Many logical shards",
+            "Move shards, not rows"
+          ]
+        },
+        {
+          "label": "Last resort",
+          "children": [
+            "Cache, tune, replicas",
+            "Scale up first"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Going from 4 to 5 shards",
+      "scenario": "A user table with 100 M users needs one more shard.",
+      "flow": [
+        "4 → 5 shards",
+        "Modulo: ~80% move",
+        "Ring: ~20% move",
+        "Logical shards: move whole buckets"
+      ],
+      "steps": [
+        {
+          "label": "Modulo",
+          "detail": "`id % 4` vs `id % 5` agree for only about 1 in 5 keys, so about 80 M rows move."
+        },
+        {
+          "label": "Consistent hashing",
+          "detail": "The new node takes one arc, so about 20 M rows move."
+        },
+        {
+          "label": "Logical shards",
+          "detail": "With 256 buckets spread over 4 servers, move about 51 buckets to the new server. The routing table changes and no keys rehash."
+        }
+      ],
+      "code": [],
+      "outcome": "growth becomes a routine, bounded data move instead of a risky near-total migration."
+    },
+    "summary": {
+      "points": [
+        "Resharding with modulo moves nearly everything.",
+        "Consistent hashing moves about 1/N.",
+        "Over-provision logical shards early."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Cassandra use consistent hashing?",
+        "a": "So nodes can be added or removed while moving only a small, bounded fraction of data."
+      }
+    ]
+  },
+  "the-connection-bottleneck-introducing-pgbouncer": {
+    "core": "Each Postgres connection is a forked process using 5–10 MB, so hundreds of app workers overwhelm the database. PgBouncer keeps a small pool of real connections and multiplexes thousands of clients onto it.",
+    "first_principles": {
+      "problem": "500 app workers each open their own connection, so 500 Postgres processes use gigabytes of RAM before any query runs. At around 2,000 connections Postgres becomes unstable however big the machine is. Yet most of those connections are idle at any moment.",
+      "truths": [
+        "Postgres forks one OS process per connection.",
+        "Each connection costs memory and an auth handshake.",
+        "Most client connections are idle most of the time."
+      ],
+      "derivation": [
+        "Put a **pooler** between app and database.",
+        "The pooler keeps a **small fixed set** of long-lived server connections (e.g. 50).",
+        "Clients connect to the pooler cheaply and **borrow** a server connection only while they need it.",
+        "The database sees a stable, small number of connections regardless of how many app workers exist."
+      ]
+    },
+    "analogy": {
+      "title": "Taxi rank",
+      "story": "A city doesn't give every resident a private taxi. A rank keeps 50 taxis running, and anyone who needs a ride takes the next free one, then it returns to the rank. Thousands of people are served by 50 cars.",
+      "mapping": [
+        [
+          "Taxis at the rank",
+          "Server connections in the pool"
+        ],
+        [
+          "Residents",
+          "Application workers"
+        ],
+        [
+          "Taking a ride",
+          "Borrowing a connection"
+        ],
+        [
+          "Taxi returns to the rank",
+          "Connection released to the pool"
+        ],
+        [
+          "Rank manager",
+          "PgBouncer"
+        ]
+      ],
+      "breaks": "Passengers don't leave things in a taxi that the next passenger relies on. Database sessions can (temp tables, `SET`), which is why pooling mode matters (next lesson)."
+    },
+    "mindmap": {
+      "center": "PgBouncer",
+      "branches": [
+        {
+          "label": "Cost of a connection",
+          "children": [
+            "Fork a process",
+            "5–10 MB RAM",
+            "Auth handshake"
+          ]
+        },
+        {
+          "label": "Problem",
+          "children": [
+            "500–2,000 connections",
+            "Instability"
+          ]
+        },
+        {
+          "label": "Pooler",
+          "children": [
+            "Small fixed pool",
+            "Multiplex clients",
+            "Written in C, very light"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "pool_mode",
+            "default_pool_size",
+            "App → PgBouncer port"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "500 workers, 50 connections",
+      "scenario": "A Python app with 500 gunicorn workers keeps hitting `too many clients`.",
+      "flow": [
+        "500 direct connections",
+        "DB RAM + CPU pressure",
+        "Add PgBouncer",
+        "500 clients → 50 server conns",
+        "Stable DB"
+      ],
+      "steps": [
+        {
+          "label": "Before",
+          "detail": "500 Postgres processes, about 4 GB RAM just for connections."
+        },
+        {
+          "label": "Install",
+          "detail": "PgBouncer on port 6432, `default_pool_size = 50`, `pool_mode = transaction`."
+        },
+        {
+          "label": "Repoint",
+          "detail": "The app connects to `:6432` instead of `:5432`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[databases]\napp = host=10.0.0.5 port=5432 dbname=app\n\n[pgbouncer]\nlisten_port       = 6432\npool_mode         = transaction\ndefault_pool_size = 50\nmax_client_conn   = 2000"
+        }
+      ],
+      "outcome": "Postgres never sees more than 50 connections, and the freed memory goes back to caching data."
+    },
+    "summary": {
+      "points": [
+        "Connections are expensive in Postgres.",
+        "A pooler multiplexes many clients over few connections.",
+        "The app just points at PgBouncer's port."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't a bigger server fix 2,000 connections?",
+        "a": "The overhead is per process (memory, scheduling, lock-manager contention). It grows with connection count, not with hardware size."
+      }
+    ]
+  },
+  "pgbouncer-pooling-modes": {
+    "core": "PgBouncer can hand out a server connection per session, per transaction or per statement. Transaction mode is the production sweet spot, as long as your app doesn't rely on session state.",
+    "first_principles": {
+      "problem": "Pooling only helps if connections are returned quickly, but some database features remember state for the whole session (temp tables, `SET` values, advisory locks, `LISTEN`). Return the connection too early and that state ends up on someone else's connection.",
+      "truths": [
+        "Session state lives on a specific server connection.",
+        "The shorter a client holds a connection, the more clients a pool can serve.",
+        "A transaction must run entirely on one connection."
+      ],
+      "derivation": [
+        "**Session mode**: hold the connection until disconnect. Everything works, but little multiplexing.",
+        "**Transaction mode**: hold it from BEGIN to COMMIT. Huge multiplexing, but session state doesn't carry over.",
+        "**Statement mode**: hold it for one statement. Multi-statement transactions break.",
+        "Default to **transaction mode**, and audit the app for temp tables, `SET`, advisory locks and `LISTEN/NOTIFY`."
+      ]
+    },
+    "analogy": {
+      "title": "Renting a desk",
+      "story": "Session mode: you rent a desk for the whole day, even while at lunch. Transaction mode: you take any free desk for each task and leave nothing behind. Statement mode: you switch desks after every sentence you write, so a multi-page report is impossible.",
+      "mapping": [
+        [
+          "Desk for the whole day",
+          "Session pooling"
+        ],
+        [
+          "Desk per task",
+          "Transaction pooling"
+        ],
+        [
+          "Desk per sentence",
+          "Statement pooling"
+        ],
+        [
+          "Notes left on your desk",
+          "Temp tables, SET, advisory locks"
+        ]
+      ],
+      "breaks": "People notice they're at a different desk. Applications don't. They just get \"relation does not exist\" errors for their temp table."
+    },
+    "mindmap": {
+      "center": "Pooling Modes",
+      "branches": [
+        {
+          "label": "Session",
+          "children": [
+            "Whole connection",
+            "All features work",
+            "Least efficient"
+          ]
+        },
+        {
+          "label": "Transaction",
+          "children": [
+            "BEGIN → COMMIT",
+            "Most common",
+            "No session state"
+          ]
+        },
+        {
+          "label": "Statement",
+          "children": [
+            "One statement",
+            "Breaks transactions",
+            "Rarely used"
+          ]
+        },
+        {
+          "label": "Breaks in txn mode",
+          "children": [
+            "Temp tables",
+            "SET variables",
+            "Advisory locks",
+            "LISTEN/NOTIFY"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Missing temp table after switching to transaction mode",
+      "scenario": "A reporting job creates a temp table, then queries it in the next transaction, and gets an error.",
+      "flow": [
+        "Txn 1: CREATE TEMP TABLE",
+        "Connection returned",
+        "Txn 2 on another connection",
+        "\"relation does not exist\""
+      ],
+      "steps": [
+        {
+          "label": "Why",
+          "detail": "Temp tables belong to the session (the physical connection). Transaction 2 ran on a different connection."
+        },
+        {
+          "label": "Fix A",
+          "detail": "Create and use the temp table inside one transaction, with `ON COMMIT DROP`."
+        },
+        {
+          "label": "Fix B",
+          "detail": "Use a separate PgBouncer pool in session mode for that job."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN;\nCREATE TEMP TABLE tmp_report ON COMMIT DROP AS SELECT ...;\nSELECT * FROM tmp_report;\nCOMMIT;"
+        }
+      ],
+      "outcome": "the job works under transaction pooling and the rest of the app keeps the efficiency."
+    },
+    "summary": {
+      "points": [
+        "Session = safe, transaction = efficient, statement = rarely.",
+        "Transaction mode breaks session-scoped features.",
+        "Keep session state inside a single transaction."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does statement pooling break BEGIN…COMMIT?",
+        "a": "Each statement may run on a different physical connection, so the statements are no longer part of the same transaction."
+      }
+    ]
+  }
+}

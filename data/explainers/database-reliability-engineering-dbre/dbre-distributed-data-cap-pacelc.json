@@ -1,0 +1,719 @@
+{
+  "introduction-the-problem-with-more-than-one": {
+    "core": "As soon as data lives on more than one machine, a broken network forces a choice: answer with possibly stale data (stay available) or refuse to answer (stay consistent).",
+    "first_principles": {
+      "problem": "With one machine, a write of `X = 5` is immediately what every reader sees. Put copies on three machines and the network between them can fail. A client asks a node that missed the write: should it answer with the old value, or refuse?",
+      "truths": [
+        "Copies are connected by a network that can fail.",
+        "A node cut off from the others can't know the latest value.",
+        "Every answer is either possibly stale or a refusal."
+      ],
+      "derivation": [
+        "Accept that copies can disagree during a network failure.",
+        "Decide per system: **return possibly stale data** (availability) or **return an error** (consistency).",
+        "Know which choice each database you run has already made."
+      ]
+    },
+    "analogy": {
+      "title": "A shared document on a bad connection",
+      "story": "Two people edit the same online document while the Wi-Fi drops in and out. For a while they each see a different version. The app must either let them keep typing and merge later, or freeze editing until the connection returns.",
+      "mapping": [
+        [
+          "Each person's screen",
+          "Replica node"
+        ],
+        [
+          "Wi-Fi dropping",
+          "Network partition"
+        ],
+        [
+          "Keep typing, merge later",
+          "Availability (AP)"
+        ],
+        [
+          "Freeze editing",
+          "Consistency (CP)"
+        ]
+      ],
+      "breaks": "People can see they're out of sync. Clients of a database usually can't tell whether the answer they got was stale."
+    },
+    "mindmap": {
+      "center": "More Than One Copy",
+      "branches": [
+        {
+          "label": "One node",
+          "children": [
+            "Single source of truth",
+            "Read sees last write"
+          ]
+        },
+        {
+          "label": "Many nodes",
+          "children": [
+            "Network between them",
+            "Copies can disagree"
+          ]
+        },
+        {
+          "label": "On partition",
+          "children": [
+            "Answer stale → available",
+            "Refuse → consistent"
+          ]
+        },
+        {
+          "label": "Takeaway",
+          "children": [
+            "Every system chose a side"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Node B didn't get the write",
+      "scenario": "N=3. `X = 5` reaches node A, but B is cut off. A client asks B for X.",
+      "flow": [
+        "Write X=5 → A",
+        "Link A–B down",
+        "Client asks B",
+        "Option 1: return old X",
+        "Option 2: return error"
+      ],
+      "steps": [
+        {
+          "label": "Option 1",
+          "detail": "B returns the old value. The system is up, but the client gets a wrong answer."
+        },
+        {
+          "label": "Option 2",
+          "detail": "B returns an error. No wrong data, but the request failed."
+        },
+        {
+          "label": "Lesson",
+          "detail": "There's no third option while the link is down."
+        }
+      ],
+      "code": [],
+      "outcome": "you see why distributed databases are classified by what they do in exactly this moment."
+    },
+    "summary": {
+      "points": [
+        "One copy = certainty, many copies = trade-offs.",
+        "During a partition: stale answer or no answer.",
+        "Know your database's default choice."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't node B just check with A first?",
+        "a": "During a partition B can't reach A. That's what the partition means, so B must decide alone."
+      }
+    ]
+  },
+  "the-cap-theorem-the-impossible-triangle": {
+    "core": "CAP says a distributed system can't be both perfectly consistent and always available during a network partition. Since partitions are inevitable, the real choice is CP or AP.",
+    "first_principles": {
+      "problem": "We want every read to see the latest write (consistency), every request to get an answer (availability), and the system to survive network failures (partition tolerance). It turns out you can't guarantee all three at once.",
+      "truths": [
+        "Networks drop and delay messages, so partitions will happen.",
+        "During a partition, the two sides can't coordinate.",
+        "A node can either answer alone or wait for the other side."
+      ],
+      "derivation": [
+        "Partition tolerance isn't optional, because otherwise you just have a single node with extra steps.",
+        "So during a partition choose **CP** (refuse writes without agreement: etcd, ZooKeeper, sync-replicated Postgres) or **AP** (keep serving and reconcile later: Cassandra, DynamoDB default).",
+        "Remember many systems let you **tune per operation**, so the label is a default, not an identity."
+      ]
+    },
+    "analogy": {
+      "title": "Two bank branches lose their phone line",
+      "story": "CP: both branches stop processing withdrawals until the line is back, which is safe but means customers wait. AP: both keep serving customers and sort out the books later, which keeps customers happy but an account might get overdrawn twice.",
+      "mapping": [
+        [
+          "Phone line down",
+          "Network partition"
+        ],
+        [
+          "Stop withdrawals",
+          "CP: refuse without quorum"
+        ],
+        [
+          "Keep serving, reconcile later",
+          "AP: accept on both sides"
+        ],
+        [
+          "Overdrawn twice",
+          "Conflicting writes"
+        ]
+      ],
+      "breaks": "Branch staff can apologise to customers. Database nodes can't, so conflict resolution in AP systems has to be automatic (e.g. last-write-wins), and it can silently lose data."
+    },
+    "mindmap": {
+      "center": "CAP Theorem",
+      "branches": [
+        {
+          "label": "C",
+          "children": [
+            "Every read = latest write",
+            "Linearizable"
+          ]
+        },
+        {
+          "label": "A",
+          "children": [
+            "Every request answered",
+            "Maybe stale"
+          ]
+        },
+        {
+          "label": "P",
+          "children": [
+            "Survive partitions",
+            "Not optional"
+          ]
+        },
+        {
+          "label": "CP systems",
+          "children": [
+            "etcd, ZooKeeper",
+            "Sync-replicated PG"
+          ]
+        },
+        {
+          "label": "AP systems",
+          "children": [
+            "Cassandra",
+            "DynamoDB default"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same partition, two systems",
+      "scenario": "A zone loses connectivity for 2 minutes.",
+      "flow": [
+        "Partition",
+        "etcd minority side: refuses writes",
+        "Cassandra: both sides accept",
+        "Partition heals",
+        "Cassandra reconciles"
+      ],
+      "steps": [
+        {
+          "label": "etcd (CP)",
+          "detail": "The side without a Raft majority rejects writes. Clients there see errors, but no conflicting data is ever created."
+        },
+        {
+          "label": "Cassandra (AP)",
+          "detail": "Both sides accept writes at low consistency levels. After healing, the latest timestamp wins."
+        },
+        {
+          "label": "Tunable",
+          "detail": "DynamoDB `ConsistentRead=true` behaves CP for that read."
+        }
+      ],
+      "code": [],
+      "outcome": "you can predict exactly how each store behaves when the network breaks."
+    },
+    "summary": {
+      "points": [
+        "P is mandatory, so choose C or A during partitions.",
+        "CP = correct but may refuse, AP = up but may be stale.",
+        "Many systems tune this per request."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is a single-node Postgres CP or AP?",
+        "a": "Neither. CAP applies to distributed systems, and a single node has no network partition between copies."
+      }
+    ]
+  },
+  "beyond-cap-the-pacelc-theorem": {
+    "core": "PACELC adds the everyday trade-off CAP ignores: even with a healthy network, waiting for replicas to agree costs latency. If Partition, choose A or C. Else, choose Latency or Consistency.",
+    "first_principles": {
+      "problem": "CAP only talks about failures, which are rare. Most of the time the network is fine, yet strongly consistent writes still feel slow. A write from New York that must be confirmed by London waits for light to cross the Atlantic, every time.",
+      "truths": [
+        "Confirming a write on another node takes a network round trip.",
+        "Round trips are bounded by physics (distance / speed of light).",
+        "Skipping confirmation is fast but risks stale reads."
+      ],
+      "derivation": [
+        "Ask two questions: during a **partition**, A or C? **Else**, Latency or Consistency?",
+        "**PA/EL** (Cassandra, DynamoDB): stay up and be fast.",
+        "**PC/EC** (etcd, HBase): stay correct, and pay latency.",
+        "Accept that low latency and strong consistency conflict **even when nothing is broken**."
+      ]
+    },
+    "analogy": {
+      "title": "Getting a second signature",
+      "story": "A cautious bank needs a second manager to countersign every transfer. On a normal day that means waiting for them to walk over (latency). If the second manager is unreachable, transfers stop (consistency during partition). A relaxed bank skips the countersignature: fast, but occasionally wrong.",
+      "mapping": [
+        [
+          "Waiting for the countersignature",
+          "Synchronous replication latency"
+        ],
+        [
+          "Manager unreachable",
+          "Partition"
+        ],
+        [
+          "Skip countersigning",
+          "Low latency, weaker consistency"
+        ],
+        [
+          "Always countersign",
+          "EC"
+        ]
+      ],
+      "breaks": "A manager can walk faster. Network latency between regions can't go below the speed of light, so geography sets the minimum cost of consistency."
+    },
+    "mindmap": {
+      "center": "PACELC",
+      "branches": [
+        {
+          "label": "If Partition",
+          "children": [
+            "Availability",
+            "Consistency"
+          ]
+        },
+        {
+          "label": "Else",
+          "children": [
+            "Latency",
+            "Consistency"
+          ]
+        },
+        {
+          "label": "PA/EL",
+          "children": [
+            "Cassandra",
+            "DynamoDB"
+          ]
+        },
+        {
+          "label": "PC/EC",
+          "children": [
+            "etcd",
+            "HBase",
+            "VoltDB"
+          ]
+        },
+        {
+          "label": "Insight",
+          "children": [
+            "Consistency costs latency always"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A transatlantic write",
+      "scenario": "App in New York, replica in London, about 70 ms round trip.",
+      "flow": [
+        "Write in NY",
+        "Sync confirm from London",
+        "+70 ms per write",
+        "Or async: fast, maybe stale"
+      ],
+      "steps": [
+        {
+          "label": "EC choice",
+          "detail": "Every write waits about 70 ms for London. Reads anywhere are consistent."
+        },
+        {
+          "label": "EL choice",
+          "detail": "Acknowledge after the local write. A London reader may briefly see old data."
+        },
+        {
+          "label": "Design",
+          "detail": "Keep strongly consistent data close to its writers, and replicate the rest asynchronously."
+        }
+      ],
+      "code": [],
+      "outcome": "you can explain why a 'consistent' global database is slower on a perfectly healthy day."
+    },
+    "summary": {
+      "points": [
+        "CAP = behaviour during failures, PACELC adds normal operation.",
+        "Consistency always costs latency.",
+        "PA/EL and PC/EC are the common pairs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does PACELC tell you that CAP doesn't?",
+        "a": "How a system trades latency against consistency during normal operation, not just during partitions."
+      }
+    ]
+  },
+  "tunable-consistency-and-quorums": {
+    "core": "With N replicas, a write waits for W acknowledgements and a read asks R replicas. If R + W > N, every read overlaps the latest write, so you can dial consistency per operation.",
+    "first_principles": {
+      "problem": "CAP sounds like a binary switch, but different operations in one app need different guarantees: an inventory count must be exact, while a view counter can lag. We need a dial, not a switch.",
+      "truths": [
+        "Data is stored on N replicas.",
+        "Waiting for more replicas is slower but safer.",
+        "If the set of nodes you write to and the set you read from overlap, you see the latest write (pigeonhole)."
+      ],
+      "derivation": [
+        "Choose **W** (write acks needed) and **R** (replicas consulted on read) per request.",
+        "Strong consistency rule: **R + W > N**, so read and write sets must share a node with the newest timestamp.",
+        "**R + W ≤ N** is eventual consistency: faster, possibly stale.",
+        "The common default **N=3, W=2, R=2** is strong and survives one node down."
+      ]
+    },
+    "analogy": {
+      "title": "Asking a committee",
+      "story": "A committee of 3 records decisions. If a decision is written down by at least 2 members, and you later ask any 2 members, at least one of the people you ask must have written it down. Ask just 1 member and they might have missed it.",
+      "mapping": [
+        [
+          "Committee of 3",
+          "N = 3 replicas"
+        ],
+        [
+          "2 members record it",
+          "W = 2"
+        ],
+        [
+          "Asking 2 members",
+          "R = 2"
+        ],
+        [
+          "At least one overlap",
+          "R + W > N"
+        ],
+        [
+          "Asking just 1",
+          "R = 1 (eventual)"
+        ]
+      ],
+      "breaks": "Committee members compare notes and spot the newest. Replicas compare timestamps, and if clocks are skewed, \"newest\" can be wrong."
+    },
+    "mindmap": {
+      "center": "Quorums",
+      "branches": [
+        {
+          "label": "Variables",
+          "children": [
+            "N: replicas",
+            "W: write acks",
+            "R: read replicas"
+          ]
+        },
+        {
+          "label": "Strong",
+          "children": [
+            "R + W > N",
+            "Overlap guaranteed"
+          ]
+        },
+        {
+          "label": "Eventual",
+          "children": [
+            "R + W ≤ N",
+            "Fast, maybe stale"
+          ]
+        },
+        {
+          "label": "N=3 presets",
+          "children": [
+            "2/2 balanced",
+            "1/3 write-heavy reads",
+            "3/1 read-heavy",
+            "1/1 ingest"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inventory vs. page views",
+      "scenario": "One Cassandra cluster with N=3 stores both inventory counts and page-view counters.",
+      "flow": [
+        "Inventory: W=2 R=2",
+        "4 > 3 → strong",
+        "Page views: W=1 R=1",
+        "2 ≤ 3 → eventual, fast"
+      ],
+      "steps": [
+        {
+          "label": "Inventory",
+          "detail": "QUORUM writes and reads, so you never sell stock that isn't there, and one node can still be down."
+        },
+        {
+          "label": "Page views",
+          "detail": "ONE/ONE: fastest, and a slightly stale count is fine."
+        },
+        {
+          "label": "Per query",
+          "detail": "The consistency level is set on each statement."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CONSISTENCY QUORUM;   -- inventory\nUPDATE stock SET qty = 41 WHERE sku = 'X1';\nCONSISTENCY ONE;      -- page views\nUPDATE views SET n = n + 1 WHERE page = '/home';"
+        }
+      ],
+      "outcome": "each operation pays exactly the latency its correctness needs."
+    },
+    "summary": {
+      "points": [
+        "R + W > N → reads see the latest write.",
+        "Tune per operation.",
+        "N=3, W=2, R=2 is the balanced default."
+      ]
+    },
+    "check": [
+      {
+        "q": "N=5. What's the smallest W if R=2 and you need strong reads?",
+        "a": "W = 4, because R + W must exceed 5, so 2 + 4 = 6 > 5."
+      }
+    ]
+  },
+  "hinted-handoff-dealing-with-temporary-outages": {
+    "core": "When a replica is briefly down, a healthy node keeps the writes meant for it as hints and replays them when it returns. That covers short outages without an expensive full repair.",
+    "first_principles": {
+      "problem": "With W=2 of N=3, a write succeeds even though node C was rebooting. Now C is missing that write. Running a full cluster comparison every time a node blips would be far too expensive.",
+      "truths": [
+        "Short outages (reboots, blips) are common.",
+        "Full replica comparison is costly.",
+        "Storing pending writes costs disk on the node that keeps them."
+      ],
+      "derivation": [
+        "When a replica is unreachable, the coordinator **stores a hint** (data + timestamp) on a healthy node.",
+        "The holder **watches** for the replica to come back and **hands off** the write.",
+        "Bound it with a **hint window** (e.g. 3 h) so hints can't fill the disk.",
+        "Beyond the window, hints are dropped, so you must run **anti-entropy repair**."
+      ]
+    },
+    "analogy": {
+      "title": "Taking a message for a colleague",
+      "story": "Your colleague is out at lunch, so you write \"Client called, price is now $50\" on a sticky note. When they're back, you hand it over. If they're away on a three-week holiday, you throw the notes away after a while, and they'll need a proper handover meeting when they return.",
+      "mapping": [
+        [
+          "Sticky note",
+          "Hint"
+        ],
+        [
+          "Colleague at lunch",
+          "Briefly down replica"
+        ],
+        [
+          "Handing the note over",
+          "Hinted handoff"
+        ],
+        [
+          "Throwing notes after a while",
+          "Hint window expiry"
+        ],
+        [
+          "Handover meeting",
+          "Anti-entropy repair"
+        ]
+      ],
+      "breaks": "Colleagues read every note. If the node holding hints dies too, those hints are lost, and only repair can recover the gap."
+    },
+    "mindmap": {
+      "center": "Hinted Handoff",
+      "branches": [
+        {
+          "label": "Situation",
+          "children": [
+            "W met, one node down",
+            "That node misses data"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Store hint on healthy node",
+            "Replay on return"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Hint window (~3 h)",
+            "Disk on hint holder"
+          ]
+        },
+        {
+          "label": "Beyond window",
+          "children": [
+            "Hints dropped",
+            "Run repair"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Node C reboots for 5 minutes",
+      "scenario": "N=3, W=2. A write `X=5` arrives while C is down.",
+      "flow": [
+        "A writes ✓",
+        "B writes ✓",
+        "C down → hint on A",
+        "Client: success",
+        "C back at +5 min",
+        "A hands off → C has X=5"
+      ],
+      "steps": [
+        {
+          "label": "Write",
+          "detail": "A and B acknowledge, so W=2 is satisfied and the client gets success."
+        },
+        {
+          "label": "Hint",
+          "detail": "A stores \"for C: X=5 @ T0\"."
+        },
+        {
+          "label": "Handoff",
+          "detail": "When C returns, A replays the hint and all three agree."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# cassandra.yaml\nhinted_handoff_enabled: true\nmax_hint_window: 3h        # longer outages need nodetool repair"
+        }
+      ],
+      "outcome": "a short reboot heals itself automatically, with no operator involved."
+    },
+    "summary": {
+      "points": [
+        "Hints cover short outages cheaply.",
+        "Hint windows bound disk use.",
+        "Longer outages need repair."
+      ]
+    },
+    "check": [
+      {
+        "q": "A node was down for 6 hours with a 3-hour hint window. What now?",
+        "a": "Some writes were never hinted, so run anti-entropy repair (`nodetool repair`) on it."
+      }
+    ]
+  },
+  "read-repair-and-anti-entropy-keeping-data-consistent-over-time": {
+    "core": "Replicas drift over time. Read repair fixes the stale copies it notices during reads, and anti-entropy repair uses Merkle trees to find and fix every difference, including data nobody reads.",
+    "first_principles": {
+      "problem": "Even a healthy cluster drifts: a node was briefly slow and missed a write, or a disk corrupted a value. Left alone, small differences accumulate, and deleted data can even come back to life.",
+      "truths": [
+        "Reads that consult several replicas can see disagreements.",
+        "Data that's never read never gets compared.",
+        "Comparing entire datasets row by row is too expensive."
+      ],
+      "derivation": [
+        "**Read repair**: when a read sees replicas disagree, return the newest and quietly update the stale ones.",
+        "**Anti-entropy repair**: on a schedule, compare replicas systematically.",
+        "Use **Merkle trees** (hashes of hashes) so matching subtrees are skipped and only differing ranges are synced.",
+        "Run repair at least once per **gc_grace_seconds** so tombstones reach every replica before they're purged."
+      ]
+    },
+    "analogy": {
+      "title": "Fixing typos in shared encyclopedias",
+      "story": "Read repair: whenever you look up an article in two copies and spot a difference, you fix the older copy on the spot. Anti-entropy: once a month someone compares chapter checksums between copies and only rereads the chapters whose checksums differ.",
+      "mapping": [
+        [
+          "Fixing a copy while reading",
+          "Read repair"
+        ],
+        [
+          "Monthly comparison",
+          "Anti-entropy repair"
+        ],
+        [
+          "Chapter checksums",
+          "Merkle tree hashes"
+        ],
+        [
+          "Only reread mismatched chapters",
+          "Sync only differing ranges"
+        ]
+      ],
+      "breaks": "An encyclopedia's deleted article doesn't reappear. In Cassandra, if repair doesn't run within gc_grace_seconds, a replica that missed a delete can resurrect the data."
+    },
+    "mindmap": {
+      "center": "Repairing Drift",
+      "branches": [
+        {
+          "label": "Drift causes",
+          "children": [
+            "Missed writes",
+            "Silent corruption"
+          ]
+        },
+        {
+          "label": "Read repair",
+          "children": [
+            "During R > 1 reads",
+            "Newest wins",
+            "Only data that's read"
+          ]
+        },
+        {
+          "label": "Anti-entropy",
+          "children": [
+            "Scheduled",
+            "Merkle trees",
+            "All data"
+          ]
+        },
+        {
+          "label": "Tombstones",
+          "children": [
+            "gc_grace_seconds",
+            "Repair before purge",
+            "Else zombies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A zombie row",
+      "scenario": "A row is deleted while node C is down. C returns after 12 days. gc_grace_seconds is 10 days, and no repair ran.",
+      "flow": [
+        "DELETE (C down)",
+        "Tombstone on A, B",
+        "Day 10: tombstones purged",
+        "C returns with old row",
+        "Row reappears!"
+      ],
+      "steps": [
+        {
+          "label": "Cause",
+          "detail": "C never received the tombstone, and A and B purged it after 10 days."
+        },
+        {
+          "label": "Result",
+          "detail": "C's old copy looks like the latest data, so the deleted row comes back."
+        },
+        {
+          "label": "Prevention",
+          "detail": "Run `nodetool repair` on every node within gc_grace_seconds, so the tombstone reaches C before it's purged."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# schedule per node, more often than gc_grace_seconds (default 10 days)\nnodetool repair -pr my_keyspace"
+        }
+      ],
+      "outcome": "regular repair keeps replicas converged and deleted data stays deleted."
+    },
+    "summary": {
+      "points": [
+        "Read repair is opportunistic.",
+        "Anti-entropy with Merkle trees covers everything.",
+        "Repair within gc_grace_seconds or deletes can resurrect."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are Merkle trees efficient for comparing replicas?",
+        "a": "Equal parent hashes prove whole subtrees match, so only branches with differing hashes are explored and synced."
+      }
+    ]
+  }
+}
