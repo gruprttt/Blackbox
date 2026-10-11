@@ -91,13 +91,16 @@
         if (shown !== d.id) {
           shown = d.id;
           tip.style.setProperty("--c", d.color);
-          tip.innerHTML = card ? regionTip(d, brain) : '<i></i>' + esc(d.name) + (d.soon ? " <em>soon</em>" : "");
+          tip.innerHTML = opts.tip ? opts.tip(d, brain) : card ? regionTip(d, brain) : '<i></i>' + esc(d.name) + (d.soon ? " <em>soon</em>" : "");
         }
         tip.hidden = false; screen.classList.add("hovering");
       };
     }
     brain = BB.Brain(canvas, opts);
-    var refresh = function (o) { brain.setState(BB.brainState(), o); };
+    var refresh = function (o) {
+      if (opts.state) { var x = opts.state(); brain.setState(x.st, Object.assign({ full: x.full }, o)); }
+      else brain.setState(BB.brainState(), o);
+    };
     refresh();
     var lastTick = 0;
     BB.on(function (w, detail) {
@@ -112,38 +115,76 @@
     var r = (brain.stats().byRegion || {})[d.id] || { lit: 0, size: 1 }, st = BB.brainState()[d.id] || { done: 0, total: 0, focusMin: 0 };
     var pct = Math.round(r.lit / r.size * 100);
     return '<div class="bt-head"><i style="background:' + d.color + ";box-shadow:0 0 10px " + d.color + '"></i><b>' + esc(d.name) + "</b></div>" +
-      (d.soon ? '<p class="bt-soon">Dormant region · coming soon</p>'
+      (d.soon ? '<p class="bt-soon">Dormant lobe · coming soon</p>'
         : '<div class="bt-bar"><span style="width:' + pct + "%;background:" + d.color + '"></span></div>' +
-          '<p class="bt-meta"><span>' + pct + "% wired</span><span>" + r.lit + " neurons</span><span>" + st.done + "/" + st.total + " lessons</span></p>");
+          '<p class="bt-meta"><span>' + pct + "% wired</span><span>" + r.lit + " neurons</span><span>" + st.done + "/" + st.total + " learned</span></p>" +
+          '<p class="bt-hint">Click to go inside</p>');
   }
   function paintStats(s) {
     $$('[data-stat="neurons"]').forEach(function (el) { el.textContent = s.neurons.toLocaleString(); });
     $$('[data-stat="synapses"]').forEach(function (el) { el.textContent = s.synapses.toLocaleString(); });
-    $$('[data-stat="regions"]').forEach(function (el) { el.textContent = s.regions + " / " + DATA.domains.filter(function (d) { return !d.soon; }).length; });
+    $$('[data-stat="regions"]').forEach(function (el) { el.textContent = s.regions + " / " + (s.of != null ? s.of : DATA.domains.filter(function (d) { return !d.soon; }).length); });
   }
 
 
   // ── shared: path & health helpers (home + tracks page) ──
-  function met(a) { return !!a && (a.lessons > 0 || a.focus >= 25); }
+  // Daily goal: finish N items (lessons, problems, sections, concepts) OR focus M minutes. Each user sets their own.
+  function goal() {
+    var g = BB.load("bb-goal", null) || {};
+    return { items: g.items > 0 ? Math.min(50, g.items | 0) : 3, min: g.min > 0 ? Math.min(480, g.min | 0) : 25,
+             slo: g.slo >= 50 && g.slo <= 100 ? g.slo | 0 : 80 };   // SLO: % of days you aim to hit the goal
+  }
+  function met(a) { var G = goal(); return !!a && (a.lessons >= G.items || a.focus >= G.min); }
 
   function slo() {
     var act = BB.activity(), today = BB.dayKey(), keys = Object.keys(act).filter(function (k) { return met(act[k]) || act[k].lessons || act[k].focus; }).sort();
     var todayAct = act[today] || { lessons: 0, focus: 0 };
     todayAct = { lessons: todayAct.lessons, focus: todayFocusMin() };
-    if (!keys.length && !met(todayAct)) return { state: "idle", label: "NO DATA" };
+    var G = goal();
+    if (!keys.length && !met(todayAct)) return { state: "idle", label: "START TODAY", today: todayAct, goal: G, detail: "", budget: null };
     var first = keys[0] || today, win = Math.min(30, BB.diffDays(today, first) + 1), missed = 0, hit = 0;
     for (var i = 1; i < win; i++) { if (met(act[BB.addDays(today, -i)])) hit++; else missed++; }
     var todayMet = met(todayAct);
     if (todayMet) hit++;
-    var allowed = Math.max(1, Math.round(win * 0.2));
+    var allowed = Math.round(win * (100 - G.slo) / 100);
     var end = new Date(); end.setHours(24, 0, 0, 0);
     var left = Math.max(0, end - Date.now()) / 60000;
     return {
-      state: todayMet ? "ok" : "warn", label: todayMet ? "HEALTHY" : "AT RISK",
-      detail: todayMet ? "Today’s SLO met" : BB.fmtMin(left) + " left to meet today’s SLO",
-      budget: Math.max(0, allowed - missed) / allowed, missed: missed, allowed: allowed,
-      attain: Math.round(hit / Math.max(1, win - (todayMet ? 0 : 1)) * 100), win: win
+      state: todayMet ? "ok" : "warn", label: todayMet ? "GOAL MET" : "NOT YET", today: todayAct, goal: G, hit: hit,
+      detail: todayMet ? "Done for today — anything more is a bonus" : BB.fmtMin(left) + " left today",
+      budget: allowed ? Math.max(0, allowed - missed) / allowed : (missed ? 0 : 1), missed: missed, allowed: allowed,
+      attain: Math.round(hit / Math.max(1, win - (todayMet ? 0 : 1)) * 100), win: win, counted: Math.max(0, win - (todayMet ? 0 : 1))
     };
+  }
+
+  // Finish-date estimate for a set of items: pace = items you finished per day over the days you've
+  // actually been at it (at least 7, at most 30, so one busy day doesn't promise the moon).
+  function eta(pred, total) {
+    var m = BB.doneMap(), now = Date.now(), done = 0, times = [];
+    Object.keys(m).forEach(function (id) { if (!pred(id)) return; done++; if (m[id]) times.push(m[id]); });
+    var left = Math.max(0, total - done);
+    if (!left) return { done: true, left: 0, pace: 0, text: "done", long: "all done" };
+    var first = times.length ? Math.min.apply(null, times) : now;
+    var win = Math.min(30, Math.max(7, Math.ceil((now - first) / 864e5) + 1));
+    var recent = times.filter(function (t) { return t > now - win * 864e5; }).length, pace = recent / win;
+    if (!pace) return { done: false, left: left, pace: 0, text: "—", long: "finish something to get an estimate" };
+    var days = Math.ceil(left / pace), d = new Date(now + days * 864e5);
+    var text = days > 3 * 365 ? "3+ yrs" : d.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+    return { done: false, left: left, pace: pace, days: days, date: d, text: text,
+             long: left + " left at " + pace.toFixed(1) + "/day (last " + win + " days) ≈ " + (days > 3 * 365 ? "over 3 years" : days + " days") };
+  }
+
+  // Per-day goal status for the last n days (oldest first): hit / miss / none (before you started) / today (still open).
+  function goalDays(n) {
+    var act = BB.activity(), today = BB.dayKey(), out = [];
+    var first = Object.keys(act).filter(function (k) { var a = act[k]; return a.lessons || a.focus; }).sort()[0] || today;
+    for (var i = n - 1; i >= 0; i--) {
+      var k = BB.addDays(today, -i), a = act[k] || { lessons: 0, focus: 0 };
+      if (!i) a = { lessons: a.lessons, focus: todayFocusMin() };
+      var ok = met(a);
+      out.push({ k: k, items: a.lessons || 0, focus: Math.round(a.focus || 0), st: k < first ? "none" : ok ? "hit" : i ? "miss" : "today" });
+    }
+    return out;
   }
 
   // Daily activity score (lessons + focus/25) for anything matching a predicate.
@@ -208,14 +249,16 @@
     });
     var ps = $("[data-path-status]");
     if (ps) {
-      var l14 = daily(14, function () { return true; }).reduce(function (a, b) { return a + b; }, 0) / 14, left = DATA.total - total, o = slo();
+      var pathTotal = DATA.pathTotal || 1;
+      var inPath = function (id) { return P.some(function (r) { return id.indexOf(r[0] + "/") === 0; }); };
+      var E = eta(inPath, pathTotal), o = slo();
       var cur = P.findIndex(function (r) { return r[0] === current; });
       ps.innerHTML =
-        '<div><span>status</span><b class="s-' + o.state + '"><i></i>' + (total >= DATA.total ? "COMPLETE" : o.label) + "</b></div>" +
-        "<div><span>completion</span><b>" + (total / DATA.total * 100).toFixed(1) + "%</b></div>" +
+        '<div><span>status</span><b class="s-' + o.state + '"><i></i>' + (total >= pathTotal ? "COMPLETE" : o.label) + "</b></div>" +
+        "<div><span>completion</span><b>" + (total / pathTotal * 100).toFixed(1) + "%</b></div>" +
         "<div><span>current</span><b>" + (cur >= 0 ? "Track " + ("0" + (cur + 1)).slice(-2) : "—") + "</b></div>" +
-        "<div><span>pace · 14d</span><b>" + l14.toFixed(1) + " /day</b></div>" +
-        "<div><span>eta</span><b>" + (l14 > 0 ? new Date(Date.now() + left / l14 * 864e5).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—") + "</b></div>";
+        "<div><span>pace</span><b>" + (E.done ? "—" : E.pace.toFixed(1) + " /day") + "</b></div>" +
+        '<div title="' + esc(E.long) + '"><span>eta</span><b>' + (E.done ? "done" : E.date ? E.date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—") + "</b></div>";
     }
     var btn = $("[data-path-next]");
     if (btn && next) {
@@ -225,9 +268,52 @@
     }
   }
 
+  // ── home: "your path" program picker ──
+  function homePrograms() {
+    var P = window.BB_PROGRAMS || {}, chips = $$("[data-home-program]"), panes = $$("[data-home-pane]");
+    if (!panes.length) return;
+    var ids = panes.map(function (p) { return p.getAttribute("data-home-pane"); });
+    var cur = BB.load("bb-home-program", null);
+    if (ids.indexOf(cur) < 0) cur = ids.indexOf("devops") >= 0 && P.devops ? "devops" : ids[0];
+    function nextIn(pid) {
+      var steps = P[pid] || [];
+      for (var i = 0; i < steps.length; i++) for (var j = 0; j < steps[i][1].length; j++) if (!BB.isDone(steps[i][1][j][0])) return { href: steps[i][1][j][1], step: i };
+      return null;
+    }
+    function paint() {
+      chips.forEach(function (c) { var on = c.getAttribute("data-home-program") === cur; c.classList.toggle("is-active", on); c.setAttribute("aria-selected", on); });
+      panes.forEach(function (p) { p.hidden = p.getAttribute("data-home-pane") !== cur; });
+      var d = BB.domain(cur), steps = P[cur] || [], started = steps.some(function (st) { return st[1].some(function (it) { return BB.isDone(it[0]); }); });
+      var nx = nextIn(cur), btn = $("[data-continue-link]"), label = $("[data-continue-label]");
+      if (btn && label) {
+        if (!steps.length) { btn.href = ROOT + "tracks/index.html#" + cur; label.textContent = "Open " + d.short; }
+        else if (!nx) { btn.href = ROOT + "tracks/index.html#" + cur; label.textContent = "Review " + d.short; }
+        else { btn.href = ROOT + nx.href; label.textContent = (started ? "Continue " : "Start ") + d.short + " · " + ("0" + (nx.step + 1)).slice(-2); }
+      }
+      // generic step cards (DSA, System Design, Backend)
+      var pane = $('[data-home-pane="' + cur + '"]'), current = nx ? nx.step : -1;
+      $$("[data-step]", pane).forEach(function (li, i) {
+        var st = steps[i]; if (!st) return;
+        var done = st[1].filter(function (it) { return BB.isDone(it[0]); }).length, all = done >= st[1].length, open = st[1].filter(function (it) { return !BB.isDone(it[0]); })[0];
+        li.classList.toggle("done", all); li.classList.toggle("is-current", i === current); li.classList.toggle("started", done > 0 && !all);
+        $("[data-path-state]", li).textContent = all ? "Completed" : i === current ? (done ? "In progress" : "Up next") : done ? "Started" : "";
+        $("[data-path-cta]", li).firstChild.nodeValue = all ? "Review " : done ? "Continue " : "Start ";
+        $("[data-path-dot]", li).className = "path-dot s-" + (all ? "ok" : done ? "warn" : "idle");
+        if (open && done) $("[data-step-link]", li).href = ROOT + open[1];
+      });
+    }
+    chips.forEach(function (c) {
+      c.addEventListener("click", function () { cur = c.getAttribute("data-home-program"); BB.save("bb-home-program", cur); paint(); });
+    });
+    BB.on(function (w) { if (w === "progress") paint(); });
+    paint();
+  }
+
   // ═════════════════════════════ HOME ═════════════════════════════
   function home() {
-    var brain = mountBrain($('[data-brain="hero"]'), { interactive: true, fill: 0.92, onStats: function (s) {
+    homePrograms();
+    var brain = mountBrain($('[data-brain="hero"]'), { interactive: true, fill: 0.92,
+      onSelect: function (d) { if (d) location.href = ROOT + "brain/index.html#" + d.id; }, onStats: function (s) {
       paintStats(s);
       var cap = $("[data-brain-caption]");
       if (cap) {
@@ -246,7 +332,7 @@
       el.innerHTML =
         stat("Focus today", BB.fmtMin(fm), sessionsToday + " session" + (sessionsToday === 1 ? "" : "s"), "var(--red)", I.focus) +
         stat("Streak", streak.current + "<small>days</small>", "Best " + streak.best, "#fbbf24", I.flame) +
-        stat("Lessons", done + "<small>/ " + DATA.total.toLocaleString() + "</small>", "+" + today + " today", "var(--blue)", I.book) +
+        stat("Learned", done + "<small>/ " + DATA.total.toLocaleString() + "</small>", "+" + today + " today", "var(--blue)", I.book) +
         stat("Neurons", (s.neurons || 0).toLocaleString(), Math.round((s.neurons || 0) / s.total * 100) + "% wired", "#a06bff", I.brain);
     }
 
@@ -310,30 +396,138 @@
     function pctile(arr, p) { if (!arr.length) return null; var a = arr.slice().sort(function (x, y) { return x - y; }); return a[Math.min(a.length - 1, Math.floor(p / 100 * a.length))]; }
 
 
+    var editingGoal = false;
+    // SRE telemetry: a status-page uptime strip, SLI trend vs SLO, and error-budget burn-down.
+    function telemetry(G) {
+      var days = goalDays(30), counted = days.filter(function (d) { return d.st === "hit" || d.st === "miss"; });
+      var hits = counted.filter(function (d) { return d.st === "hit"; }).length;
+      var fmtDay = function (k) { var d = new Date(k + "T12:00:00"); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+      var label = { hit: "goal hit", miss: "missed", none: "not started yet", today: "today · still open" };
+      var bars = days.map(function (d) {
+        return '<i class="ub-' + d.st + '" title="' + fmtDay(d.k) + " · " + label[d.st] + (d.st === "none" ? "" : " · " + d.items + " items · " + d.focus + " min") + '"></i>';
+      }).join("");
+      // rolling 7-day SLI and remaining error budget for each day
+      var sliPts = [], budPts = [], maxBud = 1;
+      days.forEach(function (d, j) {
+        var win = days.slice(Math.max(0, j - 6), j + 1).filter(function (x) { return x.st === "hit" || x.st === "miss"; });
+        sliPts.push(win.length ? win.filter(function (x) { return x.st === "hit"; }).length / win.length * 100 : null);
+        var upto = days.slice(0, j + 1).filter(function (x) { return x.st === "hit" || x.st === "miss"; });
+        var allowed = Math.round(upto.length * (100 - G.slo) / 100), miss = upto.filter(function (x) { return x.st === "miss"; }).length;
+        var rem = upto.length ? allowed - miss : null;
+        budPts.push(rem); if (rem != null) maxBud = Math.max(maxBud, allowed, Math.abs(rem));
+      });
+      var W = 300, H = 92, px = function (j) { return (j / 29 * (W - 8) + 4).toFixed(1); };
+      function path(vals, y) {
+        var d = "", pen = false;
+        vals.forEach(function (v, j) { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + px(j) + "," + y(v).toFixed(1); pen = true; });
+        return d;
+      }
+      var ySli = function (v) { return 6 + (100 - v) / 100 * (H - 16); };
+      var sliLine = path(sliPts, ySli), sloY = ySli(G.slo).toFixed(1);
+      var firstIdx = sliPts.findIndex(function (v) { return v != null; });
+      var sliArea = firstIdx < 0 ? "" : sliLine + "L" + px(29) + "," + (H - 10) + "L" + px(firstIdx) + "," + (H - 10) + "Z";
+      var below = sliPts.map(function (v, j) { return v == null ? "" : '<circle class="' + (v < G.slo ? "bad" : "pt") + '" cx="' + px(j) + '" cy="' + ySli(v).toFixed(1) + '" r="' + (v < G.slo ? 2.6 : 1.8) + '"/>'; }).join("");
+      var yBud = function (v) { var mid = (H - 10) / 2 + 3; return mid - v / maxBud * ((H - 16) / 2); }, zeroY = yBud(0).toFixed(1);
+      var budLine = path(budPts, yBud);
+      var lastSli = sliPts[29], lastBud = budPts[29];
+      var axis = '<span>30 days ago</span><span>15</span><span>today</span>';
+      return '<div class="sre-tele">' +
+        '<div class="uptime"><div class="uptime-head"><span class="mono-label">uptime · last 30 days</span><b>' + (counted.length ? Math.round(hits / counted.length * 100) + "%" : "—") +
+          '</b></div><div class="uptime-bars" role="img" aria-label="' + hits + " of " + counted.length + ' days goal hit">' + bars + '</div><div class="t-axis">' + axis + "</div>" +
+          '<div class="uptime-legend"><span><i class="ub-hit"></i>goal hit</span><span><i class="ub-miss"></i>missed</span><span><i class="ub-today"></i>today</span><span><i class="ub-none"></i>before you started</span></div></div>' +
+        '<div class="tele-charts">' +
+          '<figure class="tchart"><figcaption><span class="mono-label">SLI · 7-day rolling</span><b>' + (lastSli == null ? "—" : Math.round(lastSli) + "%") + '</b></figcaption>' +
+            '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-label="SLI trend against your SLO">' +
+            '<path class="tc-area" d="' + sliArea + '"/><line class="tc-slo" x1="4" x2="' + (W - 4) + '" y1="' + sloY + '" y2="' + sloY + '"/>' +
+            '<path class="tc-line" d="' + sliLine + '"/><g class="tc-bad">' + below + "</g></svg>" +
+            '<div class="t-axis">' + axis + '</div><p class="tc-note"><i class="lg-slo"></i>dashed line = your SLO (' + G.slo + "%) · red dots = days the trend was below it</p></figure>" +
+          '<figure class="tchart"><figcaption><span class="mono-label">error budget remaining</span><b>' + (lastBud == null ? "—" : lastBud + (Math.abs(lastBud) === 1 ? " day" : " days")) + '</b></figcaption>' +
+            '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-label="Error budget burn-down">' +
+            '<line class="tc-zero" x1="4" x2="' + (W - 4) + '" y1="' + zeroY + '" y2="' + zeroY + '"/><path class="tc-bud" d="' + budLine + '"/>' +
+              budPts.map(function (v, j) { return v == null ? "" : '<circle class="tc-bpt' + (v < 0 ? " bad" : "") + '" cx="' + px(j) + '" cy="' + yBud(v).toFixed(1) + '" r="1.8"/>'; }).join("") + "</svg>" +
+            '<div class="t-axis">' + axis + '</div><p class="tc-note">Every day you hit the goal earns a little budget; every miss spends a whole day. Below the line = over budget.</p></figure>' +
+        "</div></div>";
+    }
     function renderTelemetry() {
       var el = $("[data-telemetry]");
-      if (!el) return;
+      if (!el || editingGoal) return;
       var ser = series(14), last7 = ser.slice(-7);
-      var lpd = last7.reduce(function (s, d) { return s + d.lessons; }, 0) / 7;
+      var ipd = last7.reduce(function (s, d) { return s + d.lessons; }, 0) / 7;
       var fpd = last7.reduce(function (s, d) { return s + d.focus; }, 0) / 7;
       var mins = BB.sessions().filter(function (x) { return x.status === "done"; }).map(function (x) { return x.min; });
       var p50 = pctile(mins, 50), p95 = pctile(mins, 95), p99 = pctile(mins, 99);
-      var st = BB.learningStreak(), o = slo();
+      var st = BB.learningStreak(), o = slo(), G = o.goal || goal(), T = o.today || { lessons: 0, focus: 0 };
       var due = BB.tasks.all().filter(function (t) { return !t.done && t.due && t.due <= BB.dayKey(); }).length;
-      var budgetPct = o.budget == null ? null : Math.round(o.budget * 100);
+      var fm = function (v) { return v == null ? "—" : Math.round(v) + " min"; };
+      var plural = function (n, w) { return n + " " + w + (n === 1 ? "" : "s"); };
+      var ring = function (v, max, color, label) {
+        var f = Math.min(1, v / max);
+        return '<div class="goal-ring' + (f >= 1 ? " done" : "") + '" style="--p:' + f + ";--gc:" + color + '"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.5"/><circle class="gr-fill" cx="18" cy="18" r="15.5"/></svg>' +
+          "<div><b>" + Math.round(v) + "<small>/" + max + "</small></b><span>" + label + "</span></div></div>";
+      };
+      // SRE view of the same data: SLI (measured), SLO (target), error budget (allowed misses)
+      var idle = o.state === "idle" || !o.counted, win = o.win || 30;
+      var sli = idle ? null : o.attain, meeting = sli != null && sli >= G.slo;
+      var left = o.budget == null ? null : Math.max(0, o.allowed - o.missed), earning = left === 0 && !o.allowed && !o.missed;
+      var sre =
+        '<div class="sre"><div class="sre-head"><span class="mono-label">/ reliability · sre-style</span><span class="sre-state ' + (idle ? "idle" : meeting ? "ok" : "bad") + '">' +
+          (idle ? "measuring…" : meeting ? "meeting your SLO" : "below your SLO") + "</span></div>" +
+        '<div class="sre-row"><span class="sre-term">SLI</span><div class="sre-what"><b>What we measure</b><span>Share of days you hit your daily goal (last ' + plural(win, "day") + ")</span></div>" +
+          '<div class="sre-val"><b>' + (sli == null ? "—" : sli + "%") + "</b><span>" + (idle ? "no full day yet" : o.hit + " of " + o.counted + " days") + "</span></div></div>" +
+        '<div class="sre-row"><span class="sre-term">SLO</span><div class="sre-what"><b>Your target</b><span>Hit the goal on at least ' + G.slo + "% of days</span></div>" +
+          '<div class="sre-val"><b>' + G.slo + "%</b><span>" + (idle ? "—" : meeting ? "✓ on target" : "✗ " + plural(G.slo - sli, "pt") + " short") + "</span></div></div>" +
+        '<div class="sre-row"><span class="sre-term">Error budget</span><div class="sre-what"><b>Days you can miss</b><span>' + (100 - G.slo) + "% of " + win + " days = " + plural(o.allowed || 0, "day") + " you can skip</span></div>" +
+          '<div class="sre-val"><b>' + (left == null ? "—" : left + "<small>/" + o.allowed + "</small>") + "</b><span>" + (left == null ? "—" : earning ? "earning" : left === 0 ? "used up" : "left") + "</span></div></div>" +
+        '<div class="budget-bar' + (left != null && !earning && (left === 0 || (o.allowed >= 3 && left / o.allowed < 0.34)) ? " low" : "") + '"><span style="--p:' + (o.budget == null ? 0 : o.budget) + '"></span></div>' +
+        '<p class="sre-note">' + (idle ? "Hit your goal today and the numbers start filling in." :
+          earning ? "You earn skip days as you go — about one for every " + Math.round(100 / Math.max(1, 100 - G.slo)) + " days you track. Miss a day before then and you dip below your SLO." :
+          left === 0 ? "Budget used up — SRE teams stop shipping risky changes and fix reliability; for you, it means protect a small daily habit until you're back above " + G.slo + "%." :
+          "Budget left means a missed day is fine — rest without guilt. When it runs out, that's your signal to get consistent again.") + "</p>" +
+        '<details class="sre-learn"><summary>New to SLI / SLO? The 30-second version</summary>' +
+          "<p><b>Think of a pizza shop</b> that promises delivery within 30 minutes.</p><ul>" +
+          "<li><b>SLI</b> (Service Level <em>Indicator</em>) is what you actually <em>measure</em>: the % of pizzas that really arrived in 30 minutes — say 97%.</li>" +
+          "<li><b>SLO</b> (Service Level <em>Objective</em>) is the <em>target</em> you commit to: “95% of pizzas on time”. Not 100% — perfection is too expensive.</li>" +
+          "<li><b>Error budget</b> is the gap you're <em>allowed</em> to miss: the 5% that may be late. While there's budget left you can take risks (try a new route); when it's spent, you slow down and fix things first.</li></ul>" +
+          "<p>Real SRE teams do exactly this for websites: SLI = % of requests that succeed fast, SLO = e.g. 99.9%, error budget = the 0.1% that may fail. " +
+          "Here the “service” is <b>your learning</b>: the SLI is how often you hit your daily goal, the SLO is the % you aim for, and the error budget is how many days you can skip.</p></details></div>";
+
       el.innerHTML =
-        '<div class="panel-head"><span class="mono-label">/ slo · error budget</span><span class="live-tag"><span class="rec live"></span>cortex · local</span></div>' +
-        '<div class="tele-status s-' + o.state + '"><div><b>Learning pipeline</b><span>SLO · 1 lesson or 25 focus-min per day</span></div><span class="tele-pill">' + o.label + "</span></div>" +
+        '<div class="panel-head"><span class="mono-label">/ daily goal</span><button class="link-btn" data-goal-edit>Change goal</button></div>' +
+        '<div class="tele-status s-' + o.state + '"><div><b>Today</b><span>Goal: ' + plural(G.items, "item") + " done <em>or</em> " + G.min + " focus minutes" +
+          (o.detail ? " · " + o.detail : "") + '</span></div><span class="tele-pill">' + o.label + "</span></div>" +
+        '<div class="goal-today">' + ring(T.lessons, G.items, "var(--blue)", "items done") + '<span class="goal-or">or</span>' + ring(T.focus, G.min, "var(--red)", "focus minutes") + "</div>" +
+        '<form class="goal-form" data-goal-form hidden><p>Your day counts when you reach <b>either</b>:</p><div class="goal-fields">' +
+          '<label><input type="number" name="items" min="1" max="50" value="' + G.items + '"><span>items done</span></label><span class="goal-or">or</span>' +
+          '<label><input type="number" name="min" min="5" max="480" step="5" value="' + G.min + '"><span>focus minutes</span></label></div>' +
+          '<div class="goal-fields"><label><span>and aim to hit it on</span><input type="number" name="slo" min="50" max="100" step="5" value="' + G.slo + '"><span>% of days (your SLO)</span></label></div>' +
+          '<div class="goal-actions"><button class="btn btn-primary sm" type="submit">Save goal</button><button class="btn btn-ghost sm" type="button" data-goal-cancel>Cancel</button></div>' +
+          '<p class="goal-help">Items = lessons, DSA problems, Backend sections and System Design concepts you mark done. An SLO of 80% lets you skip about 6 days a month.</p></form>' +
+        sre;
+      var dash = $("[data-tele-dash]");
+      if (dash) dash.innerHTML =
+        '<div class="panel-head"><span class="mono-label">/ slo dashboard · your learning as a service</span><span class="tsub">last 30 days</span></div>' +
+        telemetry(G) +
         '<div class="tele-grid">' +
-          '<div class="tcell"><span class="mono-label">lessons / day · 7d</span><b>' + lpd.toFixed(1) + "</b>" + spark(ser.map(function (d) { return d.lessons; }), "var(--blue)") + "</div>" +
-          '<div class="tcell"><span class="mono-label">focus min / day · 7d</span><b>' + Math.round(fpd) + "</b>" + spark(ser.map(function (d) { return d.focus; }), "var(--red)") + "</div>" +
-          '<div class="tcell"><span class="mono-label">session length</span><div class="pct-row"><span>p50<b>' + (p50 == null ? "—" : Math.round(p50) + "m") + "</b></span><span>p95<b>" + (p95 == null ? "—" : Math.round(p95) + "m") +
-            "</b></span><span>p99<b>" + (p99 == null ? "—" : Math.round(p99) + "m") + "</b></span></div></div>" +
-          '<div class="tcell"><span class="mono-label">uptime (streak)</span><b>' + st.current + "<small>d</small></b><span class=\"tsub\">best " + st.best + "d · " + due + " task" + (due === 1 ? "" : "s") + " due</span></div>" +
+          '<div class="tcell"><span class="mono-label">streak</span><b>' + st.current + "<small> day" + (st.current === 1 ? "" : "s") + '</small></b><span class="tsub">best ' + plural(st.best, "day") + "</span></div>" +
+          '<div class="tcell"><span class="mono-label">typical focus session</span><b>' + (p50 == null ? "—" : Math.round(p50) + "<small> min</small>") + '</b><span class="tsub">' + plural(mins.length, "session") + " so far</span></div>" +
+          '<div class="tcell"><span class="mono-label">items / day · 7-day avg</span><b>' + ipd.toFixed(1) + "</b>" + spark(ser.map(function (d) { return d.lessons; }), "var(--blue)") + "</div>" +
+          '<div class="tcell"><span class="mono-label">focus / day · 7-day avg</span><b>' + Math.round(fpd) + "<small> min</small></b>" + spark(ser.map(function (d) { return d.focus; }), "var(--red)") + "</div>" +
         "</div>" +
-        '<div class="budget' + (budgetPct != null && budgetPct < 34 ? " low" : "") + '"><div class="budget-head"><span class="mono-label">error budget · ' + (o.win || 30) + "d window</span><b>" +
-          (budgetPct == null ? "—" : budgetPct + "%") + '</b></div><div class="budget-bar"><span style="--p:' + (budgetPct == null ? 0 : budgetPct / 100) + '"></span></div><p>' +
-          (o.state === "idle" ? "No data yet — finish a lesson to start measuring." : (o.missed > o.allowed ? "Budget exhausted — " + o.missed + " missed days vs " + o.allowed + " allowed" : o.missed + " of " + o.allowed + " allowed missed days used") + " · SLO attainment " + o.attain + "% · " + o.detail) + "</p></div>";
+        '<details class="more-stats"><summary>More stats</summary><div class="pct-row">' +
+          "<span>typical session · p50<b>" + fm(p50) + "</b></span><span>long session · p95<b>" + fm(p95) + "</b></span><span>longest · p99<b>" + fm(p99) + "</b></span>" +
+          "<span>tasks due<b>" + due + "</b></span></div><p class=\"goal-help\">p50 / p95 / p99: half / 95% / 99% of your sessions were this long or shorter — the same way SREs report request latency.</p></details>";
+      var form = $("[data-goal-form]", el), edit = $("[data-goal-edit]", el);
+      edit.addEventListener("click", function () { var open = form.hidden; form.hidden = !open; editingGoal = open; if (open) $("input", form).focus(); });
+      $("[data-goal-cancel]", el).addEventListener("click", function () { editingGoal = false; renderTelemetry(); });
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var items = Math.max(1, Math.min(50, parseInt(form.items.value, 10) || 3)), min = Math.max(5, Math.min(480, parseInt(form.min.value, 10) || 25));
+        var sloT = Math.max(50, Math.min(100, parseInt(form.slo.value, 10) || 80));
+        BB.save("bb-goal", { items: items, min: min, slo: sloT });
+        editingGoal = false;
+        BB.toast("Goal: " + plural(items, "item") + " or " + min + " min a day · SLO " + sloT + "%", "var(--ok)");
+        renderTelemetry(); renderBannerHead(); paintPath();
+      });
     }
 
     function renderHeroFoot() {
@@ -352,7 +546,7 @@
       var el = $("[data-region-health]");
       if (!el) return;
       el.innerHTML = DATA.domains.map(function (d) {
-        var lp = function (id) { return BB.domainOfLesson(id) === d.id; }, sp = function (x) { return x.domain === d.id; };
+        var lp = function (id) { return BB.domainOfLesson(id) === d.id; }, sp = function (x) { return BB.domain(x.domain).id === d.id; };
         var h = d.soon ? { s: "prov", label: "provisioning" } : health(lastSeen(lp, sp));
         return '<div class="rs-cell" style="--c:' + d.color + '"><span class="rs-name">' + esc(d.short.toLowerCase()) + '</span><span class="rs-spark">' + line(daily(30, lp, sp), d.color) +
           '</span><span class="rs-state s-' + h.s + '"><i></i>' + h.label + "</span></div>";
@@ -365,12 +559,12 @@
       if (!el) return;
       var o = slo(), mins = BB.sessions().filter(function (x) { return x.status === "done"; }).map(function (x) { return x.min; });
       var p = [50, 95, 99].map(function (q) { var v = pctile(mins, q); return v == null ? "—" : Math.round(v) + "m"; });
-      var l14 = series(14).reduce(function (a, d) { return a + d.lessons; }, 0) / 14;
-      var done = Object.keys(BB.doneMap()).length, left = DATA.total - done;
-      var eta = l14 > 0 ? new Date(Date.now() + left / l14 * 864e5).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "—";
+      var Eall = eta(function () { return true; }, DATA.total);
+      var stk = BB.learningStreak();
       el.innerHTML = '<span class="tb-pill s-' + o.state + '"><i></i>' + o.label + "</span>" +
-        "<span>p50 <b>" + p[0] + "</b></span><span>p95 <b>" + p[1] + "</b></span><span>p99 <b>" + p[2] + "</b></span>" +
-        "<span>lpd <b>" + l14.toFixed(1) + "</b></span><span>eta <b>" + eta + "</b></span>";
+        "<span>SLI <b>" + (o.counted && o.state !== "idle" ? o.attain + "%" : "—") + "</b></span><span>SLO <b>" + (o.goal ? o.goal.slo : 80) + "%</b></span>" +
+        "<span>streak <b>" + stk.current + "d</b></span>" +
+        "<span>items/day <b>" + Eall.pace.toFixed(1) + '</b></span><span title="Every program: ' + esc(Eall.long) + '">all programs by <b>' + Eall.text + "</b></span>";
       var chip = $("[data-tb-focus]"), a = BB.focus.get();
       if (chip) {
         chip.classList.toggle("on", !!a && a.mode === "focus");
@@ -547,7 +741,7 @@
       mirror.scrollLeft = mirror.scrollWidth;
     }
     var hist = BB.load("bb-term-hist", []), hi = hist.length, lastList = [];
-    var CMDS = ["help", "status", "next", "path", "track", "focus", "stop", "tasks", "add", "done", "search", "goto", "theme", "reset", "clear", "whoami", "uptime", "date"];
+    var CMDS = ["help", "status", "next", "path", "track", "focus", "stop", "tasks", "add", "done", "search", "goto", "reset", "clear", "whoami", "uptime", "date"];
     function out(html, cls) {
       var line = document.createElement("div");
       line.className = "tl" + (cls ? " " + cls : "");
@@ -563,7 +757,7 @@
         [["status", "progress, streak, focus, brain"], ["next", "open the next lesson on the path"], ["path", "all tracks with progress"], ["track &lt;n&gt;", "open track n"],
          ["focus [min]", "start a focus session (default 25)"], ["stop", "give up the running session"], ["tasks", "tasks due today"], ["add &lt;text&gt;", "add a task due today"],
          ["done &lt;n&gt;", "complete task n from the last list"], ["search &lt;q&gt;", "search all lessons"], ["goto &lt;page&gt;", "brain · focus · tasks · habits"],
-         ["theme", "toggle light/dark"], ["reset", "open reset & backup settings"], ["clear", "clear the screen"]
+         ["reset", "open reset & backup settings"], ["clear", "clear the screen"]
         ].forEach(function (r) { out('<span class="t-cmd">' + r[0] + '</span><span class="t-dim">' + r[1] + "</span>", "row"); });
       },
       status: function () {
@@ -594,7 +788,7 @@
       },
       focus: function (a) {
         if (BB.focus.get()) { out('<span class="t-warn">a session is already running</span>'); return; }
-        var min = Math.max(1, Math.min(240, parseInt(a[0], 10) || 25)), n = nextLesson(), dom = n ? BB.domainOfLesson(n.id) : "foundations";
+        var min = Math.max(1, Math.min(240, parseInt(a[0], 10) || 25)), n = nextLesson(), dom = n ? BB.domainOfLesson(n.id) : "devops";
         BB.focus.start({ min: min, domain: dom, label: n ? pretty(n.lesson) : "Focus", strict: BB.load("bb-strict", false) });
         out('<span class="t-ok">● focus started</span> ' + min + "m · region " + esc(BB.domain(dom).name) + ' <span class="t-dim">— timer in the header</span>');
       },
@@ -624,7 +818,6 @@
         if (!pgs[a[0]]) { out('<span class="t-err">usage: goto brain|focus|tasks|habits</span>'); return; }
         nav(ROOT + a[0] + "/index.html", a[0]);
       },
-      theme: function () { var b = $("[data-theme-toggle]"); if (b) b.click(); out('<span class="t-dim">theme → ' + document.documentElement.getAttribute("data-theme") + "</span>"); },
       reset: function () { BB.openSettings(); out('<span class="t-dim">opened settings → reset</span>'); },
       clear: function () { termOut.innerHTML = ""; },
       whoami: function () { out("an engineer, figuring things out."); },
@@ -680,32 +873,139 @@
 
   // ═════════════════════════════ BRAIN ═════════════════════════════
   function brainPage() {
-    var tip = $("[data-brain-tooltip]"), selected = null, brain;
-    var list = $("[data-region-list]");
-    function renderRegions() {
-      var st = BB.brainState(), by = (brain && brain.stats().byRegion) || {};
-      list.innerHTML = '<p class="mono-label" style="padding:4px 4px 6px">Regions</p>' + DATA.domains.map(function (d) {
-        var r = by[d.id] || { lit: 0, size: 1 }, s = st[d.id];
-        var pct = Math.round(r.lit / r.size * 100);
-        return '<button class="region' + (d.soon ? " soon" : "") + (selected === d.id ? " is-active" : "") + '" data-region="' + d.id + '" style="--c:' + d.color + '">' +
-          '<span class="region-top"><i></i><b>' + esc(d.name) + "</b><span>" + (d.soon ? "soon" : pct + "%") + "</span></span>" +
-          '<div class="progress"><div class="progress-bar"><span style="--p:' + (r.lit / r.size) + '"></span></div></div>' +
-          (d.soon ? '<span class="region-meta">Dormant — lessons coming soon</span>'
-                  : '<span class="region-meta"><span>' + s.done + "/" + s.total + " lessons</span><span>" + BB.fmtMin(s.focusMin) + " focus</span><span>" + r.lit + "/" + r.size + " neurons</span></span>") +
-          "</button>";
-      }).join("") + '<p class="region-note">Lessons can wire up to 75% of a region; focus sessions wire the rest (one neuron per 2 focused minutes).</p>';
-      $$("[data-region]", list).forEach(function (b) {
-        b.addEventListener("click", function () { select(selected === b.getAttribute("data-region") ? null : b.getAttribute("data-region")); });
-      });
+    // The brain shows each program as a lobe. Click a lobe to see what's inside it (its topics and your
+    // progress in each), and open it in Tracks.
+    var TREE = window.BB_TREE || { id: "", n: "Your brain", k: [] };
+    var list = $("[data-region-list]"), stage = $("[data-brain-stage]");
+    var lobeOf = {}, lobeNode = {}, at = null, selLobe = null, brain;
+    DATA.domains.forEach(function (d) { lobeOf[d.id] = d; });
+    (TREE.k || []).forEach(function (k) { lobeNode[k.id] = k; });
+    var isLeaf = function (x) { return Array.isArray(x); };
+    function doneAt(id) { var m = BB.doneMap(); return Object.prototype.hasOwnProperty.call(m, id) && (at == null || m[id] <= at); }
+    function tally(node) {
+      if (isLeaf(node)) return { done: doneAt(node[0]) ? 1 : 0, total: 1 };
+      var r = { done: 0, total: 0 };
+      (node.k || []).forEach(function (k) { var x = tally(k); r.done += x.done; r.total += x.total; });
+      return r;
     }
-    function select(id) { selected = id; brain.highlight(id); renderRegions(); }
+    function pct(x) { return x.total ? Math.round(x.done / x.total * 100) : 0; }
+
+    function paint() {
+      var st = BB.brainState(at == null ? undefined : at), by = (brain && brain.stats().byRegion) || {}, html = "";
+      var d = selLobe && lobeOf[selLobe];
+      $("[data-level-title]").textContent = d ? d.name : "Your brain";
+      $("[data-level-sub]").textContent = d ? "Its topics and your progress in each. Open one to study it."
+        : "Every lesson you finish, problem you solve and focus minute wires new neurons. Click a lobe to see what's inside it.";
+      if (d) {
+        var s = st[d.id] || { done: 0, total: 0, focusMin: 0 }, node = lobeNode[d.id];
+        html += '<div class="lobe-card" style="--c:' + d.color + '"><p class="mono-label">Selected lobe</p><h3>' + esc(d.name) + "</h3><p>" + esc(d.blurb) + "</p>" +
+          '<div class="rp-sum"><b>' + pct(s) + "%</b><span>" + s.done + " / " + s.total + " learned · " + BB.fmtMin(s.focusMin) + " focus</span></div>" +
+          (d.soon ? '<p class="region-meta">Coming soon.</p>' : '<div class="lobe-actions"><a class="btn btn-primary sm" href="' + ROOT + "tracks/index.html#" + d.id + '">Open in Tracks</a></div>') + "</div>";
+        if (node && (node.k || []).length) {
+          html += '<p class="mono-label rp-label">Inside · ' + node.k.length + "</p>" + node.k.map(function (k) {
+            var t = tally(k), p = t.total ? t.done / t.total : 0;
+            return '<a class="region topic-row" href="' + ROOT + esc(k.h || "") + '" style="--c:' + d.color + '"><span class="region-top"><i></i><b>' + esc(k.n) + "</b><span>" + pct(t) + "%</span></span>" +
+              '<div class="progress"><div class="progress-bar"><span style="--p:' + p + '"></span></div></div><span class="region-meta"><span>' + t.done + "/" + t.total + " learned</span></span></a>";
+          }).join("");
+        }
+      }
+      html += '<p class="mono-label rp-label">Lobes</p>' + DATA.domains.map(function (x) {
+        var r = by[x.id] || { lit: 0, size: 1 }, s2 = st[x.id] || { done: 0, total: 0, focusMin: 0 }, p2 = Math.round(r.lit / r.size * 100);
+        return '<button class="region' + (x.soon ? " soon" : "") + (selLobe === x.id ? " is-active" : "") + '" data-lobe="' + x.id + '" style="--c:' + x.color + '">' +
+          '<span class="region-top"><i></i><b>' + esc(x.name) + "</b><span>" + (x.soon ? "soon" : p2 + "%") + "</span></span>" +
+          '<div class="progress"><div class="progress-bar"><span style="--p:' + (r.lit / r.size) + '"></span></div></div>' +
+          (x.soon ? '<span class="region-meta">Coming soon — ' + esc(x.blurb) + "</span>"
+                  : '<span class="region-meta"><span>' + s2.done + "/" + s2.total + " learned</span><span>" + BB.fmtMin(s2.focusMin) + " focus</span></span>") + "</button>";
+      }).join("") + '<p class="region-note">Learning wires up to 75% of a lobe; focus sessions wire the rest (one neuron per 2 focused minutes).</p>';
+      list.innerHTML = html;
+      $$("[data-lobe]", list).forEach(function (b) {
+        b.addEventListener("click", function () { var id = b.getAttribute("data-lobe"); if (id !== selLobe) select(id); });
+      });
+      var s3 = brain ? brain.stats() : { neurons: 0, synapses: 0, regions: 0 };
+      $("[data-s1-label]").textContent = "Neurons"; $("[data-s2-label]").textContent = "Synapses"; $("[data-s3-label]").textContent = "Lobes active";
+      $("[data-s1]").textContent = s3.neurons.toLocaleString();
+      $("[data-s2]").textContent = s3.synapses.toLocaleString();
+      $("[data-s3]").textContent = s3.regions + " / " + DATA.domains.filter(function (x) { return !x.soon; }).length;
+      drawGrowth();
+    }
+    function select(id) {
+      selLobe = selLobe === id ? null : id || null;
+      if (brain) brain.highlight(selLobe);
+      var h = selLobe ? "#" + selLobe : "";
+      if (location.hash !== h) history.replaceState(null, "", location.pathname + location.search + h);
+      paint();
+    }
+
     brain = mountBrain($('[data-brain="full"]'), {
       interactive: true, zoomable: true, fill: 0.95, speed: 0.08, offsetY: window.innerWidth < 640 ? 0.05 : 0.02,
-      onStats: function (s) { paintStats(s); if (list) renderRegions(); },
-      selected: function () { return selected; }, tipMode: "card",
-      onSelect: function (d) { select(d ? (selected === d.id ? null : d.id) : null); }
+      tipMode: "card", selected: function () { return selLobe; },
+      onStats: function () { if (brain && list) paint(); },
+      onSelect: function (d) { if (d && d.id !== selLobe) select(d.id); else if (!d) select(null); }
     });
-    renderRegions();
+    document.addEventListener("keydown", function (e) {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if (e.key === "Escape" && selLobe) select(null);
+      if (e.key === "Enter" && selLobe && !lobeOf[selLobe].soon) location.href = ROOT + "tracks/index.html#" + selLobe;
+    });
+    BB.on(function (w) { if (w === "progress") paint(); });
+
+    // ── growth over time: chart + time travel ──
+    var range = $("[data-time-range]"), chart = $("[data-growth-chart]"), playing = 0;
+    function span() { var s0 = BB.firstActivity(), now = Date.now(); return [Math.min(s0 || now - 864e5, now - 864e5), now]; }
+    function leafTimes(node) {
+      var out = [], m = BB.doneMap();
+      (function walk(n) { (n.k || []).forEach(function (k) { if (isLeaf(k)) { if (m[k[0]]) out.push(m[k[0]]); else if (k[0] in m) out.push(0); } else walk(k); }); })(node);
+      return out.sort(function (a, b) { return a - b; });
+    }
+    function drawGrowth() {
+      if (!chart) return;
+      var DPR = Math.min(2, window.devicePixelRatio || 1), w = chart.clientWidth * DPR, h = chart.clientHeight * DPR;
+      if (!w || !h) return;
+      chart.width = w; chart.height = h;
+      var node = (selLobe && lobeNode[selLobe]) || TREE, g = chart.getContext("2d"), sp = span(), times = leafTimes(node), total = Math.max(1, tally(node).total);
+      var color = selLobe ? lobeOf[selLobe].color : "#5b8cff", N = 90, pts = [], j = 0, c = 0;
+      for (var i = 0; i <= N; i++) {
+        var tt = sp[0] + (sp[1] - sp[0]) * i / N;
+        while (j < times.length && times[j] <= tt) { j++; c++; }
+        pts.push([i / N * w, h - 2 * DPR - (c / total) * (h - 6 * DPR) * 0.92 - (c ? 2 * DPR : 0)]);
+      }
+      var grad = g.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, color + "66"); grad.addColorStop(1, color + "00");
+      g.beginPath(); g.moveTo(0, h); pts.forEach(function (p) { g.lineTo(p[0], p[1]); }); g.lineTo(w, h); g.closePath(); g.fillStyle = grad; g.fill();
+      g.beginPath(); pts.forEach(function (p, k) { k ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }); g.strokeStyle = color; g.lineWidth = 1.5 * DPR; g.stroke();
+      var week = times.filter(function (x) { return x > Date.now() - 7 * 864e5; }).length;
+      $("[data-time-delta]").textContent = week ? "+" + week + " this week" : "";
+    }
+    function setTime(v, quick) {
+      var sp = span();
+      at = v >= 100 ? null : sp[0] + (sp[1] - sp[0]) * v / 100;
+      var label = at == null ? "Today" : new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+      $("[data-time-date]").textContent = label;
+      var tl = $("[data-time-label]");
+      tl.hidden = at == null; tl.textContent = "⟲ Your brain on " + label;
+      stage.classList.toggle("rewound", at != null);
+      if (at != null) brain.setState(BB.brainState(at), { quick: quick }); else brain.refresh({ quick: quick });
+      paint();
+    }
+    if (range) range.addEventListener("input", function () { cancelAnimationFrame(playing); playing = 0; setTime(+range.value, true); });
+    var playBtn = $("[data-time-play]");
+    if (playBtn) playBtn.addEventListener("click", function () {
+      if (playing) { cancelAnimationFrame(playing); playing = 0; return; }
+      var t0 = performance.now(), dur = 7000, lastV = -1;
+      range.value = 0; setTime(0, true);
+      var step = function (now) {
+        var v = Math.min(100, Math.round((now - t0) / dur * 100));
+        if (v !== lastV) { lastV = v; range.value = v; setTime(v, true); }
+        playing = v < 100 ? requestAnimationFrame(step) : 0;
+      };
+      playing = requestAnimationFrame(step);
+    });
+    window.addEventListener("resize", drawGrowth);
+
+    // #dsa (or a deeper id such as #dsa/t03) selects that lobe
+    var h0 = decodeURIComponent(location.hash.slice(1)), first = h0.split("/")[0];
+    var hit = lobeOf[h0] ? h0 : lobeOf[first] ? first : first === "sd" ? "system-design" : first === "be" ? "backend" : (DATA.tracks[first] && DATA.tracks[first].d) || null;
+    if (hit) select(hit); else paint();
   }
 
   // ═════════════════════════════ FOCUS ═════════════════════════════
@@ -720,7 +1020,7 @@
     var growLabel = $("[data-grow-label]");
 
     var lastLesson = BB.load("bb-last", null);
-    var defaultDomain = BB.load("bb-focus-domain", lastLesson ? BB.domainOfLesson(lastLesson.id) : "foundations");
+    var defaultDomain = BB.load("bb-focus-domain", lastLesson ? BB.domainOfLesson(lastLesson.id) : "devops");
     domSel.innerHTML = DATA.domains.filter(function (d) { return !d.soon; }).map(function (d) {
       return '<option value="' + d.id + '"' + (d.id === defaultDomain ? " selected" : "") + ">" + esc(d.name) + "</option>";
     }).join("");
@@ -978,7 +1278,7 @@
     }
     function startFocus(id) {
       var t = BB.tasks.get(id);
-      if (!BB.focus.get()) BB.focus.start({ min: BB.load("bb-dur-focus", 25), domain: t.lesson ? BB.domainOfLesson(t.lesson) : BB.load("bb-focus-domain", "foundations"),
+      if (!BB.focus.get()) BB.focus.start({ min: BB.load("bb-dur-focus", 25), domain: t.lesson ? BB.domainOfLesson(t.lesson) : BB.load("bb-focus-domain", "devops"),
                                             task: id, label: t.title, strict: BB.load("bb-strict", false) });
       location.href = ROOT + "focus/index.html";
     }
@@ -1236,17 +1536,71 @@
 
   // ═════════════════════════════ TRACKS PAGE ═════════════════════════════
   function tracksPage() {
-    var panes = $$("[data-view-pane]"), seg = $$("[data-tracks-view] button");
-    function show(v) {
-      panes.forEach(function (p) { p.hidden = p.getAttribute("data-view-pane") !== v; });
-      seg.forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-v") === v); });
-      BB.save("bb-tracks-view", v);
-      if (v === "map" && window.BB_MINDMAP) window.BB_MINDMAP.resize();
+    // One hub: the program chips switch the pane in place (and the URL hash), nothing navigates away
+    // until you open something to learn.
+    var chips = $$("[data-program]"), panes = $$("[data-program-pane]");
+    var ids = panes.map(function (p) { return p.getAttribute("data-program-pane"); });
+    function program(id) {
+      if (ids.indexOf(id) < 0) id = BB.load("bb-tracks-program", ids[0]);
+      if (ids.indexOf(id) < 0) id = ids[0];
+      panes.forEach(function (p) { p.hidden = p.getAttribute("data-program-pane") !== id; });
+      chips.forEach(function (c) { c.classList.toggle("is-active", c.getAttribute("data-program") === id); });
+      var d = BB.domain(id);
+      $("[data-program-title]").textContent = d ? d.name : "Tracks";
+      document.title = (d ? d.name : "Tracks") + " · Tracks · BLACKBOX";
+      BB.save("bb-tracks-program", id);
+      if (location.hash.slice(1) !== id) history.replaceState(null, "", "#" + id);
+      if (BB.maps && BB.maps[id]) setTimeout(function () { BB.maps[id].resize(); }, 0);
     }
-    seg.forEach(function (b) { b.addEventListener("click", function () { show(b.getAttribute("data-v")); }); });
-    show(BB.load("bb-tracks-view", "map"));
+    chips.forEach(function (c) { c.addEventListener("click", function (e) { e.preventDefault(); program(c.getAttribute("data-program")); }); });
+    window.addEventListener("hashchange", function () { program(location.hash.slice(1)); });
+    program(location.hash.slice(1));
+
+    // every program: map / list, remembered per program
+    $$("[data-tracks-view]").forEach(function (segEl) {
+      var pid = segEl.getAttribute("data-tracks-view"), pane = segEl.closest("[data-program-pane]"), btns = $$("button", segEl);
+      function show(v) {
+        $$("[data-view-pane]", pane).forEach(function (p) { p.hidden = p.getAttribute("data-view-pane") !== v; });
+        btns.forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-v") === v); });
+        BB.save("bb-tracks-view-" + pid, v);
+        if (v === "map" && BB.maps && BB.maps[pid]) setTimeout(function () { BB.maps[pid].resize(); }, 0);
+      }
+      btns.forEach(function (b) { b.addEventListener("click", function () { show(b.getAttribute("data-v")); }); });
+      show(BB.load("bb-tracks-view-" + pid, pid === "devops" ? BB.load("bb-tracks-view", "map") : "map"));
+    });
     paintPath();
     BB.on(function (w) { if (w === "progress" || w === "session") paintPath(); });
+
+    // DSA: a topic row expands in place to its problems, grouped by subtopic
+    $$("[data-expand]").forEach(function (row) {
+      row.addEventListener("click", function (e) {
+        if (e.target.closest("a")) return;
+        var id = row.getAttribute("data-expand"), exp = $('[data-expanded="' + id + '"]'), open = exp.hidden;
+        exp.hidden = !open; row.classList.toggle("is-open", open);
+        $(".rt-name", row).setAttribute("aria-expanded", open);
+        if (!open) return;
+        var box = $("[data-inline-rows]", exp);
+        if (box.childNodes.length) return;
+        box.innerHTML = '<p class="coll-empty">Loading problems…</p>';
+        BB.dsaRows(function (rows) {
+          var groups = [], by = {};
+          Object.keys(rows).forEach(function (pid) {
+            if (pid.split("/")[1] !== id) return;
+            var r = rows[pid], g = by[r[2]];
+            if (!g) { g = by[r[2]] = { name: r[2], rows: [] }; groups.push(g); }
+            g.rows.push(r);
+          });
+          box.innerHTML = groups.map(function (g) {
+            return '<h4 class="rt-sub">' + esc(g.name) + "</h4>" +
+              '<div class="table-wrap"><table class="pt-table"><thead><tr><th class="pn">#</th><th>Problem</th><th>Difficulty</th><th class="c">Solved</th><th class="c">Bookmark</th>' +
+              '<th class="c">Revision</th><th class="c">Pattern</th><th>Practice</th></tr></thead><tbody>' +
+              g.rows.map(function (r, i) { return BB.dsaRowHtml(r, i + 1); }).join("") + "</tbody></table></div>";
+          }).join("");
+          if (BB.paintSheet) BB.paintSheet();
+          BB.emit("progress");
+        });
+      });
+    });
   }
 
   var routes = { home: home, tracks: tracksPage, brain: brainPage, focus: focusPage, tasks: tasksPage, habits: habitsPage };
