@@ -784,7 +784,7 @@ def text_w(s, px):
     """Rough rendered width of `s` in Geist at `px` font size (no DOM to measure with at build time)."""
     em = 0.0
     for ch in s:
-        em += (.66 if ch.isupper() or ch in "MW@%" else .32 if ch in " .,:;'|!il()[]/-" else .58 if ch.isdigit() else .55)
+        em += (.72 if ch in "mwMW@%" else .66 if ch.isupper() or ch in "<>+=~&_" else .32 if ch in " .,:;'|!il()[]/-" else .58 if ch.isdigit() else .56)
     return em * px
 
 
@@ -808,7 +808,7 @@ def mindmap_svg(mm):
 
     H = max(side_h(bs) for _, bs in sides) + 40
     cw = text_w(mm["center"], 15) * 1.08 + 44
-    pad = 12
+    pad = 20
     cx = pad + reach(sides[1][1]) + cw / 2
     W, cy = cx + cw / 2 + reach(sides[0][1]) + pad, H / 2
     parts = []

@@ -1,0 +1,746 @@
+{
+  "introduction-the-mvcc-hangover": {
+    "core": "MVCC never overwrites: every update and delete leaves a dead version behind. That debt (bloat in Postgres, shadows and tombstones in Cassandra) wastes disk and slows queries until vacuum or compaction pays it down.",
+    "first_principles": {
+      "problem": "Readers not blocking writers is MVCC's gift. The price is that every write leaves garbage on disk. At thousands of writes per second, a 100 GB dataset can occupy 1 TB of files, and queries must wade through dead rows to find live ones.",
+      "truths": [
+        "Old versions remain on disk until removed.",
+        "Scanning garbage costs I/O.",
+        "Cleanup must keep pace with the write rate."
+      ],
+      "derivation": [
+        "Recognise every UPDATE or DELETE as **debt** (dead tuples, tombstones).",
+        "Name the consequences: **wasted disk** and **slower queries**.",
+        "Run background cleaners: **VACUUM** (Postgres) and **compaction** (Cassandra/ScyllaDB).",
+        "Make sure they **keep up**, otherwise the database degrades and eventually fails."
+      ]
+    },
+    "analogy": {
+      "title": "A library where nothing is erased",
+      "story": "Books can't be erased, only crossed out and rewritten on a new page. Soon shelves are full of crossed-out pages, and finding the live page means flipping past dead ones. A cleaner must keep removing crossed-out pages.",
+      "mapping": [
+        [
+          "Crossed-out pages",
+          "Dead tuples / tombstones"
+        ],
+        [
+          "Rewriting on a new page",
+          "New row version"
+        ],
+        [
+          "Flipping past dead pages",
+          "Scanning bloat"
+        ],
+        [
+          "Cleaner",
+          "VACUUM / compaction"
+        ]
+      ],
+      "breaks": "Crossed-out pages are harmless if left. In Postgres, never cleaning also risks transaction ID wraparound, a hard stop."
+    },
+    "mindmap": {
+      "center": "MVCC Debt",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "UPDATE → new version",
+            "DELETE → marked / tombstone"
+          ]
+        },
+        {
+          "label": "Names",
+          "children": [
+            "Bloat (PG)",
+            "Shadows / tombstones (Cassandra)"
+          ]
+        },
+        {
+          "label": "Effects",
+          "children": [
+            "Disk waste",
+            "Slower scans"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "VACUUM",
+            "Compaction",
+            "Must keep pace"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "1 TB of files for 100 GB of data",
+      "scenario": "A heavily updated Postgres table keeps growing while row count stays flat.",
+      "flow": [
+        "Constant updates",
+        "Dead tuples accumulate",
+        "File grows 10×",
+        "Scans slow",
+        "Cleanup needed"
+      ],
+      "steps": [
+        {
+          "label": "Symptom",
+          "detail": "`pg_total_relation_size` keeps climbing while `n_live_tup` doesn't."
+        },
+        {
+          "label": "Cause",
+          "detail": "Cleanup isn't keeping up with the write rate."
+        },
+        {
+          "label": "Next lessons",
+          "detail": "Tune when autovacuum triggers and how fast it runs."
+        }
+      ],
+      "code": [],
+      "outcome": "you see vacuum and compaction as essential debt repayment, not optional housekeeping."
+    },
+    "summary": {
+      "points": [
+        "Every write leaves garbage.",
+        "Garbage costs disk and speed.",
+        "Cleanup must keep up."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't Postgres just overwrite rows in place?",
+        "a": "Concurrent transactions may still need the old version (MVCC snapshots). Overwriting would break isolation."
+      }
+    ]
+  },
+  "postgres-autovacuum-how-it-works": {
+    "core": "Autovacuum is Postgres's background janitor with three jobs: mark dead tuples reusable, refresh planner statistics (ANALYZE), and freeze old rows so 32-bit transaction IDs never wrap around. Its defaults suit small databases, not large busy ones.",
+    "first_principles": {
+      "problem": "Without automatic cleanup, dead tuples grow forever, planner statistics go stale (bad plans), and old transaction IDs eventually become ambiguous, forcing Postgres to stop accepting writes to avoid corruption.",
+      "truths": [
+        "Dead tuples free space only when vacuumed.",
+        "The planner relies on fresh statistics.",
+        "XIDs are 32-bit and compared in a circle."
+      ],
+      "derivation": [
+        "**Recover space**: mark dead tuples as free in the Free Space Map. The file doesn't shrink, but the space is reused.",
+        "**Update statistics**: run ANALYZE so the planner chooses good plans.",
+        "**Freeze** old rows: replace old XIDs with a frozen marker before they're about 2 billion behind.",
+        "Know that **defaults are conservative** (tuned for about 10 GB on modest hardware), so large tables fall behind.",
+        "If freezing lags: aggressive **anti-wraparound vacuums**, I/O storms and finally a **refusal of writes**."
+      ]
+    },
+    "analogy": {
+      "title": "An office janitor with three duties",
+      "story": "The janitor clears rubbish so desks can be reused (space), updates the office directory so visitors find the right room (statistics), and renews ID badges before they expire (freezing). If badges expire, security locks the building.",
+      "mapping": [
+        [
+          "Clearing rubbish",
+          "Dead-tuple removal"
+        ],
+        [
+          "Updating the directory",
+          "ANALYZE / statistics"
+        ],
+        [
+          "Renewing badges",
+          "Freezing XIDs"
+        ],
+        [
+          "Building locked",
+          "Wraparound protection shutdown"
+        ]
+      ],
+      "breaks": "A janitor works at their own pace. Autovacuum is deliberately throttled and waits for thresholds, so on big tables it can be both late and slow."
+    },
+    "mindmap": {
+      "center": "Autovacuum",
+      "branches": [
+        {
+          "label": "Job 1",
+          "children": [
+            "Dead tuples → FSM",
+            "File doesn't shrink"
+          ]
+        },
+        {
+          "label": "Job 2",
+          "children": [
+            "ANALYZE",
+            "Fresh planner stats"
+          ]
+        },
+        {
+          "label": "Job 3",
+          "children": [
+            "Freeze old XIDs",
+            "Avoid wraparound"
+          ]
+        },
+        {
+          "label": "Defaults",
+          "children": [
+            "Built for small DBs",
+            "Too late, too slow at scale"
+          ]
+        },
+        {
+          "label": "Worst case",
+          "children": [
+            "Anti-wraparound storms",
+            "Writes refused"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A planner gone wrong after bulk load",
+      "scenario": "10 M rows are loaded into a table that had 1,000, and queries suddenly choose terrible plans.",
+      "flow": [
+        "Bulk load",
+        "Stats still say 1,000 rows",
+        "Planner picks nested loop",
+        "ANALYZE",
+        "Correct plan"
+      ],
+      "steps": [
+        {
+          "label": "Cause",
+          "detail": "Statistics weren't refreshed yet, so the planner underestimates the rows massively."
+        },
+        {
+          "label": "Fix",
+          "detail": "Run `ANALYZE big_table` right after bulk loads, or wait for autoanalyze."
+        },
+        {
+          "label": "Lesson",
+          "detail": "Autovacuum's ANALYZE job matters as much as its cleanup job."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT relname, last_autovacuum, last_autoanalyze, n_dead_tup\nFROM pg_stat_user_tables ORDER BY n_dead_tup DESC LIMIT 5;\nANALYZE big_table;"
+        }
+      ],
+      "outcome": "you know what autovacuum is responsible for, and what breaks when it falls behind."
+    },
+    "summary": {
+      "points": [
+        "Three jobs: space, stats, freeze.",
+        "Defaults suit small DBs.",
+        "Falling behind on freezing is catastrophic."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two layers of 'autovacuum can't keep up'?",
+        "a": "First bloat and slow queries. Then, if freezing lags, wraparound protection: aggressive vacuums and finally refusal of writes."
+      }
+    ]
+  },
+  "tuning-postgres-the-scale-factor": {
+    "core": "Autovacuum triggers when dead tuples exceed threshold + scale_factor × rows. The default 20% means a 1 TB table waits for about 200 GB of garbage, so lower the scale factor per large table (≈1%, or 0 with a fixed threshold) so cleanup runs often and small.",
+    "first_principles": {
+      "problem": "A proportional trigger makes sense for small tables and is terrible for big ones. By the time a huge table reaches 20% dead tuples, the cleanup takes hours, queries are slow, disk is filling and statistics are stale.",
+      "truths": [
+        "Vacuum cost grows with the garbage it has to process.",
+        "Big tables accumulate the same absolute garbage at the same write rate.",
+        "Smaller, frequent runs are cheaper than rare, huge ones."
+      ],
+      "derivation": [
+        "Know the formula: **dead > threshold (50) + scale_factor (0.2) × rows**.",
+        "See the scaling: 100 MB means minutes, 10 GB hours, **1 TB days** before triggering.",
+        "Override **per table**: `autovacuum_vacuum_scale_factor = 0.01` and a matching analyze scale factor.",
+        "For the biggest tables: **scale_factor = 0** and a fixed **threshold** (e.g. 100k rows) for predictable triggering.",
+        "Find candidates: dead % above 10–20% with a stale `last_autovacuum`."
+      ]
+    },
+    "analogy": {
+      "title": "When to take out the bins",
+      "story": "\"Empty the bin when it's 20% full\" works for a desk bin. For a warehouse skip, 20% full is a mountain that takes a whole day to clear. Empty the big ones on a much smaller trigger, or on a fixed schedule.",
+      "mapping": [
+        [
+          "20% full rule",
+          "scale_factor 0.2"
+        ],
+        [
+          "Desk bin",
+          "Small table"
+        ],
+        [
+          "Warehouse skip",
+          "1 TB table"
+        ],
+        [
+          "Smaller trigger",
+          "scale_factor 0.01"
+        ],
+        [
+          "Fixed schedule",
+          "scale_factor 0 + threshold"
+        ]
+      ],
+      "breaks": "Bins don't affect each other. Vacuum on one big table competes for I/O with everything else, so frequent small runs are kinder to production."
+    },
+    "mindmap": {
+      "center": "Scale Factor",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "threshold + scale × rows",
+            "Defaults 50 + 0.2"
+          ]
+        },
+        {
+          "label": "Too late",
+          "children": [
+            "1 TB → ~200 GB dead",
+            "Hours-long vacuum"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Per-table ALTER",
+            "scale 0.01",
+            "or 0 + fixed threshold"
+          ]
+        },
+        {
+          "label": "Find",
+          "children": [
+            "dead % > 10–20",
+            "Stale last_autovacuum"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 600 GB orders table",
+      "scenario": "At 1,000 updates/s, autovacuum ran once in 5 days, and queries slowed steadily.",
+      "flow": [
+        "Default 20% → ~120 GB dead",
+        "Set scale 0.01",
+        "Trigger at ~6 GB",
+        "Vacuum every few hours",
+        "Steady performance"
+      ],
+      "steps": [
+        {
+          "label": "Measure",
+          "detail": "35% dead tuples, last autovacuum 5 days ago."
+        },
+        {
+          "label": "Tune",
+          "detail": "Per-table scale factor 0.01 and analyze scale 0.005."
+        },
+        {
+          "label": "Verify",
+          "detail": "`last_autovacuum` now updates every few hours and dead % stays under 2%."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "ALTER TABLE orders SET (\n  autovacuum_vacuum_scale_factor  = 0.01,\n  autovacuum_analyze_scale_factor = 0.005,\n  autovacuum_vacuum_threshold     = 10000);"
+        }
+      ],
+      "outcome": "cleanup happens in small, frequent passes instead of rare, painful ones."
+    },
+    "summary": {
+      "points": [
+        "Default 20% is too late for big tables.",
+        "Tune per table.",
+        "Huge tables: fixed threshold."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why tune per table instead of globally?",
+        "a": "Small tables are fine with defaults. Lowering them globally would vacuum tiny tables needlessly often."
+      }
+    ]
+  },
+  "tuning-postgres-the-cost-limit": {
+    "core": "Autovacuum throttles itself with a credit budget (cost_limit 200, then sleep cost_delay). On modern SSDs that makes it sleep most of the time. Raise the cost limit (e.g. 10× to 2000) and workers so cleanup outpaces writes.",
+    "first_principles": {
+      "problem": "Even when autovacuum triggers at the right time, bloat can keep growing, because vacuum is deliberately slowed down to protect user queries, with settings designed for 2008 spinning disks.",
+      "truths": [
+        "Each page vacuum touches has a cost (hit 1, miss 10, dirty 20).",
+        "Spending the budget triggers a sleep.",
+        "Modern NVMe can handle far more I/O than the defaults assume."
+      ],
+      "derivation": [
+        "Know the budget: spend up to **cost_limit (200)**, then sleep **cost_delay (2 ms)**, and repeat.",
+        "On NVMe that's like a janitor resting most of every shift.",
+        "**Raise `autovacuum_vacuum_cost_limit`** (e.g. 2000), optionally lower the delay, and add **max_workers** for big databases.",
+        "Tune **per table** for one critical hot table.",
+        "Diagnose: the **scale factor** controls *when* it wakes, and the **cost limit** controls *how fast* it works."
+      ]
+    },
+    "analogy": {
+      "title": "A janitor forced to take breaks",
+      "story": "You hired a janitor but required a 20-minute break after every 5 minutes of work, a rule made when floors were fragile. With modern floors, the rule just means rubbish piles up faster than it's cleared.",
+      "mapping": [
+        [
+          "Work credits before a break",
+          "cost_limit"
+        ],
+        [
+          "Mandatory break",
+          "cost_delay"
+        ],
+        [
+          "Fragile old floors",
+          "Spinning disks"
+        ],
+        [
+          "Modern floors",
+          "NVMe SSDs"
+        ],
+        [
+          "More janitors",
+          "autovacuum_max_workers"
+        ]
+      ],
+      "breaks": "A janitor working faster doesn't disturb anyone. Faster vacuum does use more I/O, so raise limits while watching user-query latency."
+    },
+    "mindmap": {
+      "center": "Cost Limit",
+      "branches": [
+        {
+          "label": "Budget",
+          "children": [
+            "hit 1, miss 10, dirty 20",
+            "limit 200 → sleep 2 ms"
+          ]
+        },
+        {
+          "label": "Problem",
+          "children": [
+            "Sleeps most of the time",
+            "Can't outpace writes"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "cost_limit ~2000",
+            "Lower delay",
+            "More workers"
+          ]
+        },
+        {
+          "label": "Diagnose",
+          "children": [
+            "Scale factor = when",
+            "Cost limit = how fast"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"Autovacuum runs constantly but bloat grows\"",
+      "scenario": "pg_stat_activity always shows `autovacuum: VACUUM public.events`, but dead % keeps climbing.",
+      "flow": [
+        "Vacuum always running",
+        "Dead % rising",
+        "Throttled by cost_limit",
+        "Raise to 2000",
+        "Dead % falls"
+      ],
+      "steps": [
+        {
+          "label": "Diagnosis",
+          "detail": "Trigger timing is fine because it's always running. It's simply too slow, so this is the cost limit, not the scale factor."
+        },
+        {
+          "label": "Fix",
+          "detail": "Raise the cost limit globally or just for `events`."
+        },
+        {
+          "label": "Watch",
+          "detail": "Track user-query p99 to make sure vacuum isn't now hurting traffic."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "ALTER SYSTEM SET autovacuum_vacuum_cost_limit = 2000;\nALTER SYSTEM SET autovacuum_max_workers = 6;     -- needs restart\nSELECT pg_reload_conf();\nALTER TABLE events SET (autovacuum_vacuum_cost_limit = 4000);"
+        }
+      ],
+      "outcome": "vacuum finally cleans faster than garbage is created."
+    },
+    "summary": {
+      "points": [
+        "Defaults throttle vacuum heavily.",
+        "Raise cost limit on modern hardware.",
+        "When vs how fast: different knobs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Vacuum never triggers vs vacuum never finishes, which knob for each?",
+        "a": "Never triggers means lower the scale factor or threshold. Never keeps up means raise the cost limit or workers."
+      }
+    ]
+  },
+  "cassandra-compaction-the-strategy-game": {
+    "core": "Cassandra merges immutable SSTables through compaction, and you choose the strategy: STCS for write-heavy, LCS for read-heavy with fast tombstone cleanup, TWCS for TTL'd time-series where whole windows are dropped.",
+    "first_principles": {
+      "problem": "SSTables are never modified, so updates and deletes pile up as newer versions and tombstones across many files. Reads must check more files, space balloons, and the wrong merge strategy either wastes I/O or leaves garbage around.",
+      "truths": [
+        "Merging files resolves versions and drops expired tombstones.",
+        "Merge patterns trade write I/O for read speed.",
+        "Time-series data expires in time order."
+      ],
+      "derivation": [
+        "**STCS** (default): merge ~4 similar-sized SSTables. Low write amplification, but reads touch many files, 2× space spikes, and tombstones linger.",
+        "**LCS**: levels of small (160 MB), non-overlapping SSTables, so reads hit 1–2 files and space is reclaimed fast. High write amplification.",
+        "**TWCS**: one bucket per time window, never merged across windows. Expired windows are **dropped whole**. Needs consistent TTLs and in-order writes.",
+        "Set it per table with `ALTER TABLE … WITH compaction = {…}` and match the window to the TTL granularity."
+      ]
+    },
+    "analogy": {
+      "title": "Three ways to tidy a filing room",
+      "story": "STCS: when you have four similar-sized piles, merge them into one, which is quick to file but slow to search. LCS: keep strictly organised shelves where each folder lives in exactly one place per shelf, which is fast to find but constantly re-filed. TWCS: one box per day, and when a box is 30 days old, throw the whole box away.",
+      "mapping": [
+        [
+          "Merging similar piles",
+          "STCS"
+        ],
+        [
+          "Strict shelves, constant re-filing",
+          "LCS"
+        ],
+        [
+          "Box per day, discard old boxes",
+          "TWCS"
+        ],
+        [
+          "Search time",
+          "Read amplification"
+        ],
+        [
+          "Re-filing effort",
+          "Write amplification"
+        ]
+      ],
+      "breaks": "You can easily put a late document in an old box. TWCS degrades badly with out-of-order or backfilled writes because it never merges across windows."
+    },
+    "mindmap": {
+      "center": "Compaction Strategies",
+      "branches": [
+        {
+          "label": "STCS",
+          "children": [
+            "Similar-size merges",
+            "Write-friendly",
+            "Reads touch many files"
+          ]
+        },
+        {
+          "label": "LCS",
+          "children": [
+            "Levels, non-overlapping",
+            "Read-friendly",
+            "High write amp"
+          ]
+        },
+        {
+          "label": "TWCS",
+          "children": [
+            "Time buckets",
+            "Drop expired windows",
+            "Needs TTL + in-order"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Writes → STCS",
+            "Reads → LCS",
+            "TTL time-series → TWCS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "30-day metrics retention",
+      "scenario": "A metrics table with `default_time_to_live` of 30 days on STCS has tombstone-heavy reads and big disk usage.",
+      "flow": [
+        "STCS + TTL: tombstones linger",
+        "Switch to TWCS, 1-day windows",
+        "30 SSTable buckets",
+        "Expired day dropped whole"
+      ],
+      "steps": [
+        {
+          "label": "Problem",
+          "detail": "STCS mixes days together, so expired data needs compaction and tombstone scans."
+        },
+        {
+          "label": "Change",
+          "detail": "TWCS with a 1-day window matching the 30-day TTL."
+        },
+        {
+          "label": "Result",
+          "detail": "Each day's SSTables disappear at once when they expire, with no rewrite."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "ALTER TABLE metrics.readings WITH compaction = {\n  'class': 'TimeWindowCompactionStrategy',\n  'compaction_window_unit': 'DAYS', 'compaction_window_size': 1 };"
+        }
+      ],
+      "outcome": "retention becomes nearly free and reads stop wading through tombstones."
+    },
+    "summary": {
+      "points": [
+        "STCS = writes, LCS = reads, TWCS = TTL time-series.",
+        "Each trades read, write and space differently.",
+        "TWCS needs in-order writes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is TWCS bad for backfilled data?",
+        "a": "Old timestamps land in new windows (or mix windows), and TWCS never compacts across windows, so data and tombstones can't be cleaned efficiently."
+      }
+    ]
+  },
+  "monitoring-bloat-how-to-know-you-have-a-problem": {
+    "core": "Measure before you tune: find tables with high dead-tuple percentages and stale vacuums, see what autovacuum is doing right now, and measure exact bloat in Postgres. Watch pending compactions and SSTable counts in Cassandra. Then decide whether the issue is trigger, speed or strategy.",
+    "first_principles": {
+      "problem": "Changing vacuum settings blindly can make things worse or fix the wrong table. You need evidence: which tables are suffering, whether cleanup is running, and whether it's late, slow or using the wrong strategy.",
+      "truths": [
+        "System views expose dead tuples and vacuum history.",
+        "In-flight work can be observed.",
+        "Different root causes need different fixes."
+      ],
+      "derivation": [
+        "**Rank tables** in `pg_stat_all_tables` by dead %, plus `last_autovacuum` and vacuum counts.",
+        "See **running vacuums** (`pg_stat_activity` matching `autovacuum:%`) and their **progress** (`pg_stat_progress_vacuum`).",
+        "Measure **exact bloat** with `pgstattuple`.",
+        "In Cassandra: `nodetool compactionstats` (pending tasks) and `nodetool tablestats` (SSTable count).",
+        "**Classify**: not triggering (scale factor), not keeping up (cost limit), or wrong strategy (compaction class). Then fix."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor runs tests before prescribing",
+      "story": "A doctor doesn't prescribe antibiotics for every cough. They measure temperature, take bloods, then decide whether it's viral, bacterial or an allergy. Vacuum tuning is the same: diagnose first, then pick the treatment.",
+      "mapping": [
+        [
+          "Taking temperature",
+          "Dead-tuple % per table"
+        ],
+        [
+          "Checking what's happening now",
+          "pg_stat_activity / progress"
+        ],
+        [
+          "Blood test",
+          "pgstattuple exact bloat"
+        ],
+        [
+          "Diagnosis",
+          "Trigger vs speed vs strategy"
+        ],
+        [
+          "Prescription",
+          "Scale factor / cost limit / compaction class"
+        ]
+      ],
+      "breaks": "Patients report symptoms. Databases only show them through metrics you choose to collect, so dashboards and alerts must exist before the problem does."
+    },
+    "mindmap": {
+      "center": "Monitoring Bloat",
+      "branches": [
+        {
+          "label": "Postgres stats",
+          "children": [
+            "pg_stat_all_tables",
+            "dead %",
+            "last_autovacuum"
+          ]
+        },
+        {
+          "label": "Live view",
+          "children": [
+            "pg_stat_activity",
+            "pg_stat_progress_vacuum"
+          ]
+        },
+        {
+          "label": "Exact",
+          "children": [
+            "pgstattuple"
+          ]
+        },
+        {
+          "label": "Cassandra",
+          "children": [
+            "compactionstats pending",
+            "tablestats SSTables"
+          ]
+        },
+        {
+          "label": "Diagnose",
+          "children": [
+            "Late → scale factor",
+            "Slow → cost limit",
+            "Wrong → strategy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A weekly bloat review",
+      "scenario": "Ten minutes every Monday for a busy Postgres cluster.",
+      "flow": [
+        "Rank by dead %",
+        "Check vacuum running?",
+        "Exact bloat on top 3",
+        "Classify cause",
+        "Apply targeted fix"
+      ],
+      "steps": [
+        {
+          "label": "Rank",
+          "detail": "`events` is 28% dead and `sessions` 22% dead."
+        },
+        {
+          "label": "Live",
+          "detail": "`events` has a vacuum running for 9 hours, so it's slow (cost limit). `sessions` hasn't been vacuumed in 4 days, so it's late (scale factor)."
+        },
+        {
+          "label": "Fix",
+          "detail": "Raise the cost limit on `events` and lower the scale factor on `sessions`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT relname, n_dead_tup,\n       round(100.0 * n_dead_tup / nullif(n_live_tup + n_dead_tup, 0), 1) AS dead_pct,\n       last_autovacuum, autovacuum_count\nFROM pg_stat_all_tables ORDER BY dead_pct DESC NULLS LAST LIMIT 10;\n\nSELECT pid, now() - xact_start AS running, query\nFROM pg_stat_activity WHERE query LIKE 'autovacuum:%';\n\nSELECT * FROM pg_stat_progress_vacuum;\nSELECT * FROM pgstattuple('events');"
+        }
+      ],
+      "outcome": "each table gets the fix its actual problem needs."
+    },
+    "summary": {
+      "points": [
+        "Measure first.",
+        "Late, slow and wrong strategy are different problems.",
+        "Watch pending compactions and SSTable counts in Cassandra."
+      ]
+    },
+    "check": [
+      {
+        "q": "A table shows autovacuum running for hours and dead % rising. Late or slow?",
+        "a": "Slow. It's triggering but throttled, so raise the cost limit or workers."
+      }
+    ]
+  }
+}

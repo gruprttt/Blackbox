@@ -121,10 +121,11 @@ topic page, under its lesson list. The lessons are not changed. Each topic gets:
 4. **Worked example**: a scenario, a flow, numbered steps, code and the outcome
 5. **Summary**: the core in one sentence, key points and self-check questions
 
-Every lesson in that topic also gets it at the end of the page, folded under *Explain this topic from
-first principles* (open it there or from the sidebar link). Keys in the file are topic
+Every lesson also gets its own explainer from `data/explainers/<track-slug>/<topic-slug>.json` (keys are
+lesson folder names), folded at the end of the page under *Explain this lesson from first principles*
+(open it there or from the sidebar link). A lesson without one shows its topic's explainer instead. Keys in the file are topic
 folder names. Text accepts `**bold**`, `*italic*` and `` `code` ``. Database Reliability (DBRE) is
-done for all 20 topics.
+done for all 20 topics and all 128 lessons.
 
 ## Reading a chapter
 
