@@ -1,0 +1,722 @@
+{
+  "introduction-the-connection-storm": {
+    "core": "Every new database connection costs a TCP handshake, maybe TLS, authentication and megabytes of memory. When thousands arrive at once (a connection storm), the database spends all its CPU saying hello and none running queries.",
+    "first_principles": {
+      "problem": "During a flash sale, 10,000 app threads open connections at the same moment. Each request is individually valid, but together they make the database spend 100% of its CPU on handshakes and authentication, and queries stop.",
+      "truths": [
+        "Opening a connection is real work: TCP, TLS, auth, memory.",
+        "Traffic spikes make many clients connect at once.",
+        "Aggregate behaviour only shows up under load."
+      ],
+      "derivation": [
+        "Count the cost per connection: **3-way TCP handshake**, **TLS** round trips, **auth** lookups, **2–10 MB RAM** (Postgres).",
+        "Multiply by thousands during a spike: CPU goes to setup, not SQL.",
+        "Stop clients from talking to the database directly. Put a **proxy** in between that keeps a few long-lived connections."
+      ]
+    },
+    "analogy": {
+      "title": "A chef who greets every guest",
+      "story": "On a Friday night, every guest insists the head chef personally greets and seats them. With 10 guests that's charming. With 10,000 arriving together, the chef never cooks a meal.",
+      "mapping": [
+        [
+          "Head chef",
+          "Database"
+        ],
+        [
+          "Greeting and seating",
+          "TCP + TLS + auth + memory"
+        ],
+        [
+          "10,000 guests at once",
+          "Connection storm"
+        ],
+        [
+          "Host at the door",
+          "Database proxy"
+        ]
+      ],
+      "breaks": "Guests leave eventually. Application connections often stay open and idle, still holding memory on the database."
+    },
+    "mindmap": {
+      "center": "Connection Storm",
+      "branches": [
+        {
+          "label": "Per-connection cost",
+          "children": [
+            "TCP handshake",
+            "TLS",
+            "Auth",
+            "2–10 MB RAM"
+          ]
+        },
+        {
+          "label": "Trigger",
+          "children": [
+            "Flash sale",
+            "Viral post",
+            "DDoS",
+            "Autoscaling"
+          ]
+        },
+        {
+          "label": "Effect",
+          "children": [
+            "CPU on handshakes",
+            "Queries starve"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Proxy / pooler"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Autoscaling makes it worse",
+      "scenario": "Load rises, the app autoscales from 50 to 400 pods, each opening 25 connections.",
+      "flow": [
+        "Traffic spike",
+        "Autoscale to 400 pods",
+        "10,000 new connections",
+        "DB CPU on auth",
+        "Queries time out"
+      ],
+      "steps": [
+        {
+          "label": "Cascade",
+          "detail": "Slower queries trigger more autoscaling, which opens even more connections."
+        },
+        {
+          "label": "Fix",
+          "detail": "Pods connect to a proxy, and the proxy keeps 100 warm connections to the DB."
+        }
+      ],
+      "code": [],
+      "outcome": "you can recognise a connection storm and why scaling the app can deepen it."
+    },
+    "summary": {
+      "points": [
+        "Connections are expensive.",
+        "Storms are an aggregate effect.",
+        "Insert a proxy to absorb them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a connection storm happen even with correct application code?",
+        "a": "Each connection is valid. The failure comes from thousands of them at once overwhelming the database's setup work."
+      }
+    ]
+  },
+  "what-is-a-database-proxy": {
+    "core": "A database proxy speaks the database's wire protocol, so unlike a TCP load balancer it understands each SQL statement and can pool, route, cache or block it.",
+    "first_principles": {
+      "problem": "A generic load balancer just forwards bytes. It can't tell a SELECT from an UPDATE, can't cache a result, and can't refuse a dangerous query. To manage database traffic intelligently, something must understand it.",
+      "truths": [
+        "Layer 4 sees connections and bytes.",
+        "Layer 7 sees protocol messages (SQL).",
+        "Decisions about queries need to see the queries."
+      ],
+      "derivation": [
+        "Sit between apps and database, speaking the **wire protocol** (Layer 7).",
+        "Parse each statement and decide: **pool, route, cache, block**.",
+        "Pick by ecosystem: **ProxySQL** (MySQL routing, cache, firewall), **PgBouncer** (lightweight PG pooling), **RDS Proxy** (managed, IAM, failover), **Pgpool-II**, **Vitess** (sharding)."
+      ]
+    },
+    "analogy": {
+      "title": "A mail sorter vs. a mail truck",
+      "story": "A truck (load balancer) carries sealed bags without knowing what's inside. A sorter (proxy) opens envelopes, reads addresses, sends urgent ones by courier, answers some from a template, and bins junk mail.",
+      "mapping": [
+        [
+          "Mail truck",
+          "TCP load balancer (L4)"
+        ],
+        [
+          "Mail sorter",
+          "Database proxy (L7)"
+        ],
+        [
+          "Reading addresses",
+          "Parsing SQL"
+        ],
+        [
+          "Different routes",
+          "Read/write routing"
+        ],
+        [
+          "Binning junk",
+          "Query firewall"
+        ]
+      ],
+      "breaks": "Mail sorters add little delay. A proxy adds a network hop and becomes critical infrastructure that must be highly available itself."
+    },
+    "mindmap": {
+      "center": "Database Proxy",
+      "branches": [
+        {
+          "label": "vs Load balancer",
+          "children": [
+            "L4 bytes",
+            "L7 SQL-aware"
+          ]
+        },
+        {
+          "label": "Abilities",
+          "children": [
+            "Pool",
+            "Route",
+            "Cache",
+            "Block"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ProxySQL",
+            "PgBouncer",
+            "RDS Proxy",
+            "Pgpool-II",
+            "Vitess"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Extra hop",
+            "Must be HA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same traffic, two layers",
+      "scenario": "`SELECT * FROM orders WHERE id = 42` arrives.",
+      "flow": [
+        "NLB: forward bytes",
+        "Proxy: parse SQL",
+        "Decide: replica + cache",
+        "Return result"
+      ],
+      "steps": [
+        {
+          "label": "L4",
+          "detail": "The NLB has no idea it's a SELECT and sends it to whatever backend is next."
+        },
+        {
+          "label": "L7",
+          "detail": "ProxySQL recognises a read, checks its cache, then picks a healthy replica."
+        }
+      ],
+      "code": [],
+      "outcome": "you can explain why protocol awareness enables every advanced proxy feature."
+    },
+    "summary": {
+      "points": [
+        "Proxies speak the DB protocol.",
+        "That enables pooling, routing, caching, firewalling.",
+        "Choose by database ecosystem."
+      ]
+    },
+    "check": [
+      {
+        "q": "Proxy vs load balancer in one sentence?",
+        "a": "A load balancer forwards TCP streams blindly (L4). A database proxy parses the SQL protocol (L7) and can act on each query."
+      }
+    ]
+  },
+  "connection-multiplexing-the-core-feature": {
+    "core": "Multiplexing maps many cheap client connections onto a few long-lived database connections (M:N), lending a backend connection only while a query or transaction runs. The database sees a stable, small number regardless of traffic.",
+    "first_principles": {
+      "problem": "Without a proxy, every app thread needs its own database connection (1:1). The database's connection count, and its memory and CPU overhead, rises and falls with application concurrency.",
+      "truths": [
+        "Accepting a TCP connection is cheap for a lightweight proxy.",
+        "Database connections are expensive but reusable.",
+        "Most client connections are idle at any instant."
+      ],
+      "derivation": [
+        "**Frontend**: the app opens as many connections to the proxy as it likes (e.g. 10,000).",
+        "**Backend**: the proxy keeps a **fixed, pre-authenticated pool** (e.g. 50).",
+        "**Borrow and return**: per query or transaction, lend an idle backend and return it in microseconds.",
+        "Pick a mode: **session** (safest), **transaction** (best default), **statement** (rare).",
+        "Beware session state (`SET search_path`, advisory locks) under transaction pooling."
+      ]
+    },
+    "analogy": {
+      "title": "Shared bikes",
+      "story": "A city doesn't give every resident a bike. A dock holds 50 bikes, and anyone takes one for a trip and docks it again. Thousands of people are served by 50 bikes because rides are short.",
+      "mapping": [
+        [
+          "Residents",
+          "Application connections (M)"
+        ],
+        [
+          "Docked bikes",
+          "Backend connections (N)"
+        ],
+        [
+          "A ride",
+          "Transaction"
+        ],
+        [
+          "Docking again",
+          "Return to pool"
+        ]
+      ],
+      "breaks": "Riders leave nothing on the bike. Database sessions can carry settings, and the next borrower inherits or loses them depending on pooling mode."
+    },
+    "mindmap": {
+      "center": "Multiplexing",
+      "branches": [
+        {
+          "label": "1:1 problem",
+          "children": [
+            "Conn per thread",
+            "DB load ∝ app concurrency"
+          ]
+        },
+        {
+          "label": "M:N",
+          "children": [
+            "Many frontend",
+            "Few backend"
+          ]
+        },
+        {
+          "label": "Cycle",
+          "children": [
+            "Borrow",
+            "Run",
+            "Return (µs)"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Session",
+            "Transaction (default)",
+            "Statement"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "Session state lost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "10,000 app connections on 50 backends",
+      "scenario": "A Node.js fleet with PgBouncer in transaction mode.",
+      "flow": [
+        "App conn #99 sends txn",
+        "Borrow backend #3",
+        "Run, COMMIT",
+        "Return #3",
+        "#3 serves app conn #4021"
+      ],
+      "steps": [
+        {
+          "label": "Stable DB",
+          "detail": "Postgres always sees about 50 connections."
+        },
+        {
+          "label": "Elastic app",
+          "detail": "The app can scale to any number of pods without touching DB limits."
+        },
+        {
+          "label": "Caveat",
+          "detail": "Any `SET` must be inside the transaction (`SET LOCAL`)."
+        }
+      ],
+      "code": [],
+      "outcome": "database load is decoupled from application concurrency."
+    },
+    "summary": {
+      "points": [
+        "M frontend : N backend.",
+        "Transaction pooling is the usual choice.",
+        "Keep session state inside transactions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does session pooling barely help?",
+        "a": "Each client holds a backend for its whole session, even when idle, so backend count still tracks client count."
+      }
+    ]
+  },
+  "query-caching-offloading-reads-transparently": {
+    "core": "A proxy like ProxySQL can cache result sets for queries matching a rule, with a TTL, so repeated reads never reach the database and no application changes are needed. There's no active invalidation, so use it only for data that can be slightly stale.",
+    "first_principles": {
+      "problem": "Application caches (Redis) need code for cache checks, invalidation and TTLs. MySQL's built-in query cache was removed in 8.0 because its global mutex serialised writes. Teams still want to offload repetitive reads without touching code.",
+      "truths": [
+        "Many queries are repeated with identical text and parameters.",
+        "A proxy sees every query and can answer before the database does.",
+        "Without invalidation, cached data ages until its TTL."
+      ],
+      "derivation": [
+        "Define **rules** (regex on query text) with a **cache_ttl** (e.g. 60 s).",
+        "First match goes to the DB and the result is stored, keyed by **normalised query + parameters**.",
+        "Later matches within the TTL are answered from proxy memory.",
+        "Accept: **in-memory only**, **no active invalidation**, so use it for catalogues and config, not balances or inventory."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist with a cheat sheet",
+      "story": "Visitors keep asking the same questions (\"what are your opening hours?\"). The receptionist writes the answer on a cheat sheet and repeats it for the next hour without phoning the manager. If the hours change, visitors get the old answer until the sheet is rewritten.",
+      "mapping": [
+        [
+          "Repeated questions",
+          "Repeated identical queries"
+        ],
+        [
+          "Cheat sheet",
+          "Proxy cache"
+        ],
+        [
+          "Rewriting every hour",
+          "TTL"
+        ],
+        [
+          "Old answer after a change",
+          "Staleness, no invalidation"
+        ]
+      ],
+      "breaks": "A receptionist might hear that the hours changed. The proxy never does. It will serve stale results until expiry."
+    },
+    "mindmap": {
+      "center": "Proxy Query Cache",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "No code changes",
+            "MySQL QC removed"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Regex match",
+            "cache_ttl ms"
+          ]
+        },
+        {
+          "label": "Key",
+          "children": [
+            "Normalised query + params"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "In-memory",
+            "No invalidation",
+            "Stale until TTL"
+          ]
+        },
+        {
+          "label": "Good for",
+          "children": [
+            "Catalogues",
+            "Config tables"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Offloading product lookups",
+      "scenario": "Product detail queries are 40% of DB reads and change rarely.",
+      "flow": [
+        "Rule: ^SELECT .* FROM products",
+        "TTL 60 s",
+        "First query → DB",
+        "Repeats → cache",
+        "DB reads ↓ ~40%"
+      ],
+      "steps": [
+        {
+          "label": "Rule",
+          "detail": "Insert a query rule with `cache_ttl = 60000`."
+        },
+        {
+          "label": "Load",
+          "detail": "`LOAD MYSQL QUERY RULES TO RUNTIME`, live with no restart."
+        },
+        {
+          "label": "Scope",
+          "detail": "Never cache stock or price-at-checkout queries."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "INSERT INTO mysql_query_rules (rule_id, active, match_digest, cache_ttl, apply)\nVALUES (50, 1, '^SELECT .* FROM products WHERE id = \\?', 60000, 1);\nLOAD MYSQL QUERY RULES TO RUNTIME;"
+        }
+      ],
+      "outcome": "a large slice of read load disappears from the database with zero application changes."
+    },
+    "summary": {
+      "points": [
+        "Transparent caching at the proxy.",
+        "TTL-based, no invalidation.",
+        "Only for staleness-tolerant data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a proxy cache wrong for account balances?",
+        "a": "Without invalidation, a changed balance could be served stale for the whole TTL, which is unacceptable for transactional data."
+      }
+    ]
+  },
+  "readwrite-splitting-routing-by-query-intent": {
+    "core": "A proxy can send writes to the primary and SELECTs to replicas by inspecting each statement, putting idle replicas to work without app changes. Reads that must see a just-made write need an exception rule to the primary.",
+    "first_principles": {
+      "problem": "You have replicas, but the app connects to one endpoint, so the replicas sit idle. Rewriting a legacy app to keep separate read and write pools and route every query is slow and error-prone.",
+      "truths": [
+        "The first keyword of a statement reveals intent (SELECT vs INSERT…).",
+        "Replicas lag behind the primary.",
+        "Some reads must see the latest write."
+      ],
+      "derivation": [
+        "Register **hostgroups**: writer (primary) and readers (replicas).",
+        "**Route by keyword**: INSERT/UPDATE/DELETE/DDL go to the writer, SELECT to the readers (round-robin or weighted).",
+        "Send **locking reads** (`SELECT … FOR UPDATE`) to the writer.",
+        "Add **high-priority exceptions** for read-after-write queries, and remove lagging replicas (`max_replication_lag`)."
+      ]
+    },
+    "analogy": {
+      "title": "A post office with two counters",
+      "story": "Sending a parcel (write) goes to the main counter. Checking a parcel's status (read) goes to self-service kiosks. But if you just posted something, the kiosks may not have updated yet, so for that you go back to the main counter.",
+      "mapping": [
+        [
+          "Main counter",
+          "Primary"
+        ],
+        [
+          "Self-service kiosks",
+          "Replicas"
+        ],
+        [
+          "Sorting people by request type",
+          "Routing by query keyword"
+        ],
+        [
+          "Kiosks not updated yet",
+          "Replication lag"
+        ],
+        [
+          "Back to the main counter",
+          "Exception rule to primary"
+        ]
+      ],
+      "breaks": "People know when they just posted something. The proxy doesn't, so read-after-write cases must be identified and given explicit rules."
+    },
+    "mindmap": {
+      "center": "Read/Write Splitting",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Idle replicas",
+            "App uses one endpoint"
+          ]
+        },
+        {
+          "label": "Hostgroups",
+          "children": [
+            "Writer (primary)",
+            "Readers (replicas)"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Writes → primary",
+            "SELECT → replicas",
+            "FOR UPDATE → primary"
+          ]
+        },
+        {
+          "label": "Lag caveat",
+          "children": [
+            "Read-after-write → primary",
+            "max_replication_lag"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "\"My order isn't showing\"",
+      "scenario": "After checkout, the confirmation page SELECTs the new order and it's sometimes missing.",
+      "flow": [
+        "INSERT order → primary",
+        "SELECT order → replica",
+        "Replica 300 ms behind",
+        "Missing!",
+        "Exception rule → primary"
+      ],
+      "steps": [
+        {
+          "label": "Diagnose",
+          "detail": "The confirmation read landed on a lagging replica."
+        },
+        {
+          "label": "Fix",
+          "detail": "Add a higher-priority rule matching the confirmation query digest that routes to the writer hostgroup."
+        },
+        {
+          "label": "Guard",
+          "detail": "Replicas lagging more than 2 s are pulled from the pool automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "INSERT INTO mysql_query_rules (rule_id, active, match_digest, destination_hostgroup, apply)\nVALUES (1, 1, '^SELECT .* FROM orders WHERE id = \\? /\\* fresh \\*/', 10, 1),\n       (2, 1, '^SELECT.*FOR UPDATE', 10, 1),\n       (3, 1, '^SELECT', 20, 1);"
+        }
+      ],
+      "outcome": "replicas carry most reads, and users still see their own new data."
+    },
+    "summary": {
+      "points": [
+        "Route by statement type.",
+        "Locking reads → primary.",
+        "Read-after-write needs exceptions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which reads are unsafe to send to replicas?",
+        "a": "Reads that must reflect a just-committed write (read-your-own-writes) and locking reads like SELECT … FOR UPDATE."
+      }
+    ]
+  },
+  "query-firewall-and-observability": {
+    "core": "Because a proxy sees every statement, it can block dangerous query patterns before they reach the database, and its per-digest statistics show the most expensive queries across 100% of traffic without enabling the slow log.",
+    "first_principles": {
+      "problem": "A bad query (an unbounded scan, a likely injection, a runaway report) reaches the database before anyone can stop it. And finding the top offenders usually means enabling slow-query logs on the database itself, which add overhead and only catch queries above a threshold.",
+      "truths": [
+        "Patterns of dangerous SQL are recognisable.",
+        "Blocking before execution costs nothing on the database.",
+        "Aggregating by normalised query shape reveals where time goes."
+      ],
+      "derivation": [
+        "Add **firewall rules**: match a pattern and return an `error_msg` instead of routing.",
+        "Block **unbounded scans**, suspicious **unparameterised** queries, and enforce **rate limits** or **kill long runners**.",
+        "Read **stats_mysql_query_digest**: per normalised query, call count, total and min/max time.",
+        "Read **stats_mysql_connection_pool**: backend health, used/free, latency per hostgroup."
+      ]
+    },
+    "analogy": {
+      "title": "A security gate with a turnstile counter",
+      "story": "The gate refuses anyone carrying something dangerous before they enter the building, and the turnstile counts every visitor and how long they stayed, so you know who uses the building most without following anyone around inside.",
+      "mapping": [
+        [
+          "Security gate",
+          "Query firewall rules"
+        ],
+        [
+          "Refused at the door",
+          "Blocked before reaching DB"
+        ],
+        [
+          "Turnstile counter",
+          "Query digest stats"
+        ],
+        [
+          "Who stays longest",
+          "Top queries by total time"
+        ]
+      ],
+      "breaks": "A gate checks obvious items. Pattern rules can be bypassed by unusual SQL, so a firewall complements, not replaces, parameterised queries and DB permissions."
+    },
+    "mindmap": {
+      "center": "Firewall & Observability",
+      "branches": [
+        {
+          "label": "Firewall",
+          "children": [
+            "Pattern match",
+            "error_msg",
+            "Never reaches DB"
+          ]
+        },
+        {
+          "label": "Use cases",
+          "children": [
+            "No-WHERE scans",
+            "Injection-like SQL",
+            "Rate limits",
+            "Kill long queries"
+          ]
+        },
+        {
+          "label": "Digest stats",
+          "children": [
+            "Calls",
+            "Total / min / max time",
+            "100% coverage"
+          ]
+        },
+        {
+          "label": "Pool stats",
+          "children": [
+            "Backend health",
+            "Used / free",
+            "Latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding and blocking a costly query",
+      "scenario": "MySQL CPU is high, and the slow log is off.",
+      "flow": [
+        "Query digest top 5",
+        "Find unbounded SELECT on users",
+        "Add block rule",
+        "App gets clear error",
+        "CPU drops"
+      ],
+      "steps": [
+        {
+          "label": "Find",
+          "detail": "The top digest by `sum_time` is `SELECT * FROM users` with no WHERE, from an admin export."
+        },
+        {
+          "label": "Block",
+          "detail": "A rule returns \"full scans of users are not allowed\"."
+        },
+        {
+          "label": "Follow up",
+          "detail": "The admin tool gets fixed to paginate."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT digest_text, count_star, sum_time, max_time\nFROM stats_mysql_query_digest ORDER BY sum_time DESC LIMIT 5;\n\nINSERT INTO mysql_query_rules (rule_id, active, match_digest, error_msg, apply)\nVALUES (5, 1, '^SELECT \\* FROM users$', 'Full scans of users are not allowed', 1);\nLOAD MYSQL QUERY RULES TO RUNTIME;"
+        }
+      ],
+      "outcome": "the costliest query is found without touching the database configuration and stopped at the door."
+    },
+    "summary": {
+      "points": [
+        "Block dangerous SQL at the proxy.",
+        "Digest stats cover all queries.",
+        "No slow-log overhead on the DB."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you find the top 5 expensive queries without the slow log?",
+        "a": "Query the proxy's stats_mysql_query_digest, ordered by total execution time."
+      }
+    ]
+  }
+}

@@ -1,0 +1,744 @@
+{
+  "introduction-the-batch-etl-problem": {
+    "core": "Polling a table for changed rows on a schedule is always behind, loads production, misses deletes and loses intermediate states. Change data capture instead listens to the database's own log of every change.",
+    "first_principles": {
+      "problem": "A nightly job runs `WHERE updated_at > now() - interval '1 day'` and copies the results to the warehouse. The business decides on yesterday's data, the job grows until it collides with peak traffic, and a row inserted at 10:00 and deleted at 14:00 is never seen.",
+      "truths": [
+        "A deleted row can't be selected later.",
+        "A query sees only the current state, not the history of changes.",
+        "The database already records every change in its transaction log."
+      ],
+      "derivation": [
+        "List the four polling flaws: **latency**, **production load**, **missed deletes**, **lost intermediate states**.",
+        "Notice that the **transaction log** already has every insert, update and delete, in order.",
+        "**Read the log** instead of re-querying tables: that's **CDC**."
+      ]
+    },
+    "analogy": {
+      "title": "Nightly catalogue walk vs. a live announcement feed",
+      "story": "Walking every shelf at closing time to note changes is slow and misses a book that was added and removed the same day. Having the front desk announce every change as it happens catches everything, immediately.",
+      "mapping": [
+        [
+          "Nightly shelf walk",
+          "Batch polling ETL"
+        ],
+        [
+          "Book added and removed same day",
+          "Missed delete"
+        ],
+        [
+          "Front-desk announcements",
+          "Transaction log"
+        ],
+        [
+          "Listening to announcements",
+          "Change data capture"
+        ]
+      ],
+      "breaks": "Announcements are free to hear. Reading the log needs a replication slot, which makes the database keep log data until you've read it."
+    },
+    "mindmap": {
+      "center": "Batch ETL vs CDC",
+      "branches": [
+        {
+          "label": "Polling flaws",
+          "children": [
+            "Latency",
+            "Production load",
+            "Missed deletes",
+            "Lost intermediate states"
+          ]
+        },
+        {
+          "label": "Insight",
+          "children": [
+            "DB already logs every change"
+          ]
+        },
+        {
+          "label": "CDC",
+          "children": [
+            "Read the log",
+            "Near real time",
+            "Deletes included"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The ghost order",
+      "scenario": "An order is created at 10:00 and deleted at 14:00 as fraud. The batch runs at midnight.",
+      "flow": [
+        "10:00 INSERT",
+        "14:00 DELETE",
+        "00:00 batch: nothing to see",
+        "Warehouse never knew",
+        "CDC: both events captured"
+      ],
+      "steps": [
+        {
+          "label": "Polling",
+          "detail": "At midnight the row doesn't exist, so the warehouse never learns it existed or was deleted."
+        },
+        {
+          "label": "Worse",
+          "detail": "If it had been loaded earlier, the warehouse keeps a ghost record forever."
+        },
+        {
+          "label": "CDC",
+          "detail": "Emits an insert event at 10:00 and a delete event at 14:00."
+        }
+      ],
+      "code": [],
+      "outcome": "you can explain why `updated_at` polling isn't enough, starting with deletes."
+    },
+    "summary": {
+      "points": [
+        "Polling is late, heavy and blind to deletes.",
+        "The transaction log has everything.",
+        "CDC listens instead of asking."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the most surprising flaw of updated_at polling?",
+        "a": "It can never see deleted rows, because they no longer exist when the query runs."
+      }
+    ]
+  },
+  "log-based-cdc-how-it-works": {
+    "core": "Log-based CDC reads the WAL or binlog (via a logical replication slot and a decoding plugin like pgoutput) to stream every committed change in order with little load. But a stalled consumer makes the slot retain WAL until the disk fills.",
+    "first_principles": {
+      "problem": "We want every change, in commit order, within seconds, without running heavy queries against production. The data is already in the transaction log, written for crash recovery and replication.",
+      "truths": [
+        "The log is sequential and complete for committed changes.",
+        "Reading a file is cheaper than running queries and locks.",
+        "The database deletes old log segments unless something holds them."
+      ],
+      "derivation": [
+        "Read the **transaction log** (WAL / binlog / redo), not the tables.",
+        "In Postgres, create a **logical replication slot** with the **pgoutput** plugin to decode WAL into row changes.",
+        "Get **low impact** (like one more replica), **complete capture** (deletes, intermediate states), **ordering** and **seconds of latency**.",
+        "**Monitor slot lag** (current LSN − restart_lsn), alert around 10 GB, and consider `max_slot_wal_keep_size`, which protects the disk at the cost of a full re-snapshot."
+      ]
+    },
+    "analogy": {
+      "title": "A stenographer's tape",
+      "story": "A court stenographer's tape already records every word in order. Instead of interviewing witnesses again, you just read the tape. But the court won't recycle tape you haven't read yet, and if you stop reading, the tape room fills up.",
+      "mapping": [
+        [
+          "Stenographer's tape",
+          "WAL / binlog"
+        ],
+        [
+          "Reading the tape",
+          "Logical decoding"
+        ],
+        [
+          "Your bookmark",
+          "Replication slot"
+        ],
+        [
+          "Tape room filling",
+          "WAL retention → disk full"
+        ]
+      ],
+      "breaks": "A full tape room is an inconvenience. A full WAL disk crashes the production database, so slot lag is a paging alert."
+    },
+    "mindmap": {
+      "center": "Log-Based CDC",
+      "branches": [
+        {
+          "label": "Source",
+          "children": [
+            "WAL (PG)",
+            "binlog (MySQL)",
+            "Redo (Oracle)"
+          ]
+        },
+        {
+          "label": "Postgres",
+          "children": [
+            "Logical replication slot",
+            "pgoutput plugin"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Low impact",
+            "Complete",
+            "Ordered",
+            "Seconds"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Slot lag",
+            "WAL fills disk"
+          ]
+        },
+        {
+          "label": "Mitigate",
+          "children": [
+            "Alert on lag",
+            "max_slot_wal_keep_size"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A CDC consumer down over the weekend",
+      "scenario": "The Debezium worker crashed Friday, and WAL is accumulating on the primary.",
+      "flow": [
+        "Consumer stops",
+        "Slot holds WAL",
+        "Lag 10 GB → alert",
+        "Restart consumer / drop slot",
+        "Disk safe"
+      ],
+      "steps": [
+        {
+          "label": "Detect",
+          "detail": "Lag computed from `pg_replication_slots` crosses 10 GB and pages on-call."
+        },
+        {
+          "label": "Recover",
+          "detail": "Restart the connector, which resumes from its offset and drains the backlog."
+        },
+        {
+          "label": "Last resort",
+          "detail": "If it can't recover, drop the slot and re-snapshot. The primary's health comes first."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT pg_create_logical_replication_slot('cdc_slot', 'pgoutput');\n\nSELECT slot_name, active,\n       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS lag\nFROM pg_replication_slots WHERE slot_type = 'logical';"
+        }
+      ],
+      "outcome": "real-time change streams with a monitored safety margin on the source database."
+    },
+    "summary": {
+      "points": [
+        "Read the log, not the tables.",
+        "Slots make the DB keep WAL for you.",
+        "Slot lag is a critical alert."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does max_slot_wal_keep_size trade off?",
+        "a": "It caps retained WAL to protect the disk, but a slot that exceeds it is invalidated and the CDC pipeline must re-snapshot."
+      }
+    ]
+  },
+  "the-engine-debezium-kafka-connect": {
+    "core": "Debezium provides database-specific connectors that decode transaction logs into change events. Kafka Connect runs those connectors with fault tolerance and offset tracking, and Kafka stores the events per table topic in a before/after envelope.",
+    "first_principles": {
+      "problem": "Reading binary WAL or binlog formats correctly, surviving restarts without losing or skipping changes, and delivering events to many consumers is hard. Teams shouldn't each build it themselves.",
+      "truths": [
+        "Each database has its own log format.",
+        "A pipeline must remember how far it got.",
+        "Consumers need a consistent event structure."
+      ],
+      "derivation": [
+        "Use **Debezium** connectors (Postgres, MySQL, MongoDB, SQL Server…) to decode logs into events.",
+        "Host them in **Kafka Connect**: lifecycle, distribution across workers, **offset tracking** so a restart resumes exactly where it stopped.",
+        "Publish to **Kafka topics** named `<server>.<schema>.<table>`.",
+        "Use the **envelope**: `op` (c/u/d/r), `before`, `after`, `source` (lsn, ts). Deletes have `after = null`, inserts `before = null`."
+      ]
+    },
+    "analogy": {
+      "title": "Translators, an agency and a mailroom",
+      "story": "Debezium is a team of translators, one per language (database log format). Kafka Connect is the agency that schedules them, replaces anyone who falls ill and records which page each was on. Kafka is the mailroom where translated letters wait for whoever needs them.",
+      "mapping": [
+        [
+          "Translators per language",
+          "Debezium connectors per DB"
+        ],
+        [
+          "Agency scheduling and bookmarks",
+          "Kafka Connect + offsets"
+        ],
+        [
+          "Mailroom pigeonholes",
+          "Kafka topics per table"
+        ],
+        [
+          "Standard letter format",
+          "Change-event envelope"
+        ]
+      ],
+      "breaks": "A translator who restarts might re-translate a page. Debezium can re-emit events after a crash (at-least-once), so consumers must handle duplicates."
+    },
+    "mindmap": {
+      "center": "Debezium Stack",
+      "branches": [
+        {
+          "label": "Debezium",
+          "children": [
+            "Log decoders",
+            "Per-DB connectors"
+          ]
+        },
+        {
+          "label": "Kafka Connect",
+          "children": [
+            "Runtime",
+            "Restarts",
+            "Offsets"
+          ]
+        },
+        {
+          "label": "Kafka",
+          "children": [
+            "Topics per table",
+            "Retention buffer"
+          ]
+        },
+        {
+          "label": "Envelope",
+          "children": [
+            "op c/u/d/r",
+            "before / after",
+            "source.lsn"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An order ships",
+      "scenario": "`UPDATE orders SET status = 'shipped' WHERE id = 1001`.",
+      "flow": [
+        "WAL entry",
+        "Debezium decodes",
+        "Event op=u, before/after",
+        "Topic postgres.public.orders",
+        "Consumers read"
+      ],
+      "steps": [
+        {
+          "label": "Event",
+          "detail": "`before.status = pending`, `after.status = shipped`, with `source.lsn` for ordering and dedupe."
+        },
+        {
+          "label": "Topic",
+          "detail": "Written to `postgres.public.orders`."
+        },
+        {
+          "label": "Restart",
+          "detail": "If the worker dies, Kafka Connect resumes from the last committed offset."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"name\": \"orders-cdc\",\n  \"config\": {\n    \"connector.class\": \"io.debezium.connector.postgresql.PostgresConnector\",\n    \"database.hostname\": \"pg-primary\", \"database.dbname\": \"ecommerce\",\n    \"table.include.list\": \"public.orders,public.customers\",\n    \"plugin.name\": \"pgoutput\", \"slot.name\": \"debezium_orders\"\n  }\n}"
+        }
+      ],
+      "outcome": "a standard, fault-tolerant stream of row changes any team can subscribe to."
+    },
+    "summary": {
+      "points": [
+        "Debezium = decoders, Kafka Connect = runtime.",
+        "Offsets enable safe restarts.",
+        "Handle c/u/d/r events in consumers."
+      ]
+    },
+    "check": [
+      {
+        "q": "Debezium vs Kafka Connect?",
+        "a": "Debezium is the connector library that reads database logs. Kafka Connect is the framework that runs connectors, manages failures and tracks offsets."
+      }
+    ]
+  },
+  "the-pipeline-db-to-warehouse": {
+    "core": "With changes in Kafka, the database is decoupled from consumers. Sink connectors load events into the warehouse in seconds, and you must choose how deletes appear there (hard, soft or append-only history).",
+    "first_principles": {
+      "problem": "We've captured every change. Now it has to land in Snowflake, BigQuery or S3 quickly and correctly, including deletes, without the production database caring how many systems read it.",
+      "truths": [
+        "Kafka retains events independently of consumers.",
+        "A warehouse row must reflect inserts, updates and deletes.",
+        "Different analyses need current state or full history."
+      ],
+      "derivation": [
+        "**Commit**: written to WAL. **Capture**: Debezium publishes in milliseconds.",
+        "**Buffer** in Kafka (e.g. 7-day retention) so slow consumers lose nothing.",
+        "**Sink**: a connector translates events into MERGE or INSERT statements, about **2–10 s** end to end.",
+        "Handle deletes: **hard delete**, **soft delete** (`is_deleted`, `deleted_at`), or **append-only** history and query the latest with `ROW_NUMBER()`."
+      ]
+    },
+    "analogy": {
+      "title": "A newspaper wire service",
+      "story": "Reporters file stories to the wire as they happen (Kafka). Each newspaper picks them up on its own schedule and prints them its own way. When a story is retracted, each paper decides whether to remove it or print a correction.",
+      "mapping": [
+        [
+          "Wire service",
+          "Kafka"
+        ],
+        [
+          "Each newspaper",
+          "Sink / destination"
+        ],
+        [
+          "Printing its own way",
+          "MERGE / INSERT / append"
+        ],
+        [
+          "Retraction",
+          "Delete event"
+        ],
+        [
+          "Correction notice",
+          "Soft delete"
+        ]
+      ],
+      "breaks": "Newspapers don't affect the wire. Kafka retention is finite, so a sink that's down longer than retention loses events and needs a re-snapshot."
+    },
+    "mindmap": {
+      "center": "DB → Warehouse",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Commit",
+            "Capture",
+            "Kafka buffer",
+            "Sink",
+            "Queryable"
+          ]
+        },
+        {
+          "label": "Latency",
+          "children": [
+            "~2–10 s",
+            "vs 24 h batch"
+          ]
+        },
+        {
+          "label": "Decoupling",
+          "children": [
+            "Add consumers freely"
+          ]
+        },
+        {
+          "label": "Deletes",
+          "children": [
+            "Hard",
+            "Soft",
+            "Append-only + ROW_NUMBER"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Keeping full history in Snowflake",
+      "scenario": "Analysts want both the current order state and every past status.",
+      "flow": [
+        "Append every event",
+        "orders_changes table",
+        "Latest per id via ROW_NUMBER",
+        "History preserved"
+      ],
+      "steps": [
+        {
+          "label": "Append",
+          "detail": "Every c/u/d event becomes a row with `op` and `ts_ms`."
+        },
+        {
+          "label": "Current state",
+          "detail": "A view keeps the newest event per id, excluding `op = 'd'`."
+        },
+        {
+          "label": "History",
+          "detail": "Status timelines and deleted records remain queryable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE VIEW orders_current AS\nSELECT * FROM orders_changes\nQUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY ts_ms DESC) = 1\n  AND op <> 'd';"
+        }
+      ],
+      "outcome": "a warehouse that's seconds behind production and keeps a complete audit trail."
+    },
+    "summary": {
+      "points": [
+        "Kafka decouples the DB from consumers.",
+        "Seconds, not hours.",
+        "Pick a delete strategy deliberately."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do most mature platforms prefer append-only for CDC data?",
+        "a": "It keeps every state change and every delete, so you can rebuild any past state or audit history. The current state is just a view on top."
+      }
+    ]
+  },
+  "handling-schema-evolution": {
+    "core": "When upstream tables change, CDC events change shape. A schema registry versions every event schema and enforces compatibility rules (BACKWARD, FORWARD, FULL), so safe changes flow through and breaking ones are rejected before they corrupt downstream data.",
+    "first_principles": {
+      "problem": "A developer runs `ALTER TABLE users ADD COLUMN age` and the sink chokes on an unknown field. Or `DROP COLUMN email`, and consumers expecting it break. Schema changes are the most common cause of CDC pipeline outages.",
+      "truths": [
+        "Producers and consumers upgrade at different times.",
+        "Some changes are readable by old consumers and some aren't.",
+        "Sending the full schema in every message is wasteful."
+      ],
+      "derivation": [
+        "Register every event schema in a **schema registry** (Confluent with Avro, Protobuf or JSON Schema).",
+        "Messages carry a **schema ID**, and consumers fetch the schema by ID.",
+        "Enforce a **compatibility mode**: BACKWARD (add optional fields), FORWARD (remove optional fields), FULL (both), never NONE in production.",
+        "Compatible changes **auto-evolve** sinks (e.g. ALTER the warehouse table), and incompatible ones are **rejected with an alert**.",
+        "Treat DDL on CDC'd tables like **code**: reviewed, with FULL compatibility in production."
+      ]
+    },
+    "analogy": {
+      "title": "A shared form with version numbers",
+      "story": "Every form has a version number in the corner. Adding an optional box is fine because old readers ignore it. Removing a box people rely on is refused by the forms office until everyone's been told. Readers look up the version to know how to read each form.",
+      "mapping": [
+        [
+          "Forms office",
+          "Schema registry"
+        ],
+        [
+          "Version number in the corner",
+          "Schema ID in message"
+        ],
+        [
+          "Optional new box",
+          "Backward-compatible change"
+        ],
+        [
+          "Refusing removal",
+          "Compatibility check rejects"
+        ],
+        [
+          "Readers looking up the version",
+          "Consumers fetch schema by ID"
+        ]
+      ],
+      "breaks": "Paper forms can't break a reader's machine. An unchecked incompatible schema can halt a sink or silently mis-parse values (e.g. INT vs BIGINT)."
+    },
+    "mindmap": {
+      "center": "Schema Evolution",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Add / drop / retype columns",
+            "Sinks break"
+          ]
+        },
+        {
+          "label": "Registry",
+          "children": [
+            "Versioned schemas",
+            "Schema ID per message"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "BACKWARD",
+            "FORWARD",
+            "FULL",
+            "NONE (dev only)"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Compatible → auto-evolve",
+            "Incompatible → reject + alert"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "FULL in prod",
+            "Review DDL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adding a column vs dropping one",
+      "scenario": "Two ALTERs on `users` with FULL compatibility in the registry.",
+      "flow": [
+        "ADD COLUMN age NULL → accepted",
+        "Sink adds column",
+        "DROP COLUMN email → rejected",
+        "Alert before damage"
+      ],
+      "steps": [
+        {
+          "label": "Add",
+          "detail": "An optional field with a default is compatible, so the new version is registered and the warehouse gains `age`."
+        },
+        {
+          "label": "Drop",
+          "detail": "Removing a field consumers rely on violates FULL, so registration fails and the pipeline alerts."
+        },
+        {
+          "label": "Resolve",
+          "detail": "Coordinate with consumers, deprecate first, then remove."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# set compatibility for a subject\ncurl -X PUT -H 'Content-Type: application/json' \\\n  --data '{\"compatibility\": \"FULL\"}' \\\n  http://schema-registry:8081/config/postgres.public.users-value"
+        }
+      ],
+      "outcome": "schema changes stop being surprise outages and become reviewed, versioned events."
+    },
+    "summary": {
+      "points": [
+        "Version every event schema.",
+        "Enforce compatibility, FULL in production.",
+        "Breaking changes are caught before data is corrupted."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which mode allows safely adding an optional field?",
+        "a": "BACKWARD (and FULL): consumers on the new schema can still read data written with the old one."
+      }
+    ]
+  },
+  "the-transactional-outbox-pattern": {
+    "core": "Instead of writing to the database and separately publishing a message (a dual write that can half-fail), write the event into an outbox table in the same transaction and let CDC publish it. Delivery is at-least-once, so consumers must be idempotent.",
+    "first_principles": {
+      "problem": "Saving an order and then calling or publishing to Shipping are two separate writes. If the first succeeds and the second fails, the order exists but Shipping never hears. Reverse the order and you can announce an order that was never saved. Retries risk duplicates.",
+      "truths": [
+        "Two writes to two systems can't be atomic without coordination.",
+        "Two writes in one local transaction are atomic.",
+        "CDC turns committed rows into reliable events."
+      ],
+      "derivation": [
+        "Write the business row **and** an `outbox` row (event type, payload) in **one local transaction**.",
+        "Let **Debezium** read the outbox from the WAL and publish it (Outbox Event Router).",
+        "Accept **at-least-once** delivery: make consumers **idempotent** (dedupe by event id, `ON CONFLICT DO NOTHING`).",
+        "**Clean up** published outbox rows (router delete or a scheduled job).",
+        "No two-phase commit needed, so you avoid its latency and failure modes."
+      ]
+    },
+    "analogy": {
+      "title": "A cheque with the receipt attached",
+      "story": "Instead of paying a bill and then separately posting the receipt (which might get lost), you attach the receipt to the cheque itself. The bank processes both together, and whoever reads the bank's ledger forwards the receipt.",
+      "mapping": [
+        [
+          "Paying + posting separately",
+          "Dual write"
+        ],
+        [
+          "Receipt stapled to cheque",
+          "Outbox row in same transaction"
+        ],
+        [
+          "Bank ledger",
+          "WAL"
+        ],
+        [
+          "Forwarding from the ledger",
+          "CDC publishes event"
+        ],
+        [
+          "Ignoring duplicate receipts",
+          "Idempotent consumers"
+        ]
+      ],
+      "breaks": "A receipt is forwarded once. CDC may forward the same event twice after a crash, so receivers must tolerate duplicates."
+    },
+    "mindmap": {
+      "center": "Transactional Outbox",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Dual write",
+            "Half failures",
+            "Retry duplicates"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Business row + outbox row",
+            "One transaction"
+          ]
+        },
+        {
+          "label": "Publish",
+          "children": [
+            "Debezium reads WAL",
+            "Outbox Event Router"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "At-least-once",
+            "Idempotent consumers"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Clean up outbox",
+            "No 2PC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "OrderPlaced reaches Shipping exactly as often as orders exist",
+      "scenario": "The order service previously lost notifications when the HTTP call to Shipping timed out.",
+      "flow": [
+        "BEGIN",
+        "INSERT order",
+        "INSERT outbox OrderPlaced",
+        "COMMIT",
+        "Debezium → Kafka",
+        "Shipping consumes (idempotent)"
+      ],
+      "steps": [
+        {
+          "label": "Atomic",
+          "detail": "The order and its event commit together or not at all."
+        },
+        {
+          "label": "Reliable",
+          "detail": "Even if Kafka is down, the event waits in the WAL and outbox until published."
+        },
+        {
+          "label": "Duplicates",
+          "detail": "Shipping records processed event ids and ignores repeats."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN;\nINSERT INTO orders (id, customer_id, status, total_cents) VALUES (1001, 42, 'pending', 4999);\nINSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload)\nVALUES (gen_random_uuid(), 'Order', 1001, 'OrderPlaced',\n        '{\"order_id\": 1001, \"total_cents\": 4999}');\nCOMMIT;\n-- consumer side\nINSERT INTO processed_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING;"
+        }
+      ],
+      "outcome": "no order without its event and no event without its order, using no distributed transactions."
+    },
+    "summary": {
+      "points": [
+        "Never dual-write across systems.",
+        "Outbox + CDC = atomic save-and-publish.",
+        "Consumers must be idempotent."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must outbox consumers be idempotent?",
+        "a": "CDC delivery is at-least-once. After a crash the same event can be published again, and processing it twice must be harmless."
+      }
+    ]
+  }
+}
