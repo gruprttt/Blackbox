@@ -1,0 +1,959 @@
+{
+  "introduction-the-illusion-of-solitude": {
+    "core": "Isolation is the illusion that each transaction runs alone. Running transactions truly one at a time is too slow, so isolation levels let you choose how much interference to tolerate in exchange for speed.",
+    "first_principles": {
+      "problem": "Thousands of transactions per second touch overlapping data. Running them one at a time would make one slow query block everyone. Running them in parallel creates race conditions: half-finished updates, two people booking the last seat.",
+      "truths": [
+        "Serial execution is correct but slow.",
+        "Parallel execution is fast but creates timing-dependent bugs.",
+        "Each guarantee you add costs contention or retries."
+      ],
+      "derivation": [
+        "Run transactions **in parallel** for throughput.",
+        "Define the specific **anomalies** parallelism can cause.",
+        "Offer **isolation levels**, each blocking more anomalies at more cost.",
+        "Pick a level per workload, because the wrong one causes bugs that only appear under load."
+      ]
+    },
+    "analogy": {
+      "title": "A shared spreadsheet with a hundred editors",
+      "story": "If everyone edits at once you might read a cell mid-update or overwrite a colleague's change without knowing. Locking the sheet so one person edits at a time is safe but nobody gets work done. You need rules somewhere in between.",
+      "mapping": [
+        [
+          "Hundred editors",
+          "Concurrent transactions"
+        ],
+        [
+          "One editor at a time",
+          "Serial execution"
+        ],
+        [
+          "Rules in between",
+          "Isolation levels"
+        ],
+        [
+          "Overwriting unseen changes",
+          "Anomalies"
+        ]
+      ],
+      "breaks": "Editors can see each other's cursors. Transactions can't see each other at all, so bugs show up silently as wrong data, not as visible collisions."
+    },
+    "mindmap": {
+      "center": "Isolation",
+      "branches": [
+        {
+          "label": "Ideal",
+          "children": [
+            "Each txn alone",
+            "The I in ACID"
+          ]
+        },
+        {
+          "label": "Reality",
+          "children": [
+            "Parallel execution",
+            "Race conditions"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Tolerate some interference",
+            "For speed"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Load-only bugs",
+            "Hard to reproduce"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A bug that only exists in production",
+      "scenario": "A booking system passes every test but double-books seats on busy evenings.",
+      "flow": [
+        "Tests: one user",
+        "Prod: concurrent users",
+        "Race on last seat",
+        "Double booking"
+      ],
+      "steps": [
+        {
+          "label": "Tests",
+          "detail": "Single-user tests never interleave transactions, so they never fail."
+        },
+        {
+          "label": "Production",
+          "detail": "Two requests read \"seat free\" at the same moment and both book it."
+        },
+        {
+          "label": "Lesson",
+          "detail": "The isolation level, not the code path, decides whether that's possible."
+        }
+      ],
+      "code": [],
+      "outcome": "you start treating isolation as a design decision instead of a default."
+    },
+    "summary": {
+      "points": [
+        "Isolation = the illusion of running alone.",
+        "Levels trade correctness for throughput.",
+        "Wrong choices create load-only bugs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not always run fully serial?",
+        "a": "Throughput would collapse. One slow transaction would block all others."
+      }
+    ]
+  },
+  "anomaly-1-dirty-read": {
+    "core": "A dirty read is seeing another transaction's uncommitted changes, which may still be rolled back. Read Committed (the Postgres and Oracle default) prevents it.",
+    "first_principles": {
+      "problem": "If a transaction can see work that hasn't been committed, it may act on data that never officially existed. A balance that briefly included a transfer that was then cancelled is enough to cause a wrong lending decision.",
+      "truths": [
+        "Uncommitted changes can still be rolled back.",
+        "Acting on data that disappears produces wrong outcomes.",
+        "Committed data is final."
+      ],
+      "derivation": [
+        "Never let a transaction read **uncommitted** versions of rows.",
+        "Show only the **last committed** version: **Read Committed**.",
+        "Leave Read Uncommitted for rare approximate analytics, and even Postgres treats it as Read Committed."
+      ]
+    },
+    "analogy": {
+      "title": "Reading a colleague's draft email",
+      "story": "You glance at a colleague's draft saying \"Bob's raise is approved\" and congratulate Bob. Your colleague then deletes the draft. You acted on something that was never sent.",
+      "mapping": [
+        [
+          "Draft email",
+          "Uncommitted write"
+        ],
+        [
+          "Deleting the draft",
+          "ROLLBACK"
+        ],
+        [
+          "Congratulating Bob",
+          "Acting on a dirty read"
+        ],
+        [
+          "Only reading sent emails",
+          "Read Committed"
+        ]
+      ],
+      "breaks": "Drafts are visibly drafts. Databases at Read Uncommitted give no hint that a value is uncommitted."
+    },
+    "mindmap": {
+      "center": "Dirty Read",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Read uncommitted data"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Writer rolls back",
+            "Acted on a lie"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Read Committed",
+            "PG / Oracle default"
+          ]
+        },
+        {
+          "label": "Read Uncommitted",
+          "children": [
+            "Approx analytics only",
+            "PG maps to RC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The cancelled transfer",
+      "scenario": "A adds $100 to Bob's balance, B reads it, then A rolls back.",
+      "flow": [
+        "A: +$100 (uncommitted)",
+        "B: reads balance +100",
+        "A: ROLLBACK",
+        "B acted on fake money"
+      ],
+      "steps": [
+        {
+          "label": "Dirty",
+          "detail": "Under Read Uncommitted, B sees $100 that will never exist."
+        },
+        {
+          "label": "Damage",
+          "detail": "B sends \"your balance is X\" or approves a loan on it."
+        },
+        {
+          "label": "Fixed",
+          "detail": "Under Read Committed, B sees the original balance until A commits."
+        }
+      ],
+      "code": [],
+      "outcome": "decisions are only ever based on committed data."
+    },
+    "summary": {
+      "points": [
+        "Dirty read = seeing uncommitted data.",
+        "Read Committed prevents it.",
+        "Read Uncommitted is almost never right."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is there any good use for Read Uncommitted?",
+        "a": "Rarely: approximate counts on huge tables where ±1% error is fine. Most engineers still use Read Committed."
+      }
+    ]
+  },
+  "anomaly-2-non-repeatable-read-fuzzy-read": {
+    "core": "A non-repeatable read is reading the same row twice in one transaction and getting different values because someone committed in between. Repeatable Read (snapshot isolation) prevents it.",
+    "first_principles": {
+      "problem": "Read Committed shows the latest committed data on every statement. Within one transaction that means a row can change between two reads, and calculations mixing both values silently become inconsistent.",
+      "truths": [
+        "Each statement under Read Committed may see newer commits.",
+        "A transaction's logic often reads the same row more than once.",
+        "Mixing values from different moments breaks arithmetic."
+      ],
+      "derivation": [
+        "Pin a **snapshot** at the start of the transaction.",
+        "Return the snapshot version on every read of the row, whatever commits later.",
+        "That's **Repeatable Read / snapshot isolation**.",
+        "Distinguish it from phantoms: this is about **a row's values**, not the **set of rows**."
+      ]
+    },
+    "analogy": {
+      "title": "A price tag that changes while you shop",
+      "story": "You note a jacket at $10, keep shopping, and at checkout the tag says $15. Your budget maths used $10 and the till uses $15. A price lock for your shopping trip would keep your sums consistent.",
+      "mapping": [
+        [
+          "Price noted at $10",
+          "First read"
+        ],
+        [
+          "Tag changed to $15",
+          "Concurrent committed update"
+        ],
+        [
+          "Price lock for your trip",
+          "Transaction snapshot"
+        ],
+        [
+          "Budget maths broken",
+          "Inconsistent calculation"
+        ]
+      ],
+      "breaks": "A shop would honour the lower price. A database at Read Committed just gives you the new value with no warning."
+    },
+    "mindmap": {
+      "center": "Non-Repeatable Read",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Same row, two reads",
+            "Different values"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "Commit in between",
+            "Per-statement snapshot"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Repeatable Read",
+            "Snapshot isolation"
+          ]
+        },
+        {
+          "label": "Not phantom",
+          "children": [
+            "Values change",
+            "vs set of rows changes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An invoice with mismatched maths",
+      "scenario": "A reads the price for the subtotal, B updates the price and commits, and A reads it again for tax.",
+      "flow": [
+        "A: price = $10",
+        "B: price → $15, COMMIT",
+        "A: price = $15",
+        "Subtotal $10, tax on $15"
+      ],
+      "steps": [
+        {
+          "label": "Bug",
+          "detail": "Under Read Committed the invoice mixes two prices, and no error is raised."
+        },
+        {
+          "label": "Fix",
+          "detail": "`BEGIN ISOLATION LEVEL REPEATABLE READ`: both reads return $10."
+        },
+        {
+          "label": "Note",
+          "detail": "B's change still commits. A just doesn't see it until its next transaction."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN ISOLATION LEVEL REPEATABLE READ;\nSELECT price FROM products WHERE id = 5;   -- $10\n-- ... B commits $15 ...\nSELECT price FROM products WHERE id = 5;   -- still $10\nCOMMIT;"
+        }
+      ],
+      "outcome": "the invoice is internally consistent."
+    },
+    "summary": {
+      "points": [
+        "Same row, different values within one transaction.",
+        "Repeatable Read pins a snapshot.",
+        "Different from phantoms (row sets)."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does Repeatable Read stop B from updating the price?",
+        "a": "No. B commits normally. A simply keeps reading its snapshot version."
+      }
+    ]
+  },
+  "anomaly-3-phantom-read": {
+    "core": "A phantom read is re-running a query in one transaction and finding rows that have appeared or disappeared, because someone inserted or deleted matching rows. Serializable prevents it everywhere, and Postgres's Repeatable Read also does.",
+    "first_principles": {
+      "problem": "Locking or snapshotting existing rows doesn't stop new rows from being added. A report that sums `salary > 100k` twice may see a new hire in the second query, and its totals won't add up.",
+      "truths": [
+        "Queries select sets of rows by condition.",
+        "Inserts can add rows that match a condition you've already evaluated.",
+        "Different databases implement Repeatable Read differently."
+      ],
+      "derivation": [
+        "Protect not just rows but **predicates** (the set matching a condition).",
+        "**Serializable** guarantees this by definition.",
+        "**Postgres Repeatable Read** uses a whole-transaction snapshot, so new rows are invisible and phantoms are prevented in practice.",
+        "**MySQL InnoDB Repeatable Read** needs **gap locks** to block inserts into scanned ranges.",
+        "Always answer \"does RR prevent phantoms?\" with **\"depends on the engine\"**."
+      ]
+    },
+    "analogy": {
+      "title": "Counting guests at a party",
+      "story": "You count 5 people in the VIP room and write it down. While you fetch drinks, someone new walks in. Counting again you get 6. Nobody changed, but the *set* of people did.",
+      "mapping": [
+        [
+          "People in the VIP room",
+          "Rows matching WHERE"
+        ],
+        [
+          "New guest walks in",
+          "Concurrent INSERT"
+        ],
+        [
+          "Count changes",
+          "Phantom read"
+        ],
+        [
+          "Locking the door",
+          "Gap / predicate lock"
+        ]
+      ],
+      "breaks": "You can see the door open. A transaction can't see the insert. It just gets a different result set."
+    },
+    "mindmap": {
+      "center": "Phantom Read",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Row set changes",
+            "Inserts / deletes"
+          ]
+        },
+        {
+          "label": "vs Non-repeatable",
+          "children": [
+            "Set vs values"
+          ]
+        },
+        {
+          "label": "Serializable",
+          "children": [
+            "Prevents everywhere"
+          ]
+        },
+        {
+          "label": "Engine specifics",
+          "children": [
+            "PG RR: prevented",
+            "MySQL RR: gap locks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A payroll report",
+      "scenario": "A sums high earners twice. B hires Carol at $150k between the two queries.",
+      "flow": [
+        "A: 5 rows, $600k",
+        "B: INSERT Carol, COMMIT",
+        "A: 6 rows, $750k",
+        "Report doesn't add up"
+      ],
+      "steps": [
+        {
+          "label": "Read Committed",
+          "detail": "The second query sees Carol: a phantom."
+        },
+        {
+          "label": "PG Repeatable Read",
+          "detail": "Both queries use the start snapshot, so Carol is invisible to A."
+        },
+        {
+          "label": "Serializable",
+          "detail": "Guaranteed on any compliant engine."
+        }
+      ],
+      "code": [],
+      "outcome": "the report's line items and total come from the same set of rows."
+    },
+    "summary": {
+      "points": [
+        "Phantoms are about sets, not values.",
+        "Serializable prevents them.",
+        "RR behaviour depends on the engine."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does Repeatable Read prevent phantoms?",
+        "a": "It depends. The SQL standard doesn't require it. Postgres's MVCC does in practice, and MySQL InnoDB uses gap locks."
+      }
+    ]
+  },
+  "the-hierarchy-of-isolation-levels": {
+    "core": "The four standard isolation levels form a ladder: each prevents one more anomaly than the one below. Databases implement them with locks or (mostly today) MVCC snapshots, and MVCC's cost is bloat.",
+    "first_principles": {
+      "problem": "You need a quick way to know what each level allows, what your database's default is, and what each level costs in practice.",
+      "truths": [
+        "Each anomaly needs its own protection.",
+        "Locks protect by blocking, and MVCC protects by versioning.",
+        "Old versions must eventually be cleaned up."
+      ],
+      "derivation": [
+        "**Read Uncommitted**: nothing prevented.",
+        "**Read Committed**: no dirty reads (Postgres, Oracle, SQL Server default).",
+        "**Repeatable Read**: also no non-repeatable reads, and phantoms depend on the database (MySQL default).",
+        "**Serializable**: no anomalies.",
+        "Implement with **locks** (simple, contention) or **MVCC** (readers don't block writers, but long snapshots cause bloat)."
+      ]
+    },
+    "analogy": {
+      "title": "Security levels in a building",
+      "story": "Lobby access, then floor access, then office access, then vault access. Each level includes everything below it plus one more restriction, and higher levels mean more checks and slower movement.",
+      "mapping": [
+        [
+          "Lobby only",
+          "Read Uncommitted"
+        ],
+        [
+          "Floor access",
+          "Read Committed"
+        ],
+        [
+          "Office access",
+          "Repeatable Read"
+        ],
+        [
+          "Vault access",
+          "Serializable"
+        ],
+        [
+          "More checks",
+          "More contention / retries"
+        ]
+      ],
+      "breaks": "Building checks don't create rubbish. MVCC creates old row versions, and a single long transaction can make them pile up into table bloat."
+    },
+    "mindmap": {
+      "center": "Isolation Ladder",
+      "branches": [
+        {
+          "label": "Read Uncommitted",
+          "children": [
+            "All anomalies possible"
+          ]
+        },
+        {
+          "label": "Read Committed",
+          "children": [
+            "No dirty reads",
+            "PG / Oracle default"
+          ]
+        },
+        {
+          "label": "Repeatable Read",
+          "children": [
+            "No non-repeatable",
+            "Phantoms: DB-dependent",
+            "MySQL default"
+          ]
+        },
+        {
+          "label": "Serializable",
+          "children": [
+            "No anomalies"
+          ]
+        },
+        {
+          "label": "Implementation",
+          "children": [
+            "Locks",
+            "MVCC + VACUUM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A forgotten open transaction",
+      "scenario": "Someone opens a REPEATABLE READ session in psql at 9:00 and goes to lunch.",
+      "flow": [
+        "Snapshot held for hours",
+        "Vacuum can't remove versions",
+        "Dead tuples pile up",
+        "Queries slow"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "MVCC must keep every row version that snapshot might need."
+        },
+        {
+          "label": "Find",
+          "detail": "Look in `pg_stat_activity` for long `xact_start` and `idle in transaction`."
+        },
+        {
+          "label": "Prevent",
+          "detail": "Set `idle_in_transaction_session_timeout`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT pid, state, now() - xact_start AS open_for\nFROM pg_stat_activity WHERE xact_start IS NOT NULL ORDER BY open_for DESC LIMIT 5;"
+        }
+      ],
+      "outcome": "you see that isolation choices have an operational cost, not just a correctness effect."
+    },
+    "summary": {
+      "points": [
+        "Each level adds one protection.",
+        "Know your engine's default.",
+        "MVCC: readers don't block writers, but snapshots cause bloat."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the default isolation in Postgres vs MySQL?",
+        "a": "Postgres: Read Committed. MySQL InnoDB: Repeatable Read."
+      }
+    ]
+  },
+  "the-silent-killer-write-skew": {
+    "core": "Write skew is when two transactions read the same facts, each decide it's safe, and write to different rows, together breaking a rule. Snapshot isolation can't see it, while Serializable (SSI) or explicit locks can.",
+    "first_principles": {
+      "problem": "Snapshot isolation feels safe, but there's a gap. Rules that span several rows (\"at least one doctor on call\", \"balance covers all payments\") can be broken by two transactions that never touch the same row, so no conflict is ever detected.",
+      "truths": [
+        "Each transaction checks the rule against its own snapshot.",
+        "Row-level conflict detection only catches writes to the same row.",
+        "Rules that span rows need protection across rows."
+      ],
+      "derivation": [
+        "Recognise the pattern: **read a set → decide → write a different row**.",
+        "Snapshot isolation sees **no write-write conflict**, so both commit.",
+        "**Serializable Snapshot Isolation** tracks read/write dependencies and aborts one transaction in a dangerous cycle.",
+        "Or **lock what you read** (`SELECT … FOR UPDATE`) so the second transaction waits and sees the change.",
+        "Contrast with a **lost update** (same row overwritten), which Repeatable Read or `FOR UPDATE` fixes."
+      ]
+    },
+    "analogy": {
+      "title": "Two doctors both leave",
+      "story": "Two on-call doctors each look at the roster, see \"2 on call\", and think it's fine for them to leave. Each crosses out only their own name. Neither changed the other's line, so nothing looks like a conflict, yet the ward is left with nobody.",
+      "mapping": [
+        [
+          "Roster shows 2",
+          "Snapshot read"
+        ],
+        [
+          "Each crosses out own name",
+          "Writes to different rows"
+        ],
+        [
+          "Nobody on call",
+          "Violated invariant"
+        ],
+        [
+          "Phoning each other first",
+          "Serializable / FOR UPDATE"
+        ]
+      ],
+      "breaks": "Doctors might notice in the hallway. Transactions never do, and both get success responses."
+    },
+    "mindmap": {
+      "center": "Write Skew",
+      "branches": [
+        {
+          "label": "Pattern",
+          "children": [
+            "Read overlap",
+            "Decide",
+            "Write different rows"
+          ]
+        },
+        {
+          "label": "Why missed",
+          "children": [
+            "No same-row conflict",
+            "Snapshot isolation"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "On-call",
+            "Double spend",
+            "Seat booking",
+            "Unique username"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "SERIALIZABLE (SSI)",
+            "SELECT … FOR UPDATE",
+            "Constraints"
+          ]
+        },
+        {
+          "label": "vs lost update",
+          "children": [
+            "Same row",
+            "RR / FOR UPDATE fixes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The on-call doctors",
+      "scenario": "Alice and Bob both on call. Both try to go off at the same moment.",
+      "flow": [
+        "Both: count = 2",
+        "A: Alice OFF",
+        "B: Bob OFF",
+        "Both COMMIT",
+        "0 on call",
+        "SERIALIZABLE → one aborts"
+      ],
+      "steps": [
+        {
+          "label": "Snapshot isolation",
+          "detail": "Both commits succeed silently."
+        },
+        {
+          "label": "Serializable",
+          "detail": "Postgres detects the dependency cycle and aborts one with SQLSTATE 40001."
+        },
+        {
+          "label": "Retry",
+          "detail": "The retry sees 1 on call and refuses."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN ISOLATION LEVEL SERIALIZABLE;\nSELECT count(*) FROM doctors WHERE status = 'ON_CALL';\nUPDATE doctors SET status = 'OFF' WHERE name = 'Alice';\nCOMMIT;  -- may fail: could not serialize access … → retry"
+        }
+      ],
+      "outcome": "the rule holds under concurrency, and the app handles the retry."
+    },
+    "summary": {
+      "points": [
+        "Write skew passes Repeatable Read.",
+        "Serializable or explicit locks stop it.",
+        "No error is raised without them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Lost update vs write skew?",
+        "a": "A lost update is two writes to the same row, one overwriting the other. Write skew is writes to different rows that jointly violate a cross-row rule."
+      }
+    ]
+  },
+  "pessimistic-locking-trust-no-one": {
+    "core": "Pessimistic locking assumes conflicts will happen and locks rows when reading (`SELECT … FOR UPDATE`), so others wait. It's safe and simple, but it causes contention and possible deadlocks.",
+    "first_principles": {
+      "problem": "Serializable isolation may be too expensive for a hot path, yet read-then-write logic still needs protection from concurrent changes. We need a targeted way to say \"these rows are mine until I commit\".",
+      "truths": [
+        "Holding a lock makes others wait.",
+        "Locks taken in different orders can wait on each other forever.",
+        "Some operations must not fail after the user has committed to them."
+      ],
+      "derivation": [
+        "Lock rows **at read time** with `FOR UPDATE`. Competing transactions block until you commit.",
+        "Use lighter variants: `FOR SHARE`, `FOR NO KEY UPDATE`, and `SKIP LOCKED` for job queues.",
+        "Keep lock-holding transactions **short**, with no network calls or user waits inside.",
+        "Lock in a **consistent order** and **retry on deadlock** (the database aborts one victim)."
+      ]
+    },
+    "analogy": {
+      "title": "Holding the item at the till",
+      "story": "When you pick up the last concert T-shirt, you keep your hand on it until you've paid. Anyone else who wants it waits. If you wander off to take a phone call while holding it, the whole queue stalls.",
+      "mapping": [
+        [
+          "Hand on the shirt",
+          "Row lock (FOR UPDATE)"
+        ],
+        [
+          "Others waiting",
+          "Blocked transactions"
+        ],
+        [
+          "Wandering off mid-purchase",
+          "Slow work while holding locks"
+        ],
+        [
+          "Two people each holding what the other wants",
+          "Deadlock"
+        ]
+      ],
+      "breaks": "Shoppers can negotiate. Deadlocked transactions can't, so the database must kill one, and the app must retry it."
+    },
+    "mindmap": {
+      "center": "Pessimistic Locking",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Lock on read",
+            "Others wait"
+          ]
+        },
+        {
+          "label": "Variants",
+          "children": [
+            "FOR UPDATE",
+            "FOR SHARE",
+            "NO KEY UPDATE",
+            "SKIP LOCKED"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Contention",
+            "Deadlocks"
+          ]
+        },
+        {
+          "label": "Best for",
+          "children": [
+            "Frequent conflicts",
+            "Costly failures",
+            "Holding reservations"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A job queue with SKIP LOCKED",
+      "scenario": "Ten workers pull jobs from a `jobs` table without taking the same job.",
+      "flow": [
+        "Worker: SELECT … FOR UPDATE SKIP LOCKED",
+        "Gets an unlocked job",
+        "Process",
+        "UPDATE done, COMMIT"
+      ],
+      "steps": [
+        {
+          "label": "Claim",
+          "detail": "Each worker locks one pending row, and `SKIP LOCKED` skips rows others hold."
+        },
+        {
+          "label": "No waiting",
+          "detail": "Workers never block each other and never double-process."
+        },
+        {
+          "label": "Keep short",
+          "detail": "Commit quickly, or long jobs hold locks and connections."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "BEGIN;\nSELECT id FROM jobs WHERE status = 'pending'\nORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED;\nUPDATE jobs SET status = 'done' WHERE id = $1;\nCOMMIT;"
+        }
+      ],
+      "outcome": "safe, parallel job claiming with no duplicates."
+    },
+    "summary": {
+      "points": [
+        "Lock early, others wait.",
+        "Keep locked transactions short.",
+        "Handle deadlocks with retries."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you reduce deadlocks?",
+        "a": "Acquire locks in a consistent order, keep transactions short, and retry when the database aborts one."
+      }
+    ]
+  },
+  "optimistic-locking-hope-for-the-best": {
+    "core": "Optimistic locking lets everyone proceed and checks for conflicts at write time with a version number. It's great when conflicts are rare and terrible when many writers fight over one row.",
+    "first_principles": {
+      "problem": "Locking rows while a user thinks for 2 minutes would freeze everyone else. But without protection, two editors can overwrite each other's changes (lost update). We need protection that doesn't hold locks while people think.",
+      "truths": [
+        "Most edits to a given row don't overlap in time.",
+        "A version number changes whenever a row changes.",
+        "A conditional UPDATE reports how many rows it changed."
+      ],
+      "derivation": [
+        "Add a `version` column.",
+        "Read the row **with its version**, without locking.",
+        "Update **only if the version is unchanged** and increment it.",
+        "**1 row** updated means success. **0 rows** means someone else changed it, so reload and retry with backoff.",
+        "Watch the **retry rate**: a spike means contention is too high and pessimistic locking is better."
+      ]
+    },
+    "analogy": {
+      "title": "Editing a wiki page",
+      "story": "You open a page to edit (version 7). When you save, the wiki checks: is it still version 7? If someone saved in the meantime, you get \"edit conflict, please merge\" instead of silently overwriting their work.",
+      "mapping": [
+        [
+          "Page version 7",
+          "version column"
+        ],
+        [
+          "Save checks version",
+          "UPDATE … WHERE version = 7"
+        ],
+        [
+          "Edit conflict",
+          "0 rows updated"
+        ],
+        [
+          "Merge and resave",
+          "Reload and retry"
+        ]
+      ],
+      "breaks": "Wikis have a handful of editors per page. If 100 threads update one hot row, 99 fail every round and the retries make things worse."
+    },
+    "mindmap": {
+      "center": "Optimistic Locking",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "No locks on read",
+            "Check at write"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "version column",
+            "WHERE version = n",
+            "Rows affected 0/1"
+          ]
+        },
+        {
+          "label": "Retry",
+          "children": [
+            "Reload",
+            "Exponential backoff",
+            "Give up after N"
+          ]
+        },
+        {
+          "label": "Use when",
+          "children": [
+            "Rare conflicts",
+            "Long think time"
+          ]
+        },
+        {
+          "label": "Avoid when",
+          "children": [
+            "Hot rows",
+            "Retry storms"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two admins edit the same product",
+      "scenario": "Both open product 5 (version 1). One saves a new price, then the other saves a description.",
+      "flow": [
+        "Both read version 1",
+        "Admin A saves → version 2",
+        "Admin B saves WHERE version=1",
+        "0 rows → conflict",
+        "B reloads, merges, saves"
+      ],
+      "steps": [
+        {
+          "label": "A wins",
+          "detail": "`UPDATE … WHERE version = 1` changes 1 row, and the version is now 2."
+        },
+        {
+          "label": "B detected",
+          "detail": "B's update matches 0 rows, so the app shows a conflict instead of overwriting."
+        },
+        {
+          "label": "Retry",
+          "detail": "B reloads version 2 and reapplies their change."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "UPDATE products SET price = 20.00, version = version + 1\nWHERE id = 5 AND version = 1;   -- 1 row: ok · 0 rows: conflict, retry"
+        }
+      ],
+      "outcome": "no silent overwrites and no locks held while people think."
+    },
+    "summary": {
+      "points": [
+        "Version column + conditional update.",
+        "0 rows = conflict, so retry.",
+        "Great for rare conflicts, bad for hot rows."
+      ]
+    },
+    "check": [
+      {
+        "q": "When does optimistic locking perform worse than pessimistic?",
+        "a": "Under high contention on the same rows. Most attempts fail and retry, creating a retry storm."
+      }
+    ]
+  }
+}

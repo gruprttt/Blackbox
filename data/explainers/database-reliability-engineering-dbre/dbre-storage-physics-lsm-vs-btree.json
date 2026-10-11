@@ -1,0 +1,833 @@
+{
+  "introduction-the-physics-of-data": {
+    "core": "Every storage engine is a strategy for arranging bytes to exploit fast sequential I/O, either for reads (B-trees) or for writes (LSM trees). You rarely get both.",
+    "first_principles": {
+      "problem": "Databases look different on the surface, but underneath they all read and write bytes on a device. Sequential I/O streams at gigabytes per second, while scattered random I/O is 10–100× slower even on NVMe. How an engine lays bytes out decides what it's good and bad at.",
+      "truths": [
+        "Sequential I/O is fast, and random I/O is slow, even on SSDs.",
+        "Data organised for fast reads must be placed carefully on write.",
+        "Data written as fast as possible ends up scattered for reads."
+      ],
+      "derivation": [
+        "Organise data on write so reads are predictable: the **B-tree** (InnoDB, Postgres, Oracle, SQLite).",
+        "Append writes and organise later so writes are sequential: the **LSM tree** (Cassandra, RocksDB, ScyllaDB).",
+        "Expect each to struggle with the other's strength, and choose and tune accordingly."
+      ]
+    },
+    "analogy": {
+      "title": "Streaming a film vs. jumping to 256 frames",
+      "story": "Watching a film start to finish streams smoothly. Pulling 256 specific frames from all over the film means seeking again and again. Storage engines are strategies for turning their main workload into the streaming kind.",
+      "mapping": [
+        [
+          "Streaming the film",
+          "Sequential I/O"
+        ],
+        [
+          "Jumping to frames",
+          "Random I/O"
+        ],
+        [
+          "Pre-sorted film library",
+          "B-tree"
+        ],
+        [
+          "Recording live, editing later",
+          "LSM tree"
+        ]
+      ],
+      "breaks": "Films don't change after release. Databases change constantly, which is exactly why the write layout matters so much."
+    },
+    "mindmap": {
+      "center": "Storage Physics",
+      "branches": [
+        {
+          "label": "Facts",
+          "children": [
+            "Sequential I/O fast",
+            "Random I/O 10–100× slower"
+          ]
+        },
+        {
+          "label": "B-tree",
+          "children": [
+            "Read-optimised",
+            "InnoDB, PG, Oracle"
+          ]
+        },
+        {
+          "label": "LSM tree",
+          "children": [
+            "Write-optimised",
+            "Cassandra, RocksDB"
+          ]
+        },
+        {
+          "label": "Consequence",
+          "children": [
+            "Choice of DB",
+            "How you tune it",
+            "How it fails"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same hardware, two engines",
+      "scenario": "An NVMe disk does 6 GB/s sequential but far less for random 4 KB writes.",
+      "flow": [
+        "Random 4 KB writes: slow",
+        "B-tree updates in place → random",
+        "LSM appends → sequential",
+        "Write throughput differs"
+      ],
+      "steps": [
+        {
+          "label": "B-tree",
+          "detail": "Each update writes a page at a specific address: random I/O."
+        },
+        {
+          "label": "LSM",
+          "detail": "Updates are batched in memory and written as one big sequential file."
+        },
+        {
+          "label": "Reads",
+          "detail": "The B-tree finds any key in about 3 reads, while the LSM may check several files."
+        }
+      ],
+      "code": [],
+      "outcome": "you can predict which engine suits a workload from how its I/O pattern lines up with the hardware."
+    },
+    "summary": {
+      "points": [
+        "Arrangement of bytes decides performance.",
+        "B-tree = read-friendly, LSM = write-friendly.",
+        "Rarely both at once."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is random I/O slow even on SSDs?",
+        "a": "Each random read or write is a separate command round trip to the device, while sequential I/O streams many blocks per command."
+      }
+    ]
+  },
+  "the-b-tree-the-organized-librarian": {
+    "core": "A B-tree keeps data sorted in fixed pages and updates in place: reads take a predictable 3–4 page hops, but each write is a random page write plus a WAL record, and full pages split.",
+    "first_principles": {
+      "problem": "We want any row to be findable in a handful of reads, so data must always be sorted at a known address. But keeping it sorted means every change must go exactly to its spot on disk.",
+      "truths": [
+        "Sorted data enables logarithmic search.",
+        "A fixed address means a write must seek there.",
+        "Pages have a fixed size and can overflow."
+      ],
+      "derivation": [
+        "Arrange pages in a **balanced tree**: root, internal nodes, leaves.",
+        "To update: descend about 3–4 pages, change the bytes in memory, and **write the whole page back to its address**, which is random I/O.",
+        "When a page is full, **split** it into two and update the parent, which means more random writes.",
+        "Use a **WAL** first (sequential) for crash safety, so each write touches disk twice."
+      ]
+    },
+    "analogy": {
+      "title": "The organised librarian",
+      "story": "Every book is always shelved in exact alphabetical order. Finding one is quick: catalogue, aisle, shelf. Adding a book to a full \"S\" shelf means rearranging the shelf into two shelves.",
+      "mapping": [
+        [
+          "Exact shelf for every book",
+          "Update-in-place at a fixed page"
+        ],
+        [
+          "Catalogue → aisle → shelf",
+          "Root → internal → leaf"
+        ],
+        [
+          "Rearranging a full shelf",
+          "Page split"
+        ],
+        [
+          "Logbook of loans",
+          "WAL"
+        ]
+      ],
+      "breaks": "A librarian rearranges one shelf calmly. A page split can cascade up the tree under heavy inserts, multiplying random writes."
+    },
+    "mindmap": {
+      "center": "B-Tree",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Root",
+            "Internal nodes",
+            "Leaves with rows"
+          ]
+        },
+        {
+          "label": "Read",
+          "children": [
+            "3–4 page reads",
+            "Predictable"
+          ]
+        },
+        {
+          "label": "Write",
+          "children": [
+            "Rewrite whole page",
+            "Random I/O"
+          ]
+        },
+        {
+          "label": "Page split",
+          "children": [
+            "Full page → two",
+            "Parent updated"
+          ]
+        },
+        {
+          "label": "WAL",
+          "children": [
+            "Sequential intent log",
+            "Crash recovery"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Changing one email address",
+      "scenario": "`UPDATE users SET email = 'new@x.com' WHERE id = 42`",
+      "flow": [
+        "Descend root → leaf",
+        "Load 8 KB leaf page",
+        "Change 10 bytes",
+        "WAL append (sequential)",
+        "Page write (random)"
+      ],
+      "steps": [
+        {
+          "label": "Find",
+          "detail": "3–4 page reads, mostly from the buffer pool."
+        },
+        {
+          "label": "Log",
+          "detail": "Append the change to the WAL: fast and sequential."
+        },
+        {
+          "label": "Write",
+          "detail": "Later the whole 8 KB page is written back to its exact location: random I/O."
+        }
+      ],
+      "code": [],
+      "outcome": "reads stay fast and predictable, and writes pay for it with random page I/O."
+    },
+    "summary": {
+      "points": [
+        "Sorted, fixed locations → fast reads.",
+        "Update-in-place → random writes.",
+        "WAL + page = two writes per change."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Postgres need both WAL and heap files?",
+        "a": "The WAL is a sequential intent log for crash recovery and replication. The heap holds the actual pages organised for reads. Different jobs."
+      }
+    ]
+  },
+  "the-lsm-tree-the-fast-journalist": {
+    "core": "An LSM tree never overwrites: writes go to an in-memory MemTable (plus commit log), flush as immutable sorted SSTables, and are merged in the background by compaction. Writes are cheap, reads check several places.",
+    "first_principles": {
+      "problem": "Random page writes cap a B-tree's write throughput. For write-heavy workloads, we want every disk write to be large and sequential, which means giving up having each key in one fixed place.",
+      "truths": [
+        "RAM writes are essentially free compared with disk.",
+        "Big sequential writes are what disks are best at.",
+        "If data isn't overwritten, multiple versions coexist."
+      ],
+      "derivation": [
+        "Write into a sorted **MemTable** in RAM and append to a **commit log** for safety.",
+        "When it's about 64 MB, **flush** it as one immutable **SSTable** (sequential).",
+        "Updates are just newer entries, and the **highest timestamp wins** on read.",
+        "Background **compaction** merges SSTables level by level (L0 → L1 → L2…), dropping old versions.",
+        "Reads check **MemTable, then L0, L1, …** until found.",
+        "Watch for **compaction storms**: if compaction can't keep up, reads slow and writes stall."
+      ]
+    },
+    "analogy": {
+      "title": "The fast journalist",
+      "story": "New facts are always written at the bottom of the current notepad. You never erase. Full notepads are filed, and periodically several are merged into one tidy summary. To find the latest on a story, check today's pad first, then the filed ones from newest to oldest.",
+      "mapping": [
+        [
+          "Current notepad",
+          "MemTable"
+        ],
+        [
+          "Filed notepads",
+          "SSTables"
+        ],
+        [
+          "Merging into a summary",
+          "Compaction"
+        ],
+        [
+          "Newest note wins",
+          "Highest timestamp wins"
+        ],
+        [
+          "Too many unmerged pads",
+          "Compaction backlog"
+        ]
+      ],
+      "breaks": "A journalist merges when convenient. Compaction must keep pace with writes or L0 files pile up and the engine throttles new writes."
+    },
+    "mindmap": {
+      "center": "LSM Tree",
+      "branches": [
+        {
+          "label": "Write",
+          "children": [
+            "MemTable (RAM)",
+            "Commit log",
+            "Never overwrite"
+          ]
+        },
+        {
+          "label": "Flush",
+          "children": [
+            "SSTable",
+            "Immutable, sorted",
+            "Sequential"
+          ]
+        },
+        {
+          "label": "Compaction",
+          "children": [
+            "Merge levels",
+            "Drop old versions"
+          ]
+        },
+        {
+          "label": "Read",
+          "children": [
+            "MemTable → L0 → L1 …",
+            "Newest wins"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Compaction storms",
+            "Write stalls"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Updating a user's email twice",
+      "scenario": "user 123 changes email at T1 and T2.",
+      "flow": [
+        "T1 → MemTable → SSTable A",
+        "T2 → MemTable → SSTable B",
+        "Read: B (T2) wins",
+        "Compaction keeps only T2"
+      ],
+      "steps": [
+        {
+          "label": "Writes",
+          "detail": "Both versions exist on disk in different SSTables."
+        },
+        {
+          "label": "Read",
+          "detail": "Check the newest files first and return T2's value."
+        },
+        {
+          "label": "Compaction",
+          "detail": "Merging A and B drops the T1 version and reclaims space."
+        }
+      ],
+      "code": [],
+      "outcome": "writes are fast and sequential. Compaction quietly pays the cleanup cost later."
+    },
+    "summary": {
+      "points": [
+        "Append, don't overwrite.",
+        "MemTable → SSTable → compaction.",
+        "Reads check multiple places, so compaction health matters."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a compaction storm?",
+        "a": "When compaction falls behind the write rate: SSTables accumulate, reads touch more files, and the engine may throttle writes."
+      }
+    ]
+  },
+  "the-three-amplifications-the-rum-conjecture": {
+    "core": "Every storage engine pays in three currencies: read amplification, write amplification and space amplification. The RUM conjecture says improving any two worsens the third.",
+    "first_principles": {
+      "problem": "Engineers compare engines with vague words like \"fast writes\" or \"good for reads\". We need precise measures of how much extra work an engine does per logical operation, and an honest statement of what can't be optimised together.",
+      "truths": [
+        "Physical work is usually more than the logical request.",
+        "Indexes, filters and compaction trade resources for each other.",
+        "There's no free lunch in data layout."
+      ],
+      "derivation": [
+        "**Read amplification**: physical pages read per logical read (ideal 1).",
+        "**Write amplification**: bytes written to the device per byte logically changed (ideal 1).",
+        "**Space amplification**: disk used ÷ logical data size (ideal 1.0).",
+        "**RUM conjecture**: optimise Reads and Updates and you pay in Memory/space, and so on.",
+        "Tuning just moves the cost: Bloom filters cut RA but cost RAM, and aggressive compaction cuts SA but raises WA."
+      ]
+    },
+    "analogy": {
+      "title": "Fast, cheap, good: pick two",
+      "story": "A builder can make a house fast and cheap (not good), good and cheap (not fast), or fast and good (not cheap). Storage engines face the same triangle with reads, writes and space.",
+      "mapping": [
+        [
+          "Fast reads",
+          "Low read amplification"
+        ],
+        [
+          "Fast writes",
+          "Low write amplification"
+        ],
+        [
+          "Small footprint",
+          "Low space amplification"
+        ],
+        [
+          "Pick two",
+          "RUM conjecture"
+        ]
+      ],
+      "breaks": "A builder's triangle is about money. Write amplification also wears out SSDs physically, so it has a hardware lifetime cost."
+    },
+    "mindmap": {
+      "center": "RUM Conjecture",
+      "branches": [
+        {
+          "label": "Read amp",
+          "children": [
+            "Pages per lookup",
+            "B-tree ~1"
+          ]
+        },
+        {
+          "label": "Write amp",
+          "children": [
+            "Bytes written per byte",
+            "B-tree up to ~400×"
+          ]
+        },
+        {
+          "label": "Space amp",
+          "children": [
+            "Disk / logical",
+            "LSM 1.1–3×"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Bloom → RAM",
+            "Compaction → writes"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Optimise 2, pay on 3rd"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "High disk I/O with little write traffic",
+      "scenario": "A Cassandra cluster shows heavy disk writes even though application writes are low.",
+      "flow": [
+        "Low app writes",
+        "High disk writes",
+        "Compaction rewriting data",
+        "Tune strategy / TWCS"
+      ],
+      "steps": [
+        {
+          "label": "Diagnose",
+          "detail": "It's compaction-driven write amplification: background rewrites, not new data."
+        },
+        {
+          "label": "Options",
+          "detail": "Change compaction strategy, raise SSTable size thresholds, or use time windows so old data is dropped, not rewritten."
+        },
+        {
+          "label": "Trade",
+          "detail": "Less compaction may mean more read or space amplification. Choose consciously."
+        }
+      ],
+      "code": [],
+      "outcome": "you can explain disk activity in terms of amplification and tune knowingly."
+    },
+    "summary": {
+      "points": [
+        "Measure RA, WA, SA.",
+        "Optimise two, pay on the third.",
+        "Tuning moves costs, it doesn't remove them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do Bloom filters illustrate the RUM conjecture?",
+        "a": "They reduce read amplification by spending memory: a space cost exchanged for read speed."
+      }
+    ]
+  },
+  "deep-dive-write-amplification": {
+    "core": "B-trees amplify writes immediately (a 10-byte change rewrites a 4–8 KB page, about 400×). LSM trees amplify later, by rewriting data repeatedly during compaction (10–30×). Both cost I/O bandwidth and SSD lifespan.",
+    "first_principles": {
+      "problem": "A tiny logical change can mean far more physical bytes written. That eats I/O bandwidth and wears out SSDs, which have a finite number of write cycles. And the two engine types amplify at different times, which changes how they behave under load.",
+      "truths": [
+        "Devices write in blocks or pages, not bytes.",
+        "SSDs have a rated total write endurance (TBW).",
+        "Rewriting data in the background still consumes the same device."
+      ],
+      "derivation": [
+        "**B-tree**: change 10 bytes, rewrite a 4 KB page, about **400×**, plus WAL and possible split cascades. It happens **synchronously**, on the write path.",
+        "**LSM**: the first write is about 1×, but each compaction level rewrites the record, about **10–30×** over its life. It happens **asynchronously**.",
+        "Estimate SSD life: logical bytes/day × WA versus rated TBW.",
+        "In LSM, if the write rate exceeds the compaction rate, L0 grows and you get **write stalls**."
+      ]
+    },
+    "analogy": {
+      "title": "Fixing a typo in a printed book",
+      "story": "B-tree: to fix one word you reprint the entire page immediately. LSM: you add a correction slip now (cheap), but every time the book is re-bound into a new edition, all pages including your fix are reprinted again.",
+      "mapping": [
+        [
+          "Reprinting the page now",
+          "B-tree synchronous WA"
+        ],
+        [
+          "Correction slip",
+          "LSM initial write ≈ 1×"
+        ],
+        [
+          "Reprinting at each new edition",
+          "Compaction rewrites"
+        ],
+        [
+          "Printing press wear",
+          "SSD write endurance"
+        ]
+      ],
+      "breaks": "Reprinting doesn't slow down readers. Compaction competes with live reads and writes for the same disk."
+    },
+    "mindmap": {
+      "center": "Write Amplification",
+      "branches": [
+        {
+          "label": "B-tree",
+          "children": [
+            "Page rewrite ~400×",
+            "+ WAL, splits",
+            "Synchronous"
+          ]
+        },
+        {
+          "label": "LSM",
+          "children": [
+            "~1× initial",
+            "10–30× via compaction",
+            "Asynchronous"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "I/O bandwidth",
+            "SSD lifespan"
+          ]
+        },
+        {
+          "label": "LSM risk",
+          "children": [
+            "L0 growth",
+            "Write stalls"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SSD lifetime estimate",
+      "scenario": "1 GB/day of logical writes, a B-tree with about 400× write amplification, and a 600 TBW SSD.",
+      "flow": [
+        "1 GB/day logical",
+        "× 400 WA",
+        "400 GB/day physical",
+        "600 TBW ÷ 0.4 TB ≈ 4 years"
+      ],
+      "steps": [
+        {
+          "label": "Physical",
+          "detail": "400 GB/day actually hits the SSD."
+        },
+        {
+          "label": "Lifetime",
+          "detail": "600 TB ÷ 0.4 TB/day ≈ 1,500 days, about 4 years, instead of centuries."
+        },
+        {
+          "label": "Mitigate",
+          "detail": "Batch updates, use fillfactor or HOT updates, or a write-optimised engine for heavy-write tables."
+        }
+      ],
+      "code": [],
+      "outcome": "write amplification turns into a concrete hardware budget you can plan for."
+    },
+    "summary": {
+      "points": [
+        "B-tree WA is paid up front, LSM WA is paid later.",
+        "WA consumes bandwidth and SSD life.",
+        "LSM: compaction must keep up."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can an LSM absorb write bursts better than a B-tree?",
+        "a": "Bursts land in the in-memory MemTable and are flushed sequentially. The amplification is deferred to background compaction."
+      }
+    ]
+  },
+  "deep-dive-read-amplification": {
+    "core": "B-trees read about 1 page path per lookup because data sits exactly where the index says. LSM trees may check many files, and Bloom filters cut that to about 2–3× for point reads, but not for ranges.",
+    "first_principles": {
+      "problem": "In an LSM, the latest version of a key may be in the MemTable or any of several SSTables at different levels. Checking them all for every read would make reads 10–50× more expensive than in a B-tree.",
+      "truths": [
+        "B-tree data has one sorted, predictable location.",
+        "LSM data for a key may be spread across levels.",
+        "Knowing a file definitely lacks a key avoids reading it."
+      ],
+      "derivation": [
+        "**B-tree**: root, internal, leaf is about 3–4 reads with the top levels cached, so RA ≈ 1, and range scans read contiguous leaves.",
+        "**LSM**: check MemTable, L0 files, L1, L2…, so RA can reach 10–50×.",
+        "Add a **Bloom filter per SSTable** (about 10 bits/key, about 1% false positives) to skip about 99% of unnecessary files, giving RA ≈ 2–3×.",
+        "Pay in **RAM** (about 1.25 GB per billion keys).",
+        "Accept that Bloom filters **don't help ranges**, which is why Cassandra is weak at range scans."
+      ]
+    },
+    "analogy": {
+      "title": "Searching for a receipt",
+      "story": "B-tree: receipts are in one binder sorted by date, so you go straight to the page. LSM: receipts are in a dozen shoeboxes from different months. Each box has a sticker listing which shops are definitely not inside, so you only open boxes that might contain it.",
+      "mapping": [
+        [
+          "Sorted binder",
+          "B-tree"
+        ],
+        [
+          "Many shoeboxes",
+          "SSTables across levels"
+        ],
+        [
+          "\"Not inside\" sticker",
+          "Bloom filter"
+        ],
+        [
+          "Opening a box for nothing",
+          "False positive"
+        ],
+        [
+          "\"All receipts in March\"",
+          "Range query, filters can't help"
+        ]
+      ],
+      "breaks": "Stickers are free. Bloom filters live in RAM, and that memory is the space amplification you pay for faster reads."
+    },
+    "mindmap": {
+      "center": "Read Amplification",
+      "branches": [
+        {
+          "label": "B-tree",
+          "children": [
+            "3–4 page reads",
+            "RA ≈ 1",
+            "Great ranges"
+          ]
+        },
+        {
+          "label": "LSM",
+          "children": [
+            "MemTable + many files",
+            "RA 10–50× raw"
+          ]
+        },
+        {
+          "label": "Bloom filters",
+          "children": [
+            "~10 bits/key",
+            "~1% false positives",
+            "RA → 2–3×"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "RAM cost",
+            "No help for ranges"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Looking up user_id=123 in an LSM",
+      "scenario": "There's a MemTable, 3 L0 files, and 1 L1 and 1 L2 file. The key is in L2.",
+      "flow": [
+        "MemTable: miss",
+        "Bloom: skip 3 L0 + L1",
+        "Open L2",
+        "Found"
+      ],
+      "steps": [
+        {
+          "label": "Without filters",
+          "detail": "6 lookups, 5 of them wasted."
+        },
+        {
+          "label": "With filters",
+          "detail": "Bloom filters rule out L0 and L1 without disk reads, so 1 file is opened."
+        },
+        {
+          "label": "Range query",
+          "detail": "\"users 100–200\" can't use the filters, so every level is scanned."
+        }
+      ],
+      "code": [],
+      "outcome": "point reads become nearly as cheap as a B-tree, and range reads remain the LSM's weak spot."
+    },
+    "summary": {
+      "points": [
+        "B-tree RA ≈ 1.",
+        "LSM RA high, so Bloom filters are essential.",
+        "Filters cost RAM and don't help ranges."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a Bloom filter help a range query?",
+        "a": "It answers 'is this exact key possibly here?', not 'is any key between A and B here?'."
+      }
+    ]
+  },
+  "deep-dive-space-amplification": {
+    "core": "Disk used is always more than logical data. B-trees waste space in half-full pages (about 1.3–1.5×, plus Postgres MVCC bloat). LSM trees keep obsolete versions and tombstones until compaction (1.1–3×).",
+    "first_principles": {
+      "problem": "You store 100 GB of data and the disk shows 150 GB, or 300 GB. Where does the extra come from, and how do you get it back?",
+      "truths": [
+        "Splits leave pages partially filled.",
+        "MVCC keeps old row versions until vacuum.",
+        "Append-only engines keep old values and delete markers until merged."
+      ],
+      "derivation": [
+        "**B-tree**: page splits leave pages about 50% full, and averages settle around 60–70%, giving SA ≈ **1.3–1.5×**.",
+        "**Postgres**: dead tuples from MVCC can push SA to **2× or more** until VACUUM runs.",
+        "**LSM**: deletes write **tombstones**, and old versions remain until compaction merges them, giving SA **1.1–3×** depending on workload.",
+        "Reduce it with **compaction** (costs write amplification) or **time-window compaction** that drops whole expired files."
+      ]
+    },
+    "analogy": {
+      "title": "A wardrobe and a storage unit",
+      "story": "B-tree: shelves are never packed full, and rearranging leaves gaps. LSM: when you replace a coat you keep the old one in the storage unit with a \"discarded\" tag until the next clear-out day. Until then, both take space.",
+      "mapping": [
+        [
+          "Half-empty shelves",
+          "Partially filled pages"
+        ],
+        [
+          "Old coat still in storage",
+          "Obsolete version"
+        ],
+        [
+          "\"Discarded\" tag",
+          "Tombstone"
+        ],
+        [
+          "Clear-out day",
+          "Compaction / VACUUM"
+        ],
+        [
+          "Throwing out a whole box by date",
+          "Time-window compaction"
+        ]
+      ],
+      "breaks": "A storage unit's rent is visible. Space amplification is invisible until disks fill or bills arrive."
+    },
+    "mindmap": {
+      "center": "Space Amplification",
+      "branches": [
+        {
+          "label": "B-tree",
+          "children": [
+            "Split → half-full pages",
+            "~1.3–1.5×"
+          ]
+        },
+        {
+          "label": "Postgres MVCC",
+          "children": [
+            "Dead tuples",
+            "Bloat until VACUUM"
+          ]
+        },
+        {
+          "label": "LSM",
+          "children": [
+            "Old versions",
+            "Tombstones",
+            "1.1–3×"
+          ]
+        },
+        {
+          "label": "Reduce",
+          "children": [
+            "Compaction (↑ WA)",
+            "VACUUM",
+            "TWCS drop windows"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A deleted record still using disk",
+      "scenario": "user 123 (50 bytes) is deleted, so a 20-byte tombstone is written.",
+      "flow": [
+        "Original in L2 (50 B)",
+        "Tombstone in L0 (20 B)",
+        "Logical size 0",
+        "Physical 70 B",
+        "Compaction removes both"
+      ],
+      "steps": [
+        {
+          "label": "Before compaction",
+          "detail": "70 bytes on disk for data that logically doesn't exist."
+        },
+        {
+          "label": "Compaction",
+          "detail": "When the tombstone and the original meet in a merge, both are dropped (after the grace period)."
+        },
+        {
+          "label": "Time-series",
+          "detail": "TWCS drops whole expired windows, so no tombstones accumulate."
+        }
+      ],
+      "code": [],
+      "outcome": "you understand why disk usage exceeds data size and which lever reclaims it."
+    },
+    "summary": {
+      "points": [
+        "Disk ≠ logical size.",
+        "B-tree: fragmentation + MVCC bloat.",
+        "LSM: versions and tombstones until compaction."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does reducing space amplification in an LSM often raise write amplification?",
+        "a": "Reclaiming space needs more frequent compaction, which rewrites data more often."
+      }
+    ]
+  }
+}
