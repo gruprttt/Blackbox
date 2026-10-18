@@ -1,0 +1,505 @@
+{
+  "introduction-the-works-on-my-machine-crisis": {
+    "core": "Developers describe workloads in docker-compose locally, Helm for staging and something else for production, so configuration drifts between environments. Score is a platform-agnostic workload spec written once and translated to each target.",
+    "first_principles": {
+      "problem": "An app works in docker-compose but fails in Kubernetes because the env vars, ports and dependencies were described differently.",
+      "truths": [
+        "Several formats describe the same workload.",
+        "Translation by hand drifts.",
+        "Developers care about intent, not platform specifics."
+      ],
+      "derivation": [
+        "Describe the workload **once** in score.yaml.",
+        "**Generate** platform files (Compose, Helm/K8s) with Score implementations.",
+        "**Inject** environment-specific values at deploy time.",
+        "**Integrate** into the platform workflow."
+      ]
+    },
+    "analogy": {
+      "title": "Writing a recipe once for any kitchen",
+      "story": "The same recipe works on a gas stove or an induction hob; the cook translates it to the equipment.",
+      "mapping": [
+        [
+          "Recipe",
+          "score.yaml"
+        ],
+        [
+          "Kitchens",
+          "Compose / Kubernetes"
+        ],
+        [
+          "Cook's translation",
+          "score-compose / score-k8s"
+        ]
+      ],
+      "breaks": "Score covers common workload needs; exotic platform features need extensions."
+    },
+    "mindmap": {
+      "center": "Score",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Config drift across envs"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "One workload spec"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "score-compose",
+            "score-k8s",
+            "Humanitec"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "Intent, not platform"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Compose vs Helm drift",
+      "scenario": "Before Score.",
+      "flow": [
+        "docker-compose: DB_URL=postgres://localhost",
+        "Helm: DATABASE_URL from secret",
+        "Mismatch → crash in staging",
+        "Score: one spec, generated both"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No more drift between environments."
+        }
+      ],
+      "code": [],
+      "outcome": "one source of truth for workload intent."
+    },
+    "summary": {
+      "points": [
+        "Several formats drift.",
+        "Describe once.",
+        "Generate per target."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does Score solve?",
+        "a": "Configuration drift from describing the same workload differently for each environment and platform."
+      }
+    ]
+  },
+  "the-architecture-the-sheet-music-analogy": {
+    "core": "Score works like sheet music. The composer (developer) writes the score (workload spec), and different orchestras (platforms like Docker Compose or Kubernetes) perform it with their own instruments (implementations), each interpreting the same music faithfully.",
+    "first_principles": {
+      "problem": "Developers must learn every platform's dialect to describe the same application.",
+      "truths": [
+        "Intent can be separated from execution.",
+        "Implementations translate for each target.",
+        "Developers can focus on the 'what'."
+      ],
+      "derivation": [
+        "**Developer**: writes score.yaml (containers, resources, service).",
+        "**Platform**: provides the implementation (score-compose, score-k8s, custom).",
+        "**Implementation**: maps resources (e.g. 'postgres') to real provisioning.",
+        "**Output**: platform-native files."
+      ]
+    },
+    "analogy": {
+      "title": "Sheet music performed by different orchestras",
+      "story": "The same score sounds right whether played by a chamber group or a full orchestra.",
+      "mapping": [
+        [
+          "Composer",
+          "Developer"
+        ],
+        [
+          "Score",
+          "score.yaml"
+        ],
+        [
+          "Orchestras",
+          "Platforms"
+        ],
+        [
+          "Conductor's interpretation",
+          "Score implementation"
+        ]
+      ],
+      "breaks": "Implementations can differ in fidelity, so test the outputs."
+    },
+    "mindmap": {
+      "center": "Score Architecture",
+      "branches": [
+        {
+          "label": "Developer",
+          "children": [
+            "score.yaml"
+          ]
+        },
+        {
+          "label": "Platform",
+          "children": [
+            "Implementation"
+          ]
+        },
+        {
+          "label": "Mapping",
+          "children": [
+            "Resources → provisioning"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Compose",
+            "K8s manifests",
+            "Helm values"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One spec, two outputs",
+      "scenario": "Flow.",
+      "flow": [
+        "score.yaml declares container + postgres resource",
+        "score-compose → compose file with a postgres container",
+        "score-k8s → Deployment + claim for managed DB"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The same intent, appropriate per environment."
+        }
+      ],
+      "code": [],
+      "outcome": "developer intent separated from platform execution."
+    },
+    "summary": {
+      "points": [
+        "Write once.",
+        "Platforms interpret.",
+        "Resources mapped per target."
+      ]
+    },
+    "check": [
+      {
+        "q": "In the Score analogy, what plays the role of the orchestra?",
+        "a": "The target platform and its Score implementation (e.g. score-compose or score-k8s)."
+      }
+    ]
+  },
+  "anatomy-of-a-scoreyaml": {
+    "core": "A score.yaml has apiVersion and metadata (name), containers (image, command, variables, files), resources (dependencies like databases, DNS and routes, by type) and service (ports). Variables can reference resource outputs with ${resources.db.host}.",
+    "first_principles": {
+      "problem": "Developers need a clear, minimal format to express what their workload needs.",
+      "truths": [
+        "Workloads need containers, dependencies and exposure.",
+        "Dependencies should be declared, not hard-coded.",
+        "References link containers to resources."
+      ],
+      "derivation": [
+        "**metadata.name**: the workload name.",
+        "**containers**: image, variables (referencing resources).",
+        "**resources**: typed dependencies (postgres, redis, dns, route).",
+        "**service.ports**: exposed ports."
+      ]
+    },
+    "analogy": {
+      "title": "A party invitation with RSVP needs",
+      "story": "'Bring yourself (container), we need a venue and catering (resources), arrive at door 8080 (service).'",
+      "mapping": [
+        [
+          "Guest",
+          "Container"
+        ],
+        [
+          "Venue and catering",
+          "Resources"
+        ],
+        [
+          "Door number",
+          "Service port"
+        ]
+      ],
+      "breaks": "Score's resource types depend on what the platform implementation supports."
+    },
+    "mindmap": {
+      "center": "score.yaml",
+      "branches": [
+        {
+          "label": "metadata",
+          "children": [
+            "name"
+          ]
+        },
+        {
+          "label": "containers",
+          "children": [
+            "image",
+            "variables",
+            "files"
+          ]
+        },
+        {
+          "label": "resources",
+          "children": [
+            "postgres",
+            "redis",
+            "dns",
+            "route"
+          ]
+        },
+        {
+          "label": "service",
+          "children": [
+            "ports"
+          ]
+        },
+        {
+          "label": "References",
+          "children": [
+            "${resources.x.y}"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A complete score.yaml",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Everything the workload needs, platform-neutral."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: score.dev/v1b1\nmetadata: { name: orders }\ncontainers:\n  main:\n    image: ghcr.io/acme/orders:1.2\n    variables:\n      DB_HOST: ${resources.db.host}\n      DB_PASS: ${resources.db.password}\nresources:\n  db: { type: postgres }\nservice:\n  ports: { http: { port: 8080 } }"
+        }
+      ],
+      "outcome": "you can read and write score.yaml."
+    },
+    "summary": {
+      "points": [
+        "Containers.",
+        "Resources.",
+        "Service.",
+        "References."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a container in score.yaml get a database's connection details?",
+        "a": "Through variable references to resource outputs, like ${resources.db.host}."
+      }
+    ]
+  },
+  "environment-agnostic-context-injection": {
+    "core": "Score keeps environment-specific values out of the spec. Containers reference abstract resource outputs, and each environment's implementation injects the real values (a local container DB vs a managed RDS endpoint, dev vs prod secrets) at generation or deploy time.",
+    "first_principles": {
+      "problem": "Hard-coded hosts and environment-specific config in deployment files mean separate files per environment, and drift.",
+      "truths": [
+        "The same workload runs in different contexts.",
+        "Values differ but structure doesn't.",
+        "Late binding keeps specs portable."
+      ],
+      "derivation": [
+        "Reference **${resources.*}** and **${metadata.*}** rather than literal values.",
+        "The platform **provisions or binds** resources per environment.",
+        "**Inject** outputs at generation or deploy.",
+        "Keep **one score.yaml** for all environments."
+      ]
+    },
+    "analogy": {
+      "title": "A form letter with mail-merge fields",
+      "story": "'Dear {name}' is filled in differently for each recipient while the letter stays the same.",
+      "mapping": [
+        [
+          "Form letter",
+          "score.yaml"
+        ],
+        [
+          "Mail-merge fields",
+          "Resource references"
+        ],
+        [
+          "Recipients",
+          "Environments"
+        ]
+      ],
+      "breaks": "Some environment differences (scale, feature flags) still need platform-level overrides."
+    },
+    "mindmap": {
+      "center": "Context Injection",
+      "branches": [
+        {
+          "label": "Spec",
+          "children": [
+            "References only"
+          ]
+        },
+        {
+          "label": "Platform",
+          "children": [
+            "Provision/bind per env"
+          ]
+        },
+        {
+          "label": "Injection",
+          "children": [
+            "Generate/deploy time"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "One spec, many envs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One reference, three environments",
+      "scenario": "Resolved values.",
+      "flow": [
+        "${resources.db.host}",
+        "local → postgres container 'db'",
+        "staging → staging-rds.internal",
+        "prod → prod-aurora.cluster.amazonaws.com"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No environment-specific files to maintain."
+        }
+      ],
+      "code": [],
+      "outcome": "truly portable workload specs."
+    },
+    "summary": {
+      "points": [
+        "Reference, don't hard-code.",
+        "The platform resolves.",
+        "One spec."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does Score keep specs environment-agnostic?",
+        "a": "Containers reference abstract resource outputs, which each environment's platform resolves to real values."
+      }
+    ]
+  },
+  "score-in-a-platform-engineering-workflow": {
+    "core": "Score sits above Kubernetes, Helm, Terraform and Compose rather than replacing them. Developers own score.yaml, while platform teams own implementations and resource provisioners, often orchestrated by a platform orchestrator (like Humanitec) or CI that generates manifests for GitOps.",
+    "first_principles": {
+      "problem": "Teams don't see where a workload spec fits among the existing tools.",
+      "truths": [
+        "Platforms are layered.",
+        "Separating responsibilities reduces load.",
+        "Generated manifests can flow into GitOps."
+      ],
+      "derivation": [
+        "**Developers** write score.yaml in the repo.",
+        "**CI** runs score-k8s/score-compose (or an orchestrator) to generate manifests.",
+        "**Platform** owns provisioners (DB → Crossplane claim).",
+        "**GitOps** (Argo CD) deploys the generated output."
+      ]
+    },
+    "analogy": {
+      "title": "An architect, builder and city services",
+      "story": "The architect draws the plans, the builder constructs to local codes and the utilities hook up power and water.",
+      "mapping": [
+        [
+          "Architect",
+          "Developer (score.yaml)"
+        ],
+        [
+          "Builder",
+          "Score implementation"
+        ],
+        [
+          "Utilities",
+          "Platform provisioners"
+        ]
+      ],
+      "breaks": "It's another layer to learn and maintain, so it's worth it at scale or across many environments."
+    },
+    "mindmap": {
+      "center": "Score in Workflow",
+      "branches": [
+        {
+          "label": "Dev owns",
+          "children": [
+            "score.yaml"
+          ]
+        },
+        {
+          "label": "Platform owns",
+          "children": [
+            "Implementations",
+            "Provisioners"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Generate",
+            "GitOps deploy"
+          ]
+        },
+        {
+          "label": "Doesn't replace",
+          "children": [
+            "K8s",
+            "Helm",
+            "Terraform"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An end-to-end flow",
+      "scenario": "Score + GitOps.",
+      "flow": [
+        "Dev updates score.yaml (adds redis)",
+        "CI: score-k8s generate → manifests + Redis claim",
+        "Commit to config repo",
+        "Argo CD syncs; Crossplane provisions Redis"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A developer adds a dependency without touching infra code."
+        }
+      ],
+      "code": [],
+      "outcome": "clean separation of developer and platform concerns."
+    },
+    "summary": {
+      "points": [
+        "Layered above.",
+        "Dev intent, platform implementation.",
+        "GitOps output."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does Score replace Kubernetes or Helm?",
+        "a": "No. It sits above them, generating platform-native configuration from a workload spec."
+      }
+    ]
+  }
+}
