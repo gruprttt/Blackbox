@@ -1,0 +1,404 @@
+{
+  "introduction-the-digital-hoarding-problem": {
+    "core": "Cloud waste piles up from 'just in case' provisioning and forgotten resources: idle instances, unattached volumes, old snapshots, oversized machines. Typically 20–30% of spend is waste.",
+    "first_principles": {
+      "problem": "Nobody deletes anything because they might need it, and the bill grows with no added value.",
+      "truths": [
+        "Unused resources still bill.",
+        "Creating resources is easy; cleaning up is forgotten.",
+        "Ownership fades over time."
+      ],
+      "derivation": [
+        "**Find zombies**: idle, unattached, orphaned.",
+        "**Rightsize** over-provisioned resources.",
+        "**Use spot** even for some stateful work.",
+        "Make cleanup **systematic**, not a one-off sprint."
+      ]
+    },
+    "analogy": {
+      "title": "A storage unit you never visit",
+      "story": "You pay every month for boxes you've forgotten you own.",
+      "mapping": [
+        [
+          "Storage unit",
+          "Idle resources"
+        ],
+        [
+          "Forgotten boxes",
+          "Zombies"
+        ],
+        [
+          "Monthly fee",
+          "Cloud bill"
+        ]
+      ],
+      "breaks": "Some 'idle' resources are DR standby, so verify before deleting."
+    },
+    "mindmap": {
+      "center": "Cloud Waste",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Idle instances",
+            "Unattached EBS",
+            "Old snapshots",
+            "Oversized"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "Just-in-case",
+            "Lost ownership"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Find",
+            "Rightsize",
+            "Systematise"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A waste audit",
+      "scenario": "Typical findings.",
+      "flow": [
+        "120 unattached EBS volumes",
+        "40 idle dev instances",
+        "2 PB of 3-year-old snapshots",
+        "~25% of bill"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Big savings with zero functional change."
+        }
+      ],
+      "code": [],
+      "outcome": "you can see waste for what it is."
+    },
+    "summary": {
+      "points": [
+        "Waste is common.",
+        "Unused still bills.",
+        "Clean up systematically."
+      ]
+    },
+    "check": [
+      {
+        "q": "Give two common types of cloud waste.",
+        "a": "For example, unattached EBS volumes and idle or forgotten instances (also old snapshots and oversized resources)."
+      }
+    ]
+  },
+  "rightsizing-the-recommender-system": {
+    "core": "Engineers provision for the worst imaginable peak. Rightsizing uses observed utilisation (CPU, memory, p95/p99) to recommend smaller or different instance types, sized for the real peak plus headroom.",
+    "first_principles": {
+      "problem": "A fleet averages 8% CPU because each instance was sized for a peak that never happens.",
+      "truths": [
+        "Actual utilisation is measurable.",
+        "Peaks can be handled by autoscaling rather than oversizing.",
+        "Memory metrics need an agent."
+      ],
+      "derivation": [
+        "Collect **2–4 weeks** of utilisation (including memory).",
+        "Size for the **p95/p99 peak + headroom**.",
+        "Use **recommenders** (Compute Optimizer, VPA, Kubecost).",
+        "Change **incrementally**, monitor, and prefer **autoscaling**."
+      ]
+    },
+    "analogy": {
+      "title": "Buying a bus for a family of four",
+      "story": "Just in case relatives visit, you drive a 40-seat bus every day. A car plus a rental for visits is far cheaper.",
+      "mapping": [
+        [
+          "40-seat bus",
+          "Oversized instance"
+        ],
+        [
+          "Family car",
+          "Right-sized instance"
+        ],
+        [
+          "Rental for visits",
+          "Autoscaling for peaks"
+        ]
+      ],
+      "breaks": "CPU averages hide bursts, so use percentiles and watch latency SLOs."
+    },
+    "mindmap": {
+      "center": "Rightsizing",
+      "branches": [
+        {
+          "label": "Data",
+          "children": [
+            "CPU",
+            "Memory",
+            "p95/p99",
+            "2-4 weeks"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Compute Optimizer",
+            "VPA",
+            "Kubecost"
+          ]
+        },
+        {
+          "label": "Method",
+          "children": [
+            "Peak + headroom",
+            "Incremental"
+          ]
+        },
+        {
+          "label": "Pair with",
+          "children": [
+            "Autoscaling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rightsizing a service",
+      "scenario": "Before and after.",
+      "flow": [
+        "m5.4xlarge, p99 CPU 22%, mem 30%",
+        "Recommend m6g.xlarge",
+        "Canary one node, watch latency",
+        "Roll out: −70% cost"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Same SLOs at a fraction of the price."
+        }
+      ],
+      "code": [],
+      "outcome": "capacity matches real demand."
+    },
+    "summary": {
+      "points": [
+        "Measure real usage.",
+        "Size to the peak plus headroom.",
+        "Change incrementally."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why size to p95/p99 rather than average utilisation?",
+        "a": "Averages hide bursts, and sizing to the average would cause saturation at peaks."
+      }
+    ]
+  },
+  "spot-orchestration-for-stateful-workloads": {
+    "core": "Spot isn't only for stateless work. With checkpointing, replicated stateful sets, graceful drains on the 2-minute notice and fast reattachment of volumes, some stateful workloads (CI caches, Kafka consumers, ML training, some databases' replicas) can use spot safely.",
+    "first_principles": {
+      "problem": "Teams assume all stateful workloads need on-demand and miss 60–90% savings on tolerant ones.",
+      "truths": [
+        "Interruptions give a 2-minute warning.",
+        "State can be checkpointed or replicated.",
+        "Volumes can detach and reattach."
+      ],
+      "derivation": [
+        "**Checkpoint** progress (ML training, batch).",
+        "Put **replicas on spot**, primaries on on-demand.",
+        "**Handle the notice**: drain, flush, release leases.",
+        "**Diversify** instance pools; use the capacity-optimised strategy."
+      ]
+    },
+    "analogy": {
+      "title": "A relay team with backups",
+      "story": "If a runner is pulled mid-race, the next one picks up the baton from the last checkpoint.",
+      "mapping": [
+        [
+          "Runner pulled",
+          "Spot interruption"
+        ],
+        [
+          "Checkpoint",
+          "Saved state"
+        ],
+        [
+          "Backup runner",
+          "Replacement instance"
+        ]
+      ],
+      "breaks": "Single-primary databases with strict latency SLOs are still poor candidates."
+    },
+    "mindmap": {
+      "center": "Stateful Spot",
+      "branches": [
+        {
+          "label": "Techniques",
+          "children": [
+            "Checkpointing",
+            "Replicas on spot",
+            "Graceful drain",
+            "Volume reattach"
+          ]
+        },
+        {
+          "label": "Good fits",
+          "children": [
+            "ML training",
+            "CI caches",
+            "Stream consumers",
+            "Read replicas"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Single primary DBs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ML training on spot",
+      "scenario": "With checkpoints.",
+      "flow": [
+        "Checkpoint to S3 every 10 min",
+        "Interruption notice → save checkpoint",
+        "New spot instance resumes",
+        "Cost −70%, ≤10 min lost per interruption"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Long jobs finish cheaply despite interruptions."
+        }
+      ],
+      "code": [],
+      "outcome": "spot savings extend to resilient stateful workloads."
+    },
+    "summary": {
+      "points": [
+        "Checkpoint.",
+        "Replicas on spot.",
+        "Handle the 2-minute notice."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes ML training a good spot candidate despite being stateful?",
+        "a": "Progress can be checkpointed regularly and resumed on a new instance after an interruption."
+      }
+    ]
+  },
+  "building-a-systematic-waste-reduction-program": {
+    "core": "One-off cleanup sprints decay. A systematic programme automates detection (policies and scripts), assigns owners, sets SLAs for fixing, tracks waste as a KPI, and prevents waste with TTLs, auto-shutdown and guardrails.",
+    "first_principles": {
+      "problem": "After a big cleanup, waste returns to the same level within six months.",
+      "truths": [
+        "Waste creation is continuous.",
+        "Automation scales where people don't.",
+        "What gets measured improves."
+      ],
+      "derivation": [
+        "**Detect** continuously (Cloud Custodian, Trusted Advisor, scripts).",
+        "**Notify owners** with a fix-by date.",
+        "**Auto-remediate** safe cases (stop idle dev instances, delete old snapshots).",
+        "**Prevent**: TTL tags, schedules, guardrails; track a **waste %** KPI."
+      ]
+    },
+    "analogy": {
+      "title": "Regular housekeeping vs. spring cleaning",
+      "story": "A daily tidy-up keeps the house clean; one annual deep clean doesn't.",
+      "mapping": [
+        [
+          "Daily tidy",
+          "Automated detection"
+        ],
+        [
+          "Spring clean",
+          "Cleanup sprint"
+        ],
+        [
+          "House rules",
+          "Prevention guardrails"
+        ]
+      ],
+      "breaks": "Over-aggressive auto-deletion destroys needed resources, so warn first and keep backups."
+    },
+    "mindmap": {
+      "center": "Waste Programme",
+      "branches": [
+        {
+          "label": "Detect",
+          "children": [
+            "Cloud Custodian",
+            "Trusted Advisor"
+          ]
+        },
+        {
+          "label": "Notify",
+          "children": [
+            "Owners",
+            "SLAs"
+          ]
+        },
+        {
+          "label": "Remediate",
+          "children": [
+            "Auto-stop",
+            "Delete snapshots"
+          ]
+        },
+        {
+          "label": "Prevent",
+          "children": [
+            "TTL",
+            "Schedules",
+            "Guardrails"
+          ]
+        },
+        {
+          "label": "KPI",
+          "children": [
+            "Waste %"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Cloud Custodian policy",
+      "scenario": "Stop idle dev instances at night.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dev compute runs about 60% fewer hours, automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "policies:\n  - name: stop-dev-offhours\n    resource: ec2\n    filters:\n      - \"tag:env\": dev\n      - type: offhour\n        default_tz: utc\n        offhour: 20\n    actions: [stop]"
+        }
+      ],
+      "outcome": "waste stays low permanently."
+    },
+    "summary": {
+      "points": [
+        "Continuous detection.",
+        "Owners + SLAs.",
+        "Auto-remediate.",
+        "Prevent."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do one-time cleanup sprints fail long term?",
+        "a": "Waste is created continuously, so without automation and prevention it simply builds up again."
+      }
+    ]
+  }
+}

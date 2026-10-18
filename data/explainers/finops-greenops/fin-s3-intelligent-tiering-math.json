@@ -1,0 +1,491 @@
+{
+  "introduction-its-not-magic-its-math": {
+    "core": "S3 Intelligent-Tiering moves objects between access tiers automatically, but charges a per-object monitoring fee. It saves money only when the per-object storage savings exceed that fee, which depends on object size and access pattern.",
+    "first_principles": {
+      "problem": "Teams enable Intelligent-Tiering everywhere and see bills rise on buckets of small objects.",
+      "truths": [
+        "Monitoring costs per object, not per GB.",
+        "Savings scale with object size.",
+        "Some access patterns never cool."
+      ],
+      "derivation": [
+        "Model the **monitoring fee per object**.",
+        "Model the **storage savings per GB** when the object cools.",
+        "Find the **break-even object size**.",
+        "Analyse the **fleet distribution**."
+      ]
+    },
+    "analogy": {
+      "title": "A smart thermostat with a subscription fee",
+      "story": "It saves on heating, but for a tiny room the subscription costs more than the savings.",
+      "mapping": [
+        [
+          "Subscription",
+          "Monitoring fee"
+        ],
+        [
+          "Heating savings",
+          "Tier price difference"
+        ],
+        [
+          "Room size",
+          "Object size"
+        ]
+      ],
+      "breaks": "It also avoids retrieval fees for unpredictable access, which is a non-price benefit."
+    },
+    "mindmap": {
+      "center": "S3-INT Math",
+      "branches": [
+        {
+          "label": "Fee",
+          "children": [
+            "Per object monitoring"
+          ]
+        },
+        {
+          "label": "Savings",
+          "children": [
+            "Per GB when cool"
+          ]
+        },
+        {
+          "label": "Key",
+          "children": [
+            "Object size",
+            "Access pattern"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Break-even",
+            "Fleet analysis"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two buckets",
+      "scenario": "Different outcomes.",
+      "flow": [
+        "Bucket A: 100 MB videos → big savings",
+        "Bucket B: 10 KB JSON → excluded/fee-heavy",
+        "Decision per bucket"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Enable it where the maths works."
+        }
+      ],
+      "code": [],
+      "outcome": "Intelligent-Tiering used where it pays."
+    },
+    "summary": {
+      "points": [
+        "Per-object fee.",
+        "Per-GB savings.",
+        "Size decides."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can S3 Intelligent-Tiering increase costs?",
+        "a": "Its per-object monitoring fee can exceed storage savings for small objects."
+      }
+    ]
+  },
+  "the-cost-formula": {
+    "core": "For each object: savings = size × (Standard price − cooler tier price) × fraction of time cooled, and cost = monitoring fee per object. It's worthwhile when savings > fee.",
+    "first_principles": {
+      "problem": "Without a formula, decisions are guesses.",
+      "truths": [
+        "Storage is priced per GB-month.",
+        "Monitoring is priced per 1,000 objects per month.",
+        "Objects cool after 30/90 days without access."
+      ],
+      "derivation": [
+        "**Fee** ≈ $0.0025 per 1,000 objects per month.",
+        "**Savings (IA tier)** ≈ size_GB × ($0.023 − $0.0125).",
+        "Deeper **archive tiers** save more.",
+        "Net = savings − fee."
+      ]
+    },
+    "analogy": {
+      "title": "Is a bulk-buy club worth the fee?",
+      "story": "Only if what you save on purchases exceeds the membership cost.",
+      "mapping": [
+        [
+          "Membership",
+          "Monitoring fee"
+        ],
+        [
+          "Purchase savings",
+          "Tier savings"
+        ],
+        [
+          "Shopping volume",
+          "Object size"
+        ]
+      ],
+      "breaks": "Prices vary by region, so plug in current rates."
+    },
+    "mindmap": {
+      "center": "Cost Formula",
+      "branches": [
+        {
+          "label": "Fee",
+          "children": [
+            "$/1k objects/mo"
+          ]
+        },
+        {
+          "label": "Savings",
+          "children": [
+            "GB × Δprice",
+            "× time cooled"
+          ]
+        },
+        {
+          "label": "Tiers",
+          "children": [
+            "Frequent",
+            "Infrequent",
+            "Archive Instant"
+          ]
+        },
+        {
+          "label": "Decision",
+          "children": [
+            "Savings > fee"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One 1 MB object, cooled to IA",
+      "scenario": "Per month.",
+      "flow": [
+        "Savings: 0.001 GB × $0.0105 = $0.0000105",
+        "Fee: $0.0000025",
+        "Net positive (~4x)"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Even 1 MB objects can pay off if they cool."
+        }
+      ],
+      "code": [],
+      "outcome": "a per-object decision rule."
+    },
+    "summary": {
+      "points": [
+        "Savings ∝ size.",
+        "Fee per object.",
+        "Compare them."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two variables in the S3-INT decision?",
+        "a": "The per-object monitoring fee and the per-GB storage savings from cooler tiers (which depend on object size)."
+      }
+    ]
+  },
+  "calculating-the-break-even-point": {
+    "core": "Break-even size = monitoring fee ÷ per-GB savings. With IA-tier savings around $0.0105/GB and a $0.0000025 fee, break-even is about 0.24 MB (~250 KB) for objects that cool. Smaller objects cost more to monitor than they save.",
+    "first_principles": {
+      "problem": "Teams need a concrete threshold to decide which buckets or prefixes to enable it on.",
+      "truths": [
+        "Savings rise linearly with size.",
+        "The fee is constant per object.",
+        "Their intersection is the break-even point."
+      ],
+      "derivation": [
+        "Set **fee = size × Δprice**.",
+        "Solve **size = fee / Δprice**.",
+        "Adjust for the **fraction of objects that actually cool**.",
+        "Deeper tiers **lower the break-even**."
+      ]
+    },
+    "analogy": {
+      "title": "The minimum order for free delivery",
+      "story": "Below a certain basket size, the delivery fee outweighs the discount.",
+      "mapping": [
+        [
+          "Delivery fee",
+          "Monitoring fee"
+        ],
+        [
+          "Basket size",
+          "Object size"
+        ],
+        [
+          "Free-delivery threshold",
+          "Break-even"
+        ]
+      ],
+      "breaks": "If objects are accessed often and never cool, there's no saving at any size."
+    },
+    "mindmap": {
+      "center": "Break-Even",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "fee / Δprice"
+          ]
+        },
+        {
+          "label": "Approx",
+          "children": [
+            "~250 KB (IA)"
+          ]
+        },
+        {
+          "label": "Adjust",
+          "children": [
+            "% that cool",
+            "Deeper tiers"
+          ]
+        },
+        {
+          "label": "Below",
+          "children": [
+            "Loses money"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Computing break-even",
+      "scenario": "Arithmetic.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Rule of thumb",
+          "detail": "Objects above roughly 250 KB that cool are good candidates."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "fee = 0.0025 / 1000          # $ per object-month\ndelta = 0.023 - 0.0125        # $ per GB-month (Frequent → Infrequent)\nprint(fee / delta * 1024, \"MB\")  # ≈ 0.24 MB"
+        }
+      ],
+      "outcome": "a quantitative threshold for adoption."
+    },
+    "summary": {
+      "points": [
+        "Fee ÷ savings.",
+        "~250 KB.",
+        "Adjust for cooling."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you compute the S3-INT break-even object size?",
+        "a": "Divide the per-object monitoring fee by the per-GB storage price saved in the cooler tier."
+      }
+    ]
+  },
+  "the-128-kb-safety-valve": {
+    "core": "AWS doesn't monitor or auto-tier objects smaller than 128 KB in Intelligent-Tiering. They stay in the Frequent tier at Standard price with no monitoring fee, which limits the small-object penalty but means no savings for them.",
+    "first_principles": {
+      "problem": "Early adopters paid monitoring fees on millions of tiny files with no possible savings.",
+      "truths": [
+        "Tiny objects can never repay the fee.",
+        "AWS changed the rules to protect customers.",
+        "Below-threshold objects still use Standard pricing."
+      ],
+      "derivation": [
+        "Objects **< 128 KB**: no monitoring fee, never tiered.",
+        "Objects **≥ 128 KB**: monitored and charged.",
+        "The 128 KB–~250 KB band still **can lose money**.",
+        "**Compacting** small files enables savings."
+      ]
+    },
+    "analogy": {
+      "title": "A store waiving the membership fee for tiny purchases",
+      "story": "You don't pay the fee, but you don't get the discount either.",
+      "mapping": [
+        [
+          "Tiny purchases",
+          "<128 KB objects"
+        ],
+        [
+          "Waived fee",
+          "No monitoring"
+        ],
+        [
+          "No discount",
+          "No tiering"
+        ]
+      ],
+      "breaks": "The threshold reduces losses but doesn't create savings for small files."
+    },
+    "mindmap": {
+      "center": "128 KB Rule",
+      "branches": [
+        {
+          "label": "<128 KB",
+          "children": [
+            "No fee",
+            "No tiering",
+            "Standard price"
+          ]
+        },
+        {
+          "label": "≥128 KB",
+          "children": [
+            "Monitored",
+            "Can tier"
+          ]
+        },
+        {
+          "label": "Gray zone",
+          "children": [
+            "128–250 KB"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Compact small files"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A bucket of 20 KB events",
+      "scenario": "Strategy.",
+      "flow": [
+        "Intelligent-Tiering does nothing (all <128 KB)",
+        "Compact hourly into 50 MB Parquet",
+        "Now tiered → large savings"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Data layout unlocks savings."
+        }
+      ],
+      "code": [],
+      "outcome": "you understand the small-object boundary."
+    },
+    "summary": {
+      "points": [
+        "<128 KB is skipped.",
+        "No fee, no savings.",
+        "Compact files."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to objects under 128 KB in S3 Intelligent-Tiering?",
+        "a": "They aren't monitored or charged the fee, and they always stay in the Frequent Access tier."
+      }
+    ]
+  },
+  "fleet-level-analysis-thinking-at-scale": {
+    "core": "Decide per bucket or prefix using the object size distribution and access patterns (S3 Storage Lens, Inventory): sum the expected savings minus fees across all objects, and target lifecycle or Intelligent-Tiering rules by prefix.",
+    "first_principles": {
+      "problem": "A bucket mixes huge videos with millions of tiny thumbnails, and a blanket decision is wrong for half of it.",
+      "truths": [
+        "Buckets contain mixed object populations.",
+        "Inventory reports give the size distribution.",
+        "Rules can be scoped by prefix, tag or size."
+      ],
+      "derivation": [
+        "Export **S3 Inventory** (size, storage class, last modified).",
+        "Analyse the **size histogram and access** (Storage Lens, CloudTrail data events).",
+        "Compute **fleet net savings**.",
+        "Apply **scoped rules** (ObjectSizeGreaterThan filters, prefixes)."
+      ]
+    },
+    "analogy": {
+      "title": "Pricing a mixed warehouse",
+      "story": "Bulky furniture belongs in cheap long-term storage; small fast-moving items stay near the front.",
+      "mapping": [
+        [
+          "Furniture",
+          "Large cold objects"
+        ],
+        [
+          "Small items",
+          "Tiny hot objects"
+        ],
+        [
+          "Warehouse zones",
+          "Scoped rules"
+        ]
+      ],
+      "breaks": "Access patterns change, so re-analyse periodically."
+    },
+    "mindmap": {
+      "center": "Fleet Analysis",
+      "branches": [
+        {
+          "label": "Data",
+          "children": [
+            "S3 Inventory",
+            "Storage Lens"
+          ]
+        },
+        {
+          "label": "Analyse",
+          "children": [
+            "Size histogram",
+            "Access patterns"
+          ]
+        },
+        {
+          "label": "Compute",
+          "children": [
+            "Σ savings − fees"
+          ]
+        },
+        {
+          "label": "Apply",
+          "children": [
+            "Prefix rules",
+            "Size filters"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A media bucket",
+      "scenario": "Scoped rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only large video objects are tiered, and thumbnails are untouched."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\"Rules\":[{\"ID\":\"int-large\",\"Status\":\"Enabled\",\n  \"Filter\":{\"And\":{\"Prefix\":\"videos/\",\"ObjectSizeGreaterThan\":262144}},\n  \"Transitions\":[{\"Days\":0,\"StorageClass\":\"INTELLIGENT_TIERING\"}]}]}"
+        }
+      ],
+      "outcome": "storage decisions optimised across the whole fleet."
+    },
+    "summary": {
+      "points": [
+        "Look at distributions.",
+        "Compute fleet net savings.",
+        "Scope the rules."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why analyse S3 Inventory before enabling Intelligent-Tiering?",
+        "a": "Buckets mix object sizes and access patterns, and only the distribution shows where the savings exceed the fees."
+      }
+    ]
+  }
+}

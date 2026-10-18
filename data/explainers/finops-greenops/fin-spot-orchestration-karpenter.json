@@ -1,0 +1,404 @@
+{
+  "introduction-the-all-or-nothing-mistake": {
+    "core": "Teams either avoid spot entirely (and overpay) or go all-in (and risk outages). The right answer is a mix: an on-demand baseline for resilience plus spot for scalable capacity, orchestrated automatically.",
+    "first_principles": {
+      "problem": "A cluster runs 100% on-demand out of fear, or 100% spot and loses capacity during a reclamation wave.",
+      "truths": [
+        "Spot is cheap but can be reclaimed.",
+        "Some capacity must be guaranteed.",
+        "Kubernetes can schedule across mixed node types."
+      ],
+      "derivation": [
+        "Keep an **on-demand floor** for critical replicas.",
+        "Run **spot for the rest**.",
+        "Use **price-capacity-optimised** selection.",
+        "**Handle interruptions** gracefully."
+      ]
+    },
+    "analogy": {
+      "title": "Standby airline seats",
+      "story": "Cheap, but you can be bumped. Book a few confirmed seats for essential travellers and fly the rest standby.",
+      "mapping": [
+        [
+          "Confirmed seats",
+          "On-demand floor"
+        ],
+        [
+          "Standby",
+          "Spot"
+        ],
+        [
+          "Being bumped",
+          "Interruption"
+        ]
+      ],
+      "breaks": "Singleton stateful workloads still belong on on-demand."
+    },
+    "mindmap": {
+      "center": "Spot Mix",
+      "branches": [
+        {
+          "label": "Mistakes",
+          "children": [
+            "All on-demand",
+            "All spot"
+          ]
+        },
+        {
+          "label": "Strategy",
+          "children": [
+            "OD floor",
+            "Spot burst"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "Price-capacity-optimised"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Interruption handling"
+          ]
+        },
+        {
+          "label": "Tool",
+          "children": [
+            "Karpenter"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 20/80 split",
+      "scenario": "Web service.",
+      "flow": [
+        "20% replicas on on-demand",
+        "80% on diversified spot",
+        "Spot wave reclaims 30% of spot",
+        "Service stays up on OD + rescheduled pods"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "~60% savings with resilience."
+        }
+      ],
+      "code": [],
+      "outcome": "savings without betting availability."
+    },
+    "summary": {
+      "points": [
+        "Avoid extremes.",
+        "Floor + burst.",
+        "Automate it."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why keep an on-demand baseline when using spot?",
+        "a": "So critical capacity survives even if many spot instances are reclaimed at once."
+      }
+    ]
+  },
+  "strategy-price-capacity-optimized-selection": {
+    "core": "Choosing the cheapest spot pool picks the pools most likely to be reclaimed. Price-capacity-optimised allocation weighs price against available capacity, picking pools that are both cheap and deep, so interruptions are far less likely.",
+    "first_principles": {
+      "problem": "Lowest-price strategies concentrate on shallow pools, which leads to frequent interruptions and churn.",
+      "truths": [
+        "Cheap pools attract demand and get exhausted.",
+        "Pool depth predicts interruption risk.",
+        "Diversification spreads risk."
+      ],
+      "derivation": [
+        "Offer **many instance types and AZs**.",
+        "Use **price-capacity-optimized** (EC2 Fleet, Karpenter default).",
+        "Avoid **lowest-price**.",
+        "Accept a slightly higher price for **much lower churn**."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing a checkout lane",
+      "story": "The 'cheapest' lane with one slow cashier isn't best; a slightly pricier one with many open tills gets you through reliably.",
+      "mapping": [
+        [
+          "Checkout lanes",
+          "Spot pools"
+        ],
+        [
+          "Open tills",
+          "Capacity depth"
+        ],
+        [
+          "Getting through",
+          "Avoiding interruption"
+        ]
+      ],
+      "breaks": "Very narrow instance requirements limit diversification."
+    },
+    "mindmap": {
+      "center": "Spot Selection",
+      "branches": [
+        {
+          "label": "Bad",
+          "children": [
+            "Lowest price",
+            "Shallow pools"
+          ]
+        },
+        {
+          "label": "Good",
+          "children": [
+            "Price-capacity-optimised"
+          ]
+        },
+        {
+          "label": "Enablers",
+          "children": [
+            "Many types",
+            "Many AZs"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "Fewer interruptions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Karpenter NodePool requirement",
+      "scenario": "Broad flexibility.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dozens of pools to choose from, so interruptions are rare."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "requirements:\n  - { key: karpenter.sh/capacity-type, operator: In, values: [spot] }\n  - { key: karpenter.k8s.aws/instance-category, operator: In, values: [c, m, r] }\n  - { key: karpenter.k8s.aws/instance-generation, operator: Gt, values: [\"5\"] }"
+        }
+      ],
+      "outcome": "spot that behaves almost like stable capacity."
+    },
+    "summary": {
+      "points": [
+        "Cheapest ≠ best.",
+        "Weigh capacity.",
+        "Diversify widely."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is the lowest-price spot strategy risky?",
+        "a": "The cheapest pools are often shallow and heavily demanded, so they're reclaimed more often."
+      }
+    ]
+  },
+  "the-split-architecture-weighted-nodepools": {
+    "core": "Express the on-demand/spot split through Kubernetes constraints: separate Karpenter NodePools (spot weighted higher for preference, on-demand as fallback) plus topology spread constraints on capacity type, so pods are distributed across both.",
+    "first_principles": {
+      "problem": "You can't tell Kubernetes directly to 'run 20% on on-demand'. You have to shape placement.",
+      "truths": [
+        "Karpenter provisions nodes from NodePools by weight and requirements.",
+        "Topology spread distributes pods across labels.",
+        "Fallback provides resilience."
+      ],
+      "derivation": [
+        "A **spot NodePool** (higher weight) and an **on-demand NodePool** (fallback).",
+        "**topologySpreadConstraints** on `karpenter.sh/capacity-type`.",
+        "Use **PodDisruptionBudgets** for safe evictions.",
+        "Pin critical workloads with **nodeSelector: on-demand**."
+      ]
+    },
+    "analogy": {
+      "title": "Seating guests across two halls",
+      "story": "A rule says guests must be spread across both halls, so losing one hall never empties the party.",
+      "mapping": [
+        [
+          "Two halls",
+          "Spot and on-demand nodes"
+        ],
+        [
+          "Spread rule",
+          "Topology spread"
+        ],
+        [
+          "Losing a hall",
+          "Spot reclamation"
+        ]
+      ],
+      "breaks": "Spread constraints give approximate ratios, not exact percentages."
+    },
+    "mindmap": {
+      "center": "Split Architecture",
+      "branches": [
+        {
+          "label": "NodePools",
+          "children": [
+            "Spot (weight)",
+            "On-demand (fallback)"
+          ]
+        },
+        {
+          "label": "Pods",
+          "children": [
+            "topologySpread capacity-type",
+            "PDBs"
+          ]
+        },
+        {
+          "label": "Critical",
+          "children": [
+            "nodeSelector OD"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "Mixed placement"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spreading a deployment",
+      "scenario": "Pod spec.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Replicas spread over spot and on-demand, which limits the blast radius."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "topologySpreadConstraints:\n  - maxSkew: 2\n    topologyKey: karpenter.sh/capacity-type\n    whenUnsatisfiable: ScheduleAnyway\n    labelSelector: { matchLabels: { app: web } }"
+        }
+      ],
+      "outcome": "declarative mixed capacity."
+    },
+    "summary": {
+      "points": [
+        "Two NodePools.",
+        "Spread by capacity type.",
+        "PDBs for safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you spread pods across spot and on-demand nodes in Kubernetes?",
+        "a": "With a topology spread constraint on the capacity-type node label."
+      }
+    ]
+  },
+  "handling-the-2-minute-warning": {
+    "core": "AWS sends an interruption notice two minutes before reclaiming a spot instance (plus earlier rebalance recommendations). Karpenter or the Node Termination Handler cordons and drains the node, pods shut down gracefully, and replacements start elsewhere.",
+    "first_principles": {
+      "problem": "Without handling, pods die abruptly, in-flight requests fail and state is lost.",
+      "truths": [
+        "The notice arrives via instance metadata and EventBridge.",
+        "Draining respects PDBs and grace periods.",
+        "Replacement capacity takes time to start."
+      ],
+      "derivation": [
+        "Enable **interruption handling** (Karpenter SQS queue or NTH).",
+        "**Cordon + drain** on notice.",
+        "Apps handle **SIGTERM** with terminationGracePeriod < ~90 s.",
+        "Act on **rebalance recommendations** early; keep **headroom**."
+      ]
+    },
+    "analogy": {
+      "title": "A fire drill with a two-minute alarm",
+      "story": "When the alarm sounds, everyone saves their work and walks out calmly to the other building.",
+      "mapping": [
+        [
+          "Alarm",
+          "Interruption notice"
+        ],
+        [
+          "Walking out calmly",
+          "Graceful drain"
+        ],
+        [
+          "Other building",
+          "Replacement nodes"
+        ]
+      ],
+      "breaks": "Long-running requests or jobs over two minutes need checkpointing or retries."
+    },
+    "mindmap": {
+      "center": "2-Minute Warning",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "Interruption notice",
+            "Rebalance recommendation"
+          ]
+        },
+        {
+          "label": "Handlers",
+          "children": [
+            "Karpenter SQS",
+            "NTH"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Cordon",
+            "Drain",
+            "Replace"
+          ]
+        },
+        {
+          "label": "App",
+          "children": [
+            "SIGTERM",
+            "Short grace",
+            "Retries"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An interruption sequence",
+      "scenario": "Timeline.",
+      "flow": [
+        "T-120s: notice via EventBridge → Karpenter",
+        "Node cordoned, replacement launched",
+        "Pods get SIGTERM, drain connections",
+        "T-0: instance reclaimed, pods already moved"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Users notice nothing."
+        }
+      ],
+      "code": [],
+      "outcome": "interruptions become routine non-events."
+    },
+    "summary": {
+      "points": [
+        "Listen for notices.",
+        "Drain gracefully.",
+        "Apps honour SIGTERM."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should an application do on SIGTERM during a spot drain?",
+        "a": "Stop accepting new work, finish or hand off in-flight requests, and exit within the grace period."
+      }
+    ]
+  }
+}

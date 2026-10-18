@@ -1,0 +1,404 @@
+{
+  "introduction-proactive-vs-reactive-finops": {
+    "core": "Reactive FinOps fixes bills after they arrive. Proactive (architectural) FinOps designs cost in from the start, choosing storage tiers, data flows and topology so the system is cheap by construction.",
+    "first_principles": {
+      "problem": "Expensive architectural decisions (cross-region chatter, everything in hot storage) are locked in, and a refactor later costs far more than designing it right.",
+      "truths": [
+        "Architecture determines most of the cost.",
+        "Changing an architecture later is expensive.",
+        "Cost can be a design requirement."
+      ],
+      "derivation": [
+        "Treat **cost as a non-functional requirement**.",
+        "**Estimate cost** in design reviews.",
+        "Design **storage tiers** and **data-transfer paths** deliberately.",
+        "**Review** cost per unit after launch."
+      ]
+    },
+    "analogy": {
+      "title": "Insulating a house while building vs. after",
+      "story": "Insulation during construction is cheap; retrofitting means tearing down walls.",
+      "mapping": [
+        [
+          "Insulation",
+          "Cost-aware design"
+        ],
+        [
+          "Retrofit",
+          "Refactor"
+        ],
+        [
+          "Energy bills",
+          "Cloud bills"
+        ]
+      ],
+      "breaks": "Over-optimising early can slow delivery, so focus on the big cost drivers."
+    },
+    "mindmap": {
+      "center": "Architectural FinOps",
+      "branches": [
+        {
+          "label": "Reactive",
+          "children": [
+            "Bill shock",
+            "Savings Plans"
+          ]
+        },
+        {
+          "label": "Proactive",
+          "children": [
+            "Design reviews",
+            "Cost as NFR"
+          ]
+        },
+        {
+          "label": "Levers",
+          "children": [
+            "Storage tiers",
+            "Data transfer",
+            "Topology"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A design review with a cost estimate",
+      "scenario": "Catching an expensive choice.",
+      "flow": [
+        "Proposal: cross-region sync every second",
+        "Estimate: $40k/mo transfer",
+        "Redesign: batch hourly + compress",
+        "$3k/mo"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Savings designed in before a line of code is written."
+        }
+      ],
+      "code": [],
+      "outcome": "systems that are cheap by construction."
+    },
+    "summary": {
+      "points": [
+        "Design for cost.",
+        "Estimate early.",
+        "Big levers: storage + network."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is proactive FinOps cheaper than reactive?",
+        "a": "Changing an architecture after it's built is far more expensive than designing for cost up front."
+      }
+    ]
+  },
+  "tiered-storage-economics": {
+    "core": "Storage classes trade access cost and latency against price per GB: hot (S3 Standard), warm (Infrequent Access), cold (Glacier Instant/Flexible) and archive (Deep Archive). Match each dataset's access temperature to its tier.",
+    "first_principles": {
+      "problem": "Petabytes of rarely read logs sit in Standard storage at up to 20x the archive price.",
+      "truths": [
+        "Access frequency drops as data ages.",
+        "Cheaper tiers charge more to retrieve.",
+        "Minimum storage durations apply."
+      ],
+      "derivation": [
+        "**Hot**: frequent access → Standard.",
+        "**Warm**: monthly → Standard-IA (retrieval fee, 30-day minimum).",
+        "**Cold**: quarterly → Glacier Instant/Flexible.",
+        "**Archive**: compliance → Deep Archive (hours to retrieve)."
+      ]
+    },
+    "analogy": {
+      "title": "Kitchen counter, pantry, basement and off-site storage",
+      "story": "Daily items on the counter, holiday decorations in the attic, old tax records in off-site storage.",
+      "mapping": [
+        [
+          "Counter",
+          "S3 Standard"
+        ],
+        [
+          "Pantry",
+          "Standard-IA"
+        ],
+        [
+          "Basement",
+          "Glacier"
+        ],
+        [
+          "Off-site",
+          "Deep Archive"
+        ]
+      ],
+      "breaks": "Retrieval and request fees can make cold tiers more expensive for data that turns out to be read often."
+    },
+    "mindmap": {
+      "center": "Storage Tiers",
+      "branches": [
+        {
+          "label": "Hot",
+          "children": [
+            "Standard"
+          ]
+        },
+        {
+          "label": "Warm",
+          "children": [
+            "Standard-IA",
+            "One Zone-IA"
+          ]
+        },
+        {
+          "label": "Cold",
+          "children": [
+            "Glacier IR",
+            "Glacier Flexible"
+          ]
+        },
+        {
+          "label": "Archive",
+          "children": [
+            "Deep Archive"
+          ]
+        },
+        {
+          "label": "Watch",
+          "children": [
+            "Retrieval fees",
+            "Min duration",
+            "Per-object overhead"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pricing 1 PB of old logs",
+      "scenario": "Rough per-month cost.",
+      "flow": [
+        "Standard: ~$21k",
+        "Standard-IA: ~$12.5k",
+        "Glacier Flexible: ~$3.6k",
+        "Deep Archive: ~$1k"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "~95% saved for compliance-only data."
+        }
+      ],
+      "code": [],
+      "outcome": "storage cost matches data value."
+    },
+    "summary": {
+      "points": [
+        "Match temperature to tier.",
+        "Mind retrieval fees.",
+        "Minimum durations."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main trade-off of colder storage tiers?",
+        "a": "Lower per-GB price in exchange for higher retrieval cost, slower access and minimum storage durations."
+      }
+    ]
+  },
+  "s3-lifecycle-policies-automating-tier-transitions": {
+    "core": "Lifecycle rules automatically transition objects to colder tiers by age (and prefix or tag), and expire them when no longer needed, so data temperature management is hands-off.",
+    "first_principles": {
+      "problem": "Manually moving objects between tiers doesn't scale, so nobody does it and costs climb.",
+      "truths": [
+        "Age is a strong proxy for access frequency.",
+        "Rules apply to billions of objects automatically.",
+        "Expiration prevents unbounded growth."
+      ],
+      "derivation": [
+        "**Transition**: Standard → IA after 30 days → Glacier after 90.",
+        "**Expire** after the retention period.",
+        "Clean up **noncurrent versions** and **incomplete multipart uploads**.",
+        "Scope by **prefix/tag**."
+      ]
+    },
+    "analogy": {
+      "title": "An automatic filing system",
+      "story": "Papers move from desk to cabinet to archive box on a schedule, and are shredded after 7 years.",
+      "mapping": [
+        [
+          "Desk",
+          "Standard"
+        ],
+        [
+          "Cabinet",
+          "IA"
+        ],
+        [
+          "Archive box",
+          "Glacier"
+        ],
+        [
+          "Shredder",
+          "Expiration"
+        ]
+      ],
+      "breaks": "Transitioning many tiny objects can cost more than it saves because of per-object fees."
+    },
+    "mindmap": {
+      "center": "Lifecycle Policies",
+      "branches": [
+        {
+          "label": "Transitions",
+          "children": [
+            "Age-based",
+            "Prefix/tag scope"
+          ]
+        },
+        {
+          "label": "Expiration",
+          "children": [
+            "Retention end"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "Noncurrent versions",
+            "Incomplete MPU"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Small objects"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A log bucket lifecycle",
+      "scenario": "JSON rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Logs flow to cheaper tiers automatically and disappear after 7 years."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\"Rules\":[{\"ID\":\"logs\",\"Filter\":{\"Prefix\":\"logs/\"},\"Status\":\"Enabled\",\n  \"Transitions\":[{\"Days\":30,\"StorageClass\":\"STANDARD_IA\"},{\"Days\":90,\"StorageClass\":\"GLACIER\"}],\n  \"Expiration\":{\"Days\":2555},\n  \"AbortIncompleteMultipartUpload\":{\"DaysAfterInitiation\":7}}]}"
+        }
+      ],
+      "outcome": "storage costs managed automatically."
+    },
+    "summary": {
+      "points": [
+        "Transition by age.",
+        "Expire on schedule.",
+        "Clean up versions and uploads."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add an AbortIncompleteMultipartUpload rule?",
+        "a": "Failed multipart uploads leave invisible parts that keep incurring storage charges."
+      }
+    ]
+  },
+  "data-transfer-topology-the-hidden-tollbooths": {
+    "core": "Clouds charge per GB to move data across AZs, across regions, out to the internet and through NAT gateways. Topology decisions (where services, caches and data sit) can quietly dominate the bill.",
+    "first_principles": {
+      "problem": "A chatty microservice architecture spread across AZs, with traffic routed through NAT, generates a larger transfer bill than its compute bill.",
+      "truths": [
+        "Same-AZ traffic is usually free.",
+        "Cross-AZ, cross-region and egress cost money.",
+        "NAT gateways charge per GB processed."
+      ],
+      "derivation": [
+        "Keep chatty services **in the same AZ** (topology-aware routing).",
+        "Use **VPC endpoints** for AWS services instead of NAT.",
+        "**Cache and CDN** egress-heavy content.",
+        "**Compress and batch** cross-region replication."
+      ]
+    },
+    "analogy": {
+      "title": "Toll roads between towns",
+      "story": "Driving within town is free; every trip between towns costs a toll, so you plan routes to minimise crossings.",
+      "mapping": [
+        [
+          "Towns",
+          "AZs/regions"
+        ],
+        [
+          "Tolls",
+          "Transfer fees"
+        ],
+        [
+          "Bypass road",
+          "VPC endpoint"
+        ]
+      ],
+      "breaks": "Keeping everything in one AZ reduces resilience, so balance cost against availability."
+    },
+    "mindmap": {
+      "center": "Data Transfer",
+      "branches": [
+        {
+          "label": "Charges",
+          "children": [
+            "Cross-AZ",
+            "Cross-region",
+            "Internet egress",
+            "NAT processing"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Topology-aware routing",
+            "VPC endpoints",
+            "CDN",
+            "Compression"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Resilience"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "NAT gateway surprise",
+      "scenario": "Fix.",
+      "flow": [
+        "Pods pull from S3 via NAT: 200 TB/mo",
+        "NAT processing ~$9k/mo",
+        "Add S3 gateway endpoint (free)",
+        "Cost → ~$0"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One routing change saves $100k a year."
+        }
+      ],
+      "code": [],
+      "outcome": "network costs are designed, not discovered."
+    },
+    "summary": {
+      "points": [
+        "Moving data costs money.",
+        "Avoid NAT for AWS services.",
+        "Keep chatty traffic local."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why route S3 traffic through a VPC gateway endpoint instead of NAT?",
+        "a": "Gateway endpoints for S3 are free, while NAT charges per GB processed."
+      }
+    ]
+  }
+}

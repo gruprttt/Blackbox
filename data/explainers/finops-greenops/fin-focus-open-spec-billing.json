@@ -1,0 +1,513 @@
+{
+  "introduction-the-tower-of-babel": {
+    "core": "Every cloud and SaaS vendor exports billing data with different column names, units and semantics. FOCUS (FinOps Open Cost and Usage Specification) defines one common schema, so multi-cloud cost analysis stops needing custom translation.",
+    "first_principles": {
+      "problem": "'How much did we spend on VMs across AWS, Azure and GCP?' takes weeks of mapping three incompatible billing formats.",
+      "truths": [
+        "Each provider evolved its own billing format.",
+        "Normalising by hand is error-prone.",
+        "Standards let tools interoperate."
+      ],
+      "derivation": [
+        "Agree on a **common schema** (column names, definitions).",
+        "Have providers **export natively** in FOCUS.",
+        "Build tooling **once** against FOCUS.",
+        "Compare **apples to apples**."
+      ]
+    },
+    "analogy": {
+      "title": "The Rosetta Stone",
+      "story": "One text in several scripts let scholars translate between them.",
+      "mapping": [
+        [
+          "Different scripts",
+          "Billing formats"
+        ],
+        [
+          "Rosetta Stone",
+          "FOCUS spec"
+        ],
+        [
+          "Translation",
+          "Normalisation"
+        ]
+      ],
+      "breaks": "FOCUS standardises structure, not prices or product names."
+    },
+    "mindmap": {
+      "center": "FOCUS",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Incompatible billing data"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Common schema"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Multi-cloud analysis",
+            "Tool interoperability"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Structure, not pricing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Querying multi-cloud compute spend",
+      "scenario": "With FOCUS.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One query across clouds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT ProviderName, SUM(EffectiveCost)\nFROM focus_billing\nWHERE ServiceCategory = 'Compute' AND ChargePeriodStart >= '2024-06-01'\nGROUP BY ProviderName;"
+        }
+      ],
+      "outcome": "unified cost data."
+    },
+    "summary": {
+      "points": [
+        "Different formats.",
+        "One standard.",
+        "Query once."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does FOCUS solve?",
+        "a": "Incompatible billing data formats across cloud and SaaS providers."
+      }
+    ]
+  },
+  "the-core-schema-speaking-the-same-language": {
+    "core": "FOCUS defines standard columns and dimensions: who (BillingAccountId, SubAccountId), what (ServiceName, ServiceCategory, ResourceId), when (ChargePeriodStart/End), how much (BilledCost, EffectiveCost, ListCost, ConsumedQuantity/Unit) and tags.",
+    "first_principles": {
+      "problem": "Providers call the same concept 'line_item_usage_account_id', 'SubscriptionId' or 'project.id'.",
+      "truths": [
+        "Billing concepts are shared across providers.",
+        "Consistent names enable shared queries.",
+        "Units must be explicit."
+      ],
+      "derivation": [
+        "**Accounts**: BillingAccountId, SubAccountId.",
+        "**Services**: ServiceName, ServiceCategory.",
+        "**Resources**: ResourceId, RegionId.",
+        "**Quantities and costs**: ConsumedQuantity, PricingUnit, cost columns; **Tags**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal form layout",
+      "story": "Every country's tax form puts 'income' in the same box, so accountants anywhere can read it.",
+      "mapping": [
+        [
+          "Form boxes",
+          "FOCUS columns"
+        ],
+        [
+          "Countries",
+          "Providers"
+        ],
+        [
+          "Accountants",
+          "FinOps tools"
+        ]
+      ],
+      "breaks": "Provider-specific details live in extension columns (prefixed x_)."
+    },
+    "mindmap": {
+      "center": "FOCUS Schema",
+      "branches": [
+        {
+          "label": "Who",
+          "children": [
+            "BillingAccountId",
+            "SubAccountId"
+          ]
+        },
+        {
+          "label": "What",
+          "children": [
+            "ServiceName",
+            "ServiceCategory",
+            "ResourceId"
+          ]
+        },
+        {
+          "label": "When",
+          "children": [
+            "ChargePeriodStart/End"
+          ]
+        },
+        {
+          "label": "How much",
+          "children": [
+            "BilledCost",
+            "EffectiveCost",
+            "ConsumedQuantity"
+          ]
+        },
+        {
+          "label": "Extensions",
+          "children": [
+            "x_ columns"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mapping three providers",
+      "scenario": "To one column.",
+      "flow": [
+        "AWS: line_item_usage_account_id",
+        "Azure: SubscriptionId",
+        "GCP: project.id",
+        "→ FOCUS SubAccountId"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A single dimension for 'which account'."
+        }
+      ],
+      "code": [],
+      "outcome": "consistent dimensions everywhere."
+    },
+    "summary": {
+      "points": [
+        "Standard columns.",
+        "Explicit units.",
+        "Extensions for the rest."
+      ]
+    },
+    "check": [
+      {
+        "q": "What prefix marks provider-specific columns in FOCUS?",
+        "a": "x_."
+      }
+    ]
+  },
+  "the-money-metrics-billed-vs-effective-vs-list": {
+    "core": "FOCUS separates cost figures. ListCost is the public price, BilledCost is what's invoiced in the period (upfront fees when paid), EffectiveCost is the amortised true cost of usage after discounts and commitments, and ContractedCost is the negotiated rate.",
+    "first_principles": {
+      "problem": "Teams compare numbers that mean different things: an upfront RI payment spikes BilledCost in one month, distorting analysis.",
+      "truths": [
+        "Commitments are paid in a different period from the usage they cover.",
+        "Discounts change the true cost.",
+        "Different questions need different numbers."
+      ],
+      "derivation": [
+        "**ListCost**: savings versus public price.",
+        "**BilledCost**: matches the invoice (cash, finance).",
+        "**EffectiveCost**: true usage cost (engineering, unit economics).",
+        "**ContractedCost**: negotiated-rate view."
+      ]
+    },
+    "analogy": {
+      "title": "A gym membership's costs",
+      "story": "The list price is $60 a month, you paid $600 upfront for the year (billed), so the effective cost is $50 a month.",
+      "mapping": [
+        [
+          "Sticker price",
+          "ListCost"
+        ],
+        [
+          "Upfront payment",
+          "BilledCost"
+        ],
+        [
+          "Monthly equivalent",
+          "EffectiveCost"
+        ]
+      ],
+      "breaks": "Using BilledCost for showback makes the team whose month included an upfront purchase look terrible."
+    },
+    "mindmap": {
+      "center": "Cost Metrics",
+      "branches": [
+        {
+          "label": "ListCost",
+          "children": [
+            "Public price"
+          ]
+        },
+        {
+          "label": "ContractedCost",
+          "children": [
+            "Negotiated rate"
+          ]
+        },
+        {
+          "label": "BilledCost",
+          "children": [
+            "Invoice",
+            "Cash timing"
+          ]
+        },
+        {
+          "label": "EffectiveCost",
+          "children": [
+            "Amortised",
+            "Unit economics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An all-upfront Savings Plan",
+      "scenario": "Per-metric view.",
+      "flow": [
+        "Jan BilledCost: +$120k upfront",
+        "EffectiveCost: $10k/mo spread over 12 months",
+        "Showback uses EffectiveCost"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fair, stable team reporting."
+        }
+      ],
+      "code": [],
+      "outcome": "the right number for each question."
+    },
+    "summary": {
+      "points": [
+        "List = public.",
+        "Billed = invoice.",
+        "Effective = true usage cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which FOCUS cost column should unit economics use?",
+        "a": "EffectiveCost, the amortised cost including discounts and commitments."
+      }
+    ]
+  },
+  "charge-types-and-the-full-picture-of-a-bill": {
+    "core": "Not every line is usage. FOCUS's ChargeCategory distinguishes Usage, Purchase (commitments, upfront fees), Tax, Credit and Adjustment (refunds, corrections), so analyses can include or exclude each correctly.",
+    "first_principles": {
+      "problem": "Credits and refunds mixed into usage totals make costs appear lower or higher than real consumption.",
+      "truths": [
+        "Bills include non-usage financial events.",
+        "Credits expire and distort trends.",
+        "Taxes vary by jurisdiction."
+      ],
+      "derivation": [
+        "Filter **ChargeCategory = 'Usage'** for consumption analysis.",
+        "Track **Purchase** for commitments.",
+        "Report **Credit** separately (expiring promotions).",
+        "Handle **Tax** and **Adjustment** for finance reconciliation."
+      ]
+    },
+    "analogy": {
+      "title": "A bank statement's transaction types",
+      "story": "Purchases, refunds, fees and interest all appear, and you categorise them to understand spending.",
+      "mapping": [
+        [
+          "Purchases",
+          "Usage"
+        ],
+        [
+          "Annual fee",
+          "Purchase"
+        ],
+        [
+          "Refunds",
+          "Credit/Adjustment"
+        ],
+        [
+          "Interest/tax",
+          "Tax"
+        ]
+      ],
+      "breaks": "Credits ending suddenly look like a cost spike, so track them separately."
+    },
+    "mindmap": {
+      "center": "Charge Types",
+      "branches": [
+        {
+          "label": "Usage",
+          "children": [
+            "Consumption"
+          ]
+        },
+        {
+          "label": "Purchase",
+          "children": [
+            "Commitments",
+            "Upfront"
+          ]
+        },
+        {
+          "label": "Credit",
+          "children": [
+            "Promotions",
+            "Expiring"
+          ]
+        },
+        {
+          "label": "Adjustment",
+          "children": [
+            "Refunds",
+            "Corrections"
+          ]
+        },
+        {
+          "label": "Tax",
+          "children": [
+            "Jurisdiction"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Startup credits expiring",
+      "scenario": "Analysis.",
+      "flow": [
+        "Usage steady at $50k",
+        "Credits −$40k/mo ended",
+        "Net bill jumps $10k → $50k",
+        "No real usage change"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Separating categories avoids false alarms."
+        }
+      ],
+      "code": [],
+      "outcome": "accurate understanding of what changed."
+    },
+    "summary": {
+      "points": [
+        "Not all lines are usage.",
+        "Separate credits.",
+        "Filter by category."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why separate Credits from Usage in cost analysis?",
+        "a": "Credits mask real consumption, and their expiry looks like a spike even when usage hasn't changed."
+      }
+    ]
+  },
+  "focus-adoption-where-the-industry-stands": {
+    "core": "FOCUS is now exported natively by major clouds (AWS Data Exports, Azure Cost Management, GCP BigQuery, OCI) and supported by FinOps tools, though coverage of every column and SaaS vendors varies. It's becoming the default foundation for cost data pipelines.",
+    "first_principles": {
+      "problem": "Teams wonder whether to build on proprietary formats or the emerging standard.",
+      "truths": [
+        "Standards gain value with adoption.",
+        "Native exports reduce ETL work.",
+        "Spec versions evolve."
+      ],
+      "derivation": [
+        "Enable **native FOCUS exports**.",
+        "Build pipelines and dashboards on **FOCUS columns**.",
+        "Use **x_ extensions** for provider-specific needs.",
+        "**Track spec versions** (1.0, 1.1+)."
+      ]
+    },
+    "analogy": {
+      "title": "The adoption of USB-C",
+      "story": "As more devices adopt one connector, building for it becomes the obvious choice.",
+      "mapping": [
+        [
+          "USB-C",
+          "FOCUS"
+        ],
+        [
+          "Devices",
+          "Providers and tools"
+        ],
+        [
+          "Old proprietary cables",
+          "CUR/native formats"
+        ]
+      ],
+      "breaks": "Some details remain provider-specific, so you can't drop native knowledge entirely."
+    },
+    "mindmap": {
+      "center": "FOCUS Adoption",
+      "branches": [
+        {
+          "label": "Providers",
+          "children": [
+            "AWS",
+            "Azure",
+            "GCP",
+            "OCI"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "FinOps platforms"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Native exports",
+            "Build on FOCUS"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "Partial coverage",
+            "Versions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Migrating a cost pipeline",
+      "scenario": "To FOCUS.",
+      "flow": [
+        "Enable AWS FOCUS export to S3",
+        "Azure FOCUS export to storage",
+        "Load both into warehouse",
+        "One dbt model, one dashboard"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "ETL code cut by 70%."
+        }
+      ],
+      "code": [],
+      "outcome": "future-proof cost data foundations."
+    },
+    "summary": {
+      "points": [
+        "Natively supported.",
+        "Build on the standard.",
+        "Watch versions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the benefit of native FOCUS exports from providers?",
+        "a": "Less custom ETL, because the data already arrives in the standard schema."
+      }
+    ]
+  }
+}
