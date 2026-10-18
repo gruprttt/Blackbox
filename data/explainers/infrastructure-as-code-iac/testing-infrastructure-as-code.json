@@ -1,0 +1,532 @@
+{
+  "introduction-trust-but-verify": {
+    "core": "IaC is code, so it can be tested, but infra tests trade speed for realism. The IaC test pyramid: fast static checks (fmt, validate, tflint, security scanners) on every commit; plan-level policy tests that inspect the planned changes; unit tests of modules (terraform test with mocks); and slower integration tests that deploy real resources, verify behaviour, then destroy them.",
+    "first_principles": {
+      "problem": "A module change passes review but deploys a security group open to 0.0.0.0/0 in production.",
+      "truths": [
+        "Mistakes are cheaper caught early.",
+        "Realism costs time and money.",
+        "Different layers catch different bugs."
+      ],
+      "derivation": [
+        "**Static analysis** on every commit.",
+        "**Plan analysis** with policies.",
+        "**Module tests** with terraform test.",
+        "**Integration tests** in sandboxes.",
+        "Run layers at **increasing cost** stages."
+      ]
+    },
+    "analogy": {
+      "title": "Spell-check, editor, and test readers",
+      "story": "Spell-check is instant, an editor catches logic, and test readers reveal how it lands in reality.",
+      "mapping": [
+        [
+          "Spell-check",
+          "Static analysis"
+        ],
+        [
+          "Editor",
+          "Plan policies"
+        ],
+        [
+          "Test readers",
+          "Integration tests"
+        ]
+      ],
+      "breaks": "Readers are cheap; real cloud resources cost money."
+    },
+    "mindmap": {
+      "center": "IaC Testing",
+      "branches": [
+        {
+          "label": "Static",
+          "children": [
+            "fmt",
+            "validate",
+            "tflint",
+            "checkov"
+          ]
+        },
+        {
+          "label": "Plan",
+          "children": [
+            "OPA/conftest",
+            "Sentinel"
+          ]
+        },
+        {
+          "label": "Unit",
+          "children": [
+            "terraform test",
+            "Mocks"
+          ]
+        },
+        {
+          "label": "Integration",
+          "children": [
+            "Terratest",
+            "Real deploy"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Speed vs realism"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pyramid timing",
+      "scenario": "Typical.",
+      "flow": [
+        "fmt/validate/tflint: seconds",
+        "checkov + conftest on plan: <1 min",
+        "terraform test with mocks: ~1 min",
+        "Terratest deploy/verify/destroy: 10–30 min"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Most bugs caught in the first minute."
+        }
+      ],
+      "code": [],
+      "outcome": "layered confidence."
+    },
+    "summary": {
+      "points": [
+        "IaC is testable.",
+        "Pyramid of speed vs realism.",
+        "Each layer catches different bugs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not rely only on integration tests?",
+        "a": "They're slow and costly; static and plan checks catch most issues in seconds and give faster feedback."
+      }
+    ]
+  },
+  "static-analysis-the-spellchecker-tflint": {
+    "core": "Static analysis inspects code without calling cloud APIs. terraform fmt and validate catch syntax and type errors; TFLint with provider rulesets catches invalid instance types, deprecated syntax and naming violations; security scanners (Checkov, Trivy, the successor to tfsec) flag risky settings such as public buckets or missing encryption. All run in seconds in pre-commit and CI.",
+    "first_principles": {
+      "problem": "A typo'd instance type 't3.mircro' passes validate and fails only at apply in CI.",
+      "truths": [
+        "Many errors are visible in code.",
+        "Provider-aware rules know valid values.",
+        "Fast checks run often."
+      ],
+      "derivation": [
+        "Run **fmt -check** and **validate**.",
+        "Run **TFLint** with AWS/Azure/GCP rulesets.",
+        "Run **Checkov/Trivy** for security.",
+        "Add to **pre-commit hooks**.",
+        "**Fail CI** on findings with justified skips."
+      ]
+    },
+    "analogy": {
+      "title": "A spell- and grammar-checker",
+      "story": "It underlines mistakes as you type, long before an editor reads the draft.",
+      "mapping": [
+        [
+          "Spelling",
+          "Syntax/types"
+        ],
+        [
+          "Grammar rules",
+          "TFLint rules"
+        ],
+        [
+          "Style guide",
+          "Security policies"
+        ]
+      ],
+      "breaks": "Spell-checkers miss meaning; static tools miss runtime behaviour."
+    },
+    "mindmap": {
+      "center": "Static Analysis",
+      "branches": [
+        {
+          "label": "Built-in",
+          "children": [
+            "fmt",
+            "validate"
+          ]
+        },
+        {
+          "label": "Linters",
+          "children": [
+            "TFLint",
+            "Provider rulesets"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Checkov",
+            "Trivy",
+            "KICS"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "Pre-commit",
+            "CI"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Skips with reasons"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CI step",
+      "scenario": "Bash.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Typo caught in seconds, before any plan."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "terraform fmt -check -recursive\nterraform init -backend=false && terraform validate\ntflint --init && tflint --recursive\ncheckov -d . --framework terraform --quiet\n# Error: \"t3.mircro\" is an invalid value as instance_type (aws_instance_invalid_type)"
+        }
+      ],
+      "outcome": "fast feedback on obvious errors."
+    },
+    "summary": {
+      "points": [
+        "fmt and validate.",
+        "TFLint knows providers.",
+        "Security scanners flag risk."
+      ]
+    },
+    "check": [
+      {
+        "q": "What can TFLint catch that terraform validate can't?",
+        "a": "Provider-specific invalid values (like non-existent instance types), deprecated patterns and custom naming rules."
+      }
+    ]
+  },
+  "plan-analysis-the-guardrail-opa": {
+    "core": "Static code analysis can't see computed values or module internals; the plan can. `terraform show -json plan.out` produces a machine-readable list of resource changes with before and after values. Policies in OPA/Rego (run by conftest), Sentinel or Checkov evaluate it to block dangerous changes, such as deleting databases, opening 0.0.0.0/0, or missing tags, before apply.",
+    "first_principles": {
+      "problem": "A variable default deep inside a module opens SSH to the world, and code scanners miss it.",
+      "truths": [
+        "Plans contain final computed values.",
+        "JSON is machine-checkable.",
+        "Some changes are only dangerous in context (deletes)."
+      ],
+      "derivation": [
+        "Generate **plan JSON**.",
+        "Write **Rego deny rules** on resource_changes.",
+        "Run **conftest** in CI.",
+        "Block on **deny**, warn on **warn**.",
+        "Guard **destructive actions** explicitly."
+      ]
+    },
+    "analogy": {
+      "title": "An airport X-ray of the packed bag",
+      "story": "Checking the packing list misses what's actually inside; the scanner sees the final contents.",
+      "mapping": [
+        [
+          "Packing list",
+          "Source code"
+        ],
+        [
+          "X-ray",
+          "Plan JSON"
+        ],
+        [
+          "Security officer",
+          "OPA policy"
+        ]
+      ],
+      "breaks": "X-rays can miss things; policies only catch what they're written to check."
+    },
+    "mindmap": {
+      "center": "Plan Analysis",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "terraform show -json"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "OPA/conftest",
+            "Sentinel",
+            "Checkov plan"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "No 0.0.0.0/0",
+            "No DB deletes",
+            "Required tags"
+          ]
+        },
+        {
+          "label": "Outcome",
+          "children": [
+            "deny",
+            "warn"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Block DB deletion",
+      "scenario": "Rego.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any plan replacing or deleting a DB fails CI."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rego",
+          "text": "package main\nimport rego.v1\n\ndeny contains msg if {\n  rc := input.resource_changes[_]\n  rc.type == \"aws_db_instance\"\n  \"delete\" in rc.change.actions\n  msg := sprintf(\"%s would be deleted\", [rc.address])\n}\n# terraform show -json tf.plan > plan.json && conftest test plan.json"
+        }
+      ],
+      "outcome": "guardrails on actual changes."
+    },
+    "summary": {
+      "points": [
+        "Plans hold final values.",
+        "Policies on plan JSON.",
+        "Block destructive changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why analyse the plan rather than just the source code?",
+        "a": "The plan contains resolved values and module internals, plus the actions (create/delete/replace), which source scanning can't see."
+      }
+    ]
+  },
+  "integration-testing-the-real-deal-terratest": {
+    "core": "Integration tests deploy real infrastructure in a sandbox account, check it behaves correctly (HTTP returns 200, the bucket rejects public access, a DB accepts connections), then destroy it. Terratest (Go) wraps terraform init/apply/destroy with helpers and retries, and the native `terraform test` command with run blocks can also apply real resources. Use unique names and always defer destroy.",
+    "first_principles": {
+      "problem": "A module produces a valid plan but the load balancer health checks fail because the security group blocks the target port.",
+      "truths": [
+        "Plans don't prove behaviour.",
+        "Real deploys find integration bugs.",
+        "Tests must clean up after themselves."
+      ],
+      "derivation": [
+        "Deploy to an **isolated sandbox**.",
+        "Use **unique names** per run.",
+        "**defer Destroy** always.",
+        "Assert **behaviour**, with retries for eventual consistency.",
+        "Run on **merge/nightly** due to cost."
+      ]
+    },
+    "analogy": {
+      "title": "A dress rehearsal",
+      "story": "The script reads fine, but only a full run on stage shows the door doesn't open.",
+      "mapping": [
+        [
+          "Script",
+          "Plan"
+        ],
+        [
+          "Stage run",
+          "Real deploy"
+        ],
+        [
+          "Striking the set",
+          "Destroy"
+        ]
+      ],
+      "breaks": "Rehearsals are cheap; cloud resources cost money, so clean up."
+    },
+    "mindmap": {
+      "center": "Integration Tests",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "Terratest",
+            "terraform test",
+            "Kitchen-Terraform"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Apply",
+            "Verify",
+            "Destroy"
+          ]
+        },
+        {
+          "label": "Practices",
+          "children": [
+            "Unique names",
+            "Retries",
+            "Sandbox account",
+            "Nuke leftovers"
+          ]
+        },
+        {
+          "label": "Cadence",
+          "children": [
+            "On merge",
+            "Nightly"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Terratest",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Proves the module actually serves traffic."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "func TestWebModule(t *testing.T) {\n    opts := &terraform.Options{\n        TerraformDir: \"../examples/web\",\n        Vars: map[string]interface{}{\"name\": \"t-\" + random.UniqueId()},\n    }\n    defer terraform.Destroy(t, opts)\n    terraform.InitAndApply(t, opts)\n    url := terraform.Output(t, opts, \"url\")\n    http_helper.HttpGetWithRetry(t, url, nil, 200, \"ok\", 30, 10*time.Second)\n}"
+        }
+      ],
+      "outcome": "behaviour verified on real infra."
+    },
+    "summary": {
+      "points": [
+        "Deploy, verify, destroy.",
+        "Unique names, always clean up.",
+        "Run less often."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use retries in integration test assertions?",
+        "a": "Cloud resources are eventually consistent; DNS, load balancers and instances take time to become ready."
+      }
+    ]
+  },
+  "structuring-tests-in-a-real-ci-pipeline": {
+    "core": "Arrange tests so the cheapest run most often. On every push: fmt, validate, tflint and security scans. On a PR: plan for each affected stack, plan-policy checks and module unit tests (terraform test with mock providers). On merge or nightly: Terratest integration tests in a sandbox, plus a leftover-resource sweeper. Gate production applies on all green.",
+    "first_principles": {
+      "problem": "Running full integration tests on every push makes PR feedback take 40 minutes, so engineers skip CI.",
+      "truths": [
+        "Fast feedback keeps developers engaged.",
+        "Expensive tests need batching.",
+        "Every layer must gate deploys."
+      ],
+      "derivation": [
+        "**Push**: static checks (seconds).",
+        "**PR**: plan + policies + unit tests (minutes).",
+        "**Merge/nightly**: integration (tens of minutes).",
+        "Test only **changed modules/stacks**.",
+        "Run a **nuke job** for leaked resources."
+      ]
+    },
+    "analogy": {
+      "title": "Airport security lanes",
+      "story": "Everyone passes the quick scanner; selected bags get a detailed search; full inspections happen offline.",
+      "mapping": [
+        [
+          "Quick scanner",
+          "Static checks"
+        ],
+        [
+          "Detailed search",
+          "Plan policies"
+        ],
+        [
+          "Full inspection",
+          "Integration tests"
+        ]
+      ],
+      "breaks": "Airports sample bags; CI should test every changed module eventually."
+    },
+    "mindmap": {
+      "center": "CI Structure",
+      "branches": [
+        {
+          "label": "Push",
+          "children": [
+            "fmt",
+            "validate",
+            "tflint",
+            "checkov"
+          ]
+        },
+        {
+          "label": "PR",
+          "children": [
+            "Plan",
+            "conftest",
+            "terraform test"
+          ]
+        },
+        {
+          "label": "Merge/Nightly",
+          "children": [
+            "Terratest",
+            "Sandbox",
+            "aws-nuke"
+          ]
+        },
+        {
+          "label": "Optimise",
+          "children": [
+            "Changed paths only",
+            "Caching",
+            "Parallelism"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "GitHub Actions jobs",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "PR feedback in ~3 min; full verification on merge."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "jobs:\n  static:   { runs-on: ubuntu-latest, steps: [ {run: make fmt validate lint scan} ] }\n  plan:\n    needs: static\n    if: github.event_name == 'pull_request'\n    steps: [ {run: make plan policy unit} ]\n  integration:\n    needs: plan\n    if: github.ref == 'refs/heads/main'\n    steps: [ {run: cd test && go test -timeout 60m ./...} ]"
+        }
+      ],
+      "outcome": "fast and thorough pipeline."
+    },
+    "summary": {
+      "points": [
+        "Cheap tests often.",
+        "Expensive tests batched.",
+        "All gate production."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should Terratest-style integration tests usually run?",
+        "a": "On merge to main or nightly in a sandbox account, not on every push, because they're slow and cost money."
+      }
+    ]
+  }
+}

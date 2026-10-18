@@ -1,0 +1,415 @@
+{
+  "introduction-escaping-the-monolith": {
+    "core": "A single state file that grew to hundreds of resources makes every plan slow (Terraform refreshes everything), puts the entire estate in every change's blast radius, and serialises all teams on one lock. Escaping the monolith means splitting state into smaller stacks with clear dependency order, then moving resources between states without recreating them.",
+    "first_principles": {
+      "problem": "A 500-resource state takes 15 minutes to plan, and an app change risks touching the VPC.",
+      "truths": [
+        "Plan time scales with resources refreshed.",
+        "One state means one lock.",
+        "Splitting must not recreate resources."
+      ],
+      "derivation": [
+        "Measure **plan time and resource count**.",
+        "Group into **stacks by lifecycle**.",
+        "Define a **dependency order**.",
+        "Move resources with **state mv / removed + import**.",
+        "Verify **zero-diff** in both stacks."
+      ]
+    },
+    "analogy": {
+      "title": "Splitting one huge warehouse into specialised depots",
+      "story": "Finding anything in one giant warehouse takes forever; depots by category are faster, and a fire in one doesn't burn the rest.",
+      "mapping": [
+        [
+          "Warehouse",
+          "Monolithic state"
+        ],
+        [
+          "Depots",
+          "Stacks"
+        ],
+        [
+          "Fire",
+          "Bad apply"
+        ]
+      ],
+      "breaks": "Moving stock is physical; moving state is metadata but still risky."
+    },
+    "mindmap": {
+      "center": "Escaping the Monolith",
+      "branches": [
+        {
+          "label": "Symptoms",
+          "children": [
+            "Slow plans",
+            "Big blast radius",
+            "Lock contention"
+          ]
+        },
+        {
+          "label": "Strategy",
+          "children": [
+            "Split by lifecycle",
+            "Dependency order"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "state mv",
+            "removed + import",
+            "moved"
+          ]
+        },
+        {
+          "label": "Verification",
+          "children": [
+            "Zero-diff plans"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Quick stats",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Evidence for where to split."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "terraform state list | wc -l          # 512\ntime terraform plan -refresh=true     # real 14m52s\nterraform state list | cut -d. -f1-2 | sort | uniq -c | sort -rn | head"
+        }
+      ],
+      "outcome": "a case and map for splitting."
+    },
+    "summary": {
+      "points": [
+        "Monoliths are slow and risky.",
+        "Split by lifecycle.",
+        "Move without recreating."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does plan time grow with state size?",
+        "a": "Terraform refreshes every resource in state by calling cloud APIs before diffing."
+      }
+    ]
+  },
+  "strategy-the-stack-hierarchy": {
+    "core": "Split stacks form a dependency graph: apps need databases, databases need subnets, subnets need a VPC. Arrange them in a strict hierarchy where outputs flow only downward, from lower and more stable layers to higher and more volatile ones. Apply in topological order, and never let a lower layer read from a higher one.",
+    "first_principles": {
+      "problem": "After splitting, nobody knows which stack to apply first, and a new environment takes days to bring up.",
+      "truths": [
+        "Dependencies form a graph.",
+        "Graphs need an order.",
+        "Stability decreases upward."
+      ],
+      "derivation": [
+        "Number layers (**00-network, 10-data, 20-apps**).",
+        "Allow dependencies **downward only**.",
+        "**Apply in order** for new environments.",
+        "Automate order with **Terragrunt/Spacelift**.",
+        "Keep the graph a **DAG**."
+      ]
+    },
+    "analogy": {
+      "title": "Building floors bottom-up",
+      "story": "You pour the foundation before walls and walls before the roof; the roof never supports the foundation.",
+      "mapping": [
+        [
+          "Foundation",
+          "Network"
+        ],
+        [
+          "Walls",
+          "Data/platform"
+        ],
+        [
+          "Roof",
+          "Apps"
+        ]
+      ],
+      "breaks": "Buildings aren't rebuilt weekly; stacks are re-applied constantly."
+    },
+    "mindmap": {
+      "center": "Stack Hierarchy",
+      "branches": [
+        {
+          "label": "Layers",
+          "children": [
+            "Network",
+            "Security",
+            "Data",
+            "Platform",
+            "Apps"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Downward deps only",
+            "DAG"
+          ]
+        },
+        {
+          "label": "Ordering",
+          "children": [
+            "Topological apply",
+            "Numbered dirs"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Terragrunt run-all",
+            "Spacelift stack deps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bring up a new env",
+      "scenario": "Order.",
+      "flow": [
+        "00-network → VPC, subnets",
+        "10-security → KMS, IAM baselines",
+        "20-data → RDS reads subnet IDs",
+        "30-apps → reads DB endpoint"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New environment in one ordered run."
+        }
+      ],
+      "code": [],
+      "outcome": "predictable dependency flow."
+    },
+    "summary": {
+      "points": [
+        "Dependencies form a DAG.",
+        "Flow downward only.",
+        "Apply topologically."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must lower layers never depend on higher ones?",
+        "a": "It would create cycles and make stable foundations change whenever volatile apps change, breaking the apply order."
+      }
+    ]
+  },
+  "resolving-state-hell-circular-dependencies": {
+    "core": "Circular dependencies appear when stack A needs B's output and B needs A's. A typical case: the app needs the DB endpoint, and the DB's security group needs the app's security group ID. Break the cycle by extracting the shared piece into a lower layer (create both security groups in a shared stack), by relying on stable identifiers such as tags or names instead of outputs, or by splitting a resource from its attachment.",
+    "first_principles": {
+      "problem": "App and DB stacks each wait for the other's output, so neither can be applied first.",
+      "truths": [
+        "Cycles have no valid order.",
+        "Shared pieces can move down.",
+        "Attachments can be separated from resources."
+      ],
+      "derivation": [
+        "**Identify** the edge causing the cycle.",
+        "**Extract** shared resources to a lower layer.",
+        "**Split** resource vs rule/attachment.",
+        "Use **predictable names/tags** instead of outputs.",
+        "Re-verify the graph is a **DAG**."
+      ]
+    },
+    "analogy": {
+      "title": "Two people each waiting for the other to call",
+      "story": "Break it by agreeing on a meeting place in advance (shared layer) instead of waiting on each other.",
+      "mapping": [
+        [
+          "Waiting for call",
+          "Waiting for output"
+        ],
+        [
+          "Pre-agreed place",
+          "Shared lower layer"
+        ],
+        [
+          "Known address",
+          "Predictable name/tag"
+        ]
+      ],
+      "breaks": "People can improvise; Terraform simply errors or deadlocks."
+    },
+    "mindmap": {
+      "center": "Circular Dependencies",
+      "branches": [
+        {
+          "label": "Symptom",
+          "children": [
+            "Deadlock",
+            "Can't bootstrap"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Mutual SG refs",
+            "Mutual IAM refs",
+            "DNS ↔ cert"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Extract down",
+            "Split attachment",
+            "Stable names"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "DAG"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Break the SG cycle",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "App and DB stacks both consume SG IDs from below."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "# 10-shared: create both SGs\nresource \"aws_security_group\" \"app\" { name = \"app\" vpc_id = var.vpc_id }\nresource \"aws_security_group\" \"db\"  { name = \"db\"  vpc_id = var.vpc_id }\nresource \"aws_vpc_security_group_ingress_rule\" \"db_from_app\" {\n  security_group_id            = aws_security_group.db.id\n  referenced_security_group_id = aws_security_group.app.id\n  from_port = 5432\n  to_port   = 5432\n  ip_protocol = \"tcp\"\n}"
+        }
+      ],
+      "outcome": "cycle removed."
+    },
+    "summary": {
+      "points": [
+        "Cycles block ordering.",
+        "Extract shared pieces down.",
+        "Separate attachments."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the most common fix for a cross-stack security-group cycle?",
+        "a": "Create both security groups (and the rule linking them) in a shared lower stack that both upper stacks consume."
+      }
+    ]
+  },
+  "state-migration-during-re-platforming": {
+    "core": "Sometimes state is too messy for surgical `state mv`, for example old 0.12-era code with inconsistent naming. Then do a clean-room migration: write fresh, idiomatic code, use `removed { lifecycle { destroy = false } }` (or state rm) to drop resources from the old state without destroying them, adopt them into the new state with import blocks, and verify zero-diff plans on both sides before deleting old code.",
+    "first_principles": {
+      "problem": "A legacy monolith with hundreds of hand-imported resources must move to a new modular layout without downtime.",
+      "truths": [
+        "Resources can leave state without being destroyed.",
+        "Imports adopt existing objects.",
+        "Two states must never manage one object."
+      ],
+      "derivation": [
+        "Write the **new code** first.",
+        "**Import** into new state.",
+        "**Remove** from old state with destroy = false.",
+        "Verify **zero-diff** in both.",
+        "Migrate in **small batches**."
+      ]
+    },
+    "analogy": {
+      "title": "Moving house with labelled boxes",
+      "story": "You register items at the new house before crossing them off the old inventory, never leaving anything unclaimed or claimed twice.",
+      "mapping": [
+        [
+          "New inventory",
+          "New state import"
+        ],
+        [
+          "Crossing off",
+          "removed block"
+        ],
+        [
+          "Double claim",
+          "Two states managing one resource"
+        ]
+      ],
+      "breaks": "Furniture can't be in two places; resources can be in two states, which is dangerous."
+    },
+    "mindmap": {
+      "center": "Re-platforming State",
+      "branches": [
+        {
+          "label": "When",
+          "children": [
+            "Messy legacy",
+            "Big restructures"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "removed block",
+            "import block",
+            "state rm"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "New code",
+            "Import",
+            "Remove old",
+            "Verify"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Never double-manage",
+            "Small batches",
+            "Backups"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hand-off a bucket",
+      "scenario": "HCL in two stacks.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ownership transferred, bucket untouched."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "# old stack\nremoved {\n  from = aws_s3_bucket.assets\n  lifecycle { destroy = false }\n}\n\n# new stack\nimport {\n  to = module.storage.aws_s3_bucket.this\n  id = \"acme-assets\"\n}"
+        }
+      ],
+      "outcome": "clean migration without downtime."
+    },
+    "summary": {
+      "points": [
+        "Remove without destroy.",
+        "Import into new.",
+        "Verify both sides."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must you avoid during state migration between stacks?",
+        "a": "Having both stacks manage the same resource at once, which leads to conflicting changes or accidental destruction."
+      }
+    ]
+  }
+}

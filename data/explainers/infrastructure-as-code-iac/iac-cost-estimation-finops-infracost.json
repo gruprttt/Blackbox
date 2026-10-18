@@ -1,0 +1,535 @@
+{
+  "introduction-the-invisible-price-tag": {
+    "core": "In the cloud, any engineer can create expensive infrastructure with a few lines of code, and nobody sees the cost until the bill arrives weeks later. That delay breaks the feedback loop: whoever made the change has moved on. Shifting cost left means showing the price of a change at review time, when it is cheapest to adjust.",
+    "first_principles": {
+      "problem": "A PR changing instance_type from m5.large to m5.8xlarge across 20 nodes is approved without anyone noticing a $20k/month increase.",
+      "truths": [
+        "Code changes have prices.",
+        "Late feedback is ignored.",
+        "Engineers decide cost in code."
+      ],
+      "derivation": [
+        "**Estimate** cost from IaC.",
+        "Show it **in the PR**.",
+        "Highlight **deltas**, not totals.",
+        "Set **thresholds** for review.",
+        "Compare with **actual bills** later."
+      ]
+    },
+    "analogy": {
+      "title": "A shopping cart that shows the total before checkout",
+      "story": "Imagine shopping with no prices until the credit-card statement arrives.",
+      "mapping": [
+        [
+          "Cart total",
+          "PR cost estimate"
+        ],
+        [
+          "Statement",
+          "Cloud bill"
+        ],
+        [
+          "Checkout",
+          "Merge/apply"
+        ]
+      ],
+      "breaks": "Carts have fixed prices; cloud costs depend on usage too."
+    },
+    "mindmap": {
+      "center": "Invisible Price Tag",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Bill shock",
+            "Delayed feedback"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "Self-service provisioning",
+            "Complex pricing"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Shift-left cost",
+            "PR estimates"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Infracost",
+            "TFC cost estimation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The missed change",
+      "scenario": "Diff.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "~$21,000/month increase hidden in a one-line diff."
+        }
+      ],
+      "code": [
+        {
+          "lang": "diff",
+          "text": "-  instance_type = \"m5.large\"     # ~$70/mo each\n+  instance_type = \"m5.8xlarge\"   # ~$1,120/mo each\n   desired_size  = 20"
+        }
+      ],
+      "outcome": "why cost must be visible in review."
+    },
+    "summary": {
+      "points": [
+        "Changes have prices.",
+        "Bills are too late.",
+        "Show cost at review time."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is the cloud bill a poor feedback mechanism for engineers?",
+        "a": "It arrives weeks later, aggregated, after the change's author has moved on, so it rarely changes behaviour."
+      }
+    ]
+  },
+  "cloud-pricing-fundamentals-why-estimation-is-hard": {
+    "core": "Cloud prices depend on many dimensions: resource type and size, region, OS and licence, purchase model (on-demand, reserved, savings plans, spot), and usage-based components (GB transferred, requests, storage-hours, IOPS). IaC describes the resources but not their usage, so estimates are exact for fixed costs and approximate for usage-based ones unless you supply usage assumptions.",
+    "first_principles": {
+      "problem": "An estimate shows $0 for an S3 bucket and a NAT gateway's data processing, which later cost $4,000/month.",
+      "truths": [
+        "Prices vary by many dimensions.",
+        "Usage isn't in the code.",
+        "Discounts happen at the billing layer."
+      ],
+      "derivation": [
+        "Distinguish **fixed vs usage-based** costs.",
+        "Supply **usage assumptions** files.",
+        "Account for **region and OS**.",
+        "Treat estimates as **on-demand list price**.",
+        "Watch **data transfer and NAT** costs."
+      ]
+    },
+    "analogy": {
+      "title": "Estimating a phone bill",
+      "story": "The plan fee is known; calls and roaming depend on how you use it.",
+      "mapping": [
+        [
+          "Plan fee",
+          "Instance-hours"
+        ],
+        [
+          "Calls/roaming",
+          "Requests/transfer"
+        ],
+        [
+          "Discount bundles",
+          "Savings plans"
+        ]
+      ],
+      "breaks": "Phone plans are simple; clouds have millions of SKUs."
+    },
+    "mindmap": {
+      "center": "Cloud Pricing",
+      "branches": [
+        {
+          "label": "Dimensions",
+          "children": [
+            "Type/size",
+            "Region",
+            "OS/licence",
+            "Purchase model"
+          ]
+        },
+        {
+          "label": "Fixed",
+          "children": [
+            "Instance-hours",
+            "Provisioned IOPS"
+          ]
+        },
+        {
+          "label": "Usage-based",
+          "children": [
+            "Transfer",
+            "Requests",
+            "Storage GB"
+          ]
+        },
+        {
+          "label": "Hidden",
+          "children": [
+            "NAT processing",
+            "Cross-AZ",
+            "Logs"
+          ]
+        },
+        {
+          "label": "Discounts",
+          "children": [
+            "RI",
+            "Savings Plans",
+            "Spot"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixed vs usage",
+      "scenario": "Breakdown.",
+      "flow": [
+        "EC2 m5.large: $70/mo (fixed, known)",
+        "NAT gateway hourly: $33/mo (fixed)",
+        "NAT data processing: $0.045/GB (usage)",
+        "S3 storage + requests: usage"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Without usage data, half the bill is invisible."
+        }
+      ],
+      "code": [],
+      "outcome": "realistic expectations of estimates."
+    },
+    "summary": {
+      "points": [
+        "Many price dimensions.",
+        "Usage not in code.",
+        "Provide assumptions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't IaC alone give an exact monthly cost?",
+        "a": "It defines resources but not their usage (traffic, requests, storage growth), and discounts apply at billing."
+      }
+    ]
+  },
+  "the-tool-infracost": {
+    "core": "Infracost parses Terraform (HCL directly or plan JSON), maps each resource to price SKUs via its cloud pricing API, and outputs a monthly cost breakdown. `infracost diff` compares against a baseline to show the cost delta of a change. A usage file (infracost-usage.yml) supplies estimates for usage-based items such as Lambda requests or S3 GB, and it supports AWS, Azure and GCP.",
+    "first_principles": {
+      "problem": "Engineers have no quick way to see the cost of a Terraform change locally.",
+      "truths": [
+        "Resources map to price SKUs.",
+        "Diffs matter more than totals.",
+        "Usage can be estimated."
+      ],
+      "derivation": [
+        "Run **infracost breakdown** for totals.",
+        "Run **infracost diff** vs baseline.",
+        "Add **usage file** for usage-based resources.",
+        "Use **plan JSON** for computed values.",
+        "Cache the **baseline** from main."
+      ]
+    },
+    "analogy": {
+      "title": "A quantity surveyor",
+      "story": "They read architectural plans and price every material line by line, flagging items priced by usage.",
+      "mapping": [
+        [
+          "Plans",
+          "Terraform"
+        ],
+        [
+          "Price list",
+          "Pricing API"
+        ],
+        [
+          "Bill of quantities",
+          "Breakdown"
+        ]
+      ],
+      "breaks": "Surveyors adjust for negotiated discounts; Infracost uses list prices by default."
+    },
+    "mindmap": {
+      "center": "Infracost",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "HCL dir",
+            "Plan JSON"
+          ]
+        },
+        {
+          "label": "Commands",
+          "children": [
+            "breakdown",
+            "diff",
+            "comment"
+          ]
+        },
+        {
+          "label": "Usage",
+          "children": [
+            "infracost-usage.yml",
+            "Cloud usage sync"
+          ]
+        },
+        {
+          "label": "Clouds",
+          "children": [
+            "AWS",
+            "Azure",
+            "GCP"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Table",
+            "JSON",
+            "HTML"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Local diff",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cost impact visible before pushing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "infracost breakdown --path . --format json --out-file base.json   # on main\ngit checkout feature/bigger-nodes\ninfracost diff --path . --compare-to base.json\n# ~ aws_eks_node_group.main\n#   +$21,000 ($1,400 → $22,400)\n# Monthly cost change: +$21,000 (+1500%)"
+        }
+      ],
+      "outcome": "cost as a local feedback loop."
+    },
+    "summary": {
+      "points": [
+        "Maps resources to prices.",
+        "diff shows delta.",
+        "Usage file for variable costs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does infracost diff compare?",
+        "a": "The cost of the current code against a baseline (usually main), showing the monthly cost change per resource."
+      }
+    ]
+  },
+  "workflow-the-pull-request-comment": {
+    "core": "The biggest impact comes from CI: on every PR that touches IaC, Infracost computes the diff against main and posts or updates one comment showing the monthly cost change per project and resource. Reviewers see cost next to the code diff, making it part of the conversation ('do we need 8xlarge?') at the moment the change is cheapest to alter.",
+    "first_principles": {
+      "problem": "Engineers forget to run cost tools locally, so expensive changes still slip through.",
+      "truths": [
+        "Automation beats memory.",
+        "Reviewers decide at PR time.",
+        "One updating comment avoids noise."
+      ],
+      "derivation": [
+        "Run on **PRs touching IaC paths**.",
+        "Generate **baseline from base branch**.",
+        "Post **one updating comment**.",
+        "Include **multiple projects** via config file.",
+        "Link to **dashboards** for trends."
+      ]
+    },
+    "analogy": {
+      "title": "A price tag on every item in the cart",
+      "story": "You see the cost as you add things, not later.",
+      "mapping": [
+        [
+          "Price tag",
+          "PR comment"
+        ],
+        [
+          "Cart",
+          "PR diff"
+        ],
+        [
+          "Checkout",
+          "Merge"
+        ]
+      ],
+      "breaks": "Price tags are exact; usage costs are estimates."
+    },
+    "mindmap": {
+      "center": "PR Cost Comment",
+      "branches": [
+        {
+          "label": "Trigger",
+          "children": [
+            "PR on IaC paths"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Baseline main",
+            "Diff PR",
+            "Comment"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Update single comment",
+            "Per-project breakdown"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "GitHub Actions",
+            "GitLab",
+            "Atlantis",
+            "Infracost Cloud"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "GitHub Actions",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every IaC PR shows its monthly cost delta."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- uses: infracost/actions/setup@v3\n  with: { api-key: \"${{ secrets.INFRACOST_API_KEY }}\" }\n- run: |\n    git checkout ${{ github.base_ref }}\n    infracost breakdown --path=. --format=json --out-file=/tmp/base.json\n    git checkout ${{ github.head_ref }}\n    infracost diff --path=. --compare-to=/tmp/base.json --format=json --out-file=/tmp/diff.json\n    infracost comment github --path=/tmp/diff.json --repo=$GITHUB_REPOSITORY \\\n      --pull-request=${{ github.event.pull_request.number }} --github-token=${{ github.token }} --behavior=update"
+        }
+      ],
+      "outcome": "cost-aware code review."
+    },
+    "summary": {
+      "points": [
+        "Automate in CI.",
+        "Diff vs base.",
+        "One updating comment."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use --behavior=update for the PR comment?",
+        "a": "It edits one comment per PR instead of adding a new one on every push, keeping the thread readable."
+      }
+    ]
+  },
+  "cost-policies-automating-cost-governance": {
+    "core": "Visibility can be followed by enforcement. Cost policies evaluate Infracost JSON with OPA, Sentinel or Infracost guardrails, for example: block if the monthly increase exceeds $1,000 without FinOps approval, require Graviton instance families, forbid gp2 volumes, or require cost-center tags. Use tiers (warn, require approval, block) so policies guide rather than obstruct.",
+    "first_principles": {
+      "problem": "Visibility alone doesn't stop a team from repeatedly merging large cost increases without approval.",
+      "truths": [
+        "Some changes need extra approval.",
+        "Policies can read cost JSON.",
+        "Hard blocks frustrate if too strict."
+      ],
+      "derivation": [
+        "Set **delta thresholds** with approvers.",
+        "Enforce **efficient defaults** (gp3, Graviton).",
+        "Require **cost allocation tags**.",
+        "Use **warn → approve → block** tiers.",
+        "Review policies with **FinOps** regularly."
+      ]
+    },
+    "analogy": {
+      "title": "A company expense policy",
+      "story": "Small expenses auto-approve, larger ones need a manager, and some items are never allowed.",
+      "mapping": [
+        [
+          "Auto-approve",
+          "Warn tier"
+        ],
+        [
+          "Manager sign-off",
+          "Approval tier"
+        ],
+        [
+          "Forbidden items",
+          "Block tier"
+        ]
+      ],
+      "breaks": "Expense policies are reviewed after spend; cost policies act before."
+    },
+    "mindmap": {
+      "center": "Cost Policies",
+      "branches": [
+        {
+          "label": "Engines",
+          "children": [
+            "OPA on Infracost JSON",
+            "Sentinel",
+            "Infracost guardrails"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Delta threshold",
+            "gp3 not gp2",
+            "Graviton",
+            "Tags"
+          ]
+        },
+        {
+          "label": "Tiers",
+          "children": [
+            "Warn",
+            "Approve",
+            "Block"
+          ]
+        },
+        {
+          "label": "Governance",
+          "children": [
+            "FinOps review",
+            "Exceptions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Threshold policy",
+      "scenario": "Rego.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Big increases need approval; inefficient choices flagged."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rego",
+          "text": "package infracost\nimport rego.v1\n\ndeny contains msg if {\n  delta := to_number(input.diffTotalMonthlyCost)\n  delta > 1000\n  msg := sprintf(\"Monthly cost increase $%.0f exceeds $1000; needs FinOps approval\", [delta])\n}\n\nwarn contains msg if {\n  some p in input.projects\n  some r in p.breakdown.resources\n  r.resourceType == \"aws_ebs_volume\"\n  r.metadata.volumeType == \"gp2\"\n  msg := sprintf(\"%s uses gp2; gp3 is ~20%% cheaper\", [r.name])\n}"
+        }
+      ],
+      "outcome": "automated cost governance."
+    },
+    "summary": {
+      "points": [
+        "Enforce after visibility.",
+        "Tiered responses.",
+        "Efficient defaults."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why tier cost policies instead of hard-blocking everything over a threshold?",
+        "a": "Legitimate growth needs to proceed; tiers route big changes to approval while keeping teams unblocked."
+      }
+    ]
+  }
+}

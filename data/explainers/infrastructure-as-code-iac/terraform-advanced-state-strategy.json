@@ -1,0 +1,836 @@
+{
+  "introduction-the-heart-of-terraform": {
+    "core": "State is Terraform's memory: a JSON map from resource addresses in code to real-world IDs and attributes. Without it, Terraform couldn't know that aws_instance.web is i-0abc, couldn't detect drift or plan deletes. So state is critical infrastructure. It must be stored safely, shared, locked, backed up, and treated as sensitive.",
+    "first_principles": {
+      "problem": "A laptop with the only copy of terraform.tfstate is lost, and Terraform now wants to recreate production.",
+      "truths": [
+        "Code says what; state says which.",
+        "Mapping enables updates and deletes.",
+        "Losing state loses control."
+      ],
+      "derivation": [
+        "Store state **remotely**.",
+        "**Lock** during writes.",
+        "**Version/back up** the store.",
+        "**Encrypt** and restrict access.",
+        "Change it via **commands/blocks**, never by hand-editing."
+      ]
+    },
+    "analogy": {
+      "title": "A valet's ticket book",
+      "story": "The ticket links your ticket number to a specific car in a specific spot; lose the book and nobody knows which car is yours.",
+      "mapping": [
+        [
+          "Ticket number",
+          "Resource address"
+        ],
+        [
+          "Car and spot",
+          "Cloud ID and attributes"
+        ],
+        [
+          "Ticket book",
+          "State"
+        ]
+      ],
+      "breaks": "Cars can be found by searching; recovering state means imports."
+    },
+    "mindmap": {
+      "center": "Terraform State",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "Address → ID",
+            "Attributes",
+            "Dependencies",
+            "Outputs"
+          ]
+        },
+        {
+          "label": "Purpose",
+          "children": [
+            "Updates",
+            "Deletes",
+            "Drift"
+          ]
+        },
+        {
+          "label": "Care",
+          "children": [
+            "Remote",
+            "Locked",
+            "Versioned",
+            "Encrypted"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "state list/show/mv/rm",
+            "import",
+            "moved"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Peek at state",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See exactly which real object each address controls."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "terraform state list\n# aws_instance.web\nterraform state show aws_instance.web | head -3\n# id  = \"i-0abc123\""
+        }
+      ],
+      "outcome": "state understood as the mapping."
+    },
+    "summary": {
+      "points": [
+        "State maps code to reality.",
+        "Losing it loses control.",
+        "Protect it like a database."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't Terraform just query the cloud instead of keeping state?",
+        "a": "Many resources can't be uniquely tied back to config without a stored mapping, and Terraform needs it to know what to update or delete."
+      }
+    ]
+  },
+  "remote-backends-and-locking": {
+    "core": "A backend decides where state lives and how it's locked. Remote backends (S3, GCS, azurerm, Terraform Cloud/HCP, PostgreSQL) give a shared, durable copy with locking so teams and CI collaborate safely. Bootstrapping the backend bucket itself is a chicken-and-egg problem, usually solved by a small separate stack or a one-off script.",
+    "first_principles": {
+      "problem": "Each engineer has a different local state file, and every apply fights the others.",
+      "truths": [
+        "Shared state needs a shared store.",
+        "Writes need mutual exclusion.",
+        "Backend config can't use variables."
+      ],
+      "derivation": [
+        "Choose a **remote backend** with locking.",
+        "Enable **encryption and versioning**.",
+        "Use **partial config** (-backend-config) per env.",
+        "Bootstrap the backend in a **separate stack**.",
+        "Restrict with **IAM** per state key."
+      ]
+    },
+    "analogy": {
+      "title": "A shared ledger in a bank vault",
+      "story": "One authoritative copy, a sign-out sheet for editing, and nightly backups.",
+      "mapping": [
+        [
+          "Vault",
+          "Remote backend"
+        ],
+        [
+          "Sign-out sheet",
+          "Lock"
+        ],
+        [
+          "Backups",
+          "Versioning"
+        ]
+      ],
+      "breaks": "Vaults have guards; IAM must be configured explicitly."
+    },
+    "mindmap": {
+      "center": "Backends",
+      "branches": [
+        {
+          "label": "Options",
+          "children": [
+            "S3",
+            "GCS",
+            "azurerm",
+            "HCP Terraform",
+            "pg"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Locking",
+            "Encryption",
+            "Versioning"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Partial config",
+            "No variables"
+          ]
+        },
+        {
+          "label": "Bootstrap",
+          "children": [
+            "Separate stack",
+            "Script"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Partial backend config",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Same code, per-environment backends."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# backend.tf contains: terraform { backend \"s3\" {} }\nterraform init -backend-config=env/prod.s3.tfbackend\n# prod.s3.tfbackend\n# bucket = \"acme-tfstate-prod\"\n# key    = \"network/terraform.tfstate\"\n# region = \"us-east-1\"\n# use_lockfile = true"
+        }
+      ],
+      "outcome": "shared, safe state."
+    },
+    "summary": {
+      "points": [
+        "Remote and locked.",
+        "Versioned and encrypted.",
+        "Bootstrap separately."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you use variables inside a backend block?",
+        "a": "The backend is configured during init, before variables are evaluated, so it needs literal values or partial config files."
+      }
+    ]
+  },
+  "state-fracturing-layering": {
+    "core": "One giant state file means slow plans, huge blast radius and lock contention. Fracture state into layers that change at different rates and have different owners: foundation (accounts, networking), shared platform (clusters, databases), then applications. Each layer has its own state and pipeline, and lower layers expose outputs that upper layers consume.",
+    "first_principles": {
+      "problem": "A typo in an app's security group change shows up in a plan that also touches the production VPC.",
+      "truths": [
+        "Blast radius equals state scope.",
+        "Layers change at different rates.",
+        "Ownership follows boundaries."
+      ],
+      "derivation": [
+        "Split by **lifecycle and ownership**.",
+        "Layer: **network → data → compute → apps**.",
+        "Keep dependencies **one-directional**.",
+        "Expose **outputs** as contracts.",
+        "Size stacks for **fast plans** (<~2 min)."
+      ]
+    },
+    "analogy": {
+      "title": "Floors in a building with separate contractors",
+      "story": "The foundation crew doesn't touch the office fit-out, and the fit-out can't move load-bearing walls.",
+      "mapping": [
+        [
+          "Foundation",
+          "Network layer"
+        ],
+        [
+          "Fit-out",
+          "App layer"
+        ],
+        [
+          "Load-bearing walls",
+          "Shared outputs"
+        ]
+      ],
+      "breaks": "Buildings are built once; layers redeploy independently all the time."
+    },
+    "mindmap": {
+      "center": "State Layering",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Blast radius",
+            "Speed",
+            "Lock contention",
+            "Ownership"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "Foundation",
+            "Platform",
+            "Data",
+            "Apps"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "One-way deps",
+            "Outputs as contracts"
+          ]
+        },
+        {
+          "label": "Glue",
+          "children": [
+            "remote_state",
+            "SSM params",
+            "Terragrunt"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Layered repo",
+      "scenario": "Tree.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "App change plans in 20 s and can't touch the VPC."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "live/prod/\n  00-network/     (VPC, subnets, TGW)\n  10-data/        (RDS, ElastiCache)\n  20-platform/    (EKS)\n  30-apps/checkout/"
+        }
+      ],
+      "outcome": "smaller, safer stacks."
+    },
+    "summary": {
+      "points": [
+        "Split by lifecycle and owner.",
+        "One-way dependencies.",
+        "Outputs as contracts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What principle decides where to split state?",
+        "a": "Group resources that share a lifecycle and owner, and keep dependencies flowing one way from lower to upper layers."
+      }
+    ]
+  },
+  "connecting-layers-remote-state-data-source": {
+    "core": "Upper layers need lower-layer values such as the VPC ID and subnet IDs. The terraform_remote_state data source reads another stack's outputs directly, but it couples consumers to the producer's backend and grants them read access to its entire state, secrets included. Publishing values to a parameter store (SSM, Consul) or using tag-based data sources gives a narrower contract.",
+    "first_principles": {
+      "problem": "Granting the app team remote_state access to the network stack also exposes VPN pre-shared keys stored in that state.",
+      "truths": [
+        "Layers need each other's outputs.",
+        "remote_state reads the whole file.",
+        "Narrow contracts reduce coupling."
+      ],
+      "derivation": [
+        "Use **terraform_remote_state** for simple setups.",
+        "Expose only **intended outputs**.",
+        "Prefer **SSM/Consul** parameters for wide sharing.",
+        "Or **query by tags** with data sources.",
+        "Document outputs as an **API**."
+      ]
+    },
+    "analogy": {
+      "title": "Sharing a phone number vs your whole address book",
+      "story": "Publishing just the number someone needs is safer than handing over the whole book.",
+      "mapping": [
+        [
+          "Address book",
+          "Entire state"
+        ],
+        [
+          "Published number",
+          "SSM parameter"
+        ],
+        [
+          "Directory listing",
+          "Tag-based lookup"
+        ]
+      ],
+      "breaks": "Address books don't hold passwords; state files often do."
+    },
+    "mindmap": {
+      "center": "Connecting Layers",
+      "branches": [
+        {
+          "label": "remote_state",
+          "children": [
+            "Simple",
+            "Full read access",
+            "Backend coupling"
+          ]
+        },
+        {
+          "label": "Parameter store",
+          "children": [
+            "SSM",
+            "Consul",
+            "Narrow"
+          ]
+        },
+        {
+          "label": "Data sources",
+          "children": [
+            "By tag/name"
+          ]
+        },
+        {
+          "label": "Contract",
+          "children": [
+            "Stable outputs",
+            "Versioning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Both approaches",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "App reads one value, never the network state."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "# producer (network)\nresource \"aws_ssm_parameter\" \"vpc_id\" {\n  name  = \"/prod/network/vpc_id\"\n  type  = \"String\"\n  value = aws_vpc.main.id\n}\n# consumer (app)\ndata \"aws_ssm_parameter\" \"vpc_id\" { name = \"/prod/network/vpc_id\" }\nlocals { vpc_id = data.aws_ssm_parameter.vpc_id.value }"
+        }
+      ],
+      "outcome": "decoupled, least-privilege layer wiring."
+    },
+    "summary": {
+      "points": [
+        "remote_state is easy but broad.",
+        "Parameters narrow the contract.",
+        "Treat outputs as an API."
+      ]
+    },
+    "check": [
+      {
+        "q": "What security drawback does terraform_remote_state have?",
+        "a": "Readers need access to the whole state file, including any sensitive values, not just the outputs they consume."
+      }
+    ]
+  },
+  "drift-detection-reality-vs-code": {
+    "core": "Drift is when real infrastructure no longer matches code and state: console edits, other tools, auto-scaling, or deleted resources. `terraform plan -refresh-only` shows what changed in reality without proposing config changes, and a scheduled `plan -detailed-exitcode` (exit code 2 means a diff) turns drift into an alert. Decide per finding whether to revert to code or adopt into code.",
+    "first_principles": {
+      "problem": "A manually opened security group port sits unnoticed for months until an audit finds it.",
+      "truths": [
+        "Reality changes outside Terraform.",
+        "Plan compares code, state and reality.",
+        "Undetected drift accumulates."
+      ],
+      "derivation": [
+        "Run **scheduled plans** per stack.",
+        "Use **-detailed-exitcode** to flag drift.",
+        "Inspect with **-refresh-only**.",
+        "**Revert** or **adopt** each drift.",
+        "Use **ignore_changes** for fields others own (e.g. ASG desired count)."
+      ]
+    },
+    "analogy": {
+      "title": "Comparing the stock list with the shelves",
+      "story": "A nightly stock-take finds missing or extra items before they become a problem.",
+      "mapping": [
+        [
+          "Stock list",
+          "Code/state"
+        ],
+        [
+          "Shelves",
+          "Real infra"
+        ],
+        [
+          "Stock-take",
+          "Scheduled plan"
+        ]
+      ],
+      "breaks": "Shelves don't change themselves; auto-scalers do legitimately."
+    },
+    "mindmap": {
+      "center": "Drift Detection",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Console edits",
+            "Other tools",
+            "Autoscaling",
+            "Deletes"
+          ]
+        },
+        {
+          "label": "Detect",
+          "children": [
+            "Scheduled plan",
+            "-detailed-exitcode",
+            "-refresh-only"
+          ]
+        },
+        {
+          "label": "Respond",
+          "children": [
+            "Revert",
+            "Adopt",
+            "ignore_changes"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "HCP drift detection",
+            "driftctl-style scanners"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Nightly drift job",
+      "scenario": "Bash.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Drift surfaces within a day."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "terraform plan -detailed-exitcode -lock=false -out=drift.plan\nrc=$?\nif [ $rc -eq 2 ]; then\n  terraform show -no-color drift.plan | ./notify-slack.sh \"#infra-drift\"\nfi"
+        }
+      ],
+      "outcome": "drift as an alert, not a surprise."
+    },
+    "summary": {
+      "points": [
+        "Reality drifts.",
+        "Schedule plans.",
+        "Revert or adopt."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does exit code 2 from terraform plan -detailed-exitcode mean?",
+        "a": "The plan succeeded and found changes, i.e. drift or pending changes exist."
+      }
+    ]
+  },
+  "importing-legacy-infrastructure": {
+    "core": "Click-ops resources can be brought under management without recreating them. Declarative `import` blocks (Terraform 1.5+) map an existing ID to an address and show up in the plan, and `terraform plan -generate-config-out` can draft the matching HCL. Iterate until the plan shows no changes, then the resource is safely adopted.",
+    "first_principles": {
+      "problem": "Hundreds of hand-built AWS resources must come under Terraform without downtime.",
+      "truths": [
+        "Existing resources have IDs.",
+        "State can map IDs to addresses.",
+        "A no-change plan proves fidelity."
+      ],
+      "derivation": [
+        "Write **import blocks** (address + id).",
+        "**Generate config** as a starting point.",
+        "Clean it up into **idiomatic modules**.",
+        "Iterate until **plan shows no changes**.",
+        "Import in **batches** by layer."
+      ]
+    },
+    "analogy": {
+      "title": "Registering a stray dog",
+      "story": "You don't buy a new dog; you microchip the one you have and record its details accurately.",
+      "mapping": [
+        [
+          "Microchip",
+          "Import block"
+        ],
+        [
+          "Records",
+          "HCL config"
+        ],
+        [
+          "Vet check",
+          "No-change plan"
+        ]
+      ],
+      "breaks": "Dogs don't have hidden settings; resources have many defaults to match."
+    },
+    "mindmap": {
+      "center": "Importing",
+      "branches": [
+        {
+          "label": "Methods",
+          "children": [
+            "import block",
+            "terraform import CLI"
+          ]
+        },
+        {
+          "label": "Helpers",
+          "children": [
+            "-generate-config-out",
+            "Terraformer"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Map",
+            "Generate",
+            "Refine",
+            "Zero-diff plan"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Defaults mismatch",
+            "Hidden dependencies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Import a bucket",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bucket adopted without recreation."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "import {\n  to = aws_s3_bucket.logs\n  id = \"acme-legacy-logs\"\n}\n# terraform plan -generate-config-out=generated.tf\n# refine generated.tf, then plan until: 0 to add, 0 to change, 0 to destroy (1 to import)"
+        }
+      ],
+      "outcome": "legacy infra under code."
+    },
+    "summary": {
+      "points": [
+        "Import blocks in plans.",
+        "Generate then refine.",
+        "Zero-diff is the goal."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a zero-change plan the success criterion after importing?",
+        "a": "It proves the config exactly matches reality, so applying won't modify or replace the adopted resource."
+      }
+    ]
+  },
+  "the-moved-block-declarative-state-refactoring": {
+    "core": "Renaming a resource or moving it into a module changes its address, and Terraform would destroy the old one and create a new one. `moved { from = ... to = ... }` blocks tell Terraform the object just changed address, so state is updated in the plan with no infrastructure change. Unlike `terraform state mv`, moved blocks are code-reviewed, applied by CI, and work for every module consumer.",
+    "first_principles": {
+      "problem": "Refactoring a flat config into modules plans to destroy and recreate a production database.",
+      "truths": [
+        "Addresses identify state entries.",
+        "Changed address looks like delete + create.",
+        "Refactors should be reviewable."
+      ],
+      "derivation": [
+        "Add **moved** blocks for renames.",
+        "Use for **count → for_each** migrations.",
+        "Use when **wrapping in modules**.",
+        "Check the plan says **'has moved to'**.",
+        "Keep moved blocks until **all consumers** upgrade."
+      ]
+    },
+    "analogy": {
+      "title": "A change-of-address card",
+      "story": "The post office forwards your mail instead of declaring you gone and issuing a new identity.",
+      "mapping": [
+        [
+          "Old address",
+          "from"
+        ],
+        [
+          "New address",
+          "to"
+        ],
+        [
+          "Forwarding",
+          "State update"
+        ]
+      ],
+      "breaks": "Mail forwarding expires; leave moved blocks long enough for all consumers."
+    },
+    "mindmap": {
+      "center": "moved Blocks",
+      "branches": [
+        {
+          "label": "Use cases",
+          "children": [
+            "Rename",
+            "Into module",
+            "count → for_each",
+            "Split modules"
+          ]
+        },
+        {
+          "label": "vs state mv",
+          "children": [
+            "Reviewed",
+            "CI-applied",
+            "Works for consumers"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "Plan says moved",
+            "0 destroy"
+          ]
+        },
+        {
+          "label": "Related",
+          "children": [
+            "removed block",
+            "import block"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Wrap in a module",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Refactor with zero infrastructure change."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "moved {\n  from = aws_db_instance.main\n  to   = module.database.aws_db_instance.this\n}\n# plan: module.database.aws_db_instance.this has moved to ...\n# Plan: 0 to add, 0 to change, 0 to destroy."
+        }
+      ],
+      "outcome": "safe, reviewable refactoring."
+    },
+    "summary": {
+      "points": [
+        "Address changes look like replacement.",
+        "moved blocks prevent it.",
+        "Reviewed in code."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefer moved blocks over terraform state mv?",
+        "a": "They're versioned and reviewed in code, applied consistently by CI, and automatically apply for every consumer of a module."
+      }
+    ]
+  },
+  "sensitive-data-in-state": {
+    "core": "State stores resource attributes in plaintext, including generated passwords, private keys and connection strings, even when variables are marked sensitive (that only hides them in CLI output). So protect the state store itself: encryption at rest, tight IAM, no local copies, and keep secrets out of state where possible with managed secrets, ephemeral resources/values, or OpenTofu state encryption.",
+    "first_principles": {
+      "problem": "A developer with read access to the state bucket extracts the production DB master password.",
+      "truths": [
+        "State holds attribute values.",
+        "sensitive=true only masks output.",
+        "Anyone reading state reads secrets."
+      ],
+      "derivation": [
+        "**Encrypt** the backend (KMS).",
+        "**Restrict** state read access.",
+        "Use **manage_master_user_password** / Secrets Manager.",
+        "Use **ephemeral** values/resources where supported.",
+        "Consider **OpenTofu state encryption**."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet with copies of every key",
+      "story": "Labelling keys 'secret' doesn't help if anyone can open the cabinet; lock the cabinet, or don't store the keys.",
+      "mapping": [
+        [
+          "Cabinet",
+          "State file"
+        ],
+        [
+          "'Secret' label",
+          "sensitive = true"
+        ],
+        [
+          "Lock",
+          "Encryption + IAM"
+        ]
+      ],
+      "breaks": "Cabinets are physical; state is copied to laptops and CI logs easily."
+    },
+    "mindmap": {
+      "center": "Secrets in State",
+      "branches": [
+        {
+          "label": "Reality",
+          "children": [
+            "Plaintext attributes",
+            "sensitive only masks"
+          ]
+        },
+        {
+          "label": "Protect store",
+          "children": [
+            "KMS",
+            "IAM",
+            "No local copies"
+          ]
+        },
+        {
+          "label": "Avoid storing",
+          "children": [
+            "Managed passwords",
+            "Ephemeral resources",
+            "External secret refs"
+          ]
+        },
+        {
+          "label": "Extra",
+          "children": [
+            "OpenTofu encryption"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Let AWS own the password",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No password in state at all."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_db_instance\" \"main\" {\n  engine                      = \"postgres\"\n  instance_class              = \"db.r6g.large\"\n  username                    = \"app\"\n  manage_master_user_password = true   # stored in Secrets Manager, not state\n}"
+        }
+      ],
+      "outcome": "secrets kept out or locked down."
+    },
+    "summary": {
+      "points": [
+        "State is plaintext.",
+        "sensitive only masks.",
+        "Encrypt, restrict, avoid."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does marking an output sensitive = true keep it out of state?",
+        "a": "No, it only redacts it from CLI output; the value is still stored in state."
+      }
+    ]
+  }
+}

@@ -1,0 +1,524 @@
+{
+  "introduction-the-entropy-of-infrastructure": {
+    "core": "Infrastructure naturally drifts from code: emergency console fixes, other automation, provider defaults changing, and resources deleted or modified by people who don't know they're Terraform-managed. Detecting drift is only half the job; each drift needs a decision (revert to code, or adopt into code) and a workflow that makes that decision quickly and safely.",
+    "first_principles": {
+      "problem": "Nightly drift reports list 140 differences and everyone ignores them.",
+      "truths": [
+        "Entropy is constant.",
+        "Detection without action is noise.",
+        "Not all drift is bad."
+      ],
+      "derivation": [
+        "**Detect** continuously.",
+        "**Classify** drift (security, cost, benign).",
+        "Decide **revert vs adopt**.",
+        "**Automate** where safe.",
+        "**Prevent** by restricting console writes."
+      ]
+    },
+    "analogy": {
+      "title": "A desk that gets messier every week",
+      "story": "Noticing the mess doesn't tidy it; you need a habit of putting things back or deciding where they now belong.",
+      "mapping": [
+        [
+          "Mess",
+          "Drift"
+        ],
+        [
+          "Putting back",
+          "Revert"
+        ],
+        [
+          "New home for item",
+          "Adopt into code"
+        ]
+      ],
+      "breaks": "Desks don't get hacked; drifted security groups do."
+    },
+    "mindmap": {
+      "center": "Infrastructure Entropy",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Console fixes",
+            "Other tools",
+            "Provider changes",
+            "Deletions"
+          ]
+        },
+        {
+          "label": "Responses",
+          "children": [
+            "Revert",
+            "Adopt",
+            "Ignore (documented)"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "Detection",
+            "Classification",
+            "Workflow"
+          ]
+        },
+        {
+          "label": "Prevention",
+          "children": [
+            "Read-only console",
+            "SCPs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Classify a report",
+      "scenario": "Triage.",
+      "flow": [
+        "140 drifts detected",
+        "3 security (open SG ports) → revert now",
+        "12 legit hotfixes → adopt",
+        "125 autoscaling counts → ignore_changes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Noise removed; real issues acted on."
+        }
+      ],
+      "code": [],
+      "outcome": "drift turned into decisions."
+    },
+    "summary": {
+      "points": [
+        "Drift is constant.",
+        "Classify and decide.",
+        "Prevent where possible."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a drift report become useless?",
+        "a": "Without classification and ownership, benign noise drowns real issues and people stop reading it."
+      }
+    ]
+  },
+  "remediation-workflows-manual-vs-automated": {
+    "core": "Manual remediation treats drift as an alert: a scheduled plan detects it, opens a ticket or PR, and a human decides. That is safe during incidents but slow. Automated remediation re-applies code on detection, which is fast and consistent but can revert a legitimate emergency fix mid-incident. Most teams combine them: auto-revert high-risk security drift, human review for the rest.",
+    "first_principles": {
+      "problem": "An auto-apply drift job reverts an on-call engineer's emergency capacity increase during an outage.",
+      "truths": [
+        "Speed and safety trade off.",
+        "Emergencies need manual changes.",
+        "Security drift is urgent."
+      ],
+      "derivation": [
+        "**Manual**: detect → notify → decide.",
+        "**Automated**: detect → apply.",
+        "Add **change freeze/incident** awareness.",
+        "Auto-revert only **narrow, high-risk** classes.",
+        "**Log** every remediation."
+      ]
+    },
+    "analogy": {
+      "title": "A smoke alarm vs a sprinkler system",
+      "story": "Alarms let a human judge; sprinklers act instantly but soak everything, including false alarms.",
+      "mapping": [
+        [
+          "Alarm",
+          "Manual alert"
+        ],
+        [
+          "Sprinkler",
+          "Auto-apply"
+        ],
+        [
+          "False alarm",
+          "Legit emergency change"
+        ]
+      ],
+      "breaks": "Sprinklers don't know about incidents; your automation must."
+    },
+    "mindmap": {
+      "center": "Remediation Workflows",
+      "branches": [
+        {
+          "label": "Manual",
+          "children": [
+            "Alert",
+            "Ticket/PR",
+            "Human decides"
+          ]
+        },
+        {
+          "label": "Automated",
+          "children": [
+            "Auto-apply",
+            "Fast",
+            "Risky"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "Auto for security",
+            "Manual for rest"
+          ]
+        },
+        {
+          "label": "Guards",
+          "children": [
+            "Incident freeze",
+            "Audit log"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hybrid job",
+      "scenario": "Pseudo-flow.",
+      "flow": [
+        "Nightly plan per stack",
+        "If only aws_security_group_rule drift → auto-apply",
+        "Else open PR 'drift: <stack>' and page owner",
+        "Skip auto-apply if incident flag set"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Security fixed fast, emergencies respected."
+        }
+      ],
+      "code": [],
+      "outcome": "balanced remediation."
+    },
+    "summary": {
+      "points": [
+        "Manual is safe but slow.",
+        "Auto is fast but blunt.",
+        "Combine by risk."
+      ]
+    },
+    "check": [
+      {
+        "q": "What guard should automated drift remediation have?",
+        "a": "Awareness of active incidents or change freezes so it doesn't revert emergency fixes."
+      }
+    ]
+  },
+  "the-import-path-adopting-legitimate-changes": {
+    "core": "When reality is right and code is wrong (a valid hotfix, or a resource created outside Terraform), adopt it rather than revert it. Update the code to match the changed attribute (the plan then shows no change), or for new unmanaged resources add an import block and config. Verify with a zero-diff plan, and merge through a normal PR so the change is reviewed and recorded.",
+    "first_principles": {
+      "problem": "A hotfix raised an RDS max_connections parameter; the next apply silently reverts it and causes another outage.",
+      "truths": [
+        "Some drift is correct.",
+        "Reverting correct changes causes harm.",
+        "Code must catch up to reality."
+      ],
+      "derivation": [
+        "Use **-refresh-only** to see true values.",
+        "**Update code** to match changed attributes.",
+        "**Import** new unmanaged resources.",
+        "Verify **zero-diff** plan.",
+        "Merge via **PR** with incident reference."
+      ]
+    },
+    "analogy": {
+      "title": "Updating the map after a new road is built",
+      "story": "The road is real and useful; you redraw the map rather than bulldoze the road.",
+      "mapping": [
+        [
+          "New road",
+          "Legit drift"
+        ],
+        [
+          "Redraw map",
+          "Update code"
+        ],
+        [
+          "Bulldoze",
+          "Revert"
+        ]
+      ],
+      "breaks": "Maps can lag; IaC should catch up within days."
+    },
+    "mindmap": {
+      "center": "Adopting Drift",
+      "branches": [
+        {
+          "label": "When",
+          "children": [
+            "Hotfixes",
+            "Unmanaged resources"
+          ]
+        },
+        {
+          "label": "How",
+          "children": [
+            "Edit code",
+            "import block",
+            "-refresh-only apply"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Zero-diff plan"
+          ]
+        },
+        {
+          "label": "Record",
+          "children": [
+            "PR",
+            "Incident link"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adopt a parameter",
+      "scenario": "Diff.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Plan shows no changes; reality and code agree."
+        }
+      ],
+      "code": [
+        {
+          "lang": "diff",
+          "text": " resource \"aws_db_parameter_group\" \"main\" {\n   parameter {\n     name  = \"max_connections\"\n-    value = \"500\"\n+    value = \"1000\"   # INC-2291 hotfix adopted\n   }\n }"
+        }
+      ],
+      "outcome": "good changes preserved."
+    },
+    "summary": {
+      "points": [
+        "Not all drift is bad.",
+        "Update code or import.",
+        "Verify zero-diff."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does terraform apply -refresh-only do?",
+        "a": "Updates state to match reality without changing infrastructure, useful when accepting drift into state before updating code."
+      }
+    ]
+  },
+  "event-driven-iac-the-immune-system": {
+    "core": "Polling for drift every 24 hours leaves long windows of exposure. Event-driven IaC reacts to changes as they happen: CloudTrail API events flow through EventBridge to rules that detect writes to managed resources, for example by checking a managed-by tag or a non-pipeline principal. These trigger a targeted plan, an alert, or an immediate fix, like an immune system responding to infection.",
+    "first_principles": {
+      "problem": "A security group opened via the console stays open for 23 hours until the nightly drift job.",
+      "truths": [
+        "Polling has latency.",
+        "Cloud APIs emit change events.",
+        "Targeted responses are cheap."
+      ],
+      "derivation": [
+        "Capture **CloudTrail** write events.",
+        "Filter in **EventBridge** (resource type, non-CI principal).",
+        "Trigger **Lambda/pipeline** for that stack.",
+        "**Alert or revert** depending on class.",
+        "Correlate with **managed-by tags**."
+      ]
+    },
+    "analogy": {
+      "title": "White blood cells vs annual check-ups",
+      "story": "The body responds to infection in minutes; it doesn't wait for next year's check-up.",
+      "mapping": [
+        [
+          "Infection",
+          "Unauthorised change"
+        ],
+        [
+          "White blood cells",
+          "Event rules + Lambda"
+        ],
+        [
+          "Check-up",
+          "Nightly polling"
+        ]
+      ],
+      "breaks": "Immune systems can overreact; tune rules to avoid auto-reverting legit changes."
+    },
+    "mindmap": {
+      "center": "Event-Driven IaC",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "CloudTrail",
+            "Config",
+            "Azure Activity Log"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "EventBridge rules"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Targeted plan",
+            "Alert",
+            "Auto-revert"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "Non-CI principal",
+            "managed-by tag"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Minutes not hours"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "EventBridge rule",
+      "scenario": "JSON pattern.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any non-CI SG ingress change triggers a revert pipeline within minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"source\": [\"aws.ec2\"],\n  \"detail-type\": [\"AWS API Call via CloudTrail\"],\n  \"detail\": {\n    \"eventName\": [\"AuthorizeSecurityGroupIngress\"],\n    \"userIdentity\": { \"arn\": [{ \"anything-but\": { \"prefix\": \"arn:aws:sts::123456789012:assumed-role/terraform-ci\" } }] }\n  }\n}"
+        }
+      ],
+      "outcome": "near-real-time drift response."
+    },
+    "summary": {
+      "points": [
+        "Polling is slow.",
+        "React to API events.",
+        "Filter by principal and tags."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can you tell an out-of-band change from a pipeline change in CloudTrail?",
+        "a": "By the principal: changes not made by the CI/Terraform role (userIdentity) are out-of-band."
+      }
+    ]
+  },
+  "choosing-a-remediation-strategy-a-decision-framework": {
+    "core": "Segment resources by risk and operational reality instead of one policy for all. Security-critical config (IAM, security groups, public access) gets event-driven auto-revert. Stateful and incident-touched resources (databases, capacity) get alert plus human decision. Externally managed fields (ASG desired count, Lambda versions deployed by CI) get ignore_changes. Low-risk drift gets a weekly batch review.",
+    "first_principles": {
+      "problem": "A single 'auto-revert everything' policy keeps breaking autoscaling and incident response.",
+      "truths": [
+        "Resources differ in risk.",
+        "Some fields are owned elsewhere.",
+        "Response speed should match risk."
+      ],
+      "derivation": [
+        "**Tier** resources by risk.",
+        "**Security tier**: auto-revert, real-time.",
+        "**Stateful tier**: alert + human.",
+        "**Externally owned**: ignore_changes.",
+        "**Low risk**: weekly review."
+      ]
+    },
+    "analogy": {
+      "title": "Hospital triage",
+      "story": "Critical patients get immediate action, others are scheduled, and some just need monitoring.",
+      "mapping": [
+        [
+          "Critical",
+          "Security drift"
+        ],
+        [
+          "Scheduled",
+          "Stateful drift"
+        ],
+        [
+          "Monitoring",
+          "Low-risk drift"
+        ]
+      ],
+      "breaks": "Triage nurses judge each case; your rules must be written in advance."
+    },
+    "mindmap": {
+      "center": "Decision Framework",
+      "branches": [
+        {
+          "label": "Security",
+          "children": [
+            "Auto-revert",
+            "Event-driven"
+          ]
+        },
+        {
+          "label": "Stateful",
+          "children": [
+            "Alert",
+            "Human decision"
+          ]
+        },
+        {
+          "label": "External owner",
+          "children": [
+            "ignore_changes"
+          ]
+        },
+        {
+          "label": "Low risk",
+          "children": [
+            "Batch review"
+          ]
+        },
+        {
+          "label": "Review",
+          "children": [
+            "Tune quarterly"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ignore_changes for owned fields",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Autoscaling never shows as drift."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_autoscaling_group\" \"web\" {\n  min_size = 2\n  max_size = 20\n  desired_capacity = 2\n  lifecycle { ignore_changes = [desired_capacity] }   # owned by autoscaling policy\n}"
+        }
+      ],
+      "outcome": "right response for each resource class."
+    },
+    "summary": {
+      "points": [
+        "Tier by risk.",
+        "Auto-revert security.",
+        "Ignore owned fields."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is ignore_changes the right remediation choice?",
+        "a": "When another system legitimately owns that attribute, such as autoscaling owning desired capacity."
+      }
+    ]
+  }
+}

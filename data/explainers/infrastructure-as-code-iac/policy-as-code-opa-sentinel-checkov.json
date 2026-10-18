@@ -1,0 +1,638 @@
+{
+  "introduction-speed-vs-safety": {
+    "core": "Manual review by a central team doesn't scale: either it becomes a bottleneck or reviewers rubber-stamp. Policy as code turns rules (\"no public buckets\", \"prod instances need tags\", \"no deleting databases\") into machine-checked code that runs automatically on every change. Teams move fast within guardrails, and exceptions are explicit and audited.",
+    "first_principles": {
+      "problem": "A security team reviewing every Terraform PR has a three-day queue, so teams find ways around it.",
+      "truths": [
+        "Human review doesn't scale.",
+        "Rules can be expressed as code.",
+        "Automated checks are consistent."
+      ],
+      "derivation": [
+        "**Codify** rules as policies.",
+        "Run them **automatically** in pipelines.",
+        "Use **enforcement levels** (advisory, soft, hard).",
+        "Make **exceptions** explicit and logged.",
+        "**Version and test** policies like code."
+      ]
+    },
+    "analogy": {
+      "title": "Guardrails on a mountain road",
+      "story": "Drivers go at speed because the rails stop them going over the edge, without a police officer at every bend.",
+      "mapping": [
+        [
+          "Guardrails",
+          "Policies"
+        ],
+        [
+          "Officer at every bend",
+          "Manual review"
+        ],
+        [
+          "Speed",
+          "Delivery velocity"
+        ]
+      ],
+      "breaks": "Guardrails are physical; policies only cover rules someone wrote."
+    },
+    "mindmap": {
+      "center": "Policy as Code",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Scale",
+            "Consistency",
+            "Speed"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "OPA/Rego",
+            "Sentinel",
+            "Checkov",
+            "Kyverno"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Advisory",
+            "Soft-mandatory",
+            "Hard-mandatory"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Tests",
+            "Exceptions",
+            "Versioning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rule journey",
+      "scenario": "From wiki to code.",
+      "flow": [
+        "Wiki: 'S3 buckets must be private'",
+        "Policy: deny if public ACL or no public access block",
+        "Runs on every PR plan",
+        "Exception via signed-off annotation"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Review queue gone; rules applied 100% of the time."
+        }
+      ],
+      "code": [],
+      "outcome": "fast and safe."
+    },
+    "summary": {
+      "points": [
+        "Manual review doesn't scale.",
+        "Codify rules.",
+        "Enforce automatically."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main benefit of policy as code over manual review?",
+        "a": "Rules are applied consistently and instantly to every change, removing the bottleneck while keeping safety."
+      }
+    ]
+  },
+  "static-analysis-checkov-and-tfsec": {
+    "core": "Checkov and Trivy (which absorbed tfsec) ship hundreds of built-in checks mapped to CIS and other benchmarks. They scan Terraform, CloudFormation, Kubernetes and Dockerfiles for misconfigurations. They're the fastest policy layer, requiring no custom code, and support inline skips with justification. They can scan plan JSON too, for resolved values.",
+    "first_principles": {
+      "problem": "A team wants immediate security coverage without writing any policies themselves.",
+      "truths": [
+        "Common misconfigurations are well known.",
+        "Prebuilt rules give instant coverage.",
+        "False positives need managed suppressions."
+      ],
+      "derivation": [
+        "Run **Checkov/Trivy** in CI.",
+        "Map findings to **benchmarks** (CIS).",
+        "Use **inline skips** with reasons.",
+        "Scan **plan JSON** for resolved values.",
+        "Add **custom checks** for org rules."
+      ]
+    },
+    "analogy": {
+      "title": "A home inspector's standard checklist",
+      "story": "They check the same hundred known hazards in every house without you writing the list.",
+      "mapping": [
+        [
+          "Checklist",
+          "Built-in checks"
+        ],
+        [
+          "Hazards",
+          "Misconfigurations"
+        ],
+        [
+          "Owner waiver",
+          "Inline skip"
+        ]
+      ],
+      "breaks": "Inspectors use judgement; scanners flag everything that matches."
+    },
+    "mindmap": {
+      "center": "Checkov & Trivy",
+      "branches": [
+        {
+          "label": "Coverage",
+          "children": [
+            "Terraform",
+            "CFN",
+            "K8s",
+            "Dockerfile",
+            "Helm"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "Built-in",
+            "CIS mapped",
+            "Custom (Python/YAML)"
+          ]
+        },
+        {
+          "label": "Suppress",
+          "children": [
+            "Inline skip + reason",
+            "Baseline file"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Source",
+            "Plan JSON"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding and justified skip",
+      "scenario": "HCL + CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Real findings fail CI; approved exceptions are documented."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_s3_bucket\" \"public_site\" {\n  #checkov:skip=CKV_AWS_20:Public website bucket, approved SEC-1423\n  bucket = \"acme-www\"\n}\n# checkov -d . --compact\n# Check: CKV_AWS_18 \"Ensure the S3 bucket has access logging enabled\" FAILED"
+        }
+      ],
+      "outcome": "broad security coverage instantly."
+    },
+    "summary": {
+      "points": [
+        "Hundreds of prebuilt checks.",
+        "Justified skips.",
+        "Plan scans for accuracy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why include a reason in a Checkov skip comment?",
+        "a": "It documents why the exception is acceptable and makes it auditable, rather than silently suppressing a finding."
+      }
+    ]
+  },
+  "opa-and-rego-the-universal-policy-engine": {
+    "core": "Open Policy Agent is a general-purpose engine: you give it JSON input (a Terraform plan, a Kubernetes admission request, an API call) and Rego policies, and it returns decisions. Because it is tool-agnostic, the same engine and language serve Terraform (conftest), Kubernetes (Gatekeeper), CI, and microservice authorisation, giving one policy skill set across the stack.",
+    "first_principles": {
+      "problem": "Each tool has its own policy syntax, so the security team maintains rules in five languages.",
+      "truths": [
+        "Most inputs can be JSON.",
+        "Decisions can be decoupled from tools.",
+        "One language reduces cognitive load."
+      ],
+      "derivation": [
+        "Express input as **JSON**.",
+        "Write **Rego** rules producing decisions.",
+        "Use **conftest** for files/plans.",
+        "Use **Gatekeeper** for Kubernetes admission.",
+        "Distribute policies as **bundles**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal judge",
+      "story": "Any case file in a standard format can be brought to the same judge applying the same law book.",
+      "mapping": [
+        [
+          "Case file",
+          "JSON input"
+        ],
+        [
+          "Law book",
+          "Rego policy"
+        ],
+        [
+          "Verdict",
+          "Decision"
+        ]
+      ],
+      "breaks": "Judges interpret; OPA evaluates logic exactly."
+    },
+    "mindmap": {
+      "center": "OPA",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Input JSON",
+            "Policy",
+            "Data",
+            "Decision"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "conftest",
+            "Gatekeeper",
+            "Envoy authz",
+            "CI"
+          ]
+        },
+        {
+          "label": "Distribution",
+          "children": [
+            "Bundles",
+            "OCI"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Tool-agnostic",
+            "One language"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same rule, two places",
+      "scenario": "Usage.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One engine for infra, k8s and app authz."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# Terraform plan\nconftest test plan.json -p policy/\n# Kubernetes manifests in CI\nconftest test k8s/*.yaml -p policy/\n# Live API decision\ncurl -s localhost:8181/v1/data/authz/allow -d '{\"input\": {\"user\": \"ana\", \"action\": \"delete\"}}'"
+        }
+      ],
+      "outcome": "unified policy across tools."
+    },
+    "summary": {
+      "points": [
+        "JSON in, decision out.",
+        "Rego everywhere.",
+        "Many integrations."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes OPA 'universal'?",
+        "a": "It evaluates policies against any JSON input and is decoupled from the tool, so the same engine serves Terraform, Kubernetes, CI and APIs."
+      }
+    ]
+  },
+  "learning-rego-syntax": {
+    "core": "Rego is declarative: rules are true when all their body expressions are true, and iteration is implicit through variables that bind to values satisfying the conditions. Partial set rules (`deny contains msg if {...}`) collect every violation. Key tools are `some ... in` for iteration, `every` for universal checks, helper functions, and `opa test` for unit-testing policies with fixture inputs.",
+    "first_principles": {
+      "problem": "An engineer writes Rego like Python loops and gets confusing results that never trigger.",
+      "truths": [
+        "Rules are logical conjunctions.",
+        "Variables unify with matching values.",
+        "Multiple rule bodies mean OR."
+      ],
+      "derivation": [
+        "Read rule bodies as **AND**.",
+        "Multiple definitions as **OR**.",
+        "Iterate with **some x in coll**.",
+        "Collect violations in **sets**.",
+        "**Test** with opa test."
+      ]
+    },
+    "analogy": {
+      "title": "A database query, not a script",
+      "story": "You describe which rows you want and the engine finds them; you don't write the loop.",
+      "mapping": [
+        [
+          "WHERE clause",
+          "Rule body"
+        ],
+        [
+          "Result rows",
+          "Set of violations"
+        ],
+        [
+          "UNION",
+          "Multiple rule bodies"
+        ]
+      ],
+      "breaks": "SQL has tables; Rego navigates nested JSON."
+    },
+    "mindmap": {
+      "center": "Rego Basics",
+      "branches": [
+        {
+          "label": "Semantics",
+          "children": [
+            "AND in body",
+            "OR across rules",
+            "Unification"
+          ]
+        },
+        {
+          "label": "Constructs",
+          "children": [
+            "some in",
+            "every",
+            "contains",
+            "functions"
+          ]
+        },
+        {
+          "label": "Imports",
+          "children": [
+            "rego.v1",
+            "input",
+            "data"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "opa test",
+            "Fixtures"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rule and test",
+      "scenario": "Rego.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Collects one message per non-compliant resource; tested with opa test."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rego",
+          "text": "package terraform.tags\nimport rego.v1\n\nrequired := {\"owner\", \"cost-center\"}\n\ndeny contains msg if {\n  some rc in input.resource_changes\n  rc.change.actions[_] in {\"create\", \"update\"}\n  missing := required - object.keys(object.get(rc.change.after, \"tags\", {}))\n  count(missing) > 0\n  msg := sprintf(\"%s missing tags %v\", [rc.address, missing])\n}\n\ntest_missing_tag if {\n  deny[_] with input as {\"resource_changes\": [{\"address\": \"aws_s3_bucket.b\",\n    \"change\": {\"actions\": [\"create\"], \"after\": {\"tags\": {\"owner\": \"x\"}}}}]}\n}"
+        }
+      ],
+      "outcome": "working, tested Rego."
+    },
+    "summary": {
+      "points": [
+        "Declarative logic.",
+        "Sets collect violations.",
+        "Unit-test policies."
+      ]
+    },
+    "check": [
+      {
+        "q": "In Rego, what does defining the same rule twice with different bodies mean?",
+        "a": "Logical OR: the rule is true if either body is satisfied."
+      }
+    ]
+  },
+  "hashicorp-sentinel-enterprise-integrated-policy": {
+    "core": "Sentinel is HashiCorp's embedded policy language in HCP Terraform/Enterprise (and Vault, Consul, Nomad). Policies run between plan and apply with imports such as tfplan/v2, tfconfig and tfstate, plus cost estimates. Enforcement levels are advisory (warn), soft-mandatory (override allowed with permission) or hard-mandatory (block). It integrates tightly but only in HashiCorp's commercial products; HCP Terraform also supports OPA.",
+    "first_principles": {
+      "problem": "A company on Terraform Enterprise needs cost and security gates that some admins can override with a record.",
+      "truths": [
+        "Integrated policies see rich context.",
+        "Some rules need override paths.",
+        "Lock-in is a trade-off."
+      ],
+      "derivation": [
+        "Use **tfplan/v2** for planned changes.",
+        "Use **tfrun** for cost and workspace context.",
+        "Pick **enforcement levels** per policy.",
+        "Group in **policy sets** per workspace.",
+        "Test with **sentinel test**."
+      ]
+    },
+    "analogy": {
+      "title": "A building's integrated access system",
+      "story": "Badges, cameras and override keys are built in, but only work inside that building.",
+      "mapping": [
+        [
+          "Override keys",
+          "Soft-mandatory"
+        ],
+        [
+          "Locked doors",
+          "Hard-mandatory"
+        ],
+        [
+          "Building",
+          "HCP Terraform"
+        ]
+      ],
+      "breaks": "Buildings are physical; policies can be ported if written in OPA instead."
+    },
+    "mindmap": {
+      "center": "Sentinel",
+      "branches": [
+        {
+          "label": "Where",
+          "children": [
+            "HCP Terraform",
+            "TFE",
+            "Vault",
+            "Consul"
+          ]
+        },
+        {
+          "label": "Imports",
+          "children": [
+            "tfplan/v2",
+            "tfconfig",
+            "tfstate",
+            "tfrun"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Advisory",
+            "Soft-mandatory",
+            "Hard-mandatory"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Deep integration",
+            "Commercial only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cost cap",
+      "scenario": "Sentinel.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Runs adding >$500/month need an authorised override."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sentinel",
+          "text": "import \"tfrun\"\nimport \"decimal\"\n\nlimit = decimal.new(500)\nmain = rule {\n  decimal.new(tfrun.cost_estimate.delta_monthly_cost).less_than(limit)\n}\n# policy set: enforcement_level = \"soft-mandatory\""
+        }
+      ],
+      "outcome": "integrated, tiered governance."
+    },
+    "summary": {
+      "points": [
+        "Embedded in HashiCorp products.",
+        "Rich imports incl. cost.",
+        "Three enforcement levels."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does soft-mandatory mean in Sentinel?",
+        "a": "The policy blocks by default, but a user with permission can override it, and the override is logged."
+      }
+    ]
+  },
+  "where-does-it-fit-in-the-pipeline": {
+    "core": "Run policies at several points: in the IDE and pre-commit for instant feedback (Checkov, TFLint); in PR CI on code and plan JSON (conftest, Checkov); at the platform gate between plan and apply (Sentinel/OPA in HCP Terraform or Spacelift); at Kubernetes admission (Gatekeeper, Kyverno); and continuously at runtime (AWS Config, Security Hub) to catch drift and click-ops.",
+    "first_principles": {
+      "problem": "Policies only run in CI, so a console change creating a public bucket is never caught.",
+      "truths": [
+        "Earlier feedback is cheaper.",
+        "Some changes bypass pipelines.",
+        "Each point sees different information."
+      ],
+      "derivation": [
+        "**Shift left**: IDE/pre-commit.",
+        "**PR gate**: code + plan policies.",
+        "**Apply gate**: platform policies.",
+        "**Admission**: K8s controllers.",
+        "**Runtime**: AWS Config / CSPM."
+      ]
+    },
+    "analogy": {
+      "title": "Layers of airport security",
+      "story": "Online check-in rules, bag drop, security scan, gate check and on-board crew each catch different things.",
+      "mapping": [
+        [
+          "Check-in",
+          "IDE/pre-commit"
+        ],
+        [
+          "Security scan",
+          "PR/plan policies"
+        ],
+        [
+          "On-board crew",
+          "Runtime monitoring"
+        ]
+      ],
+      "breaks": "Airports have one entry path; infra has many, including the console."
+    },
+    "mindmap": {
+      "center": "Policy Placement",
+      "branches": [
+        {
+          "label": "Left",
+          "children": [
+            "IDE",
+            "pre-commit"
+          ]
+        },
+        {
+          "label": "CI",
+          "children": [
+            "conftest",
+            "Checkov plan"
+          ]
+        },
+        {
+          "label": "Apply gate",
+          "children": [
+            "Sentinel",
+            "OPA in TFC/Spacelift"
+          ]
+        },
+        {
+          "label": "Admission",
+          "children": [
+            "Gatekeeper",
+            "Kyverno"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "AWS Config",
+            "Security Hub",
+            "CSPM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same rule, four layers",
+      "scenario": "No public buckets.",
+      "flow": [
+        "pre-commit: Checkov CKV_AWS_20",
+        "PR: conftest on plan JSON",
+        "Apply gate: hard-mandatory policy",
+        "Runtime: AWS Config rule s3-bucket-public-read-prohibited + auto-remediation"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Caught early normally, caught late if bypassed."
+        }
+      ],
+      "code": [],
+      "outcome": "defence in depth for policy."
+    },
+    "summary": {
+      "points": [
+        "Shift left for speed.",
+        "Gate before apply.",
+        "Monitor runtime for bypasses."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add runtime policy checks if CI already enforces rules?",
+        "a": "Changes can bypass the pipeline (console, scripts, other tools), and only runtime monitoring catches those."
+      }
+    ]
+  }
+}

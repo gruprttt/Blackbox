@@ -1,0 +1,415 @@
+{
+  "introduction-the-noisy-neighbor-problem": {
+    "core": "A SaaS tenant is a customer organisation. Sharing infrastructure between tenants is cheap, but one tenant's load spike, misconfiguration or breach can affect others: the noisy neighbour problem. Tenancy models range from fully pooled (shared everything) to fully siloed (dedicated stack per tenant), and the IaC structure you choose decides isolation, blast radius, cost and operational effort.",
+    "first_principles": {
+      "problem": "One enterprise customer's batch job saturates the shared database, slowing every other customer.",
+      "truths": [
+        "Sharing lowers cost.",
+        "Sharing increases blast radius.",
+        "Some tenants require isolation contractually."
+      ],
+      "derivation": [
+        "Decide **isolation per tier** (free vs enterprise).",
+        "Choose **pool, silo, or cell** models.",
+        "Map model to **IaC structure** and state.",
+        "Measure **cost per tenant**.",
+        "Plan **onboarding automation**."
+      ]
+    },
+    "analogy": {
+      "title": "Apartment building vs detached houses",
+      "story": "Apartments share walls and plumbing (cheap, noisy); houses are isolated (expensive, quiet).",
+      "mapping": [
+        [
+          "Apartment",
+          "Pooled tenancy"
+        ],
+        [
+          "Detached house",
+          "Siloed tenancy"
+        ],
+        [
+          "Noisy neighbour",
+          "Resource contention"
+        ]
+      ],
+      "breaks": "Buildings are fixed; tenants can be moved between models."
+    },
+    "mindmap": {
+      "center": "Tenancy Models",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Noisy neighbour",
+            "Blast radius"
+          ]
+        },
+        {
+          "label": "Models",
+          "children": [
+            "Pool",
+            "Silo",
+            "Cell/bridge"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Cost",
+            "Isolation",
+            "Ops effort"
+          ]
+        },
+        {
+          "label": "IaC impact",
+          "children": [
+            "State layout",
+            "Onboarding",
+            "Upgrades"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tiered tenancy",
+      "scenario": "Design.",
+      "flow": [
+        "Free/standard tenants: pooled cells",
+        "Enterprise: dedicated cell",
+        "Regulated: dedicated account",
+        "All from the same modules"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolation matched to price and compliance."
+        }
+      ],
+      "code": [],
+      "outcome": "tenancy chosen deliberately."
+    },
+    "summary": {
+      "points": [
+        "Sharing is cheap but risky.",
+        "Models trade cost vs isolation.",
+        "IaC structure follows the model."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the noisy neighbour problem?",
+        "a": "One tenant's heavy usage or failure degrades performance or availability for other tenants sharing the same resources."
+      }
+    ]
+  },
+  "strategy-1-module-per-tenant-the-pool-approach": {
+    "core": "The simplest IaC approach: one root module and one state, looping a tenant module with for_each over a map of tenants. Onboarding a tenant means adding a map entry. Everything is visible in one place, but every plan touches every tenant, a single bad change can affect all of them, state grows linearly, and plans slow down as tenants are added.",
+    "first_principles": {
+      "problem": "With 300 tenants in one state, a plan takes 25 minutes and a typo in the shared module breaks everyone.",
+      "truths": [
+        "One state equals one blast radius.",
+        "for_each scales code, not safety.",
+        "Plan time grows with resources."
+      ],
+      "derivation": [
+        "Use **for_each over a tenants map**.",
+        "Good for **few, small** tenants.",
+        "Expect **growing plan times**.",
+        "Use **-target** only in emergencies.",
+        "Plan an **exit** to cells as tenants grow."
+      ]
+    },
+    "analogy": {
+      "title": "A single spreadsheet with a row per customer",
+      "story": "Easy to see everything, but one bad formula breaks every row.",
+      "mapping": [
+        [
+          "Row",
+          "Tenant entry"
+        ],
+        [
+          "Formula",
+          "Shared module"
+        ],
+        [
+          "Spreadsheet",
+          "Single state"
+        ]
+      ],
+      "breaks": "Spreadsheets recalc instantly; plans refresh every resource."
+    },
+    "mindmap": {
+      "center": "Pool Approach",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "for_each tenants",
+            "One state"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Simple",
+            "One view",
+            "Easy onboarding"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Blast radius",
+            "Slow plans",
+            "Lock contention"
+          ]
+        },
+        {
+          "label": "Fits",
+          "children": [
+            "Small tenant counts",
+            "Early stage"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tenants map",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Add a line to onboard; but all tenants share one plan/apply."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "variable \"tenants\" {\n  type = map(object({ plan = string }))\n  default = {\n    acme   = { plan = \"pro\" }\n    globex = { plan = \"free\" }\n  }\n}\nmodule \"tenant\" {\n  source   = \"./modules/tenant\"\n  for_each = var.tenants\n  name     = each.key\n  plan     = each.value.plan\n}"
+        }
+      ],
+      "outcome": "simple start with known limits."
+    },
+    "summary": {
+      "points": [
+        "One state, many tenants.",
+        "Easy onboarding.",
+        "Blast radius grows."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main risk of the pool approach as tenants grow?",
+        "a": "Every change plans and applies against all tenants in one state, so mistakes affect everyone and plans become slow."
+      }
+    ]
+  },
+  "strategy-2-workspace-per-tenant-the-clone-approach": {
+    "core": "Terraform workspaces give each tenant its own state from the same code: `terraform workspace select acme`, then apply with that tenant's tfvars. Blast radius shrinks to one tenant per apply, but all tenants must run identical code versions, upgrades mean looping applies over every workspace, workspace selection is implicit and error-prone, and visibility across tenants needs extra tooling.",
+    "first_principles": {
+      "problem": "Rolling a module upgrade to 200 tenant workspaces requires a fragile shell loop, and one run hits the wrong workspace.",
+      "truths": [
+        "Separate state limits blast radius.",
+        "Same code forces lockstep upgrades.",
+        "Implicit context invites mistakes."
+      ],
+      "derivation": [
+        "One **workspace per tenant**.",
+        "Per-tenant **tfvars**.",
+        "**Automate** loops in CI, not shells.",
+        "Guard with **workspace assertions**.",
+        "Accept **lockstep** versioning."
+      ]
+    },
+    "analogy": {
+      "title": "Photocopies of one master document",
+      "story": "Each customer gets a separate copy, but updating the master means re-copying for everyone, and it's easy to hand someone the wrong copy.",
+      "mapping": [
+        [
+          "Master",
+          "Shared code"
+        ],
+        [
+          "Copies",
+          "Workspaces"
+        ],
+        [
+          "Wrong copy",
+          "Wrong workspace selected"
+        ]
+      ],
+      "breaks": "Photocopies are static; workspaces are live infrastructure."
+    },
+    "mindmap": {
+      "center": "Workspace per Tenant",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "Workspaces",
+            "tfvars per tenant"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Isolated state",
+            "Smaller blast radius"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Lockstep versions",
+            "Implicit selection",
+            "Looping upgrades"
+          ]
+        },
+        {
+          "label": "Guards",
+          "children": [
+            "Assert terraform.workspace",
+            "CI orchestration"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Workspace guard",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Wrong workspace + tfvars combination fails at plan."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "locals { tenant = terraform.workspace }\nresource \"terraform_data\" \"guard\" {\n  lifecycle {\n    precondition {\n      condition     = local.tenant == var.tenant_name\n      error_message = \"Workspace ${local.tenant} does not match tfvars tenant ${var.tenant_name}.\"\n    }\n  }\n}"
+        }
+      ],
+      "outcome": "isolated state with guardrails."
+    },
+    "summary": {
+      "points": [
+        "State per tenant.",
+        "Lockstep upgrades.",
+        "Guard implicit selection."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do workspaces force lockstep upgrades across tenants?",
+        "a": "All workspaces share the same code directory, so you can't pin different module versions per tenant."
+      }
+    ]
+  },
+  "strategy-3-cell-based-directory-per-tenant": {
+    "core": "Cell-based IaC generates a separate directory (its own root module and state) per tenant or per cell of tenants, each pinning its own module version. Tenants upgrade in waves (canary cells first), failures stay inside one cell, and the generated directories make each tenant's configuration explicit. Tooling (Terragrunt, scripts, Spacelift) creates cells from a template and orchestrates rollouts.",
+    "first_principles": {
+      "problem": "A bad upgrade must never take down all customers at once, and enterprise tenants need different upgrade timing.",
+      "truths": [
+        "Independent state means independent failure.",
+        "Per-cell versions enable waves.",
+        "Generation keeps cells consistent."
+      ],
+      "derivation": [
+        "**Generate** cell dirs from a template.",
+        "Pin **module version per cell**.",
+        "Roll out in **waves** (canary → all).",
+        "Group small tenants into **shared cells**.",
+        "**Automate** onboarding and upgrades."
+      ]
+    },
+    "analogy": {
+      "title": "Ships with watertight compartments",
+      "story": "A breach floods one compartment, not the whole ship, and each can be repaired on its own schedule.",
+      "mapping": [
+        [
+          "Compartment",
+          "Cell"
+        ],
+        [
+          "Breach",
+          "Bad apply"
+        ],
+        [
+          "Bulkhead",
+          "Separate state"
+        ]
+      ],
+      "breaks": "Compartments are identical; cells may run different versions temporarily."
+    },
+    "mindmap": {
+      "center": "Cell-Based IaC",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Dir per cell",
+            "Own state",
+            "Pinned version"
+          ]
+        },
+        {
+          "label": "Rollout",
+          "children": [
+            "Canary cells",
+            "Waves",
+            "Pause on errors"
+          ]
+        },
+        {
+          "label": "Grouping",
+          "children": [
+            "Shared cells for small tenants",
+            "Dedicated for enterprise"
+          ]
+        },
+        {
+          "label": "Tooling",
+          "children": [
+            "Terragrunt",
+            "Generators",
+            "Spacelift"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cell layout",
+      "scenario": "Tree + config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "v4.2.0 proves itself in canary before wave 2."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "infrastructure/\n  modules/tenant-stack/          # versioned\n  cells/\n    cell-001-canary/terragrunt.hcl   # ref=v4.2.0\n    cell-002/terragrunt.hcl          # ref=v4.1.3\n    enterprise-acme/terragrunt.hcl   # ref=v4.1.3, dedicated\n  scripts/new-cell.sh"
+        }
+      ],
+      "outcome": "contained failures and staged upgrades."
+    },
+    "summary": {
+      "points": [
+        "Directory and state per cell.",
+        "Per-cell versions.",
+        "Wave rollouts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What key capability do cells add over workspaces?",
+        "a": "Each cell pins its own module version, enabling staged (canary/wave) upgrades and per-tenant timing."
+      }
+    ]
+  }
+}

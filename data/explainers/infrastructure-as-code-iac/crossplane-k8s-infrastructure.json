@@ -1,0 +1,416 @@
+{
+  "introduction-from-cli-to-control-plane": {
+    "core": "Terraform reconciles only when someone runs apply; between runs, drift goes unnoticed. Crossplane turns Kubernetes into a universal control plane: cloud resources become custom resources, and controllers continuously reconcile them against the cloud, just as the Deployment controller keeps pods running. You get kubectl, RBAC, GitOps and continuous drift correction for databases and buckets.",
+    "first_principles": {
+      "problem": "A manually deleted RDS instance stays missing until someone next runs terraform apply, days later.",
+      "truths": [
+        "Reconciliation can be continuous.",
+        "Kubernetes is a generic control-loop platform.",
+        "Same API for apps and infra simplifies tooling."
+      ],
+      "derivation": [
+        "Represent infra as **CRDs**.",
+        "Run **controllers** that reconcile continuously.",
+        "Use **RBAC and namespaces** for access.",
+        "Manage via **GitOps** like apps.",
+        "Offer **self-service APIs** to developers."
+      ]
+    },
+    "analogy": {
+      "title": "A thermostat vs flipping the heater manually",
+      "story": "You set the temperature once and the thermostat keeps correcting; you don't have to remember to check.",
+      "mapping": [
+        [
+          "Set point",
+          "Desired spec"
+        ],
+        [
+          "Thermostat",
+          "Controller"
+        ],
+        [
+          "Heater",
+          "Cloud API"
+        ]
+      ],
+      "breaks": "Thermostats tolerate a few degrees; controllers correct every drift they see."
+    },
+    "mindmap": {
+      "center": "Control Plane IaC",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "CRDs",
+            "Controllers",
+            "Continuous reconcile"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Drift auto-heal",
+            "kubectl/RBAC",
+            "GitOps"
+          ]
+        },
+        {
+          "label": "Parts",
+          "children": [
+            "Providers",
+            "Managed resources",
+            "Compositions"
+          ]
+        },
+        {
+          "label": "Contrast",
+          "children": [
+            "Terraform: on-demand apply"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Managed resource",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Delete it in the console and the controller recreates it within minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: s3.aws.upbound.io/v1beta1\nkind: Bucket\nmetadata:\n  name: acme-logs\nspec:\n  forProvider:\n    region: us-east-1\n  providerConfigRef:\n    name: aws-prod"
+        }
+      ],
+      "outcome": "infrastructure that self-heals."
+    },
+    "summary": {
+      "points": [
+        "Continuous reconciliation.",
+        "Kubernetes as control plane.",
+        "Same tooling as apps."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key operational difference between Crossplane and Terraform?",
+        "a": "Crossplane continuously reconciles via controllers; Terraform only reconciles when someone runs plan/apply."
+      }
+    ]
+  },
+  "providers-connecting-crossplane-to-the-cloud": {
+    "core": "A Crossplane provider is a package that installs CRDs (managed resources such as Bucket or RDSInstance) and a controller that calls the cloud API. ProviderConfig objects supply credentials, ideally via IRSA or workload identity rather than static keys. Upbound's official providers are largely generated from Terraform providers, so coverage is broad; family providers split large clouds into smaller installs.",
+    "first_principles": {
+      "problem": "Installing the monolithic AWS provider adds 900 CRDs and slows the API server.",
+      "truths": [
+        "Each provider brings CRDs and a controller.",
+        "Credentials come from ProviderConfig.",
+        "Too many CRDs burden the API server."
+      ],
+      "derivation": [
+        "Install **family providers** (only s3, rds...).",
+        "Use **ProviderConfig** with IRSA/workload identity.",
+        "Set **deletionPolicy** (Delete/Orphan).",
+        "Use **managementPolicies** for observe-only.",
+        "Pin **provider versions**."
+      ]
+    },
+    "analogy": {
+      "title": "Installing language packs on a phone",
+      "story": "Only add the languages you speak; each pack takes space and needs the right keyboard (credentials).",
+      "mapping": [
+        [
+          "Language pack",
+          "Provider family"
+        ],
+        [
+          "Keyboard",
+          "ProviderConfig"
+        ],
+        [
+          "Storage",
+          "API server load"
+        ]
+      ],
+      "breaks": "Language packs don't create real resources; providers do, with real bills."
+    },
+    "mindmap": {
+      "center": "Crossplane Providers",
+      "branches": [
+        {
+          "label": "Install",
+          "children": [
+            "Provider package",
+            "Family providers"
+          ]
+        },
+        {
+          "label": "Auth",
+          "children": [
+            "ProviderConfig",
+            "IRSA",
+            "Workload identity"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "deletionPolicy",
+            "managementPolicies"
+          ]
+        },
+        {
+          "label": "Source",
+          "children": [
+            "Upjet from Terraform",
+            "Native"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Install + config",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only S3 CRDs installed, keyless auth."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: pkg.crossplane.io/v1\nkind: Provider\nmetadata: { name: provider-aws-s3 }\nspec: { package: xpkg.upbound.io/upbound/provider-aws-s3:v1.14.0 }\n---\napiVersion: aws.upbound.io/v1beta1\nkind: ProviderConfig\nmetadata: { name: aws-prod }\nspec:\n  credentials: { source: IRSA }"
+        }
+      ],
+      "outcome": "lean, secure provider setup."
+    },
+    "summary": {
+      "points": [
+        "CRDs plus controller.",
+        "Use family providers.",
+        "Keyless credentials."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does deletionPolicy: Orphan do?",
+        "a": "Deleting the Kubernetes object leaves the cloud resource in place instead of deleting it."
+      }
+    ]
+  },
+  "compositions-building-your-own-api": {
+    "core": "Compositions let a platform team define their own abstractions. A CompositeResourceDefinition (XRD) declares a new API (for example `PostgresInstance` with size and version), and a Composition maps it to managed resources (RDS, subnet group, security group, secret), today usually via function pipelines (patch-and-transform, KCL, Go). Developers create a simple claim in their namespace and get a full, compliant database.",
+    "first_principles": {
+      "problem": "Developers must understand 40 RDS parameters to get a database, and each team configures it differently.",
+      "truths": [
+        "Developers want intent, not knobs.",
+        "Platform teams own standards.",
+        "APIs can hide implementations."
+      ],
+      "derivation": [
+        "Define an **XRD** with a minimal schema.",
+        "Write a **Composition** mapping to managed resources.",
+        "Use **functions** for logic (patch-and-transform, KCL).",
+        "Expose **namespaced claims**.",
+        "Write **connection secrets** to the claim's namespace."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant menu vs the kitchen",
+      "story": "Diners order 'medium steak'; the kitchen handles suppliers, temperatures and plating.",
+      "mapping": [
+        [
+          "Menu item",
+          "XRD/claim"
+        ],
+        [
+          "Recipe",
+          "Composition"
+        ],
+        [
+          "Ingredients",
+          "Managed resources"
+        ]
+      ],
+      "breaks": "Menus rarely change; XRD schema changes need versioning."
+    },
+    "mindmap": {
+      "center": "Compositions",
+      "branches": [
+        {
+          "label": "API",
+          "children": [
+            "XRD",
+            "Claim",
+            "Composite resource"
+          ]
+        },
+        {
+          "label": "Implementation",
+          "children": [
+            "Composition",
+            "Functions pipeline"
+          ]
+        },
+        {
+          "label": "Outputs",
+          "children": [
+            "Connection secrets",
+            "Status"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Self-service",
+            "Standards",
+            "Swap implementations"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Developer claim",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Encrypted, backed-up, networked RDS from 8 lines."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: platform.acme.io/v1alpha1\nkind: PostgresInstance\nmetadata:\n  name: orders-db\n  namespace: team-orders\nspec:\n  size: medium        # composition maps to db.r6g.large, multi-AZ, encrypted\n  version: \"16\"\n  writeConnectionSecretToRef: { name: orders-db-conn }"
+        }
+      ],
+      "outcome": "self-service infrastructure APIs."
+    },
+    "summary": {
+      "points": [
+        "XRD defines the API.",
+        "Composition implements it.",
+        "Claims are self-service."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the role of an XRD versus a Composition?",
+        "a": "The XRD defines the schema of the new API; the Composition defines which managed resources implement it."
+      }
+    ]
+  },
+  "crossplane-vs-terraform-choosing-the-right-tool": {
+    "core": "Terraform is mature, has huge provider coverage, explicit plans for review and works without Kubernetes, but reconciles only on apply. Crossplane gives continuous reconciliation, a Kubernetes-native self-service API and GitOps integration, but needs a well-run management cluster, lacks a true plan preview, and debugging spans controllers and events. Many organisations use Terraform for foundations and Crossplane for app-level self-service.",
+    "first_principles": {
+      "problem": "A team migrates everything to Crossplane and loses the reviewable plan output that auditors relied on.",
+      "truths": [
+        "Each tool has a different reconciliation model.",
+        "Plan previews aid review.",
+        "Kubernetes adds operational load."
+      ],
+      "derivation": [
+        "Use **Terraform** for foundations and plans.",
+        "Use **Crossplane** for self-service app infra.",
+        "Consider **team skills** (K8s vs HCL).",
+        "Account for **management cluster** ops.",
+        "Allow **hybrid** setups."
+      ]
+    },
+    "analogy": {
+      "title": "A surveyor's plan vs a groundskeeper",
+      "story": "The surveyor draws precise plans for big changes; the groundskeeper keeps everything tidy every day.",
+      "mapping": [
+        [
+          "Surveyor",
+          "Terraform"
+        ],
+        [
+          "Groundskeeper",
+          "Crossplane"
+        ],
+        [
+          "Precise plans",
+          "terraform plan"
+        ]
+      ],
+      "breaks": "Groundskeepers ask before big changes; controllers just reconcile."
+    },
+    "mindmap": {
+      "center": "Crossplane vs Terraform",
+      "branches": [
+        {
+          "label": "Terraform",
+          "children": [
+            "Plan preview",
+            "Huge ecosystem",
+            "No K8s needed",
+            "On-demand"
+          ]
+        },
+        {
+          "label": "Crossplane",
+          "children": [
+            "Continuous",
+            "K8s API",
+            "Self-service",
+            "GitOps"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Mgmt cluster",
+            "Debugging",
+            "No plan"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "TF foundations",
+            "XP app infra"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hybrid split",
+      "scenario": "Design.",
+      "flow": [
+        "Terraform: accounts, VPCs, EKS management cluster",
+        "Crossplane installed on management cluster",
+        "Teams claim databases/queues via XRDs",
+        "Argo CD syncs claims from Git"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reviewed foundations, self-service apps."
+        }
+      ],
+      "code": [],
+      "outcome": "right tool per layer."
+    },
+    "summary": {
+      "points": [
+        "Different reconcile models.",
+        "Plan vs continuous.",
+        "Hybrid is common."
+      ]
+    },
+    "check": [
+      {
+        "q": "What capability do teams most often miss when moving from Terraform to Crossplane?",
+        "a": "A reliable plan/preview of exactly what will change before it happens."
+      }
+    ]
+  }
+}

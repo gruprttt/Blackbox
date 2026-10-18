@@ -1,0 +1,730 @@
+{
+  "introduction-terraform-is-a-plugin-system": {
+    "core": "Terraform core is a graph engine that knows nothing about any API. Every resource type comes from a provider: a separate Go binary that core launches and talks to over gRPC. If your internal platform, SaaS tool or on-prem system has an API but no provider, you can write one and manage it with the same plan/apply workflow as AWS.",
+    "first_principles": {
+      "problem": "An internal DNS service is managed by tickets because there's no Terraform provider for it.",
+      "truths": [
+        "Core is API-agnostic.",
+        "Providers are separate processes.",
+        "Any CRUD API can be modelled."
+      ],
+      "derivation": [
+        "Identify the API's **resources** and their **CRUD** calls.",
+        "Model **schemas** (attributes, types, computed).",
+        "Implement with the **Plugin Framework**.",
+        "Test with **acceptance tests**.",
+        "Publish to a **private or public registry**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal remote with downloadable codes",
+      "story": "The remote (core) works with any TV once you load that TV's code set (provider).",
+      "mapping": [
+        [
+          "Remote",
+          "Terraform core"
+        ],
+        [
+          "Code set",
+          "Provider"
+        ],
+        [
+          "TV",
+          "Target API"
+        ]
+      ],
+      "breaks": "Remote codes are tiny; providers carry full CRUD and diff logic."
+    },
+    "mindmap": {
+      "center": "Plugin System",
+      "branches": [
+        {
+          "label": "Core",
+          "children": [
+            "Graph",
+            "Plan/apply",
+            "State"
+          ]
+        },
+        {
+          "label": "Provider",
+          "children": [
+            "Go binary",
+            "gRPC",
+            "Schemas",
+            "CRUD"
+          ]
+        },
+        {
+          "label": "Why custom",
+          "children": [
+            "Internal APIs",
+            "SaaS gaps"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Build",
+            "Test",
+            "Publish"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "How core runs a provider",
+      "scenario": "Trace.",
+      "flow": [
+        "terraform init downloads provider binary",
+        "Core launches it as a child process",
+        "Handshake over gRPC (go-plugin)",
+        "Core calls PlanResourceChange / ApplyResourceChange"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any API becomes Terraform-manageable."
+        }
+      ],
+      "code": [],
+      "outcome": "why providers are the extension point."
+    },
+    "summary": {
+      "points": [
+        "Core knows no APIs.",
+        "Providers are gRPC plugins.",
+        "Write one for any CRUD API."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Terraform core delegate to providers?",
+        "a": "Everything API-specific: schemas, reading, planning and applying create/update/delete for each resource type."
+      }
+    ]
+  },
+  "the-protocol-grpc-and-go-plugin": {
+    "core": "Core and providers talk via HashiCorp's go-plugin library: core starts the provider binary, they handshake over stdout with a magic cookie and protocol version, then speak gRPC (Terraform plugin protocol v5 or v6). Key RPCs are GetProviderSchema, ValidateResourceConfig, ReadResource, PlanResourceChange, ApplyResourceChange and ImportResourceState. Process isolation means a provider crash doesn't corrupt core.",
+    "first_principles": {
+      "problem": "A developer can't understand why their provider prints nothing when run directly.",
+      "truths": [
+        "Providers are separate processes.",
+        "A handshake selects the protocol.",
+        "RPCs mirror the Terraform lifecycle."
+      ],
+      "derivation": [
+        "Core **launches** the binary with env cookie.",
+        "Provider prints **handshake line** (address, protocol).",
+        "Communicate over **gRPC**.",
+        "Implement **schema, plan, apply, read, import** RPCs.",
+        "Use **protocol v6** via the Plugin Framework."
+      ]
+    },
+    "analogy": {
+      "title": "An interpreter at a conference",
+      "story": "A booked interpreter checks a passcode, agrees on a language, then translates every request word for word.",
+      "mapping": [
+        [
+          "Passcode",
+          "Magic cookie"
+        ],
+        [
+          "Agreed language",
+          "Protocol version"
+        ],
+        [
+          "Translation",
+          "gRPC calls"
+        ]
+      ],
+      "breaks": "Interpreters paraphrase; RPCs carry exact typed values."
+    },
+    "mindmap": {
+      "center": "Plugin Protocol",
+      "branches": [
+        {
+          "label": "Transport",
+          "children": [
+            "go-plugin",
+            "gRPC",
+            "Local socket"
+          ]
+        },
+        {
+          "label": "Handshake",
+          "children": [
+            "Magic cookie",
+            "Protocol v5/v6"
+          ]
+        },
+        {
+          "label": "RPCs",
+          "children": [
+            "GetProviderSchema",
+            "PlanResourceChange",
+            "ApplyResourceChange",
+            "ReadResource",
+            "ImportResourceState"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Isolation",
+            "Language-neutral"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lifecycle RPCs during apply",
+      "scenario": "Sequence.",
+      "flow": [
+        "GetProviderSchema",
+        "ValidateResourceConfig",
+        "ReadResource (refresh)",
+        "PlanResourceChange (diff)",
+        "ApplyResourceChange (create/update/delete)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each step maps to a function you implement."
+        }
+      ],
+      "code": [],
+      "outcome": "the contract between core and provider."
+    },
+    "summary": {
+      "points": [
+        "go-plugin handshake.",
+        "gRPC protocol v5/v6.",
+        "RPCs mirror lifecycle."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does running a provider binary directly do nothing useful?",
+        "a": "It expects to be launched by core with the handshake cookie and then serve gRPC; without that it just exits or waits."
+      }
+    ]
+  },
+  "sdkv2-vs-the-plugin-framework": {
+    "core": "SDKv2 is the older, map-based library used by most legacy providers: schemas are map[string]*Schema and values are untyped interfaces, with null and unknown values blurred. The Terraform Plugin Framework is the modern, strongly typed library on protocol v6, with explicit null, unknown and known states, plan modifiers, validators and nested attributes. New providers should use the Framework; existing ones can migrate gradually with muxing.",
+    "first_principles": {
+      "problem": "An SDKv2 provider can't tell whether a user set a bool to false or left it unset, causing spurious diffs.",
+      "truths": [
+        "Null, unknown and zero differ.",
+        "Type safety prevents bugs.",
+        "Large providers can't rewrite at once."
+      ],
+      "derivation": [
+        "Use **Framework** for new providers.",
+        "Model values as **types.String/Int64** etc.",
+        "Use **plan modifiers** (UseStateForUnknown, RequiresReplace).",
+        "Add **validators** on attributes.",
+        "**Mux** SDKv2 and Framework during migration."
+      ]
+    },
+    "analogy": {
+      "title": "Paper forms vs a validated web form",
+      "story": "A paper form can't tell a blank from a deliberate 'no'; a typed web form records each field precisely.",
+      "mapping": [
+        [
+          "Paper form",
+          "SDKv2"
+        ],
+        [
+          "Web form",
+          "Plugin Framework"
+        ],
+        [
+          "Blank vs no",
+          "Null vs false"
+        ]
+      ],
+      "breaks": "Forms are filled by humans; schemas are consumed by code."
+    },
+    "mindmap": {
+      "center": "SDKv2 vs Framework",
+      "branches": [
+        {
+          "label": "SDKv2",
+          "children": [
+            "Map schemas",
+            "interface{} values",
+            "Protocol v5",
+            "Legacy"
+          ]
+        },
+        {
+          "label": "Framework",
+          "children": [
+            "Typed values",
+            "Null/unknown explicit",
+            "Plan modifiers",
+            "Validators",
+            "Protocol v6"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "terraform-plugin-mux",
+            "Resource by resource"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Framework schema",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Typed, validated, explicit replacement rules."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "func (r *recordResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {\n    resp.Schema = schema.Schema{\n        Attributes: map[string]schema.Attribute{\n            \"id\":   schema.StringAttribute{Computed: true,\n                PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},\n            \"name\": schema.StringAttribute{Required: true,\n                PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},\n            \"ttl\":  schema.Int64Attribute{Optional: true, Computed: true,\n                Validators: []validator.Int64{int64validator.Between(60, 86400)}},\n        },\n    }\n}"
+        }
+      ],
+      "outcome": "precise schemas with fewer diff bugs."
+    },
+    "summary": {
+      "points": [
+        "SDKv2 is legacy.",
+        "Framework is typed.",
+        "Mux to migrate."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does UseStateForUnknown do?",
+        "a": "It keeps a computed attribute's prior state value in the plan instead of showing '(known after apply)' when it won't change."
+      }
+    ]
+  },
+  "provider-project-structure": {
+    "core": "A provider repo usually follows the scaffolding template: main.go starts providerserver.Serve; internal/provider holds the provider (configuration schema and client setup), one file per resource and data source, and tests; examples/ and docs/ feed the registry via tfplugindocs; and GoReleaser plus GPG signing produce registry-ready releases.",
+    "first_principles": {
+      "problem": "A provider's resources, client code and docs are tangled in one file, making contributions painful.",
+      "truths": [
+        "Registry expects a layout and signatures.",
+        "API client should be separate.",
+        "Docs can be generated."
+      ],
+      "derivation": [
+        "Start from **terraform-provider-scaffolding-framework**.",
+        "Put the **API client** in its own package.",
+        "One file per **resource/data source**.",
+        "Generate docs with **tfplugindocs**.",
+        "Release with **GoReleaser + GPG**."
+      ]
+    },
+    "analogy": {
+      "title": "A well-organised kitchen",
+      "story": "Pantry (client), stations per dish (resources), recipe cards (docs) and a delivery process (releases).",
+      "mapping": [
+        [
+          "Pantry",
+          "API client"
+        ],
+        [
+          "Stations",
+          "Resource files"
+        ],
+        [
+          "Recipe cards",
+          "Docs/examples"
+        ]
+      ],
+      "breaks": "Kitchens adapt freely; registries require exact naming and signatures."
+    },
+    "mindmap": {
+      "center": "Provider Layout",
+      "branches": [
+        {
+          "label": "Entry",
+          "children": [
+            "main.go",
+            "providerserver.Serve"
+          ]
+        },
+        {
+          "label": "Code",
+          "children": [
+            "provider.go",
+            "resource_*.go",
+            "data_source_*.go",
+            "client pkg"
+          ]
+        },
+        {
+          "label": "Docs",
+          "children": [
+            "examples/",
+            "tfplugindocs"
+          ]
+        },
+        {
+          "label": "Release",
+          "children": [
+            "GoReleaser",
+            "GPG",
+            "Registry manifest"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Repo tree",
+      "scenario": "Layout.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Familiar layout for contributors and the registry."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "terraform-provider-acmedns/\n  main.go\n  internal/provider/\n    provider.go\n    record_resource.go\n    record_resource_test.go\n    zone_data_source.go\n  internal/client/\n  examples/resources/acmedns_record/resource.tf\n  docs/            # generated\n  .goreleaser.yml\n  terraform-registry-manifest.json"
+        }
+      ],
+      "outcome": "maintainable provider codebase."
+    },
+    "summary": {
+      "points": [
+        "Use the scaffold.",
+        "Separate client.",
+        "Generate docs, sign releases."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why keep the API client in a separate package?",
+        "a": "It isolates HTTP/auth logic from Terraform types, making it reusable and testable on its own."
+      }
+    ]
+  },
+  "crud-operations": {
+    "core": "Each resource implements Create, Read, Update and Delete (plus optional ImportState). Create calls the API and saves the returned ID and computed attributes into state. Read refreshes state from the API and removes the resource from state if it's gone (404). Update applies in-place changes, and Delete removes it. Read must be accurate, because it drives drift detection and every plan.",
+    "first_principles": {
+      "problem": "A Read that ignores 404s makes Terraform think a deleted record still exists, so it never recreates it.",
+      "truths": [
+        "State must reflect the API.",
+        "Missing objects must leave state.",
+        "Computed fields come from the API."
+      ],
+      "derivation": [
+        "**Create**: call API, set ID and computed fields.",
+        "**Read**: fetch, update state, **RemoveResource on 404**.",
+        "**Update**: only mutable fields; others RequiresReplace.",
+        "**Delete**: call API, tolerate already-gone.",
+        "**ImportState**: parse ID into state."
+      ]
+    },
+    "analogy": {
+      "title": "A librarian's catalogue",
+      "story": "Add a card when a book arrives, check the shelf to update cards, and remove the card if the book is gone.",
+      "mapping": [
+        [
+          "Add card",
+          "Create"
+        ],
+        [
+          "Shelf check",
+          "Read"
+        ],
+        [
+          "Remove card",
+          "RemoveResource"
+        ]
+      ],
+      "breaks": "Librarians notice odd things; Read only knows what the API returns."
+    },
+    "mindmap": {
+      "center": "CRUD",
+      "branches": [
+        {
+          "label": "Create",
+          "children": [
+            "API call",
+            "Set ID",
+            "Computed values"
+          ]
+        },
+        {
+          "label": "Read",
+          "children": [
+            "Refresh",
+            "404 → remove"
+          ]
+        },
+        {
+          "label": "Update",
+          "children": [
+            "Mutable fields",
+            "RequiresReplace others"
+          ]
+        },
+        {
+          "label": "Delete",
+          "children": [
+            "Idempotent"
+          ]
+        },
+        {
+          "label": "Import",
+          "children": [
+            "ID parsing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Read with 404 handling",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Deleted records reappear in the next plan as 'to create'."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "func (r *recordResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {\n    var st recordModel\n    resp.Diagnostics.Append(req.State.Get(ctx, &st)...)\n    rec, err := r.client.GetRecord(ctx, st.ID.ValueString())\n    if errors.Is(err, client.ErrNotFound) {\n        resp.State.RemoveResource(ctx)   // drifted away → recreate on next plan\n        return\n    }\n    if err != nil { resp.Diagnostics.AddError(\"read failed\", err.Error()); return }\n    st.TTL = types.Int64Value(rec.TTL)\n    resp.Diagnostics.Append(resp.State.Set(ctx, &st)...)\n}"
+        }
+      ],
+      "outcome": "correct drift behaviour."
+    },
+    "summary": {
+      "points": [
+        "Implement all four.",
+        "Read drives drift.",
+        "Handle 404 by removal."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should Read do if the API returns 404?",
+        "a": "Remove the resource from state so Terraform plans to recreate it."
+      }
+    ]
+  },
+  "acceptance-testing": {
+    "core": "Acceptance tests (resource.Test with TF_ACC=1) run real Terraform against the real API: apply a config, check attributes, change the config and check the update, test import, and check destroy. They are slower and cost money but are the only way to prove CRUD and diff logic. Unit tests cover helpers, and CheckDestroy confirms cleanup.",
+    "first_principles": {
+      "problem": "A provider passes unit tests but every second apply shows a perpetual diff on 'ttl'.",
+      "truths": [
+        "Diff bugs appear only end-to-end.",
+        "Real APIs have quirks.",
+        "Tests must clean up."
+      ],
+      "derivation": [
+        "Write **TestStep**s for create, update, import.",
+        "Use **ConfigStateChecks/Check** to assert attributes.",
+        "Add **ImportStateVerify**.",
+        "Use **CheckDestroy** to confirm removal.",
+        "Run in **CI with a sandbox account**."
+      ]
+    },
+    "analogy": {
+      "title": "A test drive, not a brochure",
+      "story": "You drive, change gears, park and return the car to be sure it really works.",
+      "mapping": [
+        [
+          "Driving",
+          "Apply"
+        ],
+        [
+          "Changing gears",
+          "Update step"
+        ],
+        [
+          "Returning",
+          "Destroy check"
+        ]
+      ],
+      "breaks": "Test drives are free; API calls and resources may cost money."
+    },
+    "mindmap": {
+      "center": "Acceptance Tests",
+      "branches": [
+        {
+          "label": "Framework",
+          "children": [
+            "resource.Test",
+            "TF_ACC=1"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Create",
+            "Update",
+            "Import",
+            "Destroy"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "Attributes",
+            "No-op re-plan",
+            "CheckDestroy"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Sandbox account",
+            "Sweepers",
+            "Nightly CI"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Test with import",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Framework also re-plans after each step and fails on unexpected diffs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "func TestAccRecord_basic(t *testing.T) {\n    resource.Test(t, resource.TestCase{\n        ProtoV6ProviderFactories: testProviders,\n        CheckDestroy:             testCheckRecordDestroyed,\n        Steps: []resource.TestStep{\n            {Config: cfg(300), Check: resource.TestCheckResourceAttr(\"acmedns_record.a\", \"ttl\", \"300\")},\n            {Config: cfg(600), Check: resource.TestCheckResourceAttr(\"acmedns_record.a\", \"ttl\", \"600\")},\n            {ResourceName: \"acmedns_record.a\", ImportState: true, ImportStateVerify: true},\n        },\n    })\n}"
+        }
+      ],
+      "outcome": "proven CRUD and diff logic."
+    },
+    "summary": {
+      "points": [
+        "Test against real APIs.",
+        "Cover create, update, import, destroy.",
+        "Fail on perpetual diffs."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do acceptance tests catch perpetual diffs?",
+        "a": "After each apply step the framework runs another plan and fails if it isn't empty."
+      }
+    ]
+  },
+  "debugging-providers": {
+    "core": "Debug with logs first: TF_LOG=DEBUG (or TF_LOG_PROVIDER) plus tflog structured logging inside the provider. For deeper issues, run the provider in debug mode (Delve with -debug flag), which prints TF_REATTACH_PROVIDERS so Terraform attaches to your running process and you can set breakpoints. Dev overrides in .terraformrc point Terraform at a locally built binary without publishing.",
+    "first_principles": {
+      "problem": "A provider panics on update only in one user's config, and print statements don't show up.",
+      "truths": [
+        "Provider stdout is the RPC channel.",
+        "Logs go via structured logging.",
+        "Debuggers need reattach."
+      ],
+      "derivation": [
+        "Use **tflog** (not fmt.Println).",
+        "Set **TF_LOG_PROVIDER=TRACE**.",
+        "Use **dev_overrides** for local builds.",
+        "Run with **-debug** and attach **Delve**.",
+        "Export **TF_REATTACH_PROVIDERS**."
+      ]
+    },
+    "analogy": {
+      "title": "Listening in on a phone call",
+      "story": "Instead of shouting into the line (stdout), you tap the call (logs) or join it with a headset (debugger).",
+      "mapping": [
+        [
+          "Shouting",
+          "fmt.Println"
+        ],
+        [
+          "Tap",
+          "tflog + TF_LOG"
+        ],
+        [
+          "Headset",
+          "Delve reattach"
+        ]
+      ],
+      "breaks": "Phone taps are passive; breakpoints pause the provider and can time out core."
+    },
+    "mindmap": {
+      "center": "Debugging Providers",
+      "branches": [
+        {
+          "label": "Logs",
+          "children": [
+            "tflog",
+            "TF_LOG_PROVIDER",
+            "TF_LOG_PATH"
+          ]
+        },
+        {
+          "label": "Local builds",
+          "children": [
+            "dev_overrides",
+            ".terraformrc"
+          ]
+        },
+        {
+          "label": "Debugger",
+          "children": [
+            "-debug flag",
+            "Delve",
+            "TF_REATTACH_PROVIDERS"
+          ]
+        },
+        {
+          "label": "Pitfall",
+          "children": [
+            "stdout is RPC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dev override + logs",
+      "scenario": "Config and commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Local binary used, structured logs captured."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat > ~/.terraformrc <<'EOF'\nprovider_installation {\n  dev_overrides { \"acme/acmedns\" = \"/home/me/go/bin\" }\n  direct {}\n}\nEOF\ngo install .\nTF_LOG_PROVIDER=DEBUG terraform plan 2>debug.log"
+        }
+      ],
+      "outcome": "fast debugging loop."
+    },
+    "summary": {
+      "points": [
+        "Log with tflog.",
+        "dev_overrides for local builds.",
+        "Reattach a debugger."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shouldn't a provider print debug output to stdout?",
+        "a": "stdout carries the go-plugin handshake, so stray output can break communication; use tflog/stderr logs."
+      }
+    ]
+  }
+}

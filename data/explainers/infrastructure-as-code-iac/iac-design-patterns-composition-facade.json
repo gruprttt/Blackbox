@@ -1,0 +1,512 @@
+{
+  "introduction-coding-patterns-in-infrastructure": {
+    "core": "As IaC grows, the same problems software engineering solved reappear: duplication, tight coupling, leaky abstractions and modules that only work in one context. Design patterns from software apply directly. Composition assembles small modules, the facade hides complexity behind a simple interface, and dependency inversion has modules receive dependencies instead of creating them.",
+    "first_principles": {
+      "problem": "A 'service' module creates its own VPC, so it can't be deployed into the shared network.",
+      "truths": [
+        "Infra code has the same structure problems as app code.",
+        "Patterns are reusable solutions.",
+        "Coupling limits reuse."
+      ],
+      "derivation": [
+        "Prefer **composition** of small modules.",
+        "Offer **facades** for common use cases.",
+        "**Inject** dependencies via variables.",
+        "Keep modules **single-purpose**.",
+        "Design **interfaces** deliberately."
+      ]
+    },
+    "analogy": {
+      "title": "A city's electrical grid",
+      "story": "Early towns ran wires anywhere; modern cities use standard substations and connectors so the grid can grow safely.",
+      "mapping": [
+        [
+          "Ad-hoc wiring",
+          "Copy-paste IaC"
+        ],
+        [
+          "Substations",
+          "Modules"
+        ],
+        [
+          "Standard connectors",
+          "Interfaces"
+        ]
+      ],
+      "breaks": "Grids change slowly; IaC modules version weekly."
+    },
+    "mindmap": {
+      "center": "IaC Design Patterns",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "Duplication",
+            "Coupling",
+            "Leaky abstractions"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Composition",
+            "Facade",
+            "Dependency inversion"
+          ]
+        },
+        {
+          "label": "Principles",
+          "children": [
+            "Single purpose",
+            "Small interfaces"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Reuse at scale"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Coupled vs injected",
+      "scenario": "Comparison.",
+      "flow": [
+        "Coupled: module creates VPC + app",
+        "Can't reuse in shared VPC",
+        "Injected: module takes vpc_id, subnet_ids",
+        "Works in any network"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One module, many contexts."
+        }
+      ],
+      "code": [],
+      "outcome": "why patterns matter for IaC."
+    },
+    "summary": {
+      "points": [
+        "Same problems as software.",
+        "Same patterns help.",
+        "Design for reuse."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a module that creates its own VPC hard to reuse?",
+        "a": "It's coupled to a specific network; it can't deploy into existing or shared VPCs without modification."
+      }
+    ]
+  },
+  "composition-vs-inheritance": {
+    "core": "Terraform modules have no inheritance; you can't extend a module and override parts of it. Reuse happens through composition: a parent module calls several small child modules and wires their outputs to inputs. That is 'has-a' (a service has a load balancer, has a database) rather than 'is-a'. Composition keeps modules loosely coupled and lets you swap parts independently.",
+    "first_principles": {
+      "problem": "A team tries to fork-and-modify a base module for each variant, producing 12 diverging copies.",
+      "truths": [
+        "HCL has no inheritance.",
+        "Outputs to inputs is the wiring.",
+        "Small parts recombine flexibly."
+      ],
+      "derivation": [
+        "Build **small, focused modules**.",
+        "**Compose** them in parent modules.",
+        "Wire via **outputs → variables**.",
+        "Use **feature flags** sparingly.",
+        "Prefer **new compositions** over forks."
+      ]
+    },
+    "analogy": {
+      "title": "LEGO vs carving a figure",
+      "story": "You assemble a car from wheel, chassis and engine bricks rather than carving a car shape you can't change.",
+      "mapping": [
+        [
+          "Bricks",
+          "Child modules"
+        ],
+        [
+          "Assembly",
+          "Composition"
+        ],
+        [
+          "Carving",
+          "Monolithic module"
+        ]
+      ],
+      "breaks": "LEGO has no data flow; modules pass outputs to inputs."
+    },
+    "mindmap": {
+      "center": "Composition",
+      "branches": [
+        {
+          "label": "Is-a",
+          "children": [
+            "Inheritance",
+            "Not in HCL"
+          ]
+        },
+        {
+          "label": "Has-a",
+          "children": [
+            "Composition",
+            "Parent wires children"
+          ]
+        },
+        {
+          "label": "Wiring",
+          "children": [
+            "Outputs → variables"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Loose coupling",
+            "Swap parts",
+            "No forks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Composed service",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Swap rds for aurora module without touching others."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "module \"alb\" { source = \"../alb\"  vpc_id = var.vpc_id  subnets = var.public_subnets }\nmodule \"db\"  { source = \"../rds\"  vpc_id = var.vpc_id  subnets = var.private_subnets }\nmodule \"ecs\" {\n  source           = \"../ecs-service\"\n  target_group_arn = module.alb.target_group_arn\n  db_endpoint      = module.db.endpoint\n}"
+        }
+      ],
+      "outcome": "flexible assembled systems."
+    },
+    "summary": {
+      "points": [
+        "No inheritance in HCL.",
+        "Compose small modules.",
+        "Wire outputs to inputs."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you create a variant of a module without forking it?",
+        "a": "Compose a new parent module from the same small child modules with different wiring or inputs."
+      }
+    ]
+  },
+  "the-facade-pattern": {
+    "core": "A facade module wraps many resources and child modules behind a small, intent-based interface. 'Standard web service' takes name, image and size and internally creates the ASG or ECS service, IAM role, alarms, log groups, security groups and DNS with organisational defaults. Product teams get a simple API; the platform team controls best practice and can change internals without breaking consumers.",
+    "first_principles": {
+      "problem": "Fifty teams each configure 30 resources for a web service, and every one misses something different.",
+      "truths": [
+        "Most users want intent, not knobs.",
+        "Defaults encode best practice.",
+        "Stable interfaces allow internal change."
+      ],
+      "derivation": [
+        "Identify **common use cases**.",
+        "Expose **few, meaningful inputs** (size: small/medium/large).",
+        "Hide **implementation** details.",
+        "Bake **org defaults** (alarms, tags, IAM).",
+        "Version the **interface** carefully."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel concierge",
+      "story": "You ask for 'dinner for two at 8'; they handle reservations, transport and preferences behind the scenes.",
+      "mapping": [
+        [
+          "Request",
+          "Facade inputs"
+        ],
+        [
+          "Behind-the-scenes calls",
+          "Internal resources"
+        ],
+        [
+          "Concierge",
+          "Facade module"
+        ]
+      ],
+      "breaks": "Concierges adapt to odd requests; facades need escape hatches or a lower-level path."
+    },
+    "mindmap": {
+      "center": "Facade Pattern",
+      "branches": [
+        {
+          "label": "Interface",
+          "children": [
+            "Few inputs",
+            "Intent-based",
+            "T-shirt sizes"
+          ]
+        },
+        {
+          "label": "Internals",
+          "children": [
+            "Compute",
+            "IAM",
+            "Alarms",
+            "Logs",
+            "DNS"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Consistency",
+            "Simplicity",
+            "Internal evolution"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Too rigid",
+            "Leaky options"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Consumer call",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "~40 resources created with standards baked in."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "module \"checkout\" {\n  source  = \"git::https://git.acme/platform/web-service.git?ref=v3.2.0\"\n  name    = \"checkout\"\n  image   = \"acme/checkout:2.7.1\"\n  size    = \"medium\"        # maps to CPU/mem, min/max tasks\n  network = module.platform.network\n}"
+        }
+      ],
+      "outcome": "simple, consistent consumption."
+    },
+    "summary": {
+      "points": [
+        "Simple interface.",
+        "Hidden complexity.",
+        "Defaults as policy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use t-shirt sizes instead of raw CPU/memory inputs in a facade?",
+        "a": "They express intent, let the platform team tune the mapping centrally, and prevent misconfiguration."
+      }
+    ]
+  },
+  "dependency-inversion-in-iac": {
+    "core": "Dependency inversion means modules depend on abstractions passed in, not on concrete resources they create or look up themselves. Instead of an app module creating a VPC or finding one by hardcoded name, it accepts vpc_id and subnet_ids (or a network object) as inputs. The caller decides where those come from, so the same module works in any account, region or environment, and in tests.",
+    "first_principles": {
+      "problem": "An app module looks up 'prod-vpc' by name with a data source and fails in the staging account.",
+      "truths": [
+        "Hidden lookups couple modules to context.",
+        "Inputs make dependencies explicit.",
+        "Callers know the environment."
+      ],
+      "derivation": [
+        "Accept dependencies as **variables**.",
+        "Use **object types** for related inputs (network).",
+        "Avoid **hardcoded data source lookups** in shared modules.",
+        "Let the **root module** resolve dependencies.",
+        "Enables **testing** with fake inputs."
+      ]
+    },
+    "analogy": {
+      "title": "A lamp with a plug vs one wired into the wall",
+      "story": "The plug lets you use the lamp in any room; hardwiring ties it to one spot.",
+      "mapping": [
+        [
+          "Plug",
+          "Input variables"
+        ],
+        [
+          "Socket",
+          "Caller-provided resources"
+        ],
+        [
+          "Hardwiring",
+          "Internal creation/lookup"
+        ]
+      ],
+      "breaks": "Plugs are standard; module inputs need agreed types."
+    },
+    "mindmap": {
+      "center": "Dependency Inversion",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Module creates/looks up deps"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Inject via variables",
+            "Object types"
+          ]
+        },
+        {
+          "label": "Who resolves",
+          "children": [
+            "Root module"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Portability",
+            "Testability",
+            "Clear contracts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Injected network object",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Same module in prod, staging and test with different inputs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "variable \"network\" {\n  type = object({\n    vpc_id             = string\n    private_subnet_ids = list(string)\n    security_group_ids = list(string)\n  })\n}\nresource \"aws_ecs_service\" \"this\" {\n  network_configuration {\n    subnets         = var.network.private_subnet_ids\n    security_groups = var.network.security_group_ids\n  }\n}"
+        }
+      ],
+      "outcome": "portable, testable modules."
+    },
+    "summary": {
+      "points": [
+        "Inject, don't create.",
+        "Typed objects for contracts.",
+        "Root resolves context."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should environment-specific lookups live under dependency inversion?",
+        "a": "In the root module (or composition layer), which passes resolved values into reusable child modules."
+      }
+    ]
+  },
+  "putting-it-all-together-the-three-pattern-stack": {
+    "core": "The patterns form layers. Layer 1 is small resource modules (vpc, rds, alb) with injected dependencies. Layer 2 composes them into facades (web-service, data-store) with org defaults. Layer 3 is environment root modules that resolve real dependencies and call facades. Platform teams own layers 1 and 2; product teams mostly touch layer 3.",
+    "first_principles": {
+      "problem": "A platform team supporting 30 product teams needs reusable, consistent and evolvable infrastructure code.",
+      "truths": [
+        "Layers separate concerns.",
+        "Ownership follows layers.",
+        "Each pattern solves one problem."
+      ],
+      "derivation": [
+        "**Layer 1**: resource modules, dependency-injected.",
+        "**Layer 2**: facades composing layer 1.",
+        "**Layer 3**: env roots resolving deps.",
+        "**Version** layers 1–2 independently.",
+        "**Product teams** consume layer 2 only."
+      ]
+    },
+    "analogy": {
+      "title": "Bricks, prefab rooms, and houses",
+      "story": "Brick makers, prefab factories and homebuilders each do one job; homeowners just choose rooms.",
+      "mapping": [
+        [
+          "Bricks",
+          "Resource modules"
+        ],
+        [
+          "Prefab rooms",
+          "Facades"
+        ],
+        [
+          "House",
+          "Environment root"
+        ]
+      ],
+      "breaks": "Houses are built once; IaC layers evolve continuously."
+    },
+    "mindmap": {
+      "center": "Three-Pattern Stack",
+      "branches": [
+        {
+          "label": "Layer 1",
+          "children": [
+            "Resource modules",
+            "Dependency inversion"
+          ]
+        },
+        {
+          "label": "Layer 2",
+          "children": [
+            "Facades",
+            "Composition"
+          ]
+        },
+        {
+          "label": "Layer 3",
+          "children": [
+            "Env roots",
+            "Resolve deps"
+          ]
+        },
+        {
+          "label": "Ownership",
+          "children": [
+            "Platform: 1–2",
+            "Product: 3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Repo layout",
+      "scenario": "Tree.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Change ALB internals in layer 1, all services upgrade via version bump."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "modules/\n  resources/   vpc/ rds/ alb/ ecs-service/      # layer 1\n  facades/     web-service/ data-store/         # layer 2\nlive/\n  prod/checkout/main.tf   -> module \"svc\" { source = \"../../modules/facades/web-service\" ... }   # layer 3"
+        }
+      ],
+      "outcome": "scalable IaC architecture."
+    },
+    "summary": {
+      "points": [
+        "Three layers.",
+        "Each pattern one job.",
+        "Ownership by layer."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which layer should product teams primarily edit?",
+        "a": "Layer 3, the environment root modules that call platform-provided facades."
+      }
+    ]
+  }
+}

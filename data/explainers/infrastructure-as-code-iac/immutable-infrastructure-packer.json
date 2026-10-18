@@ -1,0 +1,533 @@
+{
+  "introduction-pets-vs-cattle": {
+    "core": "Pets are servers you name, patch and nurse back to health in place; each becomes unique over time. Cattle are identical, numbered and replaceable: if one is sick, you replace it. Immutable infrastructure takes cattle to its conclusion. You never modify a running server; you build a new image with the change and replace instances, so every server matches a known, tested artifact.",
+    "first_principles": {
+      "problem": "A critical server can't be rebuilt because nobody knows every change made to it over five years.",
+      "truths": [
+        "In-place changes accumulate uniquely.",
+        "Identical artifacts are reproducible.",
+        "Replacement is easy with automation."
+      ],
+      "derivation": [
+        "Never **SSH to modify**.",
+        "Bake changes into a **new image**.",
+        "**Replace** instances to deploy.",
+        "**Version** images like code.",
+        "Keep state **outside** instances."
+      ]
+    },
+    "analogy": {
+      "title": "Repainting a car vs getting a new one from the factory",
+      "story": "Every repaint adds unique blemishes; a factory car is identical to its test model.",
+      "mapping": [
+        [
+          "Repainting",
+          "In-place patching"
+        ],
+        [
+          "Factory model",
+          "Golden image"
+        ],
+        [
+          "New car",
+          "Replacement instance"
+        ]
+      ],
+      "breaks": "Cars are expensive to replace; instances cost seconds."
+    },
+    "mindmap": {
+      "center": "Pets vs Cattle",
+      "branches": [
+        {
+          "label": "Pets",
+          "children": [
+            "Named",
+            "Patched in place",
+            "Unique",
+            "Fragile"
+          ]
+        },
+        {
+          "label": "Cattle",
+          "children": [
+            "Numbered",
+            "Replaceable",
+            "Identical"
+          ]
+        },
+        {
+          "label": "Immutable",
+          "children": [
+            "Bake images",
+            "Replace to deploy",
+            "No SSH changes"
+          ]
+        },
+        {
+          "label": "Requires",
+          "children": [
+            "External state",
+            "Automation",
+            "Health checks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deploy via replacement",
+      "scenario": "Flow.",
+      "flow": [
+        "Build AMI v42 with app 3.1",
+        "Update launch template to v42",
+        "ASG instance refresh rolls instances",
+        "Old v41 instances terminated"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every server identical to the tested image."
+        }
+      ],
+      "code": [],
+      "outcome": "reproducible fleets."
+    },
+    "summary": {
+      "points": [
+        "Pets drift.",
+        "Cattle are replaceable.",
+        "Immutable means replace, never modify."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must be true of application state for immutable infrastructure to work?",
+        "a": "It must live outside the instances (databases, object storage, EBS/EFS), so replacing an instance loses nothing."
+      }
+    ]
+  },
+  "packer-the-image-builder": {
+    "core": "HashiCorp Packer automates machine image builds. A source (builder) launches a temporary VM or container on a platform (amazon-ebs, azure-arm, googlecompute, docker), provisioners configure it (shell, Ansible, files), it is snapshotted into an image, and post-processors handle manifests and distribution. One template can build images for several platforms in parallel.",
+    "first_principles": {
+      "problem": "Images are built by clicking through the console, so no two are quite the same.",
+      "truths": [
+        "Image builds can be scripted.",
+        "Temporary builders isolate the process.",
+        "Same config can target many platforms."
+      ],
+      "derivation": [
+        "Define **sources** per platform.",
+        "Configure with **provisioners**.",
+        "Snapshot to an **image artifact**.",
+        "Run **post-processors** (manifest, HCP registry).",
+        "Build in **CI** on every change."
+      ]
+    },
+    "analogy": {
+      "title": "A cookie-cutter production line",
+      "story": "Dough goes in, a temporary mould shapes it, and you get identical cookies every time.",
+      "mapping": [
+        [
+          "Mould",
+          "Temporary builder VM"
+        ],
+        [
+          "Decorating",
+          "Provisioners"
+        ],
+        [
+          "Packaged cookie",
+          "Image"
+        ]
+      ],
+      "breaks": "Cookies don't need patching; images must be rebuilt regularly."
+    },
+    "mindmap": {
+      "center": "Packer",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "amazon-ebs",
+            "azure-arm",
+            "googlecompute",
+            "docker"
+          ]
+        },
+        {
+          "label": "Provisioners",
+          "children": [
+            "shell",
+            "ansible",
+            "file"
+          ]
+        },
+        {
+          "label": "Post",
+          "children": [
+            "manifest",
+            "HCP Packer registry"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Launch",
+            "Configure",
+            "Snapshot",
+            "Cleanup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Build lifecycle",
+      "scenario": "Trace.",
+      "flow": [
+        "packer build launches t3.small from base AMI",
+        "Provisioners install packages",
+        "Instance stopped, AMI snapshot created",
+        "Temp instance and key deleted"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reproducible AMI in ~8 minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "automated image factory."
+    },
+    "summary": {
+      "points": [
+        "Sources, provisioners, post-processors.",
+        "Temporary builders.",
+        "Multi-platform."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to Packer's builder instance after the image is created?",
+        "a": "It's terminated along with temporary keys and security groups; only the image artifact remains."
+      }
+    ]
+  },
+  "writing-a-packer-template": {
+    "core": "Modern Packer templates are HCL2 (*.pkr.hcl): a `packer` block pins plugins, `variable` blocks parameterise, a `source` block configures the builder (source_ami_filter, instance type, SSH user), and a `build` block lists sources and provisioners. Run `packer init`, `packer fmt`, `packer validate`, then `packer build`.",
+    "first_principles": {
+      "problem": "A legacy JSON template is hard to read and hardcodes the base AMI ID.",
+      "truths": [
+        "HCL2 supports variables and functions.",
+        "Base images update.",
+        "Plugins should be pinned."
+      ],
+      "derivation": [
+        "Pin plugins in **required_plugins**.",
+        "Use **source_ami_filter** for the latest base.",
+        "Parameterise with **variables**.",
+        "Add **provisioners** in order.",
+        "**init → validate → build**."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe with substitutable ingredients",
+      "story": "'Latest flour from supplier X' rather than 'flour batch 12345'.",
+      "mapping": [
+        [
+          "Supplier filter",
+          "source_ami_filter"
+        ],
+        [
+          "Recipe steps",
+          "Provisioners"
+        ],
+        [
+          "Oven settings",
+          "Source config"
+        ]
+      ],
+      "breaks": "Recipes tolerate variance; builds should be deterministic given inputs."
+    },
+    "mindmap": {
+      "center": "Packer Template",
+      "branches": [
+        {
+          "label": "Blocks",
+          "children": [
+            "packer",
+            "variable",
+            "source",
+            "build"
+          ]
+        },
+        {
+          "label": "Source",
+          "children": [
+            "AMI filter",
+            "instance_type",
+            "ssh_username"
+          ]
+        },
+        {
+          "label": "Build",
+          "children": [
+            "Provisioners",
+            "Post-processors"
+          ]
+        },
+        {
+          "label": "CLI",
+          "children": [
+            "init",
+            "fmt",
+            "validate",
+            "build"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Minimal AWS template",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "packer build -var version=42 . → golden-al2023-42."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "packer {\n  required_plugins {\n    amazon = { source = \"github.com/hashicorp/amazon\", version = \"~> 1.3\" }\n  }\n}\nvariable \"version\" { type = string }\nsource \"amazon-ebs\" \"al2023\" {\n  region        = \"us-east-1\"\n  instance_type = \"t3.small\"\n  ssh_username  = \"ec2-user\"\n  ami_name      = \"golden-al2023-${var.version}\"\n  source_ami_filter {\n    filters     = { name = \"al2023-ami-*-x86_64\" }\n    owners      = [\"amazon\"]\n    most_recent = true\n  }\n}\nbuild {\n  sources = [\"source.amazon-ebs.al2023\"]\n  provisioner \"shell\" { inline = [\"sudo dnf -y update\", \"sudo dnf -y install nginx\"] }\n}"
+        }
+      ],
+      "outcome": "readable, parameterised image builds."
+    },
+    "summary": {
+      "points": [
+        "HCL2 templates.",
+        "Filter base images.",
+        "init, validate, build."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use source_ami_filter instead of a fixed base AMI ID?",
+        "a": "It picks up the latest patched base image automatically and works across regions where IDs differ."
+      }
+    ]
+  },
+  "golden-images-and-hardening": {
+    "core": "A golden image is the approved, hardened base for all workloads: OS patched, CIS benchmark settings applied, agents installed (logging, monitoring, EDR), unnecessary services removed. Teams build their app images on top of it. Bake hardening into the image and verify it with scanners (Inspec, OpenSCAP, Inspector), so every instance starts compliant instead of being fixed after launch.",
+    "first_principles": {
+      "problem": "Newly launched instances run for 30 minutes before a config agent hardens them, failing audits.",
+      "truths": [
+        "Launch-time fixes leave a window.",
+        "Baked settings exist from boot.",
+        "Compliance needs evidence."
+      ],
+      "derivation": [
+        "Apply **CIS hardening** at build.",
+        "Install **standard agents**.",
+        "Remove **unneeded packages/services**.",
+        "**Scan** the image before publishing.",
+        "**Layer**: base golden → app images."
+      ]
+    },
+    "analogy": {
+      "title": "Pre-inspected building materials",
+      "story": "Using certified materials means the building is compliant from day one, not after retrofits.",
+      "mapping": [
+        [
+          "Certified materials",
+          "Golden image"
+        ],
+        [
+          "Retrofit",
+          "Post-launch config"
+        ],
+        [
+          "Inspector",
+          "Image scanner"
+        ]
+      ],
+      "breaks": "Materials don't go stale; images need regular rebuilds for patches."
+    },
+    "mindmap": {
+      "center": "Golden Images",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "Patches",
+            "CIS settings",
+            "Agents",
+            "Minimal packages"
+          ]
+        },
+        {
+          "label": "Verification",
+          "children": [
+            "InSpec",
+            "OpenSCAP",
+            "Amazon Inspector"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "Base",
+            "Runtime",
+            "App"
+          ]
+        },
+        {
+          "label": "Evidence",
+          "children": [
+            "Scan reports",
+            "Image metadata"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Harden + verify",
+      "scenario": "Packer provisioners.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Image fails to publish if baseline checks fail."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "build {\n  sources = [\"source.amazon-ebs.al2023\"]\n  provisioner \"ansible\" {\n    playbook_file = \"hardening/cis-level1.yml\"\n  }\n  provisioner \"inspec\" {\n    profile = \"https://github.com/dev-sec/linux-baseline\"\n  }\n}"
+        }
+      ],
+      "outcome": "compliant from first boot."
+    },
+    "summary": {
+      "points": [
+        "Bake hardening in.",
+        "Install standard agents.",
+        "Scan before publishing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why harden at image build time rather than at boot?",
+        "a": "Instances are compliant from the first second, with no vulnerable window, and the result is tested once and reused."
+      }
+    ]
+  },
+  "ami-management-strategy": {
+    "core": "Images need lifecycle management: a regular rebuild cadence (weekly, or on CVE) for patches; a promotion pipeline (dev → staging → prod channels); sharing across accounts and regions; tracking which image each environment uses (HCP Packer channels or SSM parameters); and deregistering old AMIs and snapshots to control cost and prevent use of vulnerable images.",
+    "first_principles": {
+      "problem": "Production runs 14-month-old AMIs while 300 unused images and snapshots cost thousands per month.",
+      "truths": [
+        "Images go stale.",
+        "Promotion needs tracking.",
+        "Old images cost money and carry CVEs."
+      ],
+      "derivation": [
+        "Rebuild on **schedule and CVE**.",
+        "Publish to **channels** (dev/prod).",
+        "Reference via **SSM parameter or HCP channel**.",
+        "**Share/copy** across accounts and regions.",
+        "**Deprecate and deregister** old images."
+      ]
+    },
+    "analogy": {
+      "title": "Rotating stock in a supermarket",
+      "story": "New stock goes to the back, shelves show what's approved, and expired items are removed.",
+      "mapping": [
+        [
+          "New stock",
+          "Fresh AMIs"
+        ],
+        [
+          "Shelf labels",
+          "Channels/SSM"
+        ],
+        [
+          "Expired items",
+          "Deprecated AMIs"
+        ]
+      ],
+      "breaks": "Expired food is obvious; old AMIs look fine until scanned."
+    },
+    "mindmap": {
+      "center": "AMI Lifecycle",
+      "branches": [
+        {
+          "label": "Build",
+          "children": [
+            "Weekly",
+            "On CVE"
+          ]
+        },
+        {
+          "label": "Promote",
+          "children": [
+            "Channels",
+            "Testing gates"
+          ]
+        },
+        {
+          "label": "Reference",
+          "children": [
+            "SSM parameter",
+            "HCP Packer"
+          ]
+        },
+        {
+          "label": "Distribute",
+          "children": [
+            "Cross-account share",
+            "Region copy"
+          ]
+        },
+        {
+          "label": "Retire",
+          "children": [
+            "Deprecation time",
+            "Deregister + snapshot delete"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pointer via SSM",
+      "scenario": "Terraform consumer.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Promotion updates one parameter; next deploy rolls the new image."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "data \"aws_ssm_parameter\" \"golden\" {\n  name = \"/images/golden-al2023/prod\"   # updated by promotion pipeline\n}\nresource \"aws_launch_template\" \"app\" {\n  image_id = data.aws_ssm_parameter.golden.value\n}"
+        }
+      ],
+      "outcome": "fresh, tracked, cost-controlled images."
+    },
+    "summary": {
+      "points": [
+        "Rebuild regularly.",
+        "Promote through channels.",
+        "Retire old images."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why reference AMIs via an SSM parameter or channel instead of hardcoding IDs?",
+        "a": "Promotion becomes a single pointer update, and consumers always get the currently approved image without code changes."
+      }
+    ]
+  }
+}

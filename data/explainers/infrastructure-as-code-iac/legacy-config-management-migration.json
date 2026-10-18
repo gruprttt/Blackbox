@@ -1,0 +1,638 @@
+{
+  "introduction-the-era-of-pets": {
+    "core": "Before cloud, servers were expensive, long-lived hardware, so you named them and maintained them for years. Configuration management tools (CFEngine, Puppet, Chef, Salt) emerged to keep those pets consistent by continuously enforcing desired state. Understanding why they were built that way explains both their strengths and why cloud-native patterns now often replace them.",
+    "first_principles": {
+      "problem": "A team inherits a 10-year-old Puppet codebase and wonders whether to keep it or replace it.",
+      "truths": [
+        "Long-lived servers drift.",
+        "Continuous enforcement fights drift.",
+        "Cloud makes replacement cheap."
+      ],
+      "derivation": [
+        "Know the **historical context** (hardware, long lifetimes).",
+        "Recognise the **convergence model**.",
+        "Identify what still needs **in-place config**.",
+        "Identify what can move to **images/containers**.",
+        "Plan **migration**, not rewrite-all."
+      ]
+    },
+    "analogy": {
+      "title": "Maintaining a classic car fleet",
+      "story": "You keep detailed service schedules because replacing a car is unthinkable; with rental fleets, you just swap cars.",
+      "mapping": [
+        [
+          "Classic car",
+          "Pet server"
+        ],
+        [
+          "Service schedule",
+          "Puppet/Chef runs"
+        ],
+        [
+          "Rental swap",
+          "Immutable replacement"
+        ]
+      ],
+      "breaks": "Classic cars appreciate; old servers accumulate risk."
+    },
+    "mindmap": {
+      "center": "Era of Pets",
+      "branches": [
+        {
+          "label": "Context",
+          "children": [
+            "Expensive hardware",
+            "Long lifetimes"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "CFEngine",
+            "Puppet",
+            "Chef",
+            "Salt"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Desired state",
+            "Continuous convergence"
+          ]
+        },
+        {
+          "label": "Today",
+          "children": [
+            "Images",
+            "Containers",
+            "Still needed for some"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Timeline",
+      "scenario": "Evolution.",
+      "flow": [
+        "1993 CFEngine",
+        "2005 Puppet, 2009 Chef",
+        "2011 Salt, 2012 Ansible",
+        "2013+ Docker, Packer, Terraform, Kubernetes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each wave reflects cheaper, more disposable compute."
+        }
+      ],
+      "code": [],
+      "outcome": "context for migration decisions."
+    },
+    "summary": {
+      "points": [
+        "Built for long-lived servers.",
+        "Convergence fights drift.",
+        "Cloud changes the economics."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why did early CM tools enforce state continuously?",
+        "a": "Servers lived for years and were changed by many people, so constant convergence was the only way to fight accumulating drift."
+      }
+    ]
+  },
+  "configuration-drift-the-core-problem-these-tools-solve": {
+    "core": "Configuration drift is the gradual divergence of servers from their intended state: emergency hotfixes, manual package installs, partial failures and differing patch levels. It leads to snowflake servers, 'works on server A but not B' bugs, and failed audits. CM tools fight drift by repeatedly converging to declared state; immutable infrastructure prevents it by never changing running servers.",
+    "first_principles": {
+      "problem": "A bug appears only on 3 of 20 identical web servers because someone hotfixed a library on them.",
+      "truths": [
+        "Manual changes are inevitable under pressure.",
+        "Untracked changes cause inconsistency.",
+        "Either converge often or never change."
+      ],
+      "derivation": [
+        "**Detect** drift (CM reports, scans).",
+        "**Converge** regularly (agent runs every 30 min).",
+        "Or **prevent** with immutability.",
+        "**Forbid** manual changes via access control.",
+        "**Track** changes in Git."
+      ]
+    },
+    "analogy": {
+      "title": "A garden left untended",
+      "story": "Weeds appear gradually; either weed weekly (converge) or lay fresh turf each season (replace).",
+      "mapping": [
+        [
+          "Weeds",
+          "Drift"
+        ],
+        [
+          "Weekly weeding",
+          "CM convergence"
+        ],
+        [
+          "Fresh turf",
+          "Immutable replacement"
+        ]
+      ],
+      "breaks": "Weeds are visible; drift hides until something breaks."
+    },
+    "mindmap": {
+      "center": "Configuration Drift",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Hotfixes",
+            "Manual installs",
+            "Partial failures",
+            "Patch skew"
+          ]
+        },
+        {
+          "label": "Effects",
+          "children": [
+            "Snowflakes",
+            "Heisenbugs",
+            "Audit failures"
+          ]
+        },
+        {
+          "label": "Fight",
+          "children": [
+            "Continuous convergence"
+          ]
+        },
+        {
+          "label": "Prevent",
+          "children": [
+            "Immutable images",
+            "No SSH"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detecting drift",
+      "scenario": "Puppet noop.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows drift without fixing; a normal run would converge it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "puppet agent --test --noop\n# Notice: /Stage[main]/Nginx/File[/etc/nginx/nginx.conf]/content: current_value {md5}a1.., should be {md5}9f.. (noop)"
+        }
+      ],
+      "outcome": "drift made visible."
+    },
+    "summary": {
+      "points": [
+        "Drift is inevitable.",
+        "Converge or prevent.",
+        "Lock down manual changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two strategies against configuration drift?",
+        "a": "Continuously converge servers back to desired state (CM tools), or prevent drift by never modifying running servers (immutability)."
+      }
+    ]
+  },
+  "the-masteragent-architecture": {
+    "core": "Puppet and Chef use a pull model. An agent on every node periodically (for example every 30 minutes) contacts a central server, sends facts about itself, receives a compiled catalog or run list, and enforces it locally. This scales to many thousands of nodes and gives continuous enforcement, but needs agents everywhere, PKI and certificates, a highly available server, and adds latency to urgent changes.",
+    "first_principles": {
+      "problem": "An urgent firewall change takes up to 30 minutes to reach all nodes, and the Puppet server is a single point of failure.",
+      "truths": [
+        "Agents pull on intervals.",
+        "Central servers compile config.",
+        "Certificates authenticate nodes."
+      ],
+      "derivation": [
+        "Agent sends **facts**.",
+        "Server compiles **catalog**.",
+        "Agent **enforces** locally and reports.",
+        "Manage **PKI** for nodes.",
+        "Run servers **HA** behind load balancers."
+      ]
+    },
+    "analogy": {
+      "title": "Branch offices calling HQ for instructions",
+      "story": "Each office calls in on schedule, describes itself, and gets its tailored instructions.",
+      "mapping": [
+        [
+          "HQ",
+          "Puppet/Chef server"
+        ],
+        [
+          "Office description",
+          "Facts"
+        ],
+        [
+          "Instructions",
+          "Catalog"
+        ]
+      ],
+      "breaks": "Offices can be called urgently; agents wait for their interval unless triggered."
+    },
+    "mindmap": {
+      "center": "Master/Agent",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Facts",
+            "Catalog compile",
+            "Enforce",
+            "Report"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Scale",
+            "Continuous",
+            "Central view"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Agents everywhere",
+            "PKI",
+            "Server HA",
+            "Interval latency"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Puppet",
+            "Chef",
+            "Salt minion"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Puppet manifest",
+      "scenario": "DSL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every node with this class converges every 30 min."
+        }
+      ],
+      "code": [
+        {
+          "lang": "puppet",
+          "text": "class nginx {\n  package { 'nginx': ensure => installed }\n  file { '/etc/nginx/nginx.conf':\n    content => template('nginx/nginx.conf.erb'),\n    notify  => Service['nginx'],\n  }\n  service { 'nginx': ensure => running, enable => true }\n}"
+        }
+      ],
+      "outcome": "understanding pull-based CM."
+    },
+    "summary": {
+      "points": [
+        "Agents pull catalogs.",
+        "Continuous enforcement.",
+        "Operational overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a Puppet agent send to the server before receiving its catalog?",
+        "a": "Facts about the node (OS, IPs, hardware, custom facts) used to compile a tailored catalog."
+      }
+    ]
+  },
+  "agentless-vs-agent-based-the-ansible-disruption": {
+    "core": "Ansible disrupted the market by being agentless: no daemon to install, no PKI, just SSH and Python already present on servers. Changes are pushed on demand rather than pulled on a schedule. That lowers adoption cost and suits ad-hoc orchestration, but there's no continuous enforcement unless you schedule runs (AWX/AAP), and push over SSH is slower at very large scale.",
+    "first_principles": {
+      "problem": "A team avoids configuration management because installing and certifying Puppet agents on every server is too much work.",
+      "truths": [
+        "Agents carry operational cost.",
+        "SSH is already deployed.",
+        "Push and pull have different timing."
+      ],
+      "derivation": [
+        "Use **SSH push** for low barrier.",
+        "Schedule runs (**AWX/AAP**) for enforcement.",
+        "Use **pull mode** (ansible-pull) if needed.",
+        "Tune **forks/strategy** for scale.",
+        "Pick based on **fleet size and drift needs**."
+      ]
+    },
+    "analogy": {
+      "title": "A visiting technician vs an on-site employee",
+      "story": "The technician comes when called, needing no desk; the employee is always there but needs a badge and an office.",
+      "mapping": [
+        [
+          "Visiting technician",
+          "Ansible push"
+        ],
+        [
+          "On-site employee",
+          "Puppet agent"
+        ],
+        [
+          "Badge",
+          "PKI cert"
+        ]
+      ],
+      "breaks": "Technicians can't fix things while away; schedule runs to compensate."
+    },
+    "mindmap": {
+      "center": "Agentless vs Agent",
+      "branches": [
+        {
+          "label": "Agentless",
+          "children": [
+            "SSH",
+            "Push",
+            "Low setup",
+            "On-demand"
+          ]
+        },
+        {
+          "label": "Agent",
+          "children": [
+            "Daemon",
+            "Pull",
+            "Continuous",
+            "PKI"
+          ]
+        },
+        {
+          "label": "Bridges",
+          "children": [
+            "AWX schedules",
+            "ansible-pull"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "forks",
+            "mitogen",
+            "pull at large scale"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scheduled enforcement",
+      "scenario": "AWX schedule concept.",
+      "flow": [
+        "Job template: site.yml on prod inventory",
+        "Schedule: every 2 hours",
+        "Results and drift reported in AWX",
+        "Ad-hoc runs still possible"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Agentless with periodic convergence."
+        }
+      ],
+      "code": [],
+      "outcome": "informed push vs pull choice."
+    },
+    "summary": {
+      "points": [
+        "Agentless lowers barrier.",
+        "Push is on-demand.",
+        "Schedule for enforcement."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do you lose by default when moving from Puppet to Ansible?",
+        "a": "Continuous automatic enforcement; Ansible only converges when a run is triggered, so you must schedule runs."
+      }
+    ]
+  },
+  "saltstack-the-hybrid-approach": {
+    "core": "Salt combines models. Minions keep a persistent connection to the master over a ZeroMQ event bus, so commands reach thousands of nodes in seconds (push speed with agent scale). It also supports agentless salt-ssh, scheduled state enforcement, and an event-driven reactor that triggers states automatically on events, such as remediating when a beacon detects a changed file.",
+    "first_principles": {
+      "problem": "A team needs to run an emergency command across 10,000 servers in seconds and also auto-remediate drift.",
+      "truths": [
+        "Persistent connections enable instant push.",
+        "Events can trigger automation.",
+        "One tool can offer several models."
+      ],
+      "derivation": [
+        "Use **minions + ZeroMQ** for speed.",
+        "Write **states (SLS)** for desired config.",
+        "Use **beacons** to detect changes.",
+        "Use **reactor** to respond automatically.",
+        "Use **salt-ssh** for agentless edges."
+      ]
+    },
+    "analogy": {
+      "title": "An office with a PA system and sensors",
+      "story": "Announcements reach everyone instantly, and sensors trigger the cleaning crew automatically when something spills.",
+      "mapping": [
+        [
+          "PA system",
+          "ZeroMQ bus"
+        ],
+        [
+          "Sensors",
+          "Beacons"
+        ],
+        [
+          "Cleaning crew",
+          "Reactor states"
+        ]
+      ],
+      "breaks": "PA systems are one-way; Salt's bus returns results too."
+    },
+    "mindmap": {
+      "center": "SaltStack",
+      "branches": [
+        {
+          "label": "Transport",
+          "children": [
+            "ZeroMQ",
+            "Persistent minions"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "States (SLS)",
+            "Pillar"
+          ]
+        },
+        {
+          "label": "Events",
+          "children": [
+            "Beacons",
+            "Reactor"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Master/minion",
+            "salt-ssh",
+            "Masterless"
+          ]
+        },
+        {
+          "label": "Strength",
+          "children": [
+            "Speed at scale"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Instant command + state",
+      "scenario": "CLI + SLS.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Instant orchestration plus declarative state."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "salt '*' cmd.run 'systemctl restart chronyd'      # seconds across fleet\nsalt -G 'role:web' state.apply nginx\n# /srv/salt/nginx/init.sls\n# nginx:\n#   pkg.installed: []\n#   service.running:\n#     - enable: True\n#     - watch: [file: /etc/nginx/nginx.conf]"
+        }
+      ],
+      "outcome": "speed and event-driven remediation."
+    },
+    "summary": {
+      "points": [
+        "Persistent bus for speed.",
+        "States for config.",
+        "Reactor for automation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do Salt beacons and reactors enable?",
+        "a": "Event-driven automation: beacons detect changes on minions and reactors trigger states in response, enabling auto-remediation."
+      }
+    ]
+  },
+  "migration-strategy-the-golden-image-bridge": {
+    "core": "Don't rewrite everything at once. Use existing CM code as the bridge: run your Puppet, Chef or Ansible code inside Packer to bake golden images, so the logic is reused while deployment becomes immutable. Then migrate workload by workload (stateless first, stateful last), shrink what CM does at runtime, and finally retire the CM servers once no fleet depends on runtime convergence.",
+    "first_principles": {
+      "problem": "A big-bang rewrite from Chef to containers stalls after a year with nothing shipped.",
+      "truths": [
+        "Existing code encodes years of knowledge.",
+        "Incremental migrations ship value.",
+        "Stateless services move easiest."
+      ],
+      "derivation": [
+        "Run **CM code in Packer** builds.",
+        "Deploy **images instead of runtime runs**.",
+        "Migrate **stateless first**.",
+        "Reduce runtime CM to **bootstrap/secrets**.",
+        "**Decommission** CM servers last."
+      ]
+    },
+    "analogy": {
+      "title": "Moving house room by room",
+      "story": "Pack and move one room at a time, using your existing boxes, rather than demolishing and rebuilding overnight.",
+      "mapping": [
+        [
+          "Existing boxes",
+          "Existing CM code"
+        ],
+        [
+          "Room by room",
+          "Workload by workload"
+        ],
+        [
+          "Old house sale",
+          "CM server retirement"
+        ]
+      ],
+      "breaks": "Rooms are independent; services have dependencies to sequence."
+    },
+    "mindmap": {
+      "center": "Migration Strategy",
+      "branches": [
+        {
+          "label": "Bridge",
+          "children": [
+            "CM in Packer",
+            "Reuse logic"
+          ]
+        },
+        {
+          "label": "Order",
+          "children": [
+            "Stateless",
+            "Batch jobs",
+            "Stateful last"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "Shrink to bootstrap"
+          ]
+        },
+        {
+          "label": "End",
+          "children": [
+            "Retire servers",
+            "Containers/K8s optional"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Big bang",
+            "Hidden runtime deps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Chef in Packer",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Same Chef role, now baked; no Chef server at runtime."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "build {\n  sources = [\"source.amazon-ebs.base\"]\n  provisioner \"shell\" { inline = [\"curl -L https://omnitruck.chef.io/install.sh | sudo bash\"] }\n  provisioner \"file\"  { source = \"cookbooks/\", destination = \"/tmp/cookbooks\" }\n  provisioner \"shell\" { inline = [\"sudo chef-client --local-mode -o 'role[web]'\"] }\n}"
+        }
+      ],
+      "outcome": "incremental path to immutability."
+    },
+    "summary": {
+      "points": [
+        "Reuse CM code in builds.",
+        "Migrate incrementally.",
+        "Retire CM last."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why bake existing CM code into images rather than rewriting first?",
+        "a": "It reuses years of proven configuration logic while immediately gaining immutable deployment, delivering value incrementally."
+      }
+    ]
+  }
+}

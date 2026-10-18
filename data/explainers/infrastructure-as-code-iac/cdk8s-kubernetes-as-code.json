@@ -1,0 +1,320 @@
+{
+  "introduction-the-wall-of-yaml": {
+    "core": "Kubernetes apps quickly become thousands of lines of near-duplicate YAML: Deployments, Services, ConfigMaps and Ingresses per service per environment. Helm templating adds string interpolation in whitespace-sensitive YAML, and Kustomize patches have limits. cdk8s defines Kubernetes manifests in TypeScript, Python, Go or Java, with types, loops and classes, and synthesises plain YAML.",
+    "first_principles": {
+      "problem": "Changing a label convention means editing 400 YAML files and breaking indentation in Helm templates.",
+      "truths": [
+        "YAML has no abstraction.",
+        "Text templating is error-prone.",
+        "Typed code catches mistakes early."
+      ],
+      "derivation": [
+        "Generate YAML from **code**.",
+        "Use **typed API objects** from k8s schemas.",
+        "Abstract with **constructs**.",
+        "Output **plain manifests** for any deploy tool.",
+        "Keep **GitOps** compatibility."
+      ]
+    },
+    "analogy": {
+      "title": "Printing invitations from a template vs handwriting each",
+      "story": "Handwriting 400 cards invites typos; a mail merge from a typed list doesn't.",
+      "mapping": [
+        [
+          "Handwritten cards",
+          "Raw YAML"
+        ],
+        [
+          "Mail merge",
+          "cdk8s synth"
+        ],
+        [
+          "Guest list",
+          "Typed inputs"
+        ]
+      ],
+      "breaks": "Mail merges are text; cdk8s produces validated API objects."
+    },
+    "mindmap": {
+      "center": "Wall of YAML",
+      "branches": [
+        {
+          "label": "Pain",
+          "children": [
+            "Duplication",
+            "Indentation bugs",
+            "No types"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Helm templates",
+            "Kustomize",
+            "cdk8s"
+          ]
+        },
+        {
+          "label": "cdk8s",
+          "children": [
+            "Real languages",
+            "Typed objects",
+            "Plain YAML out"
+          ]
+        },
+        {
+          "label": "Fits",
+          "children": [
+            "GitOps",
+            "Argo CD",
+            "Flux"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Duplication count",
+      "scenario": "Before.",
+      "flow": [
+        "20 services × 3 envs × 5 manifests = 300 files",
+        "Label change touches all 300",
+        "One construct change in cdk8s",
+        "Synth regenerates all manifests"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One edit, consistent output."
+        }
+      ],
+      "code": [],
+      "outcome": "why YAML generation helps."
+    },
+    "summary": {
+      "points": [
+        "YAML lacks abstraction.",
+        "Templating is fragile.",
+        "Generate from typed code."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does cdk8s output?",
+        "a": "Plain Kubernetes YAML manifests, which any tool (kubectl, Argo CD, Flux) can apply."
+      }
+    ]
+  },
+  "how-cdk8s-works-a-client-side-rendering-engine": {
+    "core": "cdk8s runs entirely client-side. Your program builds a construct tree (App → Chart → ApiObjects), `cdk8s synth` walks the tree and writes YAML into dist/, and nothing talks to the cluster. `cdk8s import` generates typed classes from Kubernetes API versions or CRDs, so even custom resources are type-checked. Deployment is a separate step through kubectl or GitOps.",
+    "first_principles": {
+      "problem": "Engineers expect cdk8s to deploy like Pulumi and are confused there's no state.",
+      "truths": [
+        "Rendering and applying are separate.",
+        "Types come from OpenAPI/CRDs.",
+        "No cluster access needed to synth."
+      ],
+      "derivation": [
+        "Define **App and Charts**.",
+        "Add **ApiObjects/constructs**.",
+        "Run **cdk8s synth** → dist/*.yaml.",
+        "Run **cdk8s import** for CRD types.",
+        "Deploy with **kubectl/Argo/Flux**."
+      ]
+    },
+    "analogy": {
+      "title": "A print shop that only prints",
+      "story": "It turns your design into posters; someone else hangs them up.",
+      "mapping": [
+        [
+          "Design",
+          "Program"
+        ],
+        [
+          "Posters",
+          "YAML"
+        ],
+        [
+          "Hanging",
+          "kubectl/GitOps"
+        ]
+      ],
+      "breaks": "Posters don't reconcile; the cluster controller does."
+    },
+    "mindmap": {
+      "center": "cdk8s Engine",
+      "branches": [
+        {
+          "label": "Tree",
+          "children": [
+            "App",
+            "Chart",
+            "ApiObject"
+          ]
+        },
+        {
+          "label": "Synth",
+          "children": [
+            "dist/*.yaml",
+            "Deterministic"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "cdk8s import k8s",
+            "CRDs"
+          ]
+        },
+        {
+          "label": "No state",
+          "children": [
+            "Client-side only"
+          ]
+        },
+        {
+          "label": "Deploy",
+          "children": [
+            "kubectl",
+            "Argo CD",
+            "Flux"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A chart",
+      "scenario": "TypeScript.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "dist/web.k8s.yaml produced; nothing deployed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "typescript",
+          "text": "import { App, Chart } from 'cdk8s';\nimport { KubeDeployment, KubeService } from './imports/k8s';\nclass Web extends Chart {\n  constructor(scope: App, id: string) {\n    super(scope, id);\n    const labels = { app: 'web' };\n    new KubeDeployment(this, 'dep', { spec: { replicas: 2, selector: { matchLabels: labels },\n      template: { metadata: { labels }, spec: { containers: [{ name: 'web', image: 'nginx:1.27' }] } } } });\n    new KubeService(this, 'svc', { spec: { selector: labels, ports: [{ port: 80 }] } });\n  }\n}\nconst app = new App(); new Web(app, 'web'); app.synth();"
+        }
+      ],
+      "outcome": "rendering separated from applying."
+    },
+    "summary": {
+      "points": [
+        "Client-side synth.",
+        "Typed imports.",
+        "Deploy separately."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does cdk8s keep state like Terraform or Pulumi?",
+        "a": "No, it only renders YAML; the cluster and your deploy tool own the actual state."
+      }
+    ]
+  },
+  "constructs-the-building-blocks-of-cdk8s": {
+    "core": "Like the AWS CDK, cdk8s composes constructs. Low-level ApiObjects map to raw resources, cdk8s-plus provides intent-based L2s (Deployment.exposeViaService, automatic selectors, ConfigMap mounting), and your own constructs package a 'standard microservice' with probes, resources, PDBs and labels. Teams then declare a service in a handful of lines.",
+    "first_principles": {
+      "problem": "Every team forgets either readiness probes, resource limits or PodDisruptionBudgets.",
+      "truths": [
+        "Standards repeat across services.",
+        "Intent APIs reduce boilerplate.",
+        "Constructs encapsulate defaults."
+      ],
+      "derivation": [
+        "Use **cdk8s-plus** for intent-based APIs.",
+        "Build **custom constructs** for org standards.",
+        "Expose **few props** (image, port, replicas).",
+        "Include **probes, limits, PDB, labels** by default.",
+        "Publish as a **package**."
+      ]
+    },
+    "analogy": {
+      "title": "A pre-fab house kit",
+      "story": "Walls come with wiring and insulation pre-installed; you choose the colour and number of rooms.",
+      "mapping": [
+        [
+          "Kit",
+          "Custom construct"
+        ],
+        [
+          "Pre-installed wiring",
+          "Probes/limits/PDB"
+        ],
+        [
+          "Choices",
+          "Props"
+        ]
+      ],
+      "breaks": "Kits are fixed; constructs can expose escape hatches."
+    },
+    "mindmap": {
+      "center": "cdk8s Constructs",
+      "branches": [
+        {
+          "label": "L1",
+          "children": [
+            "ApiObject",
+            "Kube*"
+          ]
+        },
+        {
+          "label": "cdk8s-plus",
+          "children": [
+            "Deployment",
+            "exposeViaService",
+            "Volumes"
+          ]
+        },
+        {
+          "label": "Custom",
+          "children": [
+            "StandardService",
+            "Org defaults"
+          ]
+        },
+        {
+          "label": "Defaults",
+          "children": [
+            "Probes",
+            "Limits",
+            "PDB",
+            "Labels"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Standard service",
+      "scenario": "TypeScript.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "new StandardService(chart, 'api', { image, port: 8080 }) gives a compliant service."
+        }
+      ],
+      "code": [
+        {
+          "lang": "typescript",
+          "text": "import * as kplus from 'cdk8s-plus-30';\nexport class StandardService extends Construct {\n  constructor(scope: Construct, id: string, p: { image: string; port: number; replicas?: number }) {\n    super(scope, id);\n    const d = new kplus.Deployment(this, 'd', { replicas: p.replicas ?? 2 });\n    d.addContainer({ image: p.image, portNumber: p.port,\n      readiness: kplus.Probe.fromHttpGet('/healthz'),\n      resources: { cpu: { request: kplus.Cpu.millis(100) }, memory: { request: Size.mebibytes(128) } } });\n    d.exposeViaService({ ports: [{ port: 80, targetPort: p.port }] });\n  }\n}"
+        }
+      ],
+      "outcome": "standards by default."
+    },
+    "summary": {
+      "points": [
+        "Low-level and plus constructs.",
+        "Custom constructs for standards.",
+        "Few props, safe defaults."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does cdk8s-plus add over raw Kube* objects?",
+        "a": "Intent-based APIs with sensible defaults, like auto-wired selectors and exposeViaService, reducing boilerplate and mistakes."
+      }
+    ]
+  }
+}

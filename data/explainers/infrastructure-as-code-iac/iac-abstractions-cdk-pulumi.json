@@ -1,0 +1,649 @@
+{
+  "introduction-the-limits-of-configuration": {
+    "core": "HCL and YAML are configuration languages: great for declaring resources, awkward for real abstraction (complex conditionals, loops over nested data, types, unit tests, IDE refactoring). AWS CDK, CDKTF and Pulumi let you define infrastructure in general-purpose languages (TypeScript, Python, Go, C#), with classes, packages and tests, while still producing a declarative desired state.",
+    "first_principles": {
+      "problem": "A Terraform module grows dozens of nested ternaries and dynamic blocks to express simple business rules.",
+      "truths": [
+        "Config languages limit abstraction.",
+        "Programming languages have tooling.",
+        "Output must still be declarative."
+      ],
+      "derivation": [
+        "Write infra in **real languages**.",
+        "Use **classes/functions** for abstraction.",
+        "Leverage **package managers** for sharing.",
+        "**Unit test** with standard frameworks.",
+        "Keep generated output **declarative**."
+      ]
+    },
+    "analogy": {
+      "title": "Writing a novel in a spreadsheet vs a word processor",
+      "story": "Spreadsheets can hold text, but chapters, styles and search are far easier in the right tool.",
+      "mapping": [
+        [
+          "Spreadsheet",
+          "HCL/YAML"
+        ],
+        [
+          "Word processor",
+          "General-purpose language"
+        ],
+        [
+          "Printed book",
+          "Synthesised template/state"
+        ]
+      ],
+      "breaks": "Novels have no runtime; infra code must stay deterministic."
+    },
+    "mindmap": {
+      "center": "Beyond Configuration",
+      "branches": [
+        {
+          "label": "Limits",
+          "children": [
+            "Weak abstraction",
+            "Poor testing",
+            "Limited types"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "AWS CDK",
+            "CDKTF",
+            "Pulumi"
+          ]
+        },
+        {
+          "label": "Gains",
+          "children": [
+            "Classes",
+            "Packages",
+            "IDE",
+            "Unit tests"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Over-engineering",
+            "Non-determinism"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same bucket, two styles",
+      "scenario": "Compare.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Abstraction and loops in normal code."
+        }
+      ],
+      "code": [
+        {
+          "lang": "typescript",
+          "text": "// CDK: policy encoded once in a function\nfunction secureBucket(scope: Construct, id: string) {\n  return new s3.Bucket(scope, id, {\n    encryption: s3.BucketEncryption.KMS_MANAGED,\n    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,\n    enforceSSL: true,\n  });\n}\n['logs', 'assets', 'backups'].forEach(n => secureBucket(stack, n));"
+        }
+      ],
+      "outcome": "why real languages help."
+    },
+    "summary": {
+      "points": [
+        "Config languages hit limits.",
+        "Real languages add abstraction and tests.",
+        "Output stays declarative."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must remain true even when writing IaC in a general-purpose language?",
+        "a": "The program must deterministically produce a declarative desired state; no side effects or randomness at synth time."
+      }
+    ]
+  },
+  "aws-cdk-constructs-and-levels": {
+    "core": "In AWS CDK everything is a construct, arranged in a tree under an App and Stacks. L1 constructs (Cfn*) map 1:1 to CloudFormation resources; L2 constructs add sensible defaults and helper methods (bucket.grantRead(role)); L3 patterns bundle several resources into an architecture (ApplicationLoadBalancedFargateService). `cdk synth` renders the tree to CloudFormation templates and `cdk deploy` runs them.",
+    "first_principles": {
+      "problem": "A team writes raw CfnBucket everywhere and still hand-writes IAM policies.",
+      "truths": [
+        "Higher levels encode best practice.",
+        "Lower levels give full control.",
+        "Output is CloudFormation."
+      ],
+      "derivation": [
+        "Prefer **L2** for most resources.",
+        "Use **L3 patterns** for common architectures.",
+        "Drop to **L1/escape hatches** for unsupported props.",
+        "Use **grant*** methods for IAM.",
+        "Review **cdk diff** before deploy."
+      ]
+    },
+    "analogy": {
+      "title": "Raw ingredients, prepared components, and meal kits",
+      "story": "Flour (L1), ready pastry (L2) and a complete pie kit (L3): use the highest level that fits.",
+      "mapping": [
+        [
+          "Flour",
+          "L1 Cfn*"
+        ],
+        [
+          "Pastry",
+          "L2"
+        ],
+        [
+          "Pie kit",
+          "L3 pattern"
+        ]
+      ],
+      "breaks": "Meal kits can't be tweaked much; L3s allow overrides via escape hatches."
+    },
+    "mindmap": {
+      "center": "CDK Constructs",
+      "branches": [
+        {
+          "label": "Tree",
+          "children": [
+            "App",
+            "Stack",
+            "Construct"
+          ]
+        },
+        {
+          "label": "L1",
+          "children": [
+            "Cfn*",
+            "1:1 CloudFormation"
+          ]
+        },
+        {
+          "label": "L2",
+          "children": [
+            "Defaults",
+            "grant methods"
+          ]
+        },
+        {
+          "label": "L3",
+          "children": [
+            "Patterns"
+          ]
+        },
+        {
+          "label": "Workflow",
+          "children": [
+            "synth",
+            "diff",
+            "deploy"
+          ]
+        },
+        {
+          "label": "Escape",
+          "children": [
+            "node.defaultChild",
+            "addPropertyOverride"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "L3 Fargate service",
+      "scenario": "TypeScript.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "ALB, service, task def, SGs and IAM from a few lines."
+        }
+      ],
+      "code": [
+        {
+          "lang": "typescript",
+          "text": "const svc = new ecsPatterns.ApplicationLoadBalancedFargateService(this, 'Api', {\n  cluster,\n  cpu: 512, memoryLimitMiB: 1024, desiredCount: 2,\n  taskImageOptions: { image: ecs.ContainerImage.fromRegistry('acme/api:1.4') },\n});\ntable.grantReadWriteData(svc.taskDefinition.taskRole);   // L2 grant, least privilege"
+        }
+      ],
+      "outcome": "productive, best-practice stacks."
+    },
+    "summary": {
+      "points": [
+        "Everything is a construct.",
+        "L1, L2, L3 levels.",
+        "Synth to CloudFormation."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you use an L1 construct?",
+        "a": "When you need a property or new resource type that L2 doesn't yet support, giving direct CloudFormation control."
+      }
+    ]
+  },
+  "custom-constructs-encoding-organizational-standards": {
+    "core": "A custom construct is a class that wraps lower-level constructs with your organisation's rules baked in: encryption, tags, logging, alarms and naming. Teams consume it like any library from an internal package registry, and you can enforce standards across the tree with Aspects that visit every construct (for example to fail synth if a bucket is unencrypted).",
+    "first_principles": {
+      "problem": "Every team configures logging and alarms differently, and audits keep finding gaps.",
+      "truths": [
+        "Standards repeat.",
+        "Classes encapsulate repetition.",
+        "Aspects can enforce across a tree."
+      ],
+      "derivation": [
+        "Write **construct classes** with opinionated defaults.",
+        "Expose a **small props interface**.",
+        "Publish via **npm/PyPI** (projen, jsii for multi-language).",
+        "Enforce with **Aspects**.",
+        "Version and **changelog** releases."
+      ]
+    },
+    "analogy": {
+      "title": "A company template for slide decks",
+      "story": "Fonts, logos and disclaimers are built in; people just add content.",
+      "mapping": [
+        [
+          "Template",
+          "Custom construct"
+        ],
+        [
+          "Brand rules",
+          "Org standards"
+        ],
+        [
+          "Brand police",
+          "Aspects"
+        ]
+      ],
+      "breaks": "Templates can be ignored; Aspects can fail the build."
+    },
+    "mindmap": {
+      "center": "Custom Constructs",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Wrapper classes",
+            "Opinionated defaults"
+          ]
+        },
+        {
+          "label": "Distribution",
+          "children": [
+            "npm",
+            "PyPI",
+            "jsii multi-language"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "Aspects",
+            "cdk-nag"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Small props",
+            "Semver"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Standard service + aspect",
+      "scenario": "TypeScript.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Standards by default, violations fail synth."
+        }
+      ],
+      "code": [
+        {
+          "lang": "typescript",
+          "text": "export class StandardBucket extends Construct {\n  readonly bucket: s3.Bucket;\n  constructor(scope: Construct, id: string, props: { retainDays: number }) {\n    super(scope, id);\n    this.bucket = new s3.Bucket(this, 'B', {\n      encryption: s3.BucketEncryption.KMS_MANAGED, enforceSSL: true,\n      lifecycleRules: [{ expiration: Duration.days(props.retainDays) }],\n    });\n    Tags.of(this).add('data-class', 'internal');\n  }\n}\nAspects.of(app).add(new AwsSolutionsChecks());   // cdk-nag"
+        }
+      ],
+      "outcome": "org rules shipped as code."
+    },
+    "summary": {
+      "points": [
+        "Wrap standards in classes.",
+        "Publish as packages.",
+        "Enforce with Aspects."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a CDK Aspect?",
+        "a": "A visitor applied to every construct in a scope, used to modify or validate them, e.g. failing synth on non-compliant resources."
+      }
+    ]
+  },
+  "cross-stack-references": {
+    "core": "Splitting a CDK app into stacks (network, data, app) and passing an object from one to another makes CDK create a CloudFormation Export in the producer and an Fn::ImportValue in the consumer. Exports are locked while imported, so you can't change or remove them without first removing the consumer: the 'deadly embrace'. For loose coupling, pass values via SSM parameters or look them up by name.",
+    "first_principles": {
+      "problem": "Renaming a bucket in the data stack fails because the app stack still imports its old export.",
+      "truths": [
+        "Exports create hard dependencies.",
+        "Imported exports can't change.",
+        "Parameters decouple stacks."
+      ],
+      "derivation": [
+        "Pass **construct references** within one app for convenience.",
+        "Know they become **Export/ImportValue**.",
+        "Break the embrace with **exportValue()** two-step deploys.",
+        "Use **SSM parameters** for loose coupling.",
+        "Keep **stable** cross-stack values only."
+      ]
+    },
+    "analogy": {
+      "title": "A signed contract between departments",
+      "story": "Once accounting relies on your account number, you can't change it until they agree to stop using it.",
+      "mapping": [
+        [
+          "Signed contract",
+          "Export/Import"
+        ],
+        [
+          "Changing number",
+          "Modifying export"
+        ],
+        [
+          "Phone directory",
+          "SSM parameter"
+        ]
+      ],
+      "breaks": "Contracts can be renegotiated live; exports need ordered deployments."
+    },
+    "mindmap": {
+      "center": "Cross-Stack References",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Fn::ImportValue",
+            "Exports"
+          ]
+        },
+        {
+          "label": "Problem",
+          "children": [
+            "Deadly embrace",
+            "Locked exports"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "exportValue two-step",
+            "SSM parameters",
+            "fromLookup"
+          ]
+        },
+        {
+          "label": "Guideline",
+          "children": [
+            "Share stable values only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Loose coupling via SSM",
+      "scenario": "TypeScript.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No CloudFormation export lock between stacks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "typescript",
+          "text": "// network stack\nnew ssm.StringParameter(this, 'VpcId', { parameterName: '/net/vpc-id', stringValue: vpc.vpcId });\n// app stack\nconst vpcId = ssm.StringParameter.valueForStringParameter(this, '/net/vpc-id');"
+        }
+      ],
+      "outcome": "independently deployable stacks."
+    },
+    "summary": {
+      "points": [
+        "Refs become exports.",
+        "Exports lock.",
+        "SSM decouples."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the CDK 'deadly embrace'?",
+        "a": "A producer can't remove or change an export while a consumer imports it, but the consumer change can't deploy first because of the dependency order."
+      }
+    ]
+  },
+  "pulumi-multi-cloud-with-real-languages": {
+    "core": "Pulumi runs your program (TypeScript, Python, Go, C#, Java or YAML) with an engine that registers resources, diffs them against the stack's state and calls providers directly, without generating CloudFormation. It supports AWS, Azure, GCP, Kubernetes and more in one program. Outputs are async values (Output<T>) resolved after creation, stacks hold per-environment config, and secrets are encrypted in state.",
+    "first_principles": {
+      "problem": "A team needs AWS, Cloudflare and Kubernetes resources in one deployment with shared logic.",
+      "truths": [
+        "Programs can register resources declaratively.",
+        "Values may be unknown until created.",
+        "One engine can drive many providers."
+      ],
+      "derivation": [
+        "Write a **program** that declares resources.",
+        "Use **Output.apply** for dependent values.",
+        "Use **stacks** for environments.",
+        "Store **secrets** encrypted in config.",
+        "Share code as **component resources**."
+      ]
+    },
+    "analogy": {
+      "title": "A conductor reading a score",
+      "story": "The program is the score; the engine conducts each orchestra section (provider) and waits for one part before cueing the next.",
+      "mapping": [
+        [
+          "Score",
+          "Program"
+        ],
+        [
+          "Conductor",
+          "Pulumi engine"
+        ],
+        [
+          "Sections",
+          "Providers"
+        ],
+        [
+          "Cues",
+          "Outputs"
+        ]
+      ],
+      "breaks": "Orchestras play once; the engine diffs and only changes what differs."
+    },
+    "mindmap": {
+      "center": "Pulumi",
+      "branches": [
+        {
+          "label": "Languages",
+          "children": [
+            "TS",
+            "Python",
+            "Go",
+            ".NET",
+            "Java",
+            "YAML"
+          ]
+        },
+        {
+          "label": "Engine",
+          "children": [
+            "Register",
+            "Diff",
+            "Providers direct"
+          ]
+        },
+        {
+          "label": "Concepts",
+          "children": [
+            "Stacks",
+            "Config",
+            "Outputs",
+            "Secrets"
+          ]
+        },
+        {
+          "label": "Reuse",
+          "children": [
+            "ComponentResource",
+            "Packages"
+          ]
+        },
+        {
+          "label": "Multi-cloud",
+          "children": [
+            "AWS",
+            "Azure",
+            "GCP",
+            "K8s",
+            "Cloudflare"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bucket + DNS across providers",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cloudflare record waits on the S3 endpoint output automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import pulumi, pulumi_aws as aws, pulumi_cloudflare as cf\nsite = aws.s3.BucketV2(\"site\")\nweb = aws.s3.BucketWebsiteConfigurationV2(\"web\", bucket=site.id,\n        index_document={\"suffix\": \"index.html\"})\ncf.Record(\"www\", zone_id=pulumi.Config().require(\"zoneId\"), name=\"www\",\n          type=\"CNAME\", content=web.website_endpoint, proxied=True)\npulumi.export(\"url\", web.website_endpoint)"
+        }
+      ],
+      "outcome": "multi-cloud infra in one program."
+    },
+    "summary": {
+      "points": [
+        "Real languages, declarative engine.",
+        "Outputs model unknowns.",
+        "Many providers at once."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you use a Pulumi Output like a plain string?",
+        "a": "Its value may be unknown until the resource is created, so you must transform it with apply/interpolate to keep dependencies tracked."
+      }
+    ]
+  },
+  "custom-providers-extending-iac-to-any-api": {
+    "core": "When no provider exists, both ecosystems let you extend them. Pulumi offers dynamic providers (CRUD functions written inline in your program) for quick wins and full native providers for reuse; it can also bridge any Terraform provider. CDK has CloudFormation custom resources backed by Lambda and the CloudFormation registry for first-class types. Choose based on reuse, testing and ownership.",
+    "first_principles": {
+      "problem": "A deployment must create an API key in an internal SaaS that has no IaC support.",
+      "truths": [
+        "Any CRUD API can be modelled.",
+        "Inline hacks don't scale.",
+        "Lambda-backed resources need careful error handling."
+      ],
+      "derivation": [
+        "Quick: **Pulumi dynamic provider** / **CDK custom resource**.",
+        "Reusable: **native provider** / **CFN registry type**.",
+        "Reuse **Terraform providers** via bridges.",
+        "Implement **idempotent** create/delete.",
+        "Always **signal** CloudFormation on failure."
+      ]
+    },
+    "analogy": {
+      "title": "A universal adapter you build yourself",
+      "story": "A rough adapter works for one trip; a proper certified one is worth it if the whole team travels.",
+      "mapping": [
+        [
+          "Rough adapter",
+          "Dynamic/custom resource"
+        ],
+        [
+          "Certified adapter",
+          "Native provider/registry type"
+        ]
+      ],
+      "breaks": "Bad adapters spark; bad custom resources hang stacks for an hour."
+    },
+    "mindmap": {
+      "center": "Extending IaC",
+      "branches": [
+        {
+          "label": "Pulumi",
+          "children": [
+            "Dynamic providers",
+            "Native providers",
+            "TF bridge"
+          ]
+        },
+        {
+          "label": "CDK",
+          "children": [
+            "Custom resources (Lambda)",
+            "Provider framework",
+            "CFN registry"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Idempotent",
+            "Always respond",
+            "Physical IDs"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Reuse",
+            "Ownership",
+            "Testing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CDK custom resource",
+      "scenario": "TypeScript.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Provider framework handles CFN responses and retries."
+        }
+      ],
+      "code": [
+        {
+          "lang": "typescript",
+          "text": "const onEvent = new lambda.Function(this, 'Handler', { /* creates/deletes API key */ });\nconst provider = new cr.Provider(this, 'Prov', { onEventHandler: onEvent });\nconst key = new CustomResource(this, 'ApiKey', {\n  serviceToken: provider.serviceToken,\n  properties: { name: 'checkout' },\n});\nnew CfnOutput(this, 'KeyId', { value: key.getAttString('KeyId') });"
+        }
+      ],
+      "outcome": "IaC coverage for unsupported APIs."
+    },
+    "summary": {
+      "points": [
+        "Inline for quick wins.",
+        "Native for reuse.",
+        "Idempotent and responsive."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use the CDK Provider framework instead of a raw Lambda custom resource?",
+        "a": "It handles the CloudFormation response protocol, timeouts and async polling, avoiding stacks hanging when the Lambda fails to respond."
+      }
+    ]
+  }
+}

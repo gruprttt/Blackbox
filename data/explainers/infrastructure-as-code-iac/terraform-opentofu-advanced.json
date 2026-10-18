@@ -1,0 +1,1043 @@
+{
+  "introduction-moving-beyond-hello-world": {
+    "core": "Terraform is a declarative reconciliation engine. You describe the desired end state in HCL, Terraform reads the real state through providers, diffs the two, and builds a dependency graph of create, update and delete actions. Moving beyond hello world means treating that loop (write → plan → apply → state) as a production system with modules, remote state, locking and review.",
+    "first_principles": {
+      "problem": "A team's single main.tf works on one laptop but breaks when three engineers apply at once.",
+      "truths": [
+        "Desired state is code.",
+        "Real state must be read and remembered.",
+        "Changes are a diff, executed in dependency order."
+      ],
+      "derivation": [
+        "Declare **resources**, not steps.",
+        "Let Terraform **plan** the diff.",
+        "Store **state** remotely and lock it.",
+        "Package reuse as **modules**.",
+        "Review **plans** before apply."
+      ]
+    },
+    "analogy": {
+      "title": "An architect's blueprint and a builder",
+      "story": "You hand over the blueprint; the builder compares it with the site, lists what to build or demolish, and does it in a safe order.",
+      "mapping": [
+        [
+          "Blueprint",
+          "HCL config"
+        ],
+        [
+          "Site survey",
+          "Refresh/state"
+        ],
+        [
+          "Work order",
+          "Plan"
+        ],
+        [
+          "Builder",
+          "Apply"
+        ]
+      ],
+      "breaks": "Builders improvise; Terraform does exactly what the plan says."
+    },
+    "mindmap": {
+      "center": "Beyond Hello World",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Declarative",
+            "Plan/apply",
+            "Graph"
+          ]
+        },
+        {
+          "label": "Building blocks",
+          "children": [
+            "Providers",
+            "Resources",
+            "Data sources",
+            "Modules"
+          ]
+        },
+        {
+          "label": "Production needs",
+          "children": [
+            "Remote state",
+            "Locking",
+            "Environments",
+            "Review"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Validation",
+            "Conditions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The core loop",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exactly the reviewed plan is applied."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "terraform init      # download providers, configure backend\nterraform plan -out=tf.plan\nterraform show tf.plan   # review\nterraform apply tf.plan"
+        }
+      ],
+      "outcome": "a repeatable, reviewable change loop."
+    },
+    "summary": {
+      "points": [
+        "Declare desired state.",
+        "Plan diffs reality.",
+        "Production needs state discipline."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why apply a saved plan file instead of running apply directly?",
+        "a": "It guarantees that what's applied is exactly what was reviewed, with no new drift sneaking in between."
+      }
+    ]
+  },
+  "providers-the-bridge-to-the-cloud": {
+    "core": "Terraform core knows nothing about AWS or GitHub. Providers are plugins that translate resource CRUD into API calls. You pin their versions with required_providers and a lock file, configure credentials and region, and use aliases for multiple accounts or regions. Provider upgrades can change behaviour, so they are versioned like any dependency.",
+    "first_principles": {
+      "problem": "An unpinned provider auto-upgrades in CI and suddenly wants to replace every S3 bucket.",
+      "truths": [
+        "Core is cloud-agnostic.",
+        "Providers implement APIs.",
+        "Unpinned dependencies drift."
+      ],
+      "derivation": [
+        "Declare **required_providers** with constraints.",
+        "Commit **.terraform.lock.hcl**.",
+        "Use **aliases** for multi-region/account.",
+        "Inject credentials via **environment/OIDC**, not code.",
+        "Upgrade providers **deliberately**."
+      ]
+    },
+    "analogy": {
+      "title": "Travel adapters",
+      "story": "Your laptop (core) works anywhere, but needs the right plug adapter for each country's sockets.",
+      "mapping": [
+        [
+          "Laptop",
+          "Terraform core"
+        ],
+        [
+          "Adapter",
+          "Provider"
+        ],
+        [
+          "Socket",
+          "Cloud API"
+        ]
+      ],
+      "breaks": "Adapters don't change behaviour; provider upgrades can."
+    },
+    "mindmap": {
+      "center": "Providers",
+      "branches": [
+        {
+          "label": "Role",
+          "children": [
+            "Translate CRUD to API"
+          ]
+        },
+        {
+          "label": "Pinning",
+          "children": [
+            "required_providers",
+            "Lock file"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Region",
+            "Credentials",
+            "assume_role"
+          ]
+        },
+        {
+          "label": "Aliases",
+          "children": [
+            "Multi-region",
+            "Multi-account"
+          ]
+        },
+        {
+          "label": "Ecosystem",
+          "children": [
+            "Registry",
+            "OpenTofu registry"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two regions",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Pinned version, two regions, one config."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "terraform {\n  required_providers {\n    aws = { source = \"hashicorp/aws\", version = \"~> 5.40\" }\n  }\n}\nprovider \"aws\" { region = \"us-east-1\" }\nprovider \"aws\" {\n  alias  = \"eu\"\n  region = \"eu-west-1\"\n}\nresource \"aws_s3_bucket\" \"replica\" {\n  provider = aws.eu\n  bucket   = \"acme-replica\"\n}"
+        }
+      ],
+      "outcome": "controlled, multi-region provider use."
+    },
+    "summary": {
+      "points": [
+        "Providers bridge to APIs.",
+        "Pin versions and lock.",
+        "Aliases for multiple targets."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does .terraform.lock.hcl guarantee?",
+        "a": "Everyone and CI use the exact same provider versions and checksums selected at init."
+      }
+    ]
+  },
+  "data-sources-querying-reality": {
+    "core": "Data sources read existing information without managing it: the latest AMI, an existing VPC by tag, the current account ID, or outputs of another stack. They let configurations adapt to the world instead of hardcoding IDs. They are read on every plan, so a broad or changing query can cause surprising diffs.",
+    "first_principles": {
+      "problem": "Hardcoded AMI and subnet IDs break when code is reused in another account.",
+      "truths": [
+        "Some resources exist outside this config.",
+        "IDs differ per environment.",
+        "Reads happen every plan."
+      ],
+      "derivation": [
+        "Query by **tags/filters**, not IDs.",
+        "Use **aws_caller_identity** etc. for context.",
+        "Pin queries tightly (e.g. **most_recent** with owner).",
+        "Prefer **explicit inputs** for cross-team contracts.",
+        "Expect **plan-time reads**."
+      ]
+    },
+    "analogy": {
+      "title": "Looking up a phone number instead of memorising it",
+      "story": "You query the directory each time, so the number stays right even if it changes.",
+      "mapping": [
+        [
+          "Directory",
+          "Provider API"
+        ],
+        [
+          "Lookup",
+          "Data source"
+        ],
+        [
+          "Memorised number",
+          "Hardcoded ID"
+        ]
+      ],
+      "breaks": "Directories are stable; a 'latest AMI' query changes every week."
+    },
+    "mindmap": {
+      "center": "Data Sources",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Read, don't manage"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "AMIs",
+            "VPCs",
+            "Caller identity",
+            "Remote state"
+          ]
+        },
+        {
+          "label": "Good practice",
+          "children": [
+            "Filter by tags",
+            "Tight queries"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Unexpected diffs",
+            "Hidden coupling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find the latest hardened AMI",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Same code works in every account that owns golden images."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "data \"aws_ami\" \"base\" {\n  most_recent = true\n  owners      = [\"123456789012\"]\n  filter {\n    name   = \"name\"\n    values = [\"golden-al2023-*\"]\n  }\n}\nresource \"aws_instance\" \"web\" {\n  ami           = data.aws_ami.base.id\n  instance_type = \"t3.small\"\n}"
+        }
+      ],
+      "outcome": "configuration that adapts to reality."
+    },
+    "summary": {
+      "points": [
+        "Read existing things.",
+        "Filter, don't hardcode.",
+        "Beware moving targets."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a 'most_recent' AMI data source cause instance replacement?",
+        "a": "A new AMI changes the value on the next plan, and changing an instance's AMI forces replacement."
+      }
+    ]
+  },
+  "modules-the-lego-blocks": {
+    "core": "A module is a directory of Terraform with inputs (variables) and outputs, called with source and version. Modules encapsulate a pattern, such as a VPC or a service, so teams reuse tested building blocks instead of copying resources. Good modules have a small, typed interface, sensible defaults, versioned releases and no hidden provider configuration.",
+    "first_principles": {
+      "problem": "Twelve copies of the same VPC code have drifted apart, each with different bugs.",
+      "truths": [
+        "Duplication drifts.",
+        "Interfaces hide complexity.",
+        "Versions let consumers upgrade safely."
+      ],
+      "derivation": [
+        "Define **typed variables** with validation.",
+        "Expose **minimal outputs**.",
+        "Publish with **semantic versions**.",
+        "Keep **providers out** of child modules.",
+        "Compose small modules into **bigger ones**."
+      ]
+    },
+    "analogy": {
+      "title": "LEGO bricks",
+      "story": "Standard studs (interfaces) let any brick connect, and you build castles from tested pieces instead of carving wood each time.",
+      "mapping": [
+        [
+          "Brick",
+          "Module"
+        ],
+        [
+          "Studs",
+          "Variables/outputs"
+        ],
+        [
+          "Instruction booklet",
+          "Module docs"
+        ]
+      ],
+      "breaks": "LEGO never changes; modules release versions with breaking changes."
+    },
+    "mindmap": {
+      "center": "Modules",
+      "branches": [
+        {
+          "label": "Interface",
+          "children": [
+            "Variables",
+            "Outputs",
+            "Validation"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "Local path",
+            "Registry",
+            "Git ref"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Semver",
+            "No provider blocks",
+            "Small scope"
+          ]
+        },
+        {
+          "label": "Composition",
+          "children": [
+            "Root module",
+            "Child modules"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Calling a versioned module",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Tested VPC with one block, upgradeable by bumping version."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "module \"vpc\" {\n  source  = \"terraform-aws-modules/vpc/aws\"\n  version = \"5.8.1\"\n  name    = \"prod\"\n  cidr    = \"10.0.0.0/16\"\n  azs             = [\"us-east-1a\", \"us-east-1b\"]\n  private_subnets = [\"10.0.1.0/24\", \"10.0.2.0/24\"]\n}\noutput \"vpc_id\" { value = module.vpc.vpc_id }"
+        }
+      ],
+      "outcome": "reusable, versioned building blocks."
+    },
+    "summary": {
+      "points": [
+        "Inputs and outputs.",
+        "Version releases.",
+        "Compose small modules."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shouldn't child modules declare provider blocks?",
+        "a": "It prevents callers from controlling configuration (regions, aliases) and blocks using for_each/count on the module."
+      }
+    ]
+  },
+  "loops-count-vs-for_each": {
+    "core": "count creates N indexed copies (resource[0], resource[1]); for_each creates copies keyed by map or set values (resource[\"web\"]). Because count identifies instances by position, removing an item in the middle shifts indexes and destroys and recreates everything after it. for_each keys are stable, so use count only for on/off toggles or truly identical replicas.",
+    "first_principles": {
+      "problem": "Removing the second user from a list of 10 IAM users makes Terraform plan to recreate 8 of them.",
+      "truths": [
+        "Instance addresses come from index or key.",
+        "Indexes shift when lists change.",
+        "Keys stay stable."
+      ],
+      "derivation": [
+        "Use **for_each** with maps/sets of stable keys.",
+        "Use **count = var.enabled ? 1 : 0** for toggles.",
+        "Build maps with **for expressions**.",
+        "Use **dynamic blocks** for nested repetition.",
+        "Migrate with **moved** blocks when switching."
+      ]
+    },
+    "analogy": {
+      "title": "Seat numbers vs name cards",
+      "story": "If guests sit by seat number and one leaves, everyone shuffles along; with name cards, nobody moves.",
+      "mapping": [
+        [
+          "Seat number",
+          "count index"
+        ],
+        [
+          "Name card",
+          "for_each key"
+        ],
+        [
+          "Shuffling",
+          "Recreate cascade"
+        ]
+      ],
+      "breaks": "Guests shuffle harmlessly; resources get destroyed."
+    },
+    "mindmap": {
+      "center": "count vs for_each",
+      "branches": [
+        {
+          "label": "count",
+          "children": [
+            "Index-based",
+            "Toggles",
+            "Shift problem"
+          ]
+        },
+        {
+          "label": "for_each",
+          "children": [
+            "Key-based",
+            "Stable addresses",
+            "Maps/sets"
+          ]
+        },
+        {
+          "label": "Helpers",
+          "children": [
+            "for expressions",
+            "dynamic blocks"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "moved blocks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stable users",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One removal, one destroy."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "variable \"users\" { type = set(string) }\nresource \"aws_iam_user\" \"u\" {\n  for_each = var.users\n  name     = each.key\n}\n# removing \"bob\" destroys only aws_iam_user.u[\"bob\"]"
+        }
+      ],
+      "outcome": "predictable diffs when collections change."
+    },
+    "summary": {
+      "points": [
+        "count shifts indexes.",
+        "for_each keys are stable.",
+        "count for toggles only."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is count still the right choice?",
+        "a": "For conditional creation (0 or 1) or truly interchangeable replicas where position doesn't matter."
+      }
+    ]
+  },
+  "environment-separation-workspaces-vs-directories": {
+    "core": "CLI workspaces give one configuration several state files (dev, prod) selected at runtime, which is easy but invisible: the same code, backend and credentials, with a single wrong `workspace select` hitting prod. Directory-per-environment gives each environment its own root module, backend and variables. That is more duplication, but explicit, separately permissioned, and able to diverge safely.",
+    "first_principles": {
+      "problem": "An engineer runs apply thinking they're in dev but the workspace is prod.",
+      "truths": [
+        "Environments need isolation.",
+        "Implicit context causes mistakes.",
+        "Environments legitimately differ."
+      ],
+      "derivation": [
+        "Use **workspaces** for ephemeral, identical copies.",
+        "Use **directories** for long-lived environments.",
+        "Give each env its own **backend and credentials**.",
+        "Share logic through **modules**.",
+        "Show the **environment in the prompt/plan**."
+      ]
+    },
+    "analogy": {
+      "title": "Tabs in one spreadsheet vs separate files",
+      "story": "Tabs are quick but you can edit the wrong one; separate files in separate folders with different locks are harder to confuse.",
+      "mapping": [
+        [
+          "Tabs",
+          "Workspaces"
+        ],
+        [
+          "Separate files",
+          "Env directories"
+        ],
+        [
+          "Folder permissions",
+          "Per-env IAM"
+        ]
+      ],
+      "breaks": "Spreadsheets have undo; prod deletions don't."
+    },
+    "mindmap": {
+      "center": "Environment Separation",
+      "branches": [
+        {
+          "label": "Workspaces",
+          "children": [
+            "Same code",
+            "Multiple states",
+            "Implicit selection"
+          ]
+        },
+        {
+          "label": "Directories",
+          "children": [
+            "Separate roots",
+            "Separate backends",
+            "Explicit"
+          ]
+        },
+        {
+          "label": "Shared",
+          "children": [
+            "Modules"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Per-env credentials",
+            "Approvals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Directory layout",
+      "scenario": "Tree.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "prod uses a different bucket and role; dev credentials can't touch it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "envs/\n  dev/   main.tf  backend.tf  terraform.tfvars\n  prod/  main.tf  backend.tf  terraform.tfvars\nmodules/\n  service/"
+        }
+      ],
+      "outcome": "hard-to-confuse environments."
+    },
+    "summary": {
+      "points": [
+        "Workspaces are implicit.",
+        "Directories are explicit.",
+        "Share via modules."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where are CLI workspaces a good fit?",
+        "a": "Short-lived identical copies, like per-branch preview environments, where implicit selection is low risk."
+      }
+    ]
+  },
+  "state-locking-preventing-disaster": {
+    "core": "Two concurrent applies against the same state can both read version N, make conflicting changes, and write competing versions, corrupting state or orphaning resources. Backends with locking (S3 with a DynamoDB table or native S3 lockfile, GCS, Terraform Cloud) take an exclusive lock for the whole run. A stuck lock is released with force-unlock, only after confirming no run is active.",
+    "first_principles": {
+      "problem": "Two CI jobs apply simultaneously and the state file loses track of a newly created database.",
+      "truths": [
+        "State is shared mutable data.",
+        "Concurrent writers corrupt it.",
+        "Locks serialise writers."
+      ],
+      "derivation": [
+        "Use a backend with **locking**.",
+        "Hold the lock for the **whole run**.",
+        "**Serialise** CI applies per state.",
+        "Use **force-unlock** only after verification.",
+        "Enable **versioning** on the state bucket."
+      ]
+    },
+    "analogy": {
+      "title": "A single key to the records room",
+      "story": "Only the key holder may edit the ledger; others wait at the door.",
+      "mapping": [
+        [
+          "Key",
+          "Lock"
+        ],
+        [
+          "Ledger",
+          "State file"
+        ],
+        [
+          "Waiting",
+          "Lock wait/fail"
+        ]
+      ],
+      "breaks": "Keys can't get stuck in a crashed process; locks can."
+    },
+    "mindmap": {
+      "center": "State Locking",
+      "branches": [
+        {
+          "label": "Risk",
+          "children": [
+            "Concurrent writes",
+            "Corruption",
+            "Orphans"
+          ]
+        },
+        {
+          "label": "Backends",
+          "children": [
+            "S3 + DynamoDB",
+            "S3 native lock",
+            "GCS",
+            "TFC"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "-lock-timeout",
+            "force-unlock"
+          ]
+        },
+        {
+          "label": "Safety net",
+          "children": [
+            "Bucket versioning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "S3 backend with locking",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Second apply waits or fails with 'state locked'."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "terraform {\n  backend \"s3\" {\n    bucket       = \"acme-tfstate\"\n    key          = \"prod/network.tfstate\"\n    region       = \"us-east-1\"\n    encrypt      = true\n    use_lockfile = true   # native S3 locking (TF >= 1.10)\n  }\n}"
+        }
+      ],
+      "outcome": "one writer at a time."
+    },
+    "summary": {
+      "points": [
+        "Concurrent applies corrupt.",
+        "Lock for the whole run.",
+        "Version the bucket."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should you check before running terraform force-unlock?",
+        "a": "That no apply is actually still running (CI job, colleague), otherwise you reintroduce concurrent writes."
+      }
+    ]
+  },
+  "provisioners-the-avoid-feature": {
+    "core": "Provisioners (local-exec, remote-exec, file) run scripts during create or destroy. HashiCorp calls them a last resort because Terraform can't model what they do: their effects aren't in state, they aren't idempotent, failures taint resources, and they need network and SSH access during apply. Prefer cloud-init/user_data, baked images, configuration management or native resources.",
+    "first_principles": {
+      "problem": "A remote-exec provisioner fails halfway, the instance is tainted, and the next apply destroys a half-configured server.",
+      "truths": [
+        "Terraform can't see script effects.",
+        "Scripts aren't naturally idempotent.",
+        "Apply-time SSH is fragile."
+      ],
+      "derivation": [
+        "Use **user_data/cloud-init** for boot config.",
+        "**Bake** software into images (Packer).",
+        "Use **native resources** where they exist.",
+        "Use **terraform_data** + local-exec only for glue.",
+        "Keep provisioners **idempotent** if unavoidable."
+      ]
+    },
+    "analogy": {
+      "title": "Duct tape on a blueprint",
+      "story": "It holds something together, but the blueprint no longer describes the building.",
+      "mapping": [
+        [
+          "Duct tape",
+          "Provisioner"
+        ],
+        [
+          "Blueprint",
+          "State"
+        ],
+        [
+          "Proper part",
+          "Native resource"
+        ]
+      ],
+      "breaks": "Duct tape is visible; provisioner effects are invisible to state."
+    },
+    "mindmap": {
+      "center": "Provisioners",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "local-exec",
+            "remote-exec",
+            "file"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "Not in state",
+            "Not idempotent",
+            "Taint on failure",
+            "Needs SSH"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "cloud-init",
+            "Packer images",
+            "Ansible",
+            "Native resources"
+          ]
+        },
+        {
+          "label": "If needed",
+          "children": [
+            "terraform_data",
+            "Idempotent scripts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Replace remote-exec",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Boot config runs on the instance; Terraform stays declarative."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_instance\" \"web\" {\n  ami       = data.aws_ami.golden.id   # app pre-baked\n  user_data = templatefile(\"boot.sh.tftpl\", { env = var.env })\n  # no remote-exec, no SSH from CI\n}"
+        }
+      ],
+      "outcome": "declarative config without fragile scripts."
+    },
+    "summary": {
+      "points": [
+        "Provisioners are a last resort.",
+        "Effects are invisible.",
+        "Bake or use cloud-init."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to a resource if a creation-time provisioner fails?",
+        "a": "It is marked tainted and will be destroyed and recreated on the next apply."
+      }
+    ]
+  },
+  "preconditions-and-postconditions-assertions-in-code": {
+    "core": "Variable validation checks inputs. lifecycle precondition blocks check assumptions before a resource is planned, postcondition blocks check guarantees after it's created or read, and check blocks run continuous assertions that warn without failing. Together they turn tribal knowledge (\"this AMI must be x86\", \"the bucket must be encrypted\") into executable contracts with clear error messages.",
+    "first_principles": {
+      "problem": "Someone passes an ARM AMI to an x86 instance type and the failure only shows up as a vague API error after 10 minutes.",
+      "truths": [
+        "Assumptions are often unwritten.",
+        "Early failures are cheaper.",
+        "Clear messages speed fixes."
+      ],
+      "derivation": [
+        "Validate **inputs** with variable validation.",
+        "Assert **assumptions** with preconditions.",
+        "Assert **results** with postconditions.",
+        "Monitor **health** with check blocks.",
+        "Write **actionable error messages**."
+      ]
+    },
+    "analogy": {
+      "title": "Pre-flight and post-landing checklists",
+      "story": "Pilots verify conditions before take-off and confirm state after landing, catching problems at the cheapest moment.",
+      "mapping": [
+        [
+          "Pre-flight",
+          "Precondition"
+        ],
+        [
+          "Post-landing",
+          "Postcondition"
+        ],
+        [
+          "In-flight monitors",
+          "check blocks"
+        ]
+      ],
+      "breaks": "Pilots can override; failed conditions halt the run."
+    },
+    "mindmap": {
+      "center": "Assertions",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "variable validation"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "precondition",
+            "postcondition"
+          ]
+        },
+        {
+          "label": "Continuous",
+          "children": [
+            "check blocks"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Fail early",
+            "Clear errors",
+            "Documented contracts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Architecture guard",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Mismatch caught at plan with a readable message."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_instance\" \"app\" {\n  ami           = data.aws_ami.app.id\n  instance_type = var.instance_type\n  lifecycle {\n    precondition {\n      condition     = data.aws_ami.app.architecture == \"x86_64\"\n      error_message = \"AMI must be x86_64 for ${var.instance_type}.\"\n    }\n    postcondition {\n      condition     = self.public_ip == \"\"\n      error_message = \"App instances must not have public IPs.\"\n    }\n  }\n}"
+        }
+      ],
+      "outcome": "executable infrastructure contracts."
+    },
+    "summary": {
+      "points": [
+        "Validate inputs.",
+        "Pre/postconditions.",
+        "check blocks warn."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a check block differ from a postcondition?",
+        "a": "A failed check block produces a warning without stopping the run; a failed postcondition is an error that halts it."
+      }
+    ]
+  },
+  "opentofu-the-open-source-fork": {
+    "core": "In 2023 HashiCorp relicensed Terraform under the Business Source License, and the community forked the last MPL version as OpenTofu under the Linux Foundation. OpenTofu stays largely compatible with Terraform 1.5-era configs and state while adding its own features, such as client-side state encryption and early variable evaluation. The choice is about licence, governance, ecosystem and feature roadmap.",
+    "first_principles": {
+      "problem": "A company building an internal platform worries that Terraform's BSL licence restricts its use.",
+      "truths": [
+        "Licences constrain usage.",
+        "Forks share history but diverge.",
+        "State and HCL compatibility ease migration."
+      ],
+      "derivation": [
+        "Understand **BSL vs MPL** implications.",
+        "Check **feature parity** for your version.",
+        "Test **state compatibility** before switching.",
+        "Use the **OpenTofu registry** mirror of providers.",
+        "Pin the **binary** in CI (tofu vs terraform)."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe book going proprietary",
+      "story": "The community photocopies the last free edition and keeps adding recipes; old dishes still cook the same.",
+      "mapping": [
+        [
+          "Last free edition",
+          "Terraform 1.5 MPL"
+        ],
+        [
+          "Community edition",
+          "OpenTofu"
+        ],
+        [
+          "New recipes",
+          "Divergent features"
+        ]
+      ],
+      "breaks": "Recipes don't need compatibility; state files do."
+    },
+    "mindmap": {
+      "center": "OpenTofu",
+      "branches": [
+        {
+          "label": "Origin",
+          "children": [
+            "BSL relicense 2023",
+            "Linux Foundation"
+          ]
+        },
+        {
+          "label": "Compatibility",
+          "children": [
+            "HCL",
+            "State",
+            "Providers"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "State encryption",
+            "Early evaluation",
+            "Provider for_each"
+          ]
+        },
+        {
+          "label": "Decision",
+          "children": [
+            "Licence",
+            "Governance",
+            "Features"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Switching a repo",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Zero-diff plan proves compatibility before switching."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "tofu init        # reads same backend and lock file\ntofu plan        # expect: No changes\n# then swap 'terraform' for 'tofu' in CI"
+        }
+      ],
+      "outcome": "informed tool choice."
+    },
+    "summary": {
+      "points": [
+        "Fork after BSL change.",
+        "Largely compatible.",
+        "Verify with a no-change plan."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a safe first check when migrating a stack to OpenTofu?",
+        "a": "Run tofu init and plan against the existing state and confirm it shows no changes."
+      }
+    ]
+  }
+}

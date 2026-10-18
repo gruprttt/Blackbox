@@ -1,0 +1,412 @@
+{
+  "introduction-stop-applying-from-laptops": {
+    "core": "Applying Terraform from laptops means unreviewed changes, long-lived admin credentials on personal machines, untracked versions, and state that doesn't match main. GitOps for IaC makes Git the single source of truth: changes arrive as pull requests, automation runs the plan and posts it, a reviewer approves, and only the automation, with scoped credentials, applies.",
+    "first_principles": {
+      "problem": "A Friday-evening laptop apply with an outdated branch reverts a colleague's fix in production.",
+      "truths": [
+        "Unreviewed changes cause outages.",
+        "Laptops hold risky credentials.",
+        "Git history is an audit log."
+      ],
+      "derivation": [
+        "All changes via **pull request**.",
+        "Automation **plans on PR**.",
+        "Require **review and approval**.",
+        "Only automation **applies**.",
+        "**Remove** human write credentials."
+      ]
+    },
+    "analogy": {
+      "title": "Bank transfers needing two signatures",
+      "story": "No single clerk can move money from their desk; requests go through a logged approval system.",
+      "mapping": [
+        [
+          "Two signatures",
+          "PR approval"
+        ],
+        [
+          "Logged system",
+          "Git + CI"
+        ],
+        [
+          "Clerk's desk",
+          "Laptop"
+        ]
+      ],
+      "breaks": "Banks have regulators; you must enforce branch protection yourself."
+    },
+    "mindmap": {
+      "center": "IaC GitOps",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "Unreviewed",
+            "Laptop creds",
+            "Version skew"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Git source of truth",
+            "PR plans",
+            "Automated apply"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Atlantis",
+            "Flux TF-controller",
+            "TFC/Spacelift"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Branch protection",
+            "Scoped roles"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Workflow",
+      "scenario": "Steps.",
+      "flow": [
+        "Engineer opens PR",
+        "Bot posts terraform plan",
+        "Reviewer approves",
+        "Bot applies, merges, records"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every change reviewed and logged."
+        }
+      ],
+      "code": [],
+      "outcome": "laptop applies retired."
+    },
+    "summary": {
+      "points": [
+        "Git is the truth.",
+        "Plans in PRs.",
+        "Automation applies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why remove engineers' direct write credentials in GitOps?",
+        "a": "So all changes must go through the reviewed, logged pipeline rather than bypassing it."
+      }
+    ]
+  },
+  "atlantis-terraform-in-pull-requests": {
+    "core": "Atlantis is a self-hosted server that listens to pull request webhooks. It runs terraform plan for affected projects, posts the output as a comment, locks those projects so other PRs can't conflict, and runs apply when an approved user comments `atlantis apply`. atlantis.yaml defines projects, workflows and requirements such as approved and mergeable.",
+    "first_principles": {
+      "problem": "Two PRs touching the same stack are both approved, and the second apply undoes the first.",
+      "truths": [
+        "Plans must be visible in review.",
+        "Concurrent PRs on one stack conflict.",
+        "Applies should be gated."
+      ],
+      "derivation": [
+        "Configure **projects** per directory.",
+        "**Autoplan** on file changes.",
+        "**Lock** projects per PR.",
+        "Require **approved + mergeable** to apply.",
+        "Apply **before merge** to keep main deployable."
+      ]
+    },
+    "analogy": {
+      "title": "A shared workshop sign-up sheet",
+      "story": "Booking a machine locks it for your project; you show your plan to the supervisor before you start cutting.",
+      "mapping": [
+        [
+          "Machine booking",
+          "Project lock"
+        ],
+        [
+          "Supervisor check",
+          "Approval"
+        ],
+        [
+          "Cutting",
+          "Apply"
+        ]
+      ],
+      "breaks": "Workshops have physical queues; Atlantis locks can go stale if PRs are abandoned."
+    },
+    "mindmap": {
+      "center": "Atlantis",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Webhook",
+            "Autoplan",
+            "Comment plan",
+            "atlantis apply"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Locks",
+            "approved",
+            "mergeable"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "atlantis.yaml",
+            "Workflows",
+            "Policies (conftest)"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Apply before merge"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "atlantis.yaml",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Plan appears in PR; apply only after approval."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "version: 3\nprojects:\n  - name: prod-network\n    dir: envs/prod/network\n    autoplan: { when_modified: [\"*.tf\", \"../../../modules/**/*.tf\"] }\n    apply_requirements: [approved, mergeable]\n    workflow: default"
+        }
+      ],
+      "outcome": "reviewed applies in PRs."
+    },
+    "summary": {
+      "points": [
+        "Plans as PR comments.",
+        "Locks per project.",
+        "Gated applies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Atlantis apply before merging rather than after?",
+        "a": "So main only contains changes that actually applied successfully; failed applies are fixed in the same PR."
+      }
+    ]
+  },
+  "flux-tf-controller-the-kubernetes-native-way": {
+    "core": "The Flux Terraform controller (tofu-controller) runs Terraform inside Kubernetes. A `Terraform` custom resource points at a Git source path, and the controller periodically plans and, depending on approvePlan settings, applies automatically or waits for a manual approval of a specific plan ID. It brings continuous drift detection and GitOps-style reconciliation to Terraform code.",
+    "first_principles": {
+      "problem": "A team on Flux wants Terraform resources reconciled the same way as their Kubernetes apps.",
+      "truths": [
+        "Flux reconciles from Git on intervals.",
+        "Terraform can run in a pod.",
+        "Approval can be tied to a plan ID."
+      ],
+      "derivation": [
+        "Define a **GitRepository** source.",
+        "Create a **Terraform** CR with path and interval.",
+        "Choose **approvePlan: auto** or manual.",
+        "Store state in a **backend** (k8s secret or S3).",
+        "Write **outputs** to Kubernetes secrets."
+      ]
+    },
+    "analogy": {
+      "title": "A robot gardener with a schedule",
+      "story": "It checks the garden plan every hour and tends what's off; for big changes it waits for your nod.",
+      "mapping": [
+        [
+          "Schedule",
+          "Interval"
+        ],
+        [
+          "Garden plan",
+          "Git path"
+        ],
+        [
+          "Your nod",
+          "approvePlan"
+        ]
+      ],
+      "breaks": "Gardeners don't need state files; Terraform still does."
+    },
+    "mindmap": {
+      "center": "Flux TF-Controller",
+      "branches": [
+        {
+          "label": "Resources",
+          "children": [
+            "GitRepository",
+            "Terraform CR"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Auto apply",
+            "Manual approve",
+            "Drift detection only"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "K8s secret",
+            "Remote backend"
+          ]
+        },
+        {
+          "label": "Outputs",
+          "children": [
+            "writeOutputsToSecret"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Terraform CR",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Plans every 30 min; applies only when approved."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: infra.contrib.fluxcd.io/v1alpha2\nkind: Terraform\nmetadata: { name: prod-network, namespace: flux-system }\nspec:\n  interval: 30m\n  path: ./envs/prod/network\n  sourceRef: { kind: GitRepository, name: infra }\n  approvePlan: \"\"          # set to plan ID to approve manually\n  writeOutputsToSecret: { name: network-outputs }"
+        }
+      ],
+      "outcome": "Terraform reconciled like apps."
+    },
+    "summary": {
+      "points": [
+        "Terraform as a CR.",
+        "Interval reconciliation.",
+        "Auto or manual approval."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does manual approval work in tofu-controller?",
+        "a": "The controller generates a plan with an ID; setting approvePlan to that ID lets it apply exactly that plan."
+      }
+    ]
+  },
+  "branch-strategy-and-environment-promotion-in-gitops": {
+    "core": "Avoid branch-per-environment (dev, staging and prod branches): branches drift, merges get messy, and the diff between environments hides in Git history. Prefer trunk-based development with directory-per-environment on main and versioned modules. Promote by bumping a module version or copying a change to the next environment's directory in a new PR, so what differs between environments is visible in one tree.",
+    "first_principles": {
+      "problem": "The prod branch is 47 commits behind staging, and nobody knows which ones are safe to merge.",
+      "truths": [
+        "Long-lived branches diverge.",
+        "Environment differences should be explicit.",
+        "Promotion should be a reviewable change."
+      ],
+      "derivation": [
+        "Use **single main branch**.",
+        "Use **envs/<env>/** directories.",
+        "Pin **module versions** per env.",
+        "Promote via **PR bumping version**.",
+        "Automate **promotion PRs** after soak."
+      ]
+    },
+    "analogy": {
+      "title": "One recipe book with per-restaurant pages",
+      "story": "Each location's page lists which recipe version it serves; upgrading is a visible edit, not a separate book.",
+      "mapping": [
+        [
+          "Recipe version",
+          "Module version"
+        ],
+        [
+          "Location page",
+          "Env directory"
+        ],
+        [
+          "Edit",
+          "Promotion PR"
+        ]
+      ],
+      "breaks": "Restaurants might tolerate differences; environments should converge."
+    },
+    "mindmap": {
+      "center": "Promotion Strategy",
+      "branches": [
+        {
+          "label": "Avoid",
+          "children": [
+            "Branch per env",
+            "Cherry-pick hell"
+          ]
+        },
+        {
+          "label": "Prefer",
+          "children": [
+            "Trunk-based",
+            "Directory per env"
+          ]
+        },
+        {
+          "label": "Promotion",
+          "children": [
+            "Module version bump",
+            "Promotion PRs"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Renovate",
+            "Soak checks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Promote a module",
+      "scenario": "Diff.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Prod change is one clear, reviewable diff."
+        }
+      ],
+      "code": [
+        {
+          "lang": "diff",
+          "text": "# envs/prod/service/main.tf\n module \"api\" {\n   source  = \"git::https://git.acme/modules/service.git?ref=\"\n-  version = \"v2.3.0\"\n+  version = \"v2.4.0\"   # soaked 3 days in staging\n }"
+        }
+      ],
+      "outcome": "explicit, reviewable promotion."
+    },
+    "summary": {
+      "points": [
+        "Avoid env branches.",
+        "Directories on main.",
+        "Promote by version bump."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is branch-per-environment problematic for IaC?",
+        "a": "Branches drift and merges become complex, hiding what actually differs between environments."
+      }
+    ]
+  }
+}

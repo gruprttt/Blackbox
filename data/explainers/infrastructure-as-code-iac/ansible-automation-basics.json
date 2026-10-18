@@ -1,0 +1,951 @@
+{
+  "introduction-why-ansible": {
+    "core": "Terraform provisions infrastructure; Ansible configures what runs on it: packages, files, services and users. It is agentless (it connects over SSH or WinRM and pushes small Python modules), describes desired state in YAML playbooks, and is idempotent, so running it twice changes nothing the second time. That makes server configuration repeatable instead of a pile of hand-run shell commands.",
+    "first_principles": {
+      "problem": "Fifty servers configured by hand over three years each behave slightly differently.",
+      "truths": [
+        "Configuration drifts when done by hand.",
+        "Idempotent operations are safe to repeat.",
+        "SSH is already everywhere."
+      ],
+      "derivation": [
+        "Describe **desired state**, not commands.",
+        "Use **idempotent modules**.",
+        "Connect **agentlessly** over SSH.",
+        "Group hosts in an **inventory**.",
+        "Re-run to **converge**."
+      ]
+    },
+    "analogy": {
+      "title": "A checklist for setting up a new kitchen",
+      "story": "'Oven installed, knives in drawer 2': if it's already done, you tick it and move on.",
+      "mapping": [
+        [
+          "Checklist item",
+          "Task"
+        ],
+        [
+          "Already done → tick",
+          "Idempotency (ok)"
+        ],
+        [
+          "Kitchen",
+          "Host"
+        ]
+      ],
+      "breaks": "Humans skip items; Ansible checks every one every run."
+    },
+    "mindmap": {
+      "center": "Why Ansible",
+      "branches": [
+        {
+          "label": "Role",
+          "children": [
+            "Configuration management",
+            "Orchestration",
+            "App deploy"
+          ]
+        },
+        {
+          "label": "Traits",
+          "children": [
+            "Agentless",
+            "YAML",
+            "Idempotent",
+            "Push-based"
+          ]
+        },
+        {
+          "label": "Pairs with",
+          "children": [
+            "Terraform provisioning",
+            "Packer images"
+          ]
+        },
+        {
+          "label": "Pieces",
+          "children": [
+            "Inventory",
+            "Playbooks",
+            "Modules",
+            "Roles"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ad-hoc vs idempotent",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Safe to run repeatedly; converges hosts."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ansible web -m ansible.builtin.apt -a \"name=nginx state=present\" --become\n# first run: changed=1\n# second run: ok (no change)"
+        }
+      ],
+      "outcome": "repeatable server configuration."
+    },
+    "summary": {
+      "points": [
+        "Configure what Terraform provisions.",
+        "Agentless over SSH.",
+        "Idempotent desired state."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is idempotency essential for configuration management?",
+        "a": "It makes runs safe to repeat, so you can converge any host to the desired state regardless of its starting point."
+      }
+    ]
+  },
+  "inventory-where-are-we-going": {
+    "core": "The inventory tells Ansible which hosts exist and how to group them (web, db, prod, eu). Static inventories are INI or YAML files; dynamic inventories query clouds (the aws_ec2 plugin) by tags at runtime, so autoscaled instances are always included. Variables can be attached to hosts or groups through group_vars and host_vars.",
+    "first_principles": {
+      "problem": "A hand-maintained hosts file misses new autoscaled instances, which never get patched.",
+      "truths": [
+        "Targets change constantly in cloud.",
+        "Grouping drives what runs where.",
+        "Cloud APIs know current hosts."
+      ],
+      "derivation": [
+        "Group hosts by **role and environment**.",
+        "Use **dynamic inventory** plugins for cloud.",
+        "Build groups from **tags** (keyed_groups).",
+        "Put variables in **group_vars/host_vars**.",
+        "Check with **ansible-inventory --graph**."
+      ]
+    },
+    "analogy": {
+      "title": "A delivery driver's address list",
+      "story": "A printed list goes stale; a live dispatch app always shows today's addresses.",
+      "mapping": [
+        [
+          "Printed list",
+          "Static inventory"
+        ],
+        [
+          "Dispatch app",
+          "Dynamic inventory"
+        ],
+        [
+          "Neighbourhoods",
+          "Groups"
+        ]
+      ],
+      "breaks": "Addresses rarely vanish; instances churn hourly."
+    },
+    "mindmap": {
+      "center": "Inventory",
+      "branches": [
+        {
+          "label": "Static",
+          "children": [
+            "INI",
+            "YAML"
+          ]
+        },
+        {
+          "label": "Dynamic",
+          "children": [
+            "aws_ec2",
+            "azure_rm",
+            "gcp_compute"
+          ]
+        },
+        {
+          "label": "Groups",
+          "children": [
+            "Role",
+            "Env",
+            "keyed_groups from tags"
+          ]
+        },
+        {
+          "label": "Vars",
+          "children": [
+            "group_vars",
+            "host_vars"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ansible-inventory --graph"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AWS dynamic inventory",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Groups like role_web appear automatically from tags."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# inventory/aws_ec2.yml\nplugin: amazon.aws.aws_ec2\nregions: [us-east-1]\nfilters:\n  tag:Env: prod\nkeyed_groups:\n  - key: tags.Role\n    prefix: role\nhostnames: [private-ip-address]"
+        }
+      ],
+      "outcome": "always-current targets."
+    },
+    "summary": {
+      "points": [
+        "Inventory defines targets.",
+        "Dynamic for cloud.",
+        "Groups from tags."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefer dynamic inventory in the cloud?",
+        "a": "It queries the provider at runtime, so new and terminated instances are reflected automatically."
+      }
+    ]
+  },
+  "playbooks-the-to-do-list": {
+    "core": "A playbook is a YAML list of plays; each play targets a host group and runs an ordered list of tasks, each calling a module with arguments. Tasks report ok, changed, failed or skipped. Use `--check --diff` for a dry run, `become` for privilege escalation, and prefer purpose-built modules (apt, template, service) over shell commands so idempotency is preserved.",
+    "first_principles": {
+      "problem": "A playbook built from shell tasks reports 'changed' every run and can't be dry-run safely.",
+      "truths": [
+        "Order matters within a play.",
+        "Modules know how to check state.",
+        "Shell commands don't."
+      ],
+      "derivation": [
+        "Target a **hosts** group per play.",
+        "Write **tasks** with modules.",
+        "Use **become** where needed.",
+        "Dry-run with **--check --diff**.",
+        "Use **creates/changed_when** if shell is unavoidable."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe card",
+      "story": "Steps in order, each with a clear outcome; skip a step if it's already done.",
+      "mapping": [
+        [
+          "Recipe",
+          "Playbook"
+        ],
+        [
+          "Step",
+          "Task"
+        ],
+        [
+          "Utensil",
+          "Module"
+        ]
+      ],
+      "breaks": "Recipes don't verify; modules check current state first."
+    },
+    "mindmap": {
+      "center": "Playbooks",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Plays",
+            "Tasks",
+            "Modules"
+          ]
+        },
+        {
+          "label": "Results",
+          "children": [
+            "ok",
+            "changed",
+            "failed",
+            "skipped"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "--check",
+            "--diff",
+            "--limit"
+          ]
+        },
+        {
+          "label": "Practices",
+          "children": [
+            "Modules over shell",
+            "Named tasks",
+            "become"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Web server play",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Second run reports ok for both tasks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- name: Configure web servers\n  hosts: role_web\n  become: true\n  tasks:\n    - name: Install nginx\n      ansible.builtin.apt: { name: nginx, state: present, update_cache: true }\n    - name: Ensure nginx running\n      ansible.builtin.service: { name: nginx, state: started, enabled: true }"
+        }
+      ],
+      "outcome": "clear, idempotent to-do lists."
+    },
+    "summary": {
+      "points": [
+        "Plays target groups.",
+        "Tasks call modules.",
+        "Dry-run with check/diff."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why avoid the shell module when a dedicated module exists?",
+        "a": "Dedicated modules check current state and are idempotent; shell commands run every time and report changed."
+      }
+    ]
+  },
+  "variables-and-precedence": {
+    "core": "Ansible variables come from many places: role defaults, inventory group_vars and host_vars, play vars, facts gathered from hosts, registered results, and extra vars on the command line, with about 22 precedence levels. The practical rule: put tunable defaults in role defaults, environment values in group_vars, and use -e only for one-off overrides, because extra vars always win.",
+    "first_principles": {
+      "problem": "A port set in group_vars is mysteriously ignored because a role's vars/main.yml overrides it.",
+      "truths": [
+        "Many sources can define the same variable.",
+        "Precedence decides the winner.",
+        "Predictability needs conventions."
+      ],
+      "derivation": [
+        "**Role defaults** for overridable values.",
+        "**group_vars** per environment/role.",
+        "**host_vars** for host specifics.",
+        "Avoid **role vars/** for tunables.",
+        "Use **-e** sparingly; it always wins."
+      ]
+    },
+    "analogy": {
+      "title": "House rules, family rules, and a parent's direct instruction",
+      "story": "General rules apply unless a more specific one overrides; a direct instruction beats everything.",
+      "mapping": [
+        [
+          "House rules",
+          "Role defaults"
+        ],
+        [
+          "Family rules",
+          "group_vars"
+        ],
+        [
+          "Direct instruction",
+          "Extra vars"
+        ]
+      ],
+      "breaks": "Families negotiate; precedence is a strict ladder."
+    },
+    "mindmap": {
+      "center": "Variables",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Role defaults",
+            "Inventory vars",
+            "Play vars",
+            "Facts",
+            "register",
+            "Extra vars"
+          ]
+        },
+        {
+          "label": "Precedence",
+          "children": [
+            "Defaults lowest",
+            "Extra vars highest"
+          ]
+        },
+        {
+          "label": "Conventions",
+          "children": [
+            "Defaults for tunables",
+            "group_vars per env"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "debug var",
+            "ansible-inventory --host"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Layered values",
+      "scenario": "Files.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "prod gets 8080; -e forces 9090 for one run."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# roles/nginx/defaults/main.yml\nnginx_port: 80\n# inventory/group_vars/prod.yml\nnginx_port: 8080\n# ad-hoc override\n# ansible-playbook site.yml -e nginx_port=9090"
+        }
+      ],
+      "outcome": "predictable variable resolution."
+    },
+    "summary": {
+      "points": [
+        "Many sources.",
+        "Strict precedence.",
+        "Conventions avoid surprises."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should a role's overridable settings live?",
+        "a": "In defaults/main.yml, the lowest precedence, so inventory and play vars can override them."
+      }
+    ]
+  },
+  "templating-with-jinja2-filters-and-loops": {
+    "core": "Ansible renders Jinja2 everywhere: in task arguments ({{ var }}) and in config files via the template module. Filters transform data (default, to_nice_yaml, join, regex_replace), and loops (loop, with dict2items) repeat tasks. Templates keep a single config file that adapts per host, and template only reports changed when the rendered output differs.",
+    "first_principles": {
+      "problem": "Separate nginx.conf copies per environment drift out of sync.",
+      "truths": [
+        "Configs differ by a few values.",
+        "Templates separate structure from data.",
+        "Rendered output can be compared."
+      ],
+      "derivation": [
+        "Write **.j2 templates** with variables.",
+        "Use **filters** for formatting and defaults.",
+        "Use **loop** for repeated tasks.",
+        "Use **{% for %}** inside templates.",
+        "Validate with **validate:** on template tasks."
+      ]
+    },
+    "analogy": {
+      "title": "A form letter",
+      "story": "One letter with blanks for name and address, printed per recipient.",
+      "mapping": [
+        [
+          "Form letter",
+          "Template"
+        ],
+        [
+          "Blanks",
+          "Variables"
+        ],
+        [
+          "Mail merge",
+          "Rendering"
+        ]
+      ],
+      "breaks": "Letters aren't syntax-checked; use validate to test configs before replacing."
+    },
+    "mindmap": {
+      "center": "Jinja2 in Ansible",
+      "branches": [
+        {
+          "label": "Where",
+          "children": [
+            "Task args",
+            "template module"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "default",
+            "join",
+            "to_nice_yaml",
+            "regex_replace"
+          ]
+        },
+        {
+          "label": "Loops",
+          "children": [
+            "loop",
+            "dict2items",
+            "{% for %}"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "validate",
+            "--diff"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Upstreams template",
+      "scenario": "Jinja2 + task.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Config rebuilt from inventory; validated before install."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# templates/upstream.conf.j2\n# upstream app {\n# {% for h in groups['role_app'] %}\n#   server {{ hostvars[h].ansible_host }}:{{ app_port | default(8080) }};\n# {% endfor %}\n# }\n- name: Render upstreams\n  ansible.builtin.template:\n    src: upstream.conf.j2\n    dest: /etc/nginx/conf.d/upstream.conf\n    validate: nginx -t -c %s\n  notify: reload nginx"
+        }
+      ],
+      "outcome": "one template, many hosts."
+    },
+    "summary": {
+      "points": [
+        "Templates plus variables.",
+        "Filters and loops.",
+        "Validate before replacing."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the template module's validate option do?",
+        "a": "Runs a command on the rendered file before it replaces the real one, aborting if validation fails."
+      }
+    ]
+  },
+  "handlers-doing-things-only-when-necessary": {
+    "core": "A handler is a task that runs only when notified by a task that reported changed, and only once at the end of the play however many tasks notified it. That's how you restart nginx only when its config actually changed, instead of on every run, which would cause needless downtime.",
+    "first_principles": {
+      "problem": "A playbook restarts the database on every run, causing a brief outage each time.",
+      "truths": [
+        "Restarts have a cost.",
+        "Only changes require restarts.",
+        "Multiple changes need one restart."
+      ],
+      "derivation": [
+        "Define **handlers** for restarts/reloads.",
+        "**notify** from tasks that change config.",
+        "Handlers run **once at play end**.",
+        "Use **meta: flush_handlers** for earlier execution.",
+        "Prefer **reload** over restart when possible."
+      ]
+    },
+    "analogy": {
+      "title": "Rebooting only after installing updates",
+      "story": "You don't reboot daily; only when an update says it's needed, and once after several updates.",
+      "mapping": [
+        [
+          "Update requiring reboot",
+          "Changed task with notify"
+        ],
+        [
+          "Single reboot",
+          "Handler runs once"
+        ]
+      ],
+      "breaks": "People forget to reboot; handlers are triggered reliably."
+    },
+    "mindmap": {
+      "center": "Handlers",
+      "branches": [
+        {
+          "label": "Trigger",
+          "children": [
+            "notify on changed"
+          ]
+        },
+        {
+          "label": "Timing",
+          "children": [
+            "End of play",
+            "flush_handlers"
+          ]
+        },
+        {
+          "label": "Dedup",
+          "children": [
+            "Runs once"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Restart",
+            "Reload",
+            "Daemon-reload"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "Failed plays skip handlers (--force-handlers)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reload on config change",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No config change → no reload."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "tasks:\n  - name: Deploy nginx config\n    ansible.builtin.template: { src: nginx.conf.j2, dest: /etc/nginx/nginx.conf }\n    notify: reload nginx\nhandlers:\n  - name: reload nginx\n    ansible.builtin.service: { name: nginx, state: reloaded }"
+        }
+      ],
+      "outcome": "restarts only when necessary."
+    },
+    "summary": {
+      "points": [
+        "Handlers on notify.",
+        "Once at play end.",
+        "Avoid needless restarts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to pending handlers if a later task fails?",
+        "a": "By default they don't run, unless you use --force-handlers or force_handlers: true."
+      }
+    ]
+  },
+  "roles-organizing-your-code": {
+    "core": "A role packages tasks, handlers, templates, files, defaults and metadata in a standard directory layout, so it can be reused and shared (Ansible Galaxy, collections). Playbooks then just assign roles to host groups. Good roles do one thing (nginx, postgres, hardening), expose defaults as their interface, and are tested with Molecule.",
+    "first_principles": {
+      "problem": "A 2,000-line playbook mixes nginx, users and monitoring, and nobody can reuse any part.",
+      "truths": [
+        "Standard layouts aid reuse.",
+        "Single-purpose units compose.",
+        "Defaults form the interface."
+      ],
+      "derivation": [
+        "Create with **ansible-galaxy role init**.",
+        "Keep **one responsibility** per role.",
+        "Expose **defaults** as inputs.",
+        "Declare **dependencies** in meta.",
+        "Test with **Molecule**."
+      ]
+    },
+    "analogy": {
+      "title": "Kitchen stations in a restaurant",
+      "story": "The grill, pastry and salad stations each have their own tools and recipes; the head chef assigns stations to orders.",
+      "mapping": [
+        [
+          "Station",
+          "Role"
+        ],
+        [
+          "Head chef",
+          "Playbook"
+        ],
+        [
+          "Station tools",
+          "Templates/files"
+        ]
+      ],
+      "breaks": "Stations share a pass; roles should avoid hidden shared state."
+    },
+    "mindmap": {
+      "center": "Roles",
+      "branches": [
+        {
+          "label": "Layout",
+          "children": [
+            "tasks",
+            "handlers",
+            "templates",
+            "files",
+            "defaults",
+            "vars",
+            "meta"
+          ]
+        },
+        {
+          "label": "Sharing",
+          "children": [
+            "Galaxy",
+            "Collections"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Single purpose",
+            "Defaults as API"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "Molecule",
+            "ansible-lint"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Role-based playbook",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Readable playbook; each role reusable elsewhere."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# site.yml\n- hosts: role_web\n  become: true\n  roles:\n    - common_hardening\n    - { role: nginx, nginx_port: 8080 }\n    - node_exporter"
+        }
+      ],
+      "outcome": "modular configuration code."
+    },
+    "summary": {
+      "points": [
+        "Standard layout.",
+        "One job per role.",
+        "Test with Molecule."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is Molecule used for?",
+        "a": "Testing roles by spinning up containers/VMs, applying the role, verifying results and checking idempotency."
+      }
+    ]
+  },
+  "tags-selective-execution": {
+    "core": "Tags label tasks, blocks or roles so you can run or skip subsets with --tags or --skip-tags: just deploy the config, or skip slow package installs. Special tags `always` and `never` control default inclusion. Tags speed up targeted runs but can hide dependencies; a tagged run may skip a task that later tasks rely on.",
+    "first_principles": {
+      "problem": "Updating one config file requires a 20-minute full playbook run.",
+      "truths": [
+        "Not every run needs every task.",
+        "Labels enable selection.",
+        "Skipped tasks may be prerequisites."
+      ],
+      "derivation": [
+        "Tag tasks by **concern** (config, packages, deploy).",
+        "Use **--tags** for focused runs.",
+        "Use **always** for prerequisites like facts.",
+        "Use **never** for dangerous opt-in tasks.",
+        "List with **--list-tags**."
+      ]
+    },
+    "analogy": {
+      "title": "Chapter bookmarks",
+      "story": "Jump straight to the chapter you need, but you might miss context from earlier pages.",
+      "mapping": [
+        [
+          "Bookmarks",
+          "Tags"
+        ],
+        [
+          "Skipped pages",
+          "Skipped tasks"
+        ],
+        [
+          "Prologue always read",
+          "always tag"
+        ]
+      ],
+      "breaks": "Readers can flip back; skipped tasks just don't run."
+    },
+    "mindmap": {
+      "center": "Tags",
+      "branches": [
+        {
+          "label": "Usage",
+          "children": [
+            "--tags",
+            "--skip-tags",
+            "--list-tags"
+          ]
+        },
+        {
+          "label": "Special",
+          "children": [
+            "always",
+            "never"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Tasks",
+            "Blocks",
+            "Roles"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Skipped prerequisites"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Config-only run",
+      "scenario": "YAML + CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "30-second targeted run; wipe only with --tags wipe_cache."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- name: Deploy app config\n  ansible.builtin.template: { src: app.yml.j2, dest: /etc/app.yml }\n  tags: [config]\n- name: Wipe cache (opt-in)\n  ansible.builtin.file: { path: /var/cache/app, state: absent }\n  tags: [never, wipe_cache]\n# ansible-playbook site.yml --tags config"
+        }
+      ],
+      "outcome": "fast, focused runs."
+    },
+    "summary": {
+      "points": [
+        "Tag by concern.",
+        "always and never.",
+        "Watch hidden dependencies."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the 'never' tag do?",
+        "a": "The task is skipped unless one of its other tags is explicitly requested with --tags."
+      }
+    ]
+  },
+  "ansible-vault-keeping-secrets-safe": {
+    "core": "Ansible Vault encrypts files or single variables with AES-256 so secrets can live in Git safely. Playbooks decrypt them at runtime with a vault password, supplied via a prompt, a file or a script that fetches it from a secrets manager. Use vault IDs for different environments, and consider lookups to HashiCorp Vault or AWS Secrets Manager for rotation and auditing.",
+    "first_principles": {
+      "problem": "Database passwords sit in plaintext group_vars in the Git repository.",
+      "truths": [
+        "Secrets must not be readable in Git.",
+        "Playbooks need secrets at runtime.",
+        "Passwords for decryption need protecting too."
+      ],
+      "derivation": [
+        "**Encrypt** with ansible-vault encrypt / encrypt_string.",
+        "Separate **vault IDs** per environment.",
+        "Supply password via **script** from a secrets manager.",
+        "Use **no_log** on tasks handling secrets.",
+        "Prefer **external secret lookups** for rotation."
+      ]
+    },
+    "analogy": {
+      "title": "A locked box in a shared cupboard",
+      "story": "Everyone can see the box, but only those with the key can read what's inside.",
+      "mapping": [
+        [
+          "Box",
+          "Vaulted file"
+        ],
+        [
+          "Key",
+          "Vault password"
+        ],
+        [
+          "Cupboard",
+          "Git repo"
+        ]
+      ],
+      "breaks": "Boxes can't be copied; encrypted files can be brute-forced if the password is weak."
+    },
+    "mindmap": {
+      "center": "Ansible Vault",
+      "branches": [
+        {
+          "label": "Encrypt",
+          "children": [
+            "Files",
+            "encrypt_string"
+          ]
+        },
+        {
+          "label": "Decrypt",
+          "children": [
+            "--ask-vault-pass",
+            "password file",
+            "client script"
+          ]
+        },
+        {
+          "label": "IDs",
+          "children": [
+            "dev@",
+            "prod@"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "no_log",
+            "Strong passwords"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "HashiCorp Vault lookup",
+            "AWS SM lookup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Encrypted variable",
+      "scenario": "CLI + YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Secret in Git is ciphertext; decrypted only at runtime."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ansible-vault encrypt_string --vault-id prod@scripts/vault-pass.sh 'S3cr3t!' --name db_password\n# db_password: !vault |\n#   $ANSIBLE_VAULT;1.2;AES256;prod\n#   6231...\nansible-playbook site.yml --vault-id prod@scripts/vault-pass.sh"
+        }
+      ],
+      "outcome": "secrets safe in version control."
+    },
+    "summary": {
+      "points": [
+        "AES-256 at rest in Git.",
+        "Protect the vault password.",
+        "no_log at runtime."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add no_log: true to tasks using secrets?",
+        "a": "To stop the decrypted values appearing in task output and logs."
+      }
+    ]
+  }
+}

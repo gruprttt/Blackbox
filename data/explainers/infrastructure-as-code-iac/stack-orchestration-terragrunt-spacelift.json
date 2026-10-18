@@ -1,0 +1,413 @@
+{
+  "introduction-the-dependency-nightmare": {
+    "core": "Once state is split into many stacks, orchestration becomes the problem: copy-pasted backend and provider blocks in every directory, outputs that must be passed between stacks, and an apply order someone has to remember. Orchestrators such as Terragrunt, Spacelift and Terraform Cloud/HCP Stacks keep configuration DRY, model dependencies, and run stacks in the right order.",
+    "first_principles": {
+      "problem": "Bringing up a new region means manually applying 30 directories in an order documented on a stale wiki page.",
+      "truths": [
+        "Many stacks repeat boilerplate.",
+        "Dependencies need explicit modelling.",
+        "Order should be computed, not remembered."
+      ],
+      "derivation": [
+        "**DRY** backend/provider config.",
+        "Declare **dependencies** explicitly.",
+        "Compute **run order** as a DAG.",
+        "**Pass outputs** automatically.",
+        "Trigger **downstream** runs on change."
+      ]
+    },
+    "analogy": {
+      "title": "A project manager for construction crews",
+      "story": "Instead of crews calling each other, a schedule says who goes after whom and hands over the measurements.",
+      "mapping": [
+        [
+          "Crews",
+          "Stacks"
+        ],
+        [
+          "Schedule",
+          "DAG"
+        ],
+        [
+          "Measurements",
+          "Outputs"
+        ]
+      ],
+      "breaks": "Crews adapt; orchestrators need explicit declarations."
+    },
+    "mindmap": {
+      "center": "Dependency Nightmare",
+      "branches": [
+        {
+          "label": "Pain",
+          "children": [
+            "Boilerplate",
+            "Manual ordering",
+            "Output passing"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "DRY config",
+            "DAG",
+            "Output wiring",
+            "Triggers"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Terragrunt",
+            "Spacelift",
+            "HCP Terraform Stacks",
+            "Terramate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before orchestration",
+      "scenario": "Pain.",
+      "flow": [
+        "30 dirs each with backend.tf copy",
+        "Wiki lists apply order",
+        "Engineer copies VPC ID into tfvars",
+        "Typos break later stacks"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Slow, error-prone bring-ups."
+        }
+      ],
+      "code": [],
+      "outcome": "why orchestrators exist."
+    },
+    "summary": {
+      "points": [
+        "Boilerplate multiplies.",
+        "Order must be computed.",
+        "Outputs must flow."
+      ]
+    },
+    "check": [
+      {
+        "q": "What three problems do stack orchestrators solve?",
+        "a": "Repeated boilerplate configuration, dependency ordering, and passing outputs between stacks."
+      }
+    ]
+  },
+  "terragrunt-dependencies": {
+    "core": "Terragrunt wraps Terraform. A root terragrunt.hcl generates backend and provider blocks for every child using path-derived keys, include blocks inherit common config, and dependency blocks read another unit's outputs and add it to the run graph. `terragrunt run-all apply` (or `run --all`) applies everything in dependency order, in parallel where possible.",
+    "first_principles": {
+      "problem": "Each of 30 stacks has a slightly different, hand-written backend key, and two collide.",
+      "truths": [
+        "Paths can derive state keys.",
+        "Dependencies define order.",
+        "Outputs can be read programmatically."
+      ],
+      "derivation": [
+        "Root **remote_state** with path_relative_to_include().",
+        "Children **include** root.",
+        "**dependency** blocks for outputs.",
+        "**run-all** for graph execution.",
+        "Use **inputs** to pass variables."
+      ]
+    },
+    "analogy": {
+      "title": "A family recipe book with a shared preface",
+      "story": "Every recipe inherits the kitchen rules from the preface and lists which other recipes must be cooked first.",
+      "mapping": [
+        [
+          "Preface",
+          "Root terragrunt.hcl"
+        ],
+        [
+          "Must cook first",
+          "dependency"
+        ],
+        [
+          "Recipe",
+          "Unit"
+        ]
+      ],
+      "breaks": "Recipes don't produce outputs; units pass real IDs."
+    },
+    "mindmap": {
+      "center": "Terragrunt",
+      "branches": [
+        {
+          "label": "DRY",
+          "children": [
+            "include",
+            "generate",
+            "remote_state"
+          ]
+        },
+        {
+          "label": "Dependencies",
+          "children": [
+            "dependency block",
+            "outputs"
+          ]
+        },
+        {
+          "label": "Execution",
+          "children": [
+            "run-all",
+            "Parallel DAG"
+          ]
+        },
+        {
+          "label": "Inputs",
+          "children": [
+            "inputs = {}"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Child unit",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No backend boilerplate; VPC applied first automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "# live/prod/app/terragrunt.hcl\ninclude \"root\" { path = find_in_parent_folders(\"root.hcl\") }\nterraform { source = \"git::https://git.acme/modules/app.git?ref=v1.6.0\" }\ndependency \"vpc\" { config_path = \"../vpc\" }\ninputs = {\n  vpc_id     = dependency.vpc.outputs.vpc_id\n  subnet_ids = dependency.vpc.outputs.private_subnet_ids\n}"
+        }
+      ],
+      "outcome": "DRY, ordered stacks."
+    },
+    "summary": {
+      "points": [
+        "Generate common config.",
+        "dependency wires outputs.",
+        "run-all orders execution."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does Terragrunt know to apply vpc before app?",
+        "a": "The dependency block in app declares vpc, so it's placed earlier in the run graph."
+      }
+    ]
+  },
+  "mocking-for-the-first-run": {
+    "core": "On a brand-new environment, `run-all plan` fails because dependency outputs don't exist yet: the VPC hasn't been applied, so app can't read vpc_id. Terragrunt's mock_outputs supply placeholder values for plan and validate, restricted by mock_outputs_allowed_terraform_commands so real applies always use real outputs.",
+    "first_principles": {
+      "problem": "CI can't produce a plan for a new region because downstream stacks error on missing outputs.",
+      "truths": [
+        "Plans need values for all inputs.",
+        "Upstream outputs don't exist before apply.",
+        "Mocks must never reach apply."
+      ],
+      "derivation": [
+        "Add **mock_outputs** to dependency blocks.",
+        "Limit to **validate/plan**.",
+        "Use **realistic-format** placeholders.",
+        "Optionally **mock_outputs_merge_strategy_with_state**.",
+        "Expect downstream plans to be **approximate**."
+      ]
+    },
+    "analogy": {
+      "title": "Placeholder text in a page layout",
+      "story": "'Lorem ipsum' lets you design the page before the real copy arrives; you'd never print it.",
+      "mapping": [
+        [
+          "Lorem ipsum",
+          "Mock outputs"
+        ],
+        [
+          "Layout",
+          "Plan"
+        ],
+        [
+          "Printing",
+          "Apply"
+        ]
+      ],
+      "breaks": "Readers spot lorem ipsum; Terraform would happily use a fake ID if allowed."
+    },
+    "mindmap": {
+      "center": "Mock Outputs",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Missing upstream outputs"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "mock_outputs"
+          ]
+        },
+        {
+          "label": "Guard",
+          "children": [
+            "allowed commands: validate, plan"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Approximate plans"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "merge with state"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mocked dependency",
+      "scenario": "HCL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New-region plan works; apply uses real outputs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "dependency \"vpc\" {\n  config_path = \"../vpc\"\n  mock_outputs = {\n    vpc_id             = \"vpc-00000000\"\n    private_subnet_ids = [\"subnet-00000000\"]\n  }\n  mock_outputs_allowed_terraform_commands = [\"validate\", \"plan\"]\n}"
+        }
+      ],
+      "outcome": "first-run plans possible."
+    },
+    "summary": {
+      "points": [
+        "Outputs don't exist yet.",
+        "Mocks for plan only.",
+        "Never apply with mocks."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why restrict mock_outputs to validate and plan?",
+        "a": "So an apply never creates resources using fake IDs; it must wait for real upstream outputs."
+      }
+    ]
+  },
+  "saas-orchestration-spacelift-and-terraform-cloud": {
+    "core": "Managed platforms (Spacelift, HCP Terraform/Terraform Cloud, env0, Scalr) run Terraform for you: remote runs with logs, state storage, policy checks (OPA or Sentinel), private module registries, drift detection, and stack dependencies that pass outputs and trigger downstream runs. You trade self-hosting effort and some flexibility for governance and less undifferentiated work.",
+    "first_principles": {
+      "problem": "A team spends a sprint a quarter maintaining Atlantis, runners, policy hooks and drift jobs.",
+      "truths": [
+        "Running IaC pipelines is undifferentiated work.",
+        "Governance needs policy hooks.",
+        "Dependencies should trigger runs."
+      ],
+      "derivation": [
+        "Use **remote runs** with RBAC.",
+        "Define **stack dependencies** and output passing.",
+        "Attach **policies** (plan, approval, push).",
+        "Enable **drift detection** schedules.",
+        "Use **private workers** for network access."
+      ]
+    },
+    "analogy": {
+      "title": "A managed print service vs your own printers",
+      "story": "You stop buying toner and fixing jams, and get usage reports and access control included.",
+      "mapping": [
+        [
+          "Printers",
+          "Self-hosted runners"
+        ],
+        [
+          "Managed service",
+          "Spacelift/TFC"
+        ],
+        [
+          "Usage reports",
+          "Audit logs"
+        ]
+      ],
+      "breaks": "Print jobs are simple; infra platforms need network access to private resources."
+    },
+    "mindmap": {
+      "center": "SaaS Orchestration",
+      "branches": [
+        {
+          "label": "Platforms",
+          "children": [
+            "Spacelift",
+            "HCP Terraform",
+            "env0",
+            "Scalr"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Remote runs",
+            "State",
+            "Policies",
+            "Drift detection",
+            "Registry"
+          ]
+        },
+        {
+          "label": "Dependencies",
+          "children": [
+            "Stack deps",
+            "Run triggers",
+            "Output passing"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Cost",
+            "Lock-in",
+            "Less ops"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spacelift stack dependency",
+      "scenario": "Terraform (spacelift provider).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "VPC change triggers app run with new output."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"spacelift_stack_dependency\" \"app_on_vpc\" {\n  stack_id            = spacelift_stack.app.id\n  depends_on_stack_id = spacelift_stack.vpc.id\n}\nresource \"spacelift_stack_dependency_reference\" \"vpc_id\" {\n  stack_dependency_id = spacelift_stack_dependency.app_on_vpc.id\n  output_name         = \"vpc_id\"\n  input_name          = \"TF_VAR_vpc_id\"\n}"
+        }
+      ],
+      "outcome": "managed orchestration with governance."
+    },
+    "summary": {
+      "points": [
+        "Remote runs and state.",
+        "Policies and drift.",
+        "Dependencies trigger runs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why would a SaaS IaC platform need private workers?",
+        "a": "To reach private APIs and resources (and keep credentials) inside your network rather than from the vendor's runners."
+      }
+    ]
+  }
+}
