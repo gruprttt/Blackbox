@@ -1,0 +1,510 @@
+{
+  "the-safety-vs-performance-trade-off": {
+    "core": "Concurrent code must be correct when operations interleave unpredictably. Locks make critical sections safe but serialise work and add contention; finer-grained locks, lock-free structures and immutability improve throughput but increase complexity. Start safe, measure, then optimise hot spots.",
+    "first_principles": {
+      "problem": "A counter incremented by 8 threads ends at 6.2 million instead of 8 million.",
+      "truths": [
+        "count += 1 is read-modify-write, not atomic.",
+        "Interleavings are non-deterministic.",
+        "Locks serialise access."
+      ],
+      "derivation": [
+        "**Identify shared mutable state**.",
+        "**Protect** it (mutex) or **avoid** sharing.",
+        "**Shrink** critical sections.",
+        "**Measure contention** before optimising.",
+        "Prefer **immutability and message passing**."
+      ]
+    },
+    "analogy": {
+      "title": "A single-lane bridge",
+      "story": "A traffic light keeps it safe but cars wait; a second lane costs construction.",
+      "mapping": [
+        [
+          "Bridge",
+          "Shared resource"
+        ],
+        [
+          "Traffic light",
+          "Lock"
+        ],
+        [
+          "Second lane",
+          "Finer-grained design"
+        ]
+      ],
+      "breaks": "Bridges fail loudly; race conditions corrupt data silently."
+    },
+    "mindmap": {
+      "center": "Safety vs Performance",
+      "branches": [
+        {
+          "label": "Hazards",
+          "children": [
+            "Race conditions",
+            "Lost updates"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Mutex",
+            "Immutability",
+            "Message passing"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Fine locks",
+            "Lock-free",
+            "Sharding state"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Correct first, then measure"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing a racy counter",
+      "scenario": "Python threading.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Optimisation",
+          "detail": "Per-thread local counts, summed at the end: no contention."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import threading\nlock = threading.Lock()\ncount = 0\ndef work():\n    global count\n    for _ in range(1_000_000):\n        with lock:\n            count += 1"
+        }
+      ],
+      "outcome": "correct, then fast."
+    },
+    "summary": {
+      "points": [
+        "Shared mutable state is the danger.",
+        "Locks trade speed for safety.",
+        "Optimise measured hot spots."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is count += 1 unsafe across threads?",
+        "a": "It reads, adds and writes separately; interleaved threads can overwrite each other's updates."
+      }
+    ]
+  },
+  "the-reader-writer-lock": {
+    "core": "A reader-writer lock allows many concurrent readers or one exclusive writer. It boosts throughput for read-heavy data like caches and config, but naive versions can starve writers, so fair implementations block new readers once a writer is waiting.",
+    "first_principles": {
+      "problem": "A config map read 10,000 times/sec and updated once a minute is bottlenecked by a mutex.",
+      "truths": [
+        "Concurrent reads don't conflict.",
+        "Writes conflict with everything.",
+        "Continuous readers can starve writers."
+      ],
+      "derivation": [
+        "**Shared lock** for readers.",
+        "**Exclusive lock** for writers.",
+        "**Writer preference** to avoid starvation.",
+        "Consider **copy-on-write/RCU** for very read-heavy data."
+      ]
+    },
+    "analogy": {
+      "title": "A museum exhibit",
+      "story": "Many visitors can look at once, but when curators rearrange it, the room is closed.",
+      "mapping": [
+        [
+          "Visitors",
+          "Readers"
+        ],
+        [
+          "Curators",
+          "Writer"
+        ],
+        [
+          "Closing the room",
+          "Exclusive lock"
+        ]
+      ],
+      "breaks": "Museums schedule closures; writer starvation happens if visitors never stop arriving."
+    },
+    "mindmap": {
+      "center": "RW Lock",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "Shared read",
+            "Exclusive write"
+          ]
+        },
+        {
+          "label": "Good for",
+          "children": [
+            "Read-heavy data"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Writer starvation",
+            "Overhead"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Copy-on-write",
+            "RCU",
+            "Atomic swap"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Implementing with a condition variable",
+      "scenario": "Python sketch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Readers in parallel; waiting writers get priority."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class RWLock:\n    def __init__(self):\n        self.c = threading.Condition(); self.readers = 0; self.writing = False; self.waiting_w = 0\n    def acquire_read(self):\n        with self.c:\n            while self.writing or self.waiting_w: self.c.wait()\n            self.readers += 1\n    def release_read(self):\n        with self.c:\n            self.readers -= 1\n            if self.readers == 0: self.c.notify_all()\n    def acquire_write(self):\n        with self.c:\n            self.waiting_w += 1\n            while self.writing or self.readers: self.c.wait()\n            self.waiting_w -= 1; self.writing = True\n    def release_write(self):\n        with self.c:\n            self.writing = False; self.c.notify_all()"
+        }
+      ],
+      "outcome": "high read throughput without starvation."
+    },
+    "summary": {
+      "points": [
+        "Many readers or one writer.",
+        "Prevent writer starvation.",
+        "Consider copy-on-write."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can a reader-writer lock starve writers?",
+        "a": "If new readers keep acquiring the shared lock, the reader count never reaches zero for the writer."
+      }
+    ]
+  },
+  "the-dining-philosophers-resource-contention-and-deadlock": {
+    "core": "Five philosophers each need both neighbouring forks to eat. If all pick up their left fork at once, everyone waits forever: deadlock. Deadlock needs four Coffman conditions together (mutual exclusion, hold and wait, no preemption and circular wait), and breaking any one prevents it.",
+    "first_principles": {
+      "problem": "A service freezes intermittently when two threads lock accounts A and B in opposite orders.",
+      "truths": [
+        "Holding one lock while waiting for another risks cycles.",
+        "All four conditions are required.",
+        "Deadlocks are timing-dependent."
+      ],
+      "derivation": [
+        "Recognise **Coffman conditions**.",
+        "Break **circular wait** (lock ordering).",
+        "Break **hold-and-wait** (acquire all at once).",
+        "Allow **preemption** (try-lock with timeout).",
+        "Detect with **thread dumps**."
+      ]
+    },
+    "analogy": {
+      "title": "Four cars at a four-way stop all edging forward",
+      "story": "Each waits for the car to its right, and nobody moves.",
+      "mapping": [
+        [
+          "Cars",
+          "Threads"
+        ],
+        [
+          "Intersection space",
+          "Locks"
+        ],
+        [
+          "Waiting in a circle",
+          "Circular wait"
+        ]
+      ],
+      "breaks": "Drivers eventually wave each other on; threads never give up without timeouts."
+    },
+    "mindmap": {
+      "center": "Deadlock",
+      "branches": [
+        {
+          "label": "Coffman",
+          "children": [
+            "Mutual exclusion",
+            "Hold and wait",
+            "No preemption",
+            "Circular wait"
+          ]
+        },
+        {
+          "label": "Prevention",
+          "children": [
+            "Lock ordering",
+            "All-at-once",
+            "Timeouts"
+          ]
+        },
+        {
+          "label": "Detection",
+          "children": [
+            "Thread dumps",
+            "Wait-for graph"
+          ]
+        },
+        {
+          "label": "Related",
+          "children": [
+            "Livelock",
+            "Starvation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bank transfer deadlock",
+      "scenario": "Opposite lock order.",
+      "flow": [
+        "T1: lock A, wants B",
+        "T2: lock B, wants A",
+        "Both wait forever"
+      ],
+      "steps": [
+        {
+          "label": "Diagnosis",
+          "detail": "Thread dump shows the cycle."
+        }
+      ],
+      "code": [],
+      "outcome": "deadlock understood formally."
+    },
+    "summary": {
+      "points": [
+        "Four conditions.",
+        "Break any one.",
+        "Timing-dependent bugs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name the four Coffman conditions.",
+        "a": "Mutual exclusion, hold and wait, no preemption and circular wait."
+      }
+    ]
+  },
+  "breaking-the-deadlock-resource-ordering": {
+    "core": "The simplest deadlock prevention is a global lock order: always acquire locks in a consistent order (e.g. by account ID or memory address). With no thread ever waiting 'backwards', circular wait can't form. For dining philosophers, everyone picks the lower-numbered fork first.",
+    "first_principles": {
+      "problem": "Transfers between accounts deadlock depending on the transfer direction.",
+      "truths": [
+        "Cycles need some thread to acquire in reverse order.",
+        "A total order forbids reverse acquisition.",
+        "IDs give a natural order."
+      ],
+      "derivation": [
+        "Define a **total order** over locks.",
+        "Always **acquire ascending**.",
+        "**Release** in any order.",
+        "Encapsulate in a **helper** so callers can't get it wrong.",
+        "Use **try-lock with backoff** where ordering is impossible."
+      ]
+    },
+    "analogy": {
+      "title": "Everyone climbs the stairs in the same direction",
+      "story": "If people only go up a one-way staircase, they never block each other face to face.",
+      "mapping": [
+        [
+          "One-way stairs",
+          "Lock order"
+        ],
+        [
+          "Face-to-face block",
+          "Deadlock"
+        ],
+        [
+          "Floor numbers",
+          "Lock IDs"
+        ]
+      ],
+      "breaks": "Stairs are physical; code paths acquiring locks indirectly can violate the order unnoticed."
+    },
+    "mindmap": {
+      "center": "Lock Ordering",
+      "branches": [
+        {
+          "label": "Rule",
+          "children": [
+            "Global total order",
+            "Acquire ascending"
+          ]
+        },
+        {
+          "label": "Order by",
+          "children": [
+            "ID",
+            "Address"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Helper function",
+            "Lock hierarchy checks"
+          ]
+        },
+        {
+          "label": "Fallback",
+          "children": [
+            "tryLock + backoff"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ordered transfer",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A→B and B→A both lock the lower ID first: no cycle."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def transfer(a, b, amount):\n    first, second = (a, b) if a.id < b.id else (b, a)\n    with first.lock:\n        with second.lock:\n            a.balance -= amount\n            b.balance += amount"
+        }
+      ],
+      "outcome": "deadlock-free transfers."
+    },
+    "summary": {
+      "points": [
+        "One global order.",
+        "Acquire ascending.",
+        "Wrap it in a helper."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does consistent lock ordering prevent deadlock?",
+        "a": "It removes circular wait: no thread can hold a higher lock while waiting for a lower one."
+      }
+    ]
+  },
+  "atomic-operations-and-lock-free-programming": {
+    "core": "CPUs provide atomic instructions (fetch-and-add, compare-and-swap) that update memory indivisibly. Lock-free algorithms loop on CAS (read, compute, CAS; retry if changed), avoiding lock contention and deadlock, but they're hard to get right (ABA problem, memory ordering) and best left to proven libraries.",
+    "first_principles": {
+      "problem": "A heavily contended counter spends most time waiting on a mutex.",
+      "truths": [
+        "Hardware can make single-word updates atomic.",
+        "CAS succeeds only if the value is unchanged.",
+        "Retries replace blocking."
+      ],
+      "derivation": [
+        "Use **atomic types** (std::atomic, AtomicLong).",
+        "**CAS loop** for custom updates.",
+        "Watch **ABA** (use version tags).",
+        "Understand **memory ordering** (acquire/release).",
+        "Prefer **library structures** (ConcurrentHashMap)."
+      ]
+    },
+    "analogy": {
+      "title": "Editing a shared doc with 'only save if unchanged since I opened it'",
+      "story": "If someone else saved first, reload and retry your edit.",
+      "mapping": [
+        [
+          "Save if unchanged",
+          "CAS"
+        ],
+        [
+          "Reload and retry",
+          "Retry loop"
+        ],
+        [
+          "Shared doc",
+          "Memory word"
+        ]
+      ],
+      "breaks": "Docs show who changed things; ABA means the value can change and change back unnoticed."
+    },
+    "mindmap": {
+      "center": "Lock-Free",
+      "branches": [
+        {
+          "label": "Primitives",
+          "children": [
+            "Atomic add",
+            "CAS",
+            "Load/store ordering"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Read-compute-CAS-retry"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "ABA",
+            "Memory ordering",
+            "Livelock"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Counters",
+            "Queues",
+            "Library structures"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CAS increment",
+      "scenario": "Java.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No locks; threads retry on conflict."
+        }
+      ],
+      "code": [
+        {
+          "lang": "java",
+          "text": "AtomicLong n = new AtomicLong();\nlong prev, next;\ndo {\n    prev = n.get();\n    next = prev + 1;\n} while (!n.compareAndSet(prev, next));\n// or simply n.incrementAndGet()"
+        }
+      ],
+      "outcome": "contention-friendly updates."
+    },
+    "summary": {
+      "points": [
+        "Hardware atomics.",
+        "CAS retry loops.",
+        "Use proven libraries."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the ABA problem?",
+        "a": "A value changes from A to B and back to A, so CAS succeeds even though the state changed in between."
+      }
+    ]
+  }
+}

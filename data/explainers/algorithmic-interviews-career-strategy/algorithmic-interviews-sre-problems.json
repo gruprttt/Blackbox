@@ -1,0 +1,619 @@
+{
+  "introduction-coding-for-reliability": {
+    "core": "SRE coding interviews test practical code over puzzles: parsing logs, streaming big files, merging time intervals, rate limiting and load balancing. Interviewers look for correctness on messy input, bounded memory, clear error handling and awareness of production scale.",
+    "first_principles": {
+      "problem": "Candidates prepared on LeetCode puzzles struggle with 'parse this 50 GB log and find the top errors'.",
+      "truths": [
+        "Production data is messy.",
+        "Files can exceed RAM.",
+        "Reliability code must handle edge cases."
+      ],
+      "derivation": [
+        "**Stream** instead of loading everything.",
+        "**Validate** and skip malformed lines.",
+        "Use **hash maps and heaps** for aggregation.",
+        "Discuss **scale, failure and testing**."
+      ]
+    },
+    "analogy": {
+      "title": "A mechanic's practical exam versus a theory test",
+      "story": "You're handed a real engine with real grime, not a clean diagram.",
+      "mapping": [
+        [
+          "Real engine",
+          "Real logs"
+        ],
+        [
+          "Grime",
+          "Malformed data"
+        ],
+        [
+          "Practical skills",
+          "Robust code"
+        ]
+      ],
+      "breaks": "An engine is finite; logs can be unbounded streams."
+    },
+    "mindmap": {
+      "center": "SRE Coding",
+      "branches": [
+        {
+          "label": "Topics",
+          "children": [
+            "Log parsing",
+            "Streaming",
+            "Intervals",
+            "Rate limiting",
+            "Load balancing"
+          ]
+        },
+        {
+          "label": "Qualities",
+          "children": [
+            "Robust",
+            "Bounded memory",
+            "Readable"
+          ]
+        },
+        {
+          "label": "Discuss",
+          "children": [
+            "Scale",
+            "Failure modes",
+            "Tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Top 5 error endpoints",
+      "scenario": "A typical prompt.",
+      "flow": [
+        "Stream lines",
+        "Regex-parse status and path",
+        "Counter for status ≥ 500",
+        "heapq.nlargest(5)"
+      ],
+      "steps": [
+        {
+          "label": "Extras",
+          "detail": "Mention malformed lines and memory bounds."
+        }
+      ],
+      "code": [],
+      "outcome": "production-minded code."
+    },
+    "summary": {
+      "points": [
+        "Practical over puzzles.",
+        "Stream and validate.",
+        "Talk about scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key difference between SRE and algorithm-puzzle coding rounds?",
+        "a": "SRE rounds emphasise robustness on messy, large real-world data and operational reasoning."
+      }
+    ]
+  },
+  "log-parsing-string-manipulation": {
+    "core": "Log parsing extracts fields (timestamp, level, status, path, latency) from text lines with split() or regular expressions, converts types, and aggregates with dictionaries or Counters. Handle malformed lines gracefully and prefer anchored, precompiled regexes.",
+    "first_principles": {
+      "problem": "A naive split(' ') breaks on quoted fields with spaces, like user agents in access logs.",
+      "truths": [
+        "Log formats have structure but vary.",
+        "Some lines are malformed.",
+        "Aggregation needs typed values."
+      ],
+      "derivation": [
+        "**Choose** split for simple formats, regex for complex ones.",
+        "**Precompile** the regex.",
+        "**Use named groups**.",
+        "**Skip/count** non-matching lines.",
+        "**Aggregate** with Counter or defaultdict."
+      ]
+    },
+    "analogy": {
+      "title": "Sorting the post by reading envelopes",
+      "story": "Find the postcode in a known position; set aside envelopes you can't read.",
+      "mapping": [
+        [
+          "Postcode",
+          "Field"
+        ],
+        [
+          "Known position",
+          "Regex pattern"
+        ],
+        [
+          "Unreadable envelopes",
+          "Malformed lines"
+        ]
+      ],
+      "breaks": "Envelopes follow one standard; logs from different services may not."
+    },
+    "mindmap": {
+      "center": "Log Parsing",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "split",
+            "regex",
+            "named groups"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Match",
+            "Convert",
+            "Aggregate"
+          ]
+        },
+        {
+          "label": "Robustness",
+          "children": [
+            "Skip malformed",
+            "Count errors"
+          ]
+        },
+        {
+          "label": "Structures",
+          "children": [
+            "Counter",
+            "defaultdict"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parse nginx access lines",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Top 5 failing paths, malformed lines skipped."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import re\nfrom collections import Counter\nLINE = re.compile(r'\"(?P<method>\\S+) (?P<path>\\S+) [^\"]*\" (?P<status>\\d{3})')\nc = Counter()\nfor line in open('access.log'):\n    m = LINE.search(line)\n    if m and m['status'].startswith('5'):\n        c[m['path']] += 1\nprint(c.most_common(5))"
+        }
+      ],
+      "outcome": "reliable extraction from messy text."
+    },
+    "summary": {
+      "points": [
+        "Regex for structure.",
+        "Named groups.",
+        "Skip bad lines."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why precompile a regex used in a loop?",
+        "a": "It avoids re-parsing the pattern on every line, which is faster and clearer."
+      }
+    ]
+  },
+  "log-parsing-streaming-large-files": {
+    "core": "When a file is bigger than RAM, read it line by line (iterators/generators) so memory stays constant, aggregate incrementally, and keep only bounded state like counters or a top-k heap. For huge cardinalities, use approximate structures (Count-Min Sketch, HyperLogLog) or external sort.",
+    "first_principles": {
+      "problem": "file.readlines() on a 50 GB log crashes the process.",
+      "truths": [
+        "Iteration processes one item at a time.",
+        "State size, not file size, determines memory.",
+        "Some aggregates need unbounded state."
+      ],
+      "derivation": [
+        "**Iterate** lines lazily.",
+        "Use **generators** for pipelines.",
+        "Keep **bounded state** (heap of size k).",
+        "Use **approximate** sketches for huge key spaces.",
+        "Consider **gzip streams** and **parallel chunks**."
+      ]
+    },
+    "analogy": {
+      "title": "Counting cars from a bridge",
+      "story": "You tally as they pass instead of parking them all in a field first.",
+      "mapping": [
+        [
+          "Passing cars",
+          "Lines"
+        ],
+        [
+          "Tally sheet",
+          "Counter"
+        ],
+        [
+          "Parking field",
+          "Loading into RAM"
+        ]
+      ],
+      "breaks": "A tally sheet can overflow if there are millions of distinct plates, which is where sketches come in."
+    },
+    "mindmap": {
+      "center": "Streaming Files",
+      "branches": [
+        {
+          "label": "Memory",
+          "children": [
+            "Iterate lines",
+            "Generators"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "Counters",
+            "Top-k heap"
+          ]
+        },
+        {
+          "label": "Huge keys",
+          "children": [
+            "Count-Min",
+            "HyperLogLog"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "gzip.open",
+            "Chunked parallelism"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Generator pipeline",
+      "scenario": "Compressed log.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Constant memory regardless of file size."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import gzip, heapq\ndef lines(p):\n    with gzip.open(p, 'rt') as f:\n        yield from f\nlat = (float(l.split()[-1]) for l in lines('app.log.gz'))\nprint(heapq.nlargest(10, lat))"
+        }
+      ],
+      "outcome": "arbitrarily large logs processed safely."
+    },
+    "summary": {
+      "points": [
+        "Never load it all.",
+        "Bounded state.",
+        "Sketches for huge cardinality."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the memory cost of heapq.nlargest(k) over a stream?",
+        "a": "O(k), since it keeps only the k largest items seen so far."
+      }
+    ]
+  },
+  "interval-merging-managing-time": {
+    "core": "Interval problems (merge overlapping outages, find free slots, count concurrent sessions) usually start by sorting intervals by start time. Then sweep: merge when the next start ≤ current end. For concurrency, sweep sorted start/end events or use a min-heap of end times.",
+    "first_principles": {
+      "problem": "Calculate total downtime from overlapping incident windows without double counting.",
+      "truths": [
+        "Sorting by start puts overlapping intervals next to each other.",
+        "Overlap means next.start ≤ current.end.",
+        "Events (+1/−1) give concurrency."
+      ],
+      "derivation": [
+        "**Sort** by start.",
+        "**Merge** if overlapping, else emit.",
+        "**Sweep line**: +1 at start, −1 at end for peak concurrency.",
+        "**Min-heap** of end times for meeting rooms.",
+        "Clarify **inclusive/exclusive** ends."
+      ]
+    },
+    "analogy": {
+      "title": "Combining overlapping bookings on a calendar",
+      "story": "Line them up by start time and join any that touch.",
+      "mapping": [
+        [
+          "Bookings",
+          "Intervals"
+        ],
+        [
+          "Lining up",
+          "Sorting"
+        ],
+        [
+          "Joining",
+          "Merging"
+        ]
+      ],
+      "breaks": "Calendars show the picture; code must handle edge cases like touching endpoints."
+    },
+    "mindmap": {
+      "center": "Intervals",
+      "branches": [
+        {
+          "label": "First step",
+          "children": [
+            "Sort by start"
+          ]
+        },
+        {
+          "label": "Merge",
+          "children": [
+            "start ≤ end → extend"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "Sweep line",
+            "Min-heap"
+          ]
+        },
+        {
+          "label": "Edge cases",
+          "children": [
+            "Touching",
+            "Inclusive ends",
+            "Empty"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Merge outage windows",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Downtime",
+          "detail": "sum(e - s for s, e in merge(iv))."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def merge(iv):\n    out = []\n    for s, e in sorted(iv):\n        if out and s <= out[-1][1]:\n            out[-1][1] = max(out[-1][1], e)\n        else:\n            out.append([s, e])\n    return out"
+        }
+      ],
+      "outcome": "accurate total without double counting."
+    },
+    "summary": {
+      "points": [
+        "Sort by start.",
+        "Merge on overlap.",
+        "Sweep for concurrency."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you find the maximum number of concurrent sessions?",
+        "a": "Sweep sorted events (+1 at start, −1 at end) tracking the running max, or keep a min-heap of end times."
+      }
+    ]
+  },
+  "rate-limiter-algorithms": {
+    "core": "Rate limiters cap requests per client per time. Fixed window counters are simple but burst at boundaries; sliding window log is exact but memory-heavy; sliding window counter approximates cheaply; token bucket allows controlled bursts with a steady refill; leaky bucket smooths output.",
+    "first_principles": {
+      "problem": "A fixed 100/minute limit lets a client send 200 requests in two seconds across a minute boundary.",
+      "truths": [
+        "Time windows have edges.",
+        "Burst tolerance is a product decision.",
+        "Distributed limiters need shared state."
+      ],
+      "derivation": [
+        "**Fixed window**: counter per window.",
+        "**Sliding log**: timestamps deque.",
+        "**Sliding counter**: weighted previous + current.",
+        "**Token bucket**: refill at rate r, capacity b.",
+        "**Distributed**: Redis with atomic ops/Lua."
+      ]
+    },
+    "analogy": {
+      "title": "A token dispenser at an arcade",
+      "story": "Tokens drip out steadily into a cup that holds a few; each game costs a token.",
+      "mapping": [
+        [
+          "Drip rate",
+          "Refill rate"
+        ],
+        [
+          "Cup size",
+          "Burst capacity"
+        ],
+        [
+          "Game",
+          "Request"
+        ]
+      ],
+      "breaks": "Arcade cups are physical; distributed token buckets need synchronisation."
+    },
+    "mindmap": {
+      "center": "Rate Limiters",
+      "branches": [
+        {
+          "label": "Fixed window",
+          "children": [
+            "Simple",
+            "Boundary bursts"
+          ]
+        },
+        {
+          "label": "Sliding log",
+          "children": [
+            "Exact",
+            "Memory"
+          ]
+        },
+        {
+          "label": "Sliding counter",
+          "children": [
+            "Approximate",
+            "Cheap"
+          ]
+        },
+        {
+          "label": "Token bucket",
+          "children": [
+            "Bursts",
+            "Steady rate"
+          ]
+        },
+        {
+          "label": "Leaky bucket",
+          "children": [
+            "Smooth output"
+          ]
+        },
+        {
+          "label": "Distributed",
+          "children": [
+            "Redis",
+            "Atomicity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Token bucket",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bursts up to cap, sustained rate r."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import time\nclass Bucket:\n    def __init__(self, rate, cap):\n        self.rate, self.cap, self.tokens, self.t = rate, cap, cap, time.monotonic()\n    def allow(self):\n        now = time.monotonic()\n        self.tokens = min(self.cap, self.tokens + (now - self.t) * self.rate)\n        self.t = now\n        if self.tokens >= 1:\n            self.tokens -= 1; return True\n        return False"
+        }
+      ],
+      "outcome": "abuse limited without blocking normal bursts."
+    },
+    "summary": {
+      "points": [
+        "Know five algorithms.",
+        "Token bucket is the default.",
+        "Distributed needs atomic state."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does the fixed window algorithm have?",
+        "a": "Bursts at window boundaries can allow up to twice the limit within a short span."
+      }
+    ]
+  },
+  "load-balancer-algorithms": {
+    "core": "Load balancers choose a backend per request. Round robin is simple; weighted round robin respects capacity; least connections adapts to slow requests; power of two choices picks the less loaded of two random backends; consistent hashing keeps the same key on the same server with minimal reshuffling when nodes change.",
+    "first_principles": {
+      "problem": "Round robin overloads a backend stuck on slow requests while others sit idle.",
+      "truths": [
+        "Backends differ in capacity and current load.",
+        "Global load info is expensive.",
+        "Caches benefit from key affinity."
+      ],
+      "derivation": [
+        "**Round robin / weighted**.",
+        "**Least connections** (or least outstanding requests).",
+        "**Power of two choices** for near-optimal balance cheaply.",
+        "**Consistent hashing** (ring + virtual nodes) for affinity.",
+        "**Health checks** to remove bad nodes."
+      ]
+    },
+    "analogy": {
+      "title": "Supermarket checkout lanes",
+      "story": "Shoppers join the shortest queue, or just compare two lanes they can see.",
+      "mapping": [
+        [
+          "Lanes",
+          "Backends"
+        ],
+        [
+          "Shortest queue",
+          "Least connections"
+        ],
+        [
+          "Compare two",
+          "Power of two choices"
+        ]
+      ],
+      "breaks": "Shoppers see queue length directly; balancers have stale or partial load info."
+    },
+    "mindmap": {
+      "center": "Load Balancing",
+      "branches": [
+        {
+          "label": "Static",
+          "children": [
+            "Round robin",
+            "Weighted"
+          ]
+        },
+        {
+          "label": "Dynamic",
+          "children": [
+            "Least connections",
+            "Power of two"
+          ]
+        },
+        {
+          "label": "Affinity",
+          "children": [
+            "Consistent hashing",
+            "Virtual nodes"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Health checks",
+            "Outlier ejection"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Consistent hash ring",
+      "scenario": "Python sketch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Adding a node moves only ~1/N of keys."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import bisect, hashlib\nh = lambda s: int(hashlib.md5(s.encode()).hexdigest(), 16)\nclass Ring:\n    def __init__(self, nodes, v=100):\n        self.ring = sorted((h(f'{n}#{i}'), n) for n in nodes for i in range(v))\n        self.keys = [k for k, _ in self.ring]\n    def get(self, key):\n        i = bisect.bisect(self.keys, h(key)) % len(self.ring)\n        return self.ring[i][1]"
+        }
+      ],
+      "outcome": "balanced load with cache affinity."
+    },
+    "summary": {
+      "points": [
+        "Static vs dynamic.",
+        "Power of two choices.",
+        "Consistent hashing for affinity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use virtual nodes in consistent hashing?",
+        "a": "They spread each server across many ring points, evening out load and reducing hot spots."
+      }
+    ]
+  }
+}

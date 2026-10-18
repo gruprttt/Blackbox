@@ -1,0 +1,515 @@
+{
+  "introduction-no-right-answers": {
+    "core": "System design interviews are open-ended: there's no single correct architecture, only trade-offs. Interviewers assess how you clarify requirements, estimate scale, choose components and justify trade-offs (consistency vs availability, cost vs latency) and how you respond to probing.",
+    "first_principles": {
+      "problem": "Candidates jump straight to drawing Kafka and Cassandra without asking what the system must do.",
+      "truths": [
+        "Requirements determine architecture.",
+        "Every choice trades something.",
+        "Communication is part of the evaluation."
+      ],
+      "derivation": [
+        "**Clarify** functional and non-functional requirements.",
+        "**Estimate** scale.",
+        "**Design** high level, then deep dive.",
+        "**Justify** trade-offs out loud.",
+        "**Adapt** to new constraints."
+      ]
+    },
+    "analogy": {
+      "title": "An architect meeting a client",
+      "story": "You ask about family size, budget and lifestyle before sketching a house.",
+      "mapping": [
+        [
+          "Client brief",
+          "Requirements"
+        ],
+        [
+          "Sketch",
+          "High-level design"
+        ],
+        [
+          "Budget trade-offs",
+          "Engineering trade-offs"
+        ]
+      ],
+      "breaks": "Houses take months to build; you have 45 minutes, so time management matters."
+    },
+    "mindmap": {
+      "center": "System Design Interview",
+      "branches": [
+        {
+          "label": "Evaluated",
+          "children": [
+            "Clarifying",
+            "Estimation",
+            "Trade-offs",
+            "Communication"
+          ]
+        },
+        {
+          "label": "Mistakes",
+          "children": [
+            "Jumping to tech",
+            "No numbers",
+            "Silence"
+          ]
+        },
+        {
+          "label": "Mindset",
+          "children": [
+            "No single answer"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Designing a URL shortener",
+      "scenario": "Opening moves.",
+      "flow": [
+        "Ask: reads vs writes? custom aliases? expiry?",
+        "Estimate: 100M new URLs/month",
+        "Then sketch API, storage, cache"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Questions before boxes."
+        }
+      ],
+      "code": [],
+      "outcome": "a design grounded in requirements."
+    },
+    "summary": {
+      "points": [
+        "No single answer.",
+        "Clarify first.",
+        "Explain trade-offs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should you do first in a system design interview?",
+        "a": "Clarify functional and non-functional requirements and scope."
+      }
+    ]
+  },
+  "back-of-the-envelope-math-powers-of-2": {
+    "core": "Quick estimates decide architecture: requests per second, storage per year and bandwidth. Use powers of 2 (2¹⁰ ≈ 1 thousand, 2²⁰ ≈ 1 million, 2³⁰ ≈ 1 billion), 1 day ≈ 86,400 s ≈ 10⁵ s, and round aggressively. The goal is the order of magnitude, not precision.",
+    "first_principles": {
+      "problem": "Without numbers, a candidate can't tell if one database suffices or a sharded cluster is needed.",
+      "truths": [
+        "Orders of magnitude drive design choices.",
+        "Rounding keeps maths fast.",
+        "Peak traffic exceeds average."
+      ],
+      "derivation": [
+        "**QPS** = daily requests ÷ 10⁵ (× 2–3 for peak).",
+        "**Storage** = items × size × retention.",
+        "**Bandwidth** = QPS × payload.",
+        "**Memory for cache** ≈ 20% of hot data.",
+        "**Sanity-check** against hardware limits."
+      ]
+    },
+    "analogy": {
+      "title": "Estimating how many pizzas to order for a party",
+      "story": "Guests × slices each ÷ slices per pizza, rounded up, with no spreadsheet needed.",
+      "mapping": [
+        [
+          "Guests",
+          "Users"
+        ],
+        [
+          "Slices each",
+          "Requests per user"
+        ],
+        [
+          "Pizzas",
+          "Servers"
+        ]
+      ],
+      "breaks": "Pizza demand is steady; traffic has peaks and spikes."
+    },
+    "mindmap": {
+      "center": "Estimation",
+      "branches": [
+        {
+          "label": "Constants",
+          "children": [
+            "2¹⁰≈10³",
+            "2³⁰≈10⁹",
+            "Day≈10⁵ s"
+          ]
+        },
+        {
+          "label": "Compute",
+          "children": [
+            "QPS",
+            "Storage",
+            "Bandwidth",
+            "Cache"
+          ]
+        },
+        {
+          "label": "Habits",
+          "children": [
+            "Round",
+            "Peak factor",
+            "Sanity check"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Photo-sharing storage",
+      "scenario": "Five years.",
+      "flow": [
+        "10M uploads/day × 500 KB = 5 TB/day",
+        "× 365 × 5 ≈ 9 PB",
+        "Writes: 10⁷ ÷ 10⁵ = 100/s avg, ~300/s peak"
+      ],
+      "steps": [
+        {
+          "label": "Conclusion",
+          "detail": "Object storage needed; metadata DB handles 300 writes/s easily."
+        }
+      ],
+      "code": [],
+      "outcome": "architecture sized by numbers."
+    },
+    "summary": {
+      "points": [
+        "Powers of 2.",
+        "Day ≈ 10⁵ s.",
+        "Order of magnitude."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many requests per second is 1 billion per day?",
+        "a": "About 10⁹ ÷ 10⁵ ≈ 10,000 QPS on average."
+      }
+    ]
+  },
+  "latency-numbers-what-is-slow": {
+    "core": "Know the rough latency ladder: L1 cache ~1 ns, RAM ~100 ns, SSD random read ~100 µs, same-datacenter round trip ~0.5 ms, HDD seek ~10 ms, cross-continent round trip ~100–150 ms. Each step is about 10–1,000× slower, which explains why caching and locality dominate design.",
+    "first_principles": {
+      "problem": "A design makes 50 sequential cross-region calls per request and wonders why p99 is 6 seconds.",
+      "truths": [
+        "Memory is ~1,000× faster than SSD.",
+        "Network round trips add up.",
+        "Speed of light bounds geography."
+      ],
+      "derivation": [
+        "**Cache** in memory near compute.",
+        "**Batch and parallelise** network calls.",
+        "**Avoid** cross-region hops on the hot path.",
+        "**Sequential disk** beats random.",
+        "**Compress** before sending across WAN."
+      ]
+    },
+    "analogy": {
+      "title": "Fetching ingredients",
+      "story": "Grabbing salt from the counter (cache), the pantry (RAM), the corner shop (SSD) or flying abroad (cross-continent).",
+      "mapping": [
+        [
+          "Counter",
+          "CPU cache"
+        ],
+        [
+          "Pantry",
+          "RAM"
+        ],
+        [
+          "Corner shop",
+          "SSD"
+        ],
+        [
+          "Flight abroad",
+          "Cross-region RTT"
+        ]
+      ],
+      "breaks": "You'd never fly abroad for salt, yet a design can do it accidentally with one remote call."
+    },
+    "mindmap": {
+      "center": "Latency Numbers",
+      "branches": [
+        {
+          "label": "Fast",
+          "children": [
+            "L1 1 ns",
+            "RAM 100 ns"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "SSD 100 µs",
+            "HDD 10 ms"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "DC RTT 0.5 ms",
+            "Cross-continent 150 ms"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Cache",
+            "Batch",
+            "Locality"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Budgeting a 200 ms request",
+      "scenario": "Latency budget.",
+      "flow": [
+        "Cross-region call: 150 ms → too much",
+        "Replicate data in-region: 1 ms",
+        "Cache hot keys in RAM: 0.1 ms"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Latency numbers guide data placement."
+        }
+      ],
+      "code": [],
+      "outcome": "designs that meet latency targets."
+    },
+    "summary": {
+      "points": [
+        "Know the ladder.",
+        "Network adds up.",
+        "Cache and co-locate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Roughly how much slower is a cross-continent round trip than a RAM read?",
+        "a": "About a million times (≈100 ms vs ≈100 ns)."
+      }
+    ]
+  },
+  "the-4-step-framework": {
+    "core": "A reliable structure: (1) clarify requirements and scope, (2) estimate scale and define APIs and data model, (3) draw a high-level design, (4) deep dive into bottlenecks, scaling and failure modes, then wrap up with trade-offs. It keeps 45 minutes on track and shows senior thinking.",
+    "first_principles": {
+      "problem": "Candidates spend 30 minutes on database schema and never discuss scaling or failures.",
+      "truths": [
+        "Interviews are time-boxed.",
+        "Interviewers need signal on breadth and depth.",
+        "Structure reduces anxiety."
+      ],
+      "derivation": [
+        "**Step 1 (5 min)**: requirements, scope, NFRs.",
+        "**Step 2 (5–10)**: estimates, API, data model.",
+        "**Step 3 (10–15)**: high-level boxes and flows.",
+        "**Step 4 (15–20)**: deep dives, bottlenecks, failures.",
+        "**Wrap-up**: trade-offs and future work."
+      ]
+    },
+    "analogy": {
+      "title": "A pilot's flight plan",
+      "story": "Pre-flight checks, take-off, cruise, then handling turbulence and landing.",
+      "mapping": [
+        [
+          "Pre-flight",
+          "Requirements"
+        ],
+        [
+          "Route",
+          "High-level design"
+        ],
+        [
+          "Turbulence",
+          "Deep dives"
+        ],
+        [
+          "Landing",
+          "Wrap-up"
+        ]
+      ],
+      "breaks": "Flights rarely change destination; interviewers may change requirements mid-way."
+    },
+    "mindmap": {
+      "center": "4-Step Framework",
+      "branches": [
+        {
+          "label": "1 Clarify",
+          "children": [
+            "Functional",
+            "NFRs"
+          ]
+        },
+        {
+          "label": "2 Estimate",
+          "children": [
+            "Scale",
+            "API",
+            "Data model"
+          ]
+        },
+        {
+          "label": "3 Design",
+          "children": [
+            "Components",
+            "Flows"
+          ]
+        },
+        {
+          "label": "4 Deep dive",
+          "children": [
+            "Bottlenecks",
+            "Failures",
+            "Scaling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Applying it to a chat app",
+      "scenario": "Timeline.",
+      "flow": [
+        "Clarify: 1:1 + groups, online status, 50M DAU",
+        "Estimate: 2B messages/day ≈ 20k/s",
+        "Design: WebSocket gateways, message service, store",
+        "Deep dive: fan-out for groups, ordering, offline delivery"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Breadth and depth within the time."
+        }
+      ],
+      "code": [],
+      "outcome": "a complete, well-paced design."
+    },
+    "summary": {
+      "points": [
+        "Four steps.",
+        "Time-box each.",
+        "Finish with trade-offs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What belongs in the deep-dive step?",
+        "a": "Bottlenecks, scaling strategies, failure modes and detailed component design."
+      }
+    ]
+  },
+  "scaling-concepts-the-toolkit": {
+    "core": "Scaling tools: vertical then horizontal scaling, stateless services behind load balancers, caching (CDN, Redis), read replicas, sharding/partitioning, async processing with queues, denormalisation, and replication with CAP trade-offs. Each solves a specific bottleneck.",
+    "first_principles": {
+      "problem": "The database is the bottleneck, and the candidate's only answer is 'add more servers'.",
+      "truths": [
+        "Bottlenecks move as you scale.",
+        "State is the hard part.",
+        "Each technique has costs."
+      ],
+      "derivation": [
+        "**Stateless** app tier + **LB**.",
+        "**Cache** reads (cache-aside, TTLs).",
+        "**Replicas** for read scale.",
+        "**Shard** for write scale.",
+        "**Queues** for spikes and slow work.",
+        "**CDN** for static content."
+      ]
+    },
+    "analogy": {
+      "title": "Expanding a restaurant",
+      "story": "More waiters (stateless), a prep station (cache), more kitchens (shards) and a ticket rail (queue).",
+      "mapping": [
+        [
+          "Waiters",
+          "Stateless servers"
+        ],
+        [
+          "Prep station",
+          "Cache"
+        ],
+        [
+          "Extra kitchens",
+          "Shards"
+        ],
+        [
+          "Ticket rail",
+          "Queue"
+        ]
+      ],
+      "breaks": "Kitchens don't need consistency; shards and replicas must handle data correctness."
+    },
+    "mindmap": {
+      "center": "Scaling Toolkit",
+      "branches": [
+        {
+          "label": "Compute",
+          "children": [
+            "Vertical",
+            "Horizontal",
+            "Stateless + LB"
+          ]
+        },
+        {
+          "label": "Reads",
+          "children": [
+            "Cache",
+            "Replicas",
+            "CDN"
+          ]
+        },
+        {
+          "label": "Writes",
+          "children": [
+            "Sharding",
+            "Queues"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "CAP",
+            "Consistency",
+            "Complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scaling a read-heavy API",
+      "scenario": "Step by step.",
+      "flow": [
+        "DB at 90% CPU from reads",
+        "Add Redis cache: 85% hit rate",
+        "Add 2 read replicas",
+        "Writes still fine → no sharding yet"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Fix the actual bottleneck, cheapest first."
+        }
+      ],
+      "code": [],
+      "outcome": "scale without needless complexity."
+    },
+    "summary": {
+      "points": [
+        "Stateless compute.",
+        "Cache and replicate reads.",
+        "Shard and queue writes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which technique scales writes beyond one database?",
+        "a": "Sharding (partitioning data across multiple databases)."
+      }
+    ]
+  }
+}

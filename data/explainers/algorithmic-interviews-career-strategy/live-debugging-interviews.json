@@ -1,0 +1,534 @@
+{
+  "the-murder-mystery-mindset": {
+    "core": "Live debugging interviews test method, not memorised fixes. Treat the broken system like a detective case: gather evidence, form hypotheses, test them one at a time and narrate your reasoning. Interviewers score a structured, hypothesis-driven approach above lucky guesses.",
+    "first_principles": {
+      "problem": "Candidates panic and randomly restart services, destroying evidence and learning nothing.",
+      "truths": [
+        "Evidence narrows possibilities.",
+        "Changing things destroys clues.",
+        "Thinking aloud makes reasoning visible."
+      ],
+      "derivation": [
+        "**Clarify** symptoms and timeline.",
+        "**Observe** before changing (logs, metrics, processes).",
+        "**Hypothesise** and test the most likely, cheapest first.",
+        "**Narrate** reasoning.",
+        "**Fix, verify, explain** the root cause."
+      ]
+    },
+    "analogy": {
+      "title": "A detective at a crime scene",
+      "story": "Don't move the body until you've photographed everything, then follow the evidence to the culprit.",
+      "mapping": [
+        [
+          "Crime scene",
+          "Broken system"
+        ],
+        [
+          "Clues",
+          "Logs and metrics"
+        ],
+        [
+          "Suspects",
+          "Hypotheses"
+        ]
+      ],
+      "breaks": "Detectives can't re-run the crime; you can often reproduce the bug."
+    },
+    "mindmap": {
+      "center": "Debugging Mindset",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Clarify",
+            "Observe",
+            "Hypothesise",
+            "Test",
+            "Fix & verify"
+          ]
+        },
+        {
+          "label": "Habits",
+          "children": [
+            "Narrate",
+            "Preserve evidence",
+            "One change at a time"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Random restarts",
+            "Silence"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "'The website is slow'",
+      "scenario": "Opening moves.",
+      "flow": [
+        "Ask: since when? all users? any deploys?",
+        "Check load, memory, disk, errors",
+        "Hypothesis: DB connections exhausted",
+        "Test: count connections → confirmed"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Evidence-led path to the root cause."
+        }
+      ],
+      "code": [],
+      "outcome": "structured, visible problem solving."
+    },
+    "summary": {
+      "points": [
+        "Observe first.",
+        "Hypothesise and test.",
+        "Narrate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why avoid restarting a service immediately?",
+        "a": "It may destroy the evidence (state, logs, stuck processes) needed to find the root cause."
+      }
+    ]
+  },
+  "the-first-60-seconds-vitals-check": {
+    "core": "Start every Linux investigation with a quick vitals sweep covering load, CPU, memory, disk, network and errors: uptime, dmesg | tail, vmstat 1, mpstat -P ALL 1, pidstat 1, iostat -xz 1, free -m, sar -n DEV 1, sar -n TCP,ETCP 1 and top. In a minute you know which resource is saturated.",
+    "first_principles": {
+      "problem": "Candidates dive into application code when the box is out of disk or memory.",
+      "truths": [
+        "Most problems saturate a resource.",
+        "A standard checklist prevents tunnel vision.",
+        "The USE method (Utilisation, Saturation, Errors) covers resources."
+      ],
+      "derivation": [
+        "**uptime**: load trend.",
+        "**dmesg**: OOM kills, hardware errors.",
+        "**vmstat/mpstat**: CPU, run queue, iowait.",
+        "**iostat**: disk latency and util.",
+        "**free/df**: memory and disk space.",
+        "**sar -n**: network and TCP retransmits."
+      ]
+    },
+    "analogy": {
+      "title": "A paramedic's ABC check",
+      "story": "Airway, breathing, circulation, before any specialist diagnosis.",
+      "mapping": [
+        [
+          "Pulse and breathing",
+          "CPU and memory"
+        ],
+        [
+          "ABC checklist",
+          "60-second commands"
+        ],
+        [
+          "Specialist",
+          "Deep dive"
+        ]
+      ],
+      "breaks": "Patients show symptoms visibly; servers need commands to reveal them."
+    },
+    "mindmap": {
+      "center": "Vitals Check",
+      "branches": [
+        {
+          "label": "Load",
+          "children": [
+            "uptime",
+            "top"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "dmesg"
+          ]
+        },
+        {
+          "label": "CPU",
+          "children": [
+            "vmstat",
+            "mpstat",
+            "pidstat"
+          ]
+        },
+        {
+          "label": "Disk",
+          "children": [
+            "iostat",
+            "df"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "free"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "sar -n DEV/TCP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A slow box",
+      "scenario": "Vitals output.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Disk full + memory pressure; OOM killer active."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "uptime            # load 24 on 8 cores\ndmesg | tail      # Out of memory: Killed process 1234 (java)\nfree -m           # available 120 MB\ndf -h /           # 100% used"
+        }
+      ],
+      "outcome": "the saturated resource found in a minute."
+    },
+    "summary": {
+      "points": [
+        "Checklist first.",
+        "USE method.",
+        "dmesg reveals OOM."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does high %wa (iowait) in vmstat suggest?",
+        "a": "CPUs are idle waiting for disk I/O, pointing to a storage bottleneck."
+      }
+    ]
+  },
+  "strace-the-x-ray-machine": {
+    "core": "strace shows every system call a process makes (open, read, connect, futex…) with arguments, return values and timing. It reveals what a black-box program is actually doing: missing files, permission errors, hanging network calls or lock waits, without source code.",
+    "first_principles": {
+      "problem": "A process hangs with no logs and nobody knows why.",
+      "truths": [
+        "Programs interact with the OS only via syscalls.",
+        "Errors appear as return codes like ENOENT or EACCES.",
+        "Blocking calls show where it's stuck."
+      ],
+      "derivation": [
+        "**Attach**: strace -p PID.",
+        "**Follow threads**: -f.",
+        "**Time** calls: -T, -tt.",
+        "**Filter**: -e trace=network,file.",
+        "**Summarise**: -c.",
+        "Beware **overhead** in production."
+      ]
+    },
+    "analogy": {
+      "title": "An X-ray of a patient",
+      "story": "You see the bones and the break without surgery.",
+      "mapping": [
+        [
+          "X-ray",
+          "strace"
+        ],
+        [
+          "Bones",
+          "Syscalls"
+        ],
+        [
+          "Break",
+          "Failing call"
+        ]
+      ],
+      "breaks": "X-rays are harmless-ish; strace can slow a busy process dramatically."
+    },
+    "mindmap": {
+      "center": "strace",
+      "branches": [
+        {
+          "label": "Shows",
+          "children": [
+            "Syscalls",
+            "Args",
+            "Returns",
+            "Timing"
+          ]
+        },
+        {
+          "label": "Flags",
+          "children": [
+            "-p",
+            "-f",
+            "-T",
+            "-e trace=",
+            "-c"
+          ]
+        },
+        {
+          "label": "Finds",
+          "children": [
+            "ENOENT",
+            "EACCES",
+            "Hung connect",
+            "futex waits"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Overhead"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Why won't the app start?",
+      "scenario": "strace.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Missing config file path."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "strace -f -e trace=file ./app 2>&1 | grep -E 'ENOENT|EACCES'\n# openat(AT_FDCWD, \"/etc/app/config.yaml\", O_RDONLY) = -1 ENOENT"
+        }
+      ],
+      "outcome": "root cause without source code."
+    },
+    "summary": {
+      "points": [
+        "See every syscall.",
+        "Errors in return codes.",
+        "Mind the overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a process stuck in futex() usually indicate?",
+        "a": "It's waiting on a lock or condition variable, often contention or deadlock between threads."
+      }
+    ]
+  },
+  "tcpdump-the-wire-tap": {
+    "core": "tcpdump captures packets on an interface with filters (host, port, protocol). It answers 'is traffic actually arriving, and what does it look like?': SYNs without SYN-ACKs, resets, retransmissions, DNS failures or TLS handshakes failing. It's ground truth below the application.",
+    "first_principles": {
+      "problem": "The app says the upstream is down; the upstream team says they never saw a request.",
+      "truths": [
+        "Packets don't lie about what was sent.",
+        "TCP flags reveal connection state.",
+        "Filters keep captures manageable."
+      ],
+      "derivation": [
+        "**Capture**: tcpdump -i any -nn port 443.",
+        "**Filter**: host, port, tcp[tcpflags].",
+        "**Write** to file (-w) for Wireshark.",
+        "**Read** flags: S, S., R, F.",
+        "**Limit** with -c and snaplen."
+      ]
+    },
+    "analogy": {
+      "title": "A wiretap on a phone line",
+      "story": "You hear exactly what was said and whether anyone picked up.",
+      "mapping": [
+        [
+          "Phone line",
+          "Network interface"
+        ],
+        [
+          "Ringing, no answer",
+          "SYN with no SYN-ACK"
+        ],
+        [
+          "Hang-up",
+          "RST"
+        ]
+      ],
+      "breaks": "Encrypted calls hide content; TLS hides payloads, but handshake and flags remain visible."
+    },
+    "mindmap": {
+      "center": "tcpdump",
+      "branches": [
+        {
+          "label": "Filters",
+          "children": [
+            "host",
+            "port",
+            "proto",
+            "flags"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "-nn",
+            "-w file",
+            "-A"
+          ]
+        },
+        {
+          "label": "Diagnoses",
+          "children": [
+            "No SYN-ACK",
+            "RST",
+            "Retransmits",
+            "DNS"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Wireshark",
+            "tshark"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Is the request leaving?",
+      "scenario": "Capture.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "SYNs sent, no reply: firewall/security group dropping."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sudo tcpdump -i any -nn host 10.0.4.12 and port 5432\n# 10.0.1.5.41022 > 10.0.4.12.5432: Flags [S]\n# 10.0.1.5.41022 > 10.0.4.12.5432: Flags [S]   (retransmit, no reply)"
+        }
+      ],
+      "outcome": "network blame resolved with evidence."
+    },
+    "summary": {
+      "points": [
+        "Ground truth on the wire.",
+        "Read TCP flags.",
+        "Filter tightly."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a repeated SYN with no SYN-ACK suggest?",
+        "a": "Packets are being dropped (firewall, routing) or the host isn't reachable or listening."
+      }
+    ]
+  },
+  "reading-proc-the-kernels-live-dashboard": {
+    "core": "/proc is a virtual filesystem exposing live kernel and process state: /proc/<pid>/status (memory, threads), /proc/<pid>/fd (open files), /proc/<pid>/limits, /proc/<pid>/stack, /proc/meminfo, /proc/loadavg and /proc/net/tcp. Tools like ps and top read it, and you can read it directly when tools are missing.",
+    "first_principles": {
+      "problem": "A minimal container has no lsof or top, and a process is leaking file descriptors.",
+      "truths": [
+        "Everything ps/top shows comes from /proc.",
+        "It's always available on Linux.",
+        "Per-process directories expose internals."
+      ],
+      "derivation": [
+        "**FD leaks**: ls /proc/PID/fd | wc -l vs limits.",
+        "**Memory**: VmRSS in status.",
+        "**Where stuck**: wchan, stack.",
+        "**Environment and cmdline**.",
+        "**System**: meminfo, loadavg, net/tcp."
+      ]
+    },
+    "analogy": {
+      "title": "A car's diagnostic port",
+      "story": "Plug in and read every sensor directly, even without the fancy dashboard.",
+      "mapping": [
+        [
+          "Diagnostic port",
+          "/proc"
+        ],
+        [
+          "Sensors",
+          "Kernel counters"
+        ],
+        [
+          "Dashboard",
+          "top/ps"
+        ]
+      ],
+      "breaks": "Diagnostic ports are read-only; some /proc and /proc/sys entries are writable tunables."
+    },
+    "mindmap": {
+      "center": "/proc",
+      "branches": [
+        {
+          "label": "Per process",
+          "children": [
+            "status",
+            "fd",
+            "limits",
+            "stack",
+            "cmdline",
+            "environ"
+          ]
+        },
+        {
+          "label": "System",
+          "children": [
+            "meminfo",
+            "loadavg",
+            "net/tcp"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "FD leaks",
+            "Memory",
+            "Stuck processes"
+          ]
+        },
+        {
+          "label": "Writable",
+          "children": [
+            "/proc/sys tunables"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find an FD leak",
+      "scenario": "No lsof.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "1,000 sockets to one host: connections never closed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ls /proc/4242/fd | wc -l          # 1019\ngrep 'open files' /proc/4242/limits   # 1024\nls -l /proc/4242/fd | awk '{print $NF}' | sort | uniq -c | sort -rn | head"
+        }
+      ],
+      "outcome": "leak diagnosed with only the kernel's own files."
+    },
+    "summary": {
+      "points": [
+        "/proc is the source.",
+        "Always available.",
+        "Per-process insight."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you count a process's open file descriptors without lsof?",
+        "a": "ls /proc/<pid>/fd | wc -l."
+      }
+    ]
+  }
+}
