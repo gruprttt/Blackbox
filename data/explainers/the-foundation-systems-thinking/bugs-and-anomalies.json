@@ -1,0 +1,676 @@
+{
+  "introduction-why-naming-the-beast-matters": {
+    "core": "Bugs come in different kinds (deterministic, observer-sensitive, emergent, latent, decay). Naming the kind first tells you which debugging strategy will work.",
+    "first_principles": {
+      "problem": "Engineers dive into code with a debugger for every bug. That works for some and wastes days on others that vanish when observed or only appear under rare interactions.",
+      "truths": [
+        "Different bug types respond to different techniques.",
+        "Misdiagnosis wastes time.",
+        "Taxonomy speeds triage."
+      ],
+      "derivation": [
+        "Ask first: **does it reproduce reliably?** **Does observing change it?** **Is it emergent?**",
+        "Pick tools accordingly: debugger, logging/tracing, chaos testing, dependency pinning."
+      ]
+    },
+    "analogy": {
+      "title": "Diagnosis before surgery",
+      "story": "A doctor decides whether it's a broken bone or a virus before treating. Surgery on a virus is useless.",
+      "mapping": [
+        [
+          "Broken bone",
+          "Deterministic bug"
+        ],
+        [
+          "Virus",
+          "Emergent / intermittent bug"
+        ],
+        [
+          "Diagnosis",
+          "Bug classification"
+        ]
+      ],
+      "breaks": "Medical categories are well defined. Bug categories overlap, so classification is a starting hypothesis."
+    },
+    "mindmap": {
+      "center": "Bug Taxonomy",
+      "branches": [
+        {
+          "label": "Bohrbug",
+          "children": [
+            "Deterministic"
+          ]
+        },
+        {
+          "label": "Heisenbug",
+          "children": [
+            "Changes when observed"
+          ]
+        },
+        {
+          "label": "Mandelbug",
+          "children": [
+            "Emergent complexity"
+          ]
+        },
+        {
+          "label": "Schroedinbug",
+          "children": [
+            "Latent until noticed"
+          ]
+        },
+        {
+          "label": "Rot",
+          "children": [
+            "Environment drift"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An intermittent checkout failure",
+      "scenario": "1 in 1,000 checkouts fails.",
+      "flow": [
+        "Reproducible? No",
+        "Timing related? Likely",
+        "Classify: Heisenbug",
+        "Use tracing, not breakpoints"
+      ],
+      "steps": [
+        {
+          "label": "Choice",
+          "detail": "Breakpoints would change timing; distributed tracing captures it without pausing."
+        }
+      ],
+      "code": [],
+      "outcome": "the right tool is chosen from the start."
+    },
+    "summary": {
+      "points": [
+        "Classify before debugging.",
+        "Each type has its tools.",
+        "Saves hours."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why classify a bug first?",
+        "a": "Because the effective debugging technique depends on the bug's nature."
+      }
+    ]
+  },
+  "bohrbugs-the-deterministic-failures": {
+    "core": "A Bohrbug fails the same way every time under the same conditions. It's the easiest kind: reproduce, isolate, fix, and add a regression test.",
+    "first_principles": {
+      "problem": "A function always returns the wrong total for orders with discounts. It's annoying, but completely predictable.",
+      "truths": [
+        "Same input, same failure.",
+        "Reproduction is straightforward.",
+        "Tests can pin it down permanently."
+      ],
+      "derivation": [
+        "**Reproduce** with minimal input.",
+        "**Bisect** (git bisect, binary search on input).",
+        "**Fix** and add a **regression test**."
+      ]
+    },
+    "analogy": {
+      "title": "A broken light switch",
+      "story": "Flip it and the light stays off, every time, for everyone. You know exactly where to look.",
+      "mapping": [
+        [
+          "Broken switch",
+          "Deterministic defect"
+        ],
+        [
+          "Flipping it",
+          "Reproduction"
+        ],
+        [
+          "Replacing the switch",
+          "Fix + test"
+        ]
+      ],
+      "breaks": "Switches have one failure mode. Code can have several Bohrbugs masking each other."
+    },
+    "mindmap": {
+      "center": "Bohrbugs",
+      "branches": [
+        {
+          "label": "Trait",
+          "children": [
+            "Repeatable"
+          ]
+        },
+        {
+          "label": "Name",
+          "children": [
+            "Bohr's predictable atom"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Debugger",
+            "git bisect",
+            "Unit tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Wrong discount total",
+      "scenario": "Orders with two coupons total incorrectly.",
+      "flow": [
+        "Reproduce with 2 coupons",
+        "git bisect finds commit",
+        "Fix rounding",
+        "Add test"
+      ],
+      "steps": [
+        {
+          "label": "Bisect",
+          "detail": "The failing commit changed coupon stacking order."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "git bisect start && git bisect bad HEAD && git bisect good v2.3.0"
+        }
+      ],
+      "outcome": "fixed once and protected by a test forever."
+    },
+    "summary": {
+      "points": [
+        "Repeatable failures.",
+        "Reproduce, bisect, fix.",
+        "Always add a regression test."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the best tool to find which commit introduced a Bohrbug?",
+        "a": "git bisect, which binary-searches commits."
+      }
+    ]
+  },
+  "heisenbugs-the-observer-dependent-failures": {
+    "core": "A Heisenbug disappears or changes when you try to observe it, because debugging alters timing, memory layout or optimisation. Use low-overhead observation instead of pausing the program.",
+    "first_principles": {
+      "problem": "A race condition crashes in production but never under the debugger, because breakpoints and logs change the timing that triggers it.",
+      "truths": [
+        "Observation can change timing.",
+        "Races depend on precise interleavings.",
+        "Optimised and debug builds differ."
+      ],
+      "derivation": [
+        "Use **non-intrusive** tools: tracing, sampling profilers, core dumps.",
+        "Increase **concurrency or load** to provoke it.",
+        "Use **race detectors** (`go test -race`, TSan).",
+        "Record and **replay** where possible."
+      ]
+    },
+    "analogy": {
+      "title": "A car rattle that stops at the mechanic",
+      "story": "The noise vanishes when the mechanic listens, and returns on the drive home.",
+      "mapping": [
+        [
+          "Mechanic listening",
+          "Debugger attached"
+        ],
+        [
+          "Rattle vanishes",
+          "Bug hides"
+        ],
+        [
+          "Dashcam recording",
+          "Tracing / core dumps"
+        ]
+      ],
+      "breaks": "Cars rattle for physical reasons. Heisenbugs are often timing races that need special tools."
+    },
+    "mindmap": {
+      "center": "Heisenbugs",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Races",
+            "Uninitialised memory",
+            "Optimisation"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Breakpoints"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Tracing",
+            "Race detectors",
+            "Stress tests",
+            "Core dumps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Crash under load only",
+      "scenario": "A Go service panics 1 in 10,000 requests.",
+      "flow": [
+        "Debugger: no crash",
+        "go test -race",
+        "Data race found",
+        "Add mutex"
+      ],
+      "steps": [
+        {
+          "label": "Tool",
+          "detail": "The race detector reports two goroutines writing a shared map."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "go test -race ./..."
+        }
+      ],
+      "outcome": "the hidden race is found without changing timing by hand."
+    },
+    "summary": {
+      "points": [
+        "Observation changes behaviour.",
+        "Use low-overhead tools.",
+        "Provoke with load."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do breakpoints often hide race conditions?",
+        "a": "They change thread timing, so the problematic interleaving no longer happens."
+      }
+    ]
+  },
+  "mandelbugs-the-deeply-complex-failures": {
+    "core": "A Mandelbug arises from so many interacting factors that it looks chaotic, though it's deterministic underneath. Find it by narrowing conditions and correlating many signals, not by stepping through code.",
+    "first_principles": {
+      "problem": "A memory spike happens only with a certain traffic mix, a specific GC setting, a cron job and one tenant's large payloads. No single factor explains it.",
+      "truths": [
+        "Interactions create emergent behaviour.",
+        "Single-variable tests miss combinations.",
+        "Rich telemetry exposes correlations."
+      ],
+      "derivation": [
+        "Collect **wide telemetry** (high-cardinality events, traces).",
+        "**Slice by dimensions** (tenant, version, region) to find what's different.",
+        "**Reduce the system**: isolate components until it stops.",
+        "Accept **mitigations** while investigating."
+      ]
+    },
+    "analogy": {
+      "title": "A fractal",
+      "story": "The closer you zoom, the more detail appears: there's always another layer of cause.",
+      "mapping": [
+        [
+          "Zooming into a fractal",
+          "Peeling layers of causes"
+        ],
+        [
+          "Infinite detail",
+          "Many interacting factors"
+        ],
+        [
+          "Pattern",
+          "Correlated dimensions"
+        ]
+      ],
+      "breaks": "Fractals are infinite; real bugs eventually have a finite set of causes you can find."
+    },
+    "mindmap": {
+      "center": "Mandelbugs",
+      "branches": [
+        {
+          "label": "Trait",
+          "children": [
+            "Emergent",
+            "Looks random"
+          ]
+        },
+        {
+          "label": "Approach",
+          "children": [
+            "Wide telemetry",
+            "Slice by dimension",
+            "Isolate"
+          ]
+        },
+        {
+          "label": "Meanwhile",
+          "children": [
+            "Mitigate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Memory spike every few days",
+      "scenario": "No obvious trigger.",
+      "flow": [
+        "Slice by tenant",
+        "One tenant correlates",
+        "Large payload + GC setting",
+        "Fix buffering"
+      ],
+      "steps": [
+        {
+          "label": "Observability",
+          "detail": "Per-request events with tenant and payload size made the pattern visible."
+        }
+      ],
+      "code": [],
+      "outcome": "an apparently random bug resolves into a specific combination."
+    },
+    "summary": {
+      "points": [
+        "Many factors interact.",
+        "Slice wide telemetry.",
+        "Mitigate while hunting."
+      ]
+    },
+    "check": [
+      {
+        "q": "How is a Mandelbug different from a Heisenbug?",
+        "a": "A Heisenbug hides when observed; a Mandelbug is caused by complex interactions that make it look chaotic."
+      }
+    ]
+  },
+  "schroedinbugs-the-bugs-that-shouldnt-have-worked": {
+    "core": "A Schroedinbug is code that was always wrong but worked by luck, until something (a review, a refactor, new data) exposes it and it starts failing.",
+    "first_principles": {
+      "problem": "An off-by-one error ran for two years because the data never hit the edge case. A refactor or new input finally triggers it, and everyone wonders how it ever worked.",
+      "truths": [
+        "Lucky conditions can hide bugs.",
+        "Changing context exposes latent defects.",
+        "Tests often miss edge cases."
+      ],
+      "derivation": [
+        "When code 'shouldn't work', **investigate why it did**.",
+        "Add **edge-case tests** (boundaries, empty, max).",
+        "Use **property-based testing** and fuzzing.",
+        "Be careful when **inputs change** (new customers, migrations)."
+      ]
+    },
+    "analogy": {
+      "title": "A cracked foundation that held for years",
+      "story": "The house stood fine until heavier furniture arrived, then the crack mattered.",
+      "mapping": [
+        [
+          "Crack",
+          "Latent bug"
+        ],
+        [
+          "Light load",
+          "Lucky inputs"
+        ],
+        [
+          "Heavy furniture",
+          "New data / refactor"
+        ]
+      ],
+      "breaks": "Cracks are visible on inspection. Latent bugs often need specific inputs to appear."
+    },
+    "mindmap": {
+      "center": "Schroedinbugs",
+      "branches": [
+        {
+          "label": "Trait",
+          "children": [
+            "Always broken",
+            "Hidden by luck"
+          ]
+        },
+        {
+          "label": "Triggers",
+          "children": [
+            "Refactor",
+            "New data",
+            "Review"
+          ]
+        },
+        {
+          "label": "Prevent",
+          "children": [
+            "Edge-case tests",
+            "Property tests",
+            "Fuzzing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pagination off-by-one",
+      "scenario": "Page size 100 skips one record when totals exceed 10,000.",
+      "flow": [
+        "Small datasets fine",
+        "Big customer arrives",
+        "Missing records",
+        "Fix + property test"
+      ],
+      "steps": [
+        {
+          "label": "Prevention",
+          "detail": "Property test: every record appears exactly once across pages."
+        }
+      ],
+      "code": [],
+      "outcome": "the latent bug is fixed and its class tested."
+    },
+    "summary": {
+      "points": [
+        "Working ≠ correct.",
+        "Investigate surprises.",
+        "Test edges and properties."
+      ]
+    },
+    "check": [
+      {
+        "q": "What usually exposes a Schroedinbug?",
+        "a": "A change in context: new inputs, a refactor, or someone reading the code closely."
+      }
+    ]
+  },
+  "software-rot-bit-rot": {
+    "core": "Unchanged code breaks over time because its environment changes: dependencies, APIs, certificates, OS versions, data shapes. Fight rot with pinning, regular updates and continuous testing.",
+    "first_principles": {
+      "problem": "A deployment script untouched for three years fails today. The code didn't change; the world around it did.",
+      "truths": [
+        "Dependencies evolve and deprecate.",
+        "External services change behaviour.",
+        "Unexercised code paths decay silently."
+      ],
+      "derivation": [
+        "**Pin** dependency versions and use lockfiles.",
+        "**Update regularly** in small steps (Dependabot/Renovate).",
+        "**Run** rarely used paths regularly (scheduled CI).",
+        "**Delete** code you don't use."
+      ]
+    },
+    "analogy": {
+      "title": "A car left in a garage",
+      "story": "Untouched for years, the tyres deflate, the battery dies and the fuel goes stale, though nobody 'changed' the car.",
+      "mapping": [
+        [
+          "Flat tyres, dead battery",
+          "Expired certs, deprecated APIs"
+        ],
+        [
+          "Regular drives",
+          "Scheduled CI runs"
+        ],
+        [
+          "Servicing",
+          "Dependency updates"
+        ]
+      ],
+      "breaks": "Cars rot physically. Software rots through its environment, so the fix is exercise and updates."
+    },
+    "mindmap": {
+      "center": "Software Rot",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Dependency drift",
+            "API changes",
+            "Expired certs",
+            "OS upgrades"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Pin + lockfiles",
+            "Small regular updates",
+            "Scheduled CI",
+            "Delete dead code"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The 3-year-old deploy script",
+      "scenario": "Fails with a TLS error.",
+      "flow": [
+        "Script unchanged",
+        "Endpoint now requires TLS 1.2",
+        "Old client fails",
+        "Update + nightly CI run"
+      ],
+      "steps": [
+        {
+          "label": "Prevention",
+          "detail": "A nightly run would have caught it months earlier."
+        }
+      ],
+      "code": [],
+      "outcome": "rot is caught early by continuously exercising code."
+    },
+    "summary": {
+      "points": [
+        "Environments change.",
+        "Pin and update regularly.",
+        "Exercise unused paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does unchanged code break?",
+        "a": "Its dependencies, platforms and external services change around it."
+      }
+    ]
+  },
+  "anomalies-in-distributed-systems": {
+    "core": "Distributed systems add anomalies single machines don't have: partial failures, network partitions, clock skew, retries causing duplicates, and emergent cascades. The eight fallacies of distributed computing name the false assumptions.",
+    "first_principles": {
+      "problem": "Code that assumes the network is reliable, latency is zero and time is consistent works in testing and fails strangely in production.",
+      "truths": [
+        "The network is unreliable.",
+        "Latency isn't zero.",
+        "Clocks disagree."
+      ],
+      "derivation": [
+        "Design for **partial failure**: timeouts, retries with idempotency.",
+        "Handle **duplicates and reordering**.",
+        "Don't trust **clock ordering** across machines.",
+        "Use **tracing** to follow requests across services.",
+        "Remember the **eight fallacies** (reliable network, zero latency, infinite bandwidth, secure network, stable topology, one admin, zero transport cost, homogeneous network)."
+      ]
+    },
+    "analogy": {
+      "title": "Coordinating by post",
+      "story": "Letters get lost, arrive out of order or twice, and each person's watch shows a different time.",
+      "mapping": [
+        [
+          "Lost letters",
+          "Dropped packets"
+        ],
+        [
+          "Duplicate letters",
+          "Retries"
+        ],
+        [
+          "Different watches",
+          "Clock skew"
+        ]
+      ],
+      "breaks": "Post delays are days; network delays are milliseconds but happen millions of times."
+    },
+    "mindmap": {
+      "center": "Distributed Anomalies",
+      "branches": [
+        {
+          "label": "Fallacies",
+          "children": [
+            "Reliable network",
+            "Zero latency",
+            "Infinite bandwidth",
+            "Stable topology"
+          ]
+        },
+        {
+          "label": "Anomalies",
+          "children": [
+            "Partial failure",
+            "Duplicates",
+            "Reordering",
+            "Clock skew"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Idempotency",
+            "Timeouts",
+            "Tracing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Double charges",
+      "scenario": "A payment call times out and is retried.",
+      "flow": [
+        "Charge succeeds",
+        "Response lost",
+        "Client retries",
+        "Double charge",
+        "Fix: idempotency key"
+      ],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "The server stores idempotency keys and returns the original result on retry."
+        }
+      ],
+      "code": [],
+      "outcome": "retries become safe."
+    },
+    "summary": {
+      "points": [
+        "Assume the network fails.",
+        "Make operations idempotent.",
+        "Trace across services."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name three of the eight fallacies.",
+        "a": "The network is reliable; latency is zero; bandwidth is infinite."
+      }
+    ]
+  }
+}
