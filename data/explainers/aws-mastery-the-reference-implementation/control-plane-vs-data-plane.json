@@ -1,0 +1,705 @@
+{
+  "introduction-the-pilot-and-the-engines": {
+    "core": "Every AWS service has a control plane (APIs that create, modify and delete resources: launching instances, changing DNS records) and a data plane (the resources doing the work: running instances, answering DNS queries). Data planes are simpler and more available; control planes are complex and fail more often.",
+    "first_principles": {
+      "problem": "A recovery plan depends on launching new instances during an outage, exactly when the EC2 APIs are degraded.",
+      "truths": [
+        "Control planes have more logic and dependencies.",
+        "Data planes must keep running independently.",
+        "Outages often hit control planes first."
+      ],
+      "derivation": [
+        "**Classify** each dependency as control or data plane.",
+        "**Rely on data planes** during recovery.",
+        "**Pre-provision** what you'll need.",
+        "**Avoid** control-plane calls in critical paths."
+      ]
+    },
+    "analogy": {
+      "title": "A plane's pilot and its engines",
+      "story": "If the radio to air traffic control fails, the engines keep flying the plane.",
+      "mapping": [
+        [
+          "Air traffic control",
+          "Control plane"
+        ],
+        [
+          "Engines",
+          "Data plane"
+        ],
+        [
+          "Flying on",
+          "Static stability"
+        ]
+      ],
+      "breaks": "Pilots can improvise; systems must be designed in advance not to need the control plane."
+    },
+    "mindmap": {
+      "center": "Control vs Data Plane",
+      "branches": [
+        {
+          "label": "Control plane",
+          "children": [
+            "Create/modify/delete",
+            "Complex",
+            "Less available"
+          ]
+        },
+        {
+          "label": "Data plane",
+          "children": [
+            "Serving traffic",
+            "Simple",
+            "More available"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Recover via data plane"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "EC2 RunInstances vs running instance",
+            "Route 53 API vs DNS answers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Classifying dependencies",
+      "scenario": "Examples.",
+      "flow": [
+        "RunInstances → control plane",
+        "Running EC2 instance → data plane",
+        "ChangeResourceRecordSets → control plane",
+        "DNS query answers → data plane"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "You know which parts to avoid in recovery."
+        }
+      ],
+      "code": [],
+      "outcome": "dependencies understood by plane."
+    },
+    "summary": {
+      "points": [
+        "Two planes per service.",
+        "Data planes are more available.",
+        "Recover without the control plane."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is changing a Route 53 record a control- or data-plane action?",
+        "a": "Control plane; answering DNS queries is the data plane."
+      }
+    ]
+  },
+  "the-availability-gap": {
+    "core": "Control planes are typically less available than data planes because they involve more components, workflows, databases and validation. AWS designs data planes for higher availability, and SLAs often reflect that. Recovery mechanisms that need control planes inherit their lower availability during the very events that trigger them.",
+    "first_principles": {
+      "problem": "A team assumes failover will work because the service SLA is high, without noticing the failover uses an API call.",
+      "truths": [
+        "More moving parts means lower availability.",
+        "Large events stress control planes (everyone calls APIs at once).",
+        "Data planes run with fewer dependencies."
+      ],
+      "derivation": [
+        "**Expect control-plane impairment** during regional events.",
+        "**Measure** which recovery actions use APIs.",
+        "Design **data-plane-only failover** (health checks, pre-scaled capacity).",
+        "Avoid **thundering herd** of API calls."
+      ]
+    },
+    "analogy": {
+      "title": "A ticket office versus the trains",
+      "story": "During a storm, the ticket office queue explodes while trains already running keep moving.",
+      "mapping": [
+        [
+          "Ticket office",
+          "Control plane"
+        ],
+        [
+          "Running trains",
+          "Data plane"
+        ],
+        [
+          "Storm queue",
+          "API throttling during events"
+        ]
+      ],
+      "breaks": "Ticket offices close visibly; control-plane degradation can be partial and confusing."
+    },
+    "mindmap": {
+      "center": "Availability Gap",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "More components",
+            "Workflows",
+            "Validation"
+          ]
+        },
+        {
+          "label": "When",
+          "children": [
+            "Large-scale events",
+            "Thundering herd"
+          ]
+        },
+        {
+          "label": "Implication",
+          "children": [
+            "Recovery via APIs is fragile"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Pre-provision",
+            "Data-plane failover"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AZ failure response",
+      "scenario": "Two plans.",
+      "flow": [
+        "Plan A: launch replacement instances in other AZs (control plane, may throttle)",
+        "Plan B: run N+1 capacity across AZs already (data plane)",
+        "Plan B survives"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Pay for headroom to avoid API dependency."
+        }
+      ],
+      "code": [],
+      "outcome": "realistic recovery planning."
+    },
+    "summary": {
+      "points": [
+        "Control planes are less available.",
+        "Events stress them most.",
+        "Pre-provision."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are control planes stressed during large outages?",
+        "a": "Many customers simultaneously call APIs to recover, causing throttling and slowness."
+      }
+    ]
+  },
+  "the-cardinal-sin-control-plane-dependency": {
+    "core": "The cardinal sin is making your data path depend on a control plane: calling IAM or describe APIs per request, looking up configuration through management APIs on every call, or requiring resource creation to serve traffic. When that control plane wobbles, your whole service fails even though the data plane is fine.",
+    "first_principles": {
+      "problem": "A service calls DescribeInstances on each request to discover peers, and goes down when EC2 APIs throttle.",
+      "truths": [
+        "Per-request API calls amplify dependency.",
+        "Describe APIs have rate limits.",
+        "Cached state can serve during outages."
+      ],
+      "derivation": [
+        "**Never call control-plane APIs per request**.",
+        "**Cache** configuration with long fallback TTLs.",
+        "Use **data-plane discovery** (DNS, Cloud Map data plane).",
+        "**Fail static**: keep last known good config.",
+        "**Load test** with API throttling."
+      ]
+    },
+    "analogy": {
+      "title": "Calling head office to approve every sale",
+      "story": "When their phone line is busy, every till in every shop stops.",
+      "mapping": [
+        [
+          "Head office approval",
+          "Control-plane API"
+        ],
+        [
+          "Tills",
+          "Request path"
+        ],
+        [
+          "Busy line",
+          "Throttling/outage"
+        ]
+      ],
+      "breaks": "Shops could take cash anyway; code only does what it was designed to do."
+    },
+    "mindmap": {
+      "center": "Control-Plane Dependency",
+      "branches": [
+        {
+          "label": "Anti-patterns",
+          "children": [
+            "Describe per request",
+            "Config via API per call",
+            "Create resources to serve"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Cache",
+            "Fail static",
+            "Data-plane discovery"
+          ]
+        },
+        {
+          "label": "Test",
+          "children": [
+            "Inject API throttling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing peer discovery",
+      "scenario": "Before/after.",
+      "flow": [
+        "Before: DescribeInstances per request",
+        "After: refresh peer list every 60 s, keep last good",
+        "API outage: service keeps serving with cached peers"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Data path independent of the control plane."
+        }
+      ],
+      "code": [],
+      "outcome": "services that survive API outages."
+    },
+    "summary": {
+      "points": [
+        "No APIs in the hot path.",
+        "Cache and fail static.",
+        "Test with throttling."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should a service do if its config API becomes unavailable?",
+        "a": "Keep running on the last known good configuration (fail static)."
+      }
+    ]
+  },
+  "static-stability-the-holy-grail": {
+    "core": "A statically stable system keeps working during a dependency failure without needing to change anything. For example, running enough capacity across three AZs that losing one still leaves sufficient capacity, rather than relying on launching replacements. Stability comes from pre-provisioning and avoiding reactive control-plane actions.",
+    "first_principles": {
+      "problem": "An AZ outage requires autoscaling to launch 50% more instances, but launches are delayed for hours.",
+      "truths": [
+        "Reacting requires working control planes.",
+        "Pre-provisioned capacity is already there.",
+        "Over-provisioning costs money but buys resilience."
+      ],
+      "derivation": [
+        "**Provision N+1 AZ capacity** (e.g. 150% across 3 AZs).",
+        "**Pre-establish** connections, DNS records and failover routes.",
+        "**Health checks** shift traffic in the data plane.",
+        "**Avoid** needing new resources to recover.",
+        "Quantify the **cost of static stability**."
+      ]
+    },
+    "analogy": {
+      "title": "A building with a backup generator already running",
+      "story": "When the grid fails, lights stay on; no one needs to order a generator.",
+      "mapping": [
+        [
+          "Running backup generator",
+          "Pre-provisioned capacity"
+        ],
+        [
+          "Ordering a generator",
+          "Launching instances during outage"
+        ],
+        [
+          "Grid",
+          "Primary AZ"
+        ]
+      ],
+      "breaks": "Generators cost fuel only when used; idle capacity costs money all the time."
+    },
+    "mindmap": {
+      "center": "Static Stability",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Keep working without changes"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "N+1 capacity",
+            "Pre-provisioned failover",
+            "Data-plane health checks"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Reactive scaling to recover"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Extra cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Capacity across 3 AZs",
+      "scenario": "Maths.",
+      "flow": [
+        "Need 300 instances' worth of capacity",
+        "Run 150 per AZ × 3 = 450",
+        "Lose 1 AZ → 300 remain → no action needed"
+      ],
+      "steps": [
+        {
+          "label": "Cost",
+          "detail": "50% extra capacity buys AZ-failure immunity."
+        }
+      ],
+      "code": [],
+      "outcome": "no recovery actions required."
+    },
+    "summary": {
+      "points": [
+        "Don't react; pre-provision.",
+        "N+1 capacity.",
+        "Data-plane failover."
+      ]
+    },
+    "check": [
+      {
+        "q": "How much capacity per AZ do you need across 3 AZs to survive one AZ loss statically?",
+        "a": "50% of total required load per AZ (150% overall)."
+      }
+    ]
+  },
+  "case-study-route-53-and-the-100-sla": {
+    "core": "Route 53's DNS data plane is engineered for a 100% availability SLA: anycast across many edge locations, independent server fleets (shuffle sharding of name servers per zone) and static answers. Its control plane (changing records) lives in one region and is less available, so failover should rely on health checks (data plane), not record edits during an incident.",
+    "first_principles": {
+      "problem": "A DR runbook says 'update DNS to point at the DR region', which needs the Route 53 control plane during a crisis.",
+      "truths": [
+        "DNS answers are served globally from the edge.",
+        "Record changes go through a central control plane.",
+        "Health checks run in the data plane."
+      ],
+      "derivation": [
+        "Pre-configure **failover/weighted records** with health checks.",
+        "Use **Application Recovery Controller routing controls** (highly available data-plane switches).",
+        "**Avoid editing records** to fail over.",
+        "Use **shuffle-sharded name servers** advantage.",
+        "**Test** failover regularly."
+      ]
+    },
+    "analogy": {
+      "title": "Pre-printed road diversion signs with automatic lights",
+      "story": "When the road closes, sensors flip the lights; nobody needs to print new signs in the storm.",
+      "mapping": [
+        [
+          "Pre-printed signs",
+          "Pre-configured records"
+        ],
+        [
+          "Sensors",
+          "Health checks"
+        ],
+        [
+          "Printing new signs",
+          "Control-plane record edits"
+        ]
+      ],
+      "breaks": "Road signs are local; DNS answers are cached by resolvers for the TTL."
+    },
+    "mindmap": {
+      "center": "Route 53 Case Study",
+      "branches": [
+        {
+          "label": "Data plane",
+          "children": [
+            "Anycast",
+            "100% SLA",
+            "Shuffle sharding",
+            "Health checks"
+          ]
+        },
+        {
+          "label": "Control plane",
+          "children": [
+            "Record changes",
+            "Single region"
+          ]
+        },
+        {
+          "label": "Failover",
+          "children": [
+            "Health-checked records",
+            "ARC routing controls"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Editing records in incidents"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Health-checked failover",
+      "scenario": "Design.",
+      "flow": [
+        "Primary record → us-east-1 ALB with health check",
+        "Secondary → eu-west-1 ALB",
+        "Primary unhealthy → DNS answers flip automatically",
+        "No API calls needed"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failover through the 100%-SLA data plane."
+        }
+      ],
+      "code": [],
+      "outcome": "DNS failover that works in a crisis."
+    },
+    "summary": {
+      "points": [
+        "DNS answers are the data plane.",
+        "Pre-configure failover.",
+        "Don't edit records mid-incident."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use health-checked failover records instead of editing DNS during an incident?",
+        "a": "Health checks and answers are data-plane operations; editing records depends on the less available control plane."
+      }
+    ]
+  },
+  "the-big-red-button-problem": {
+    "core": "A 'big red button' manual failover sounds safe, but if pressing it calls control-plane APIs, deploys code or needs credentials from a dependent system, it may not work when needed. Design failover switches that are simple, pre-tested, data-plane based, highly available and protected against accidental or partial use.",
+    "first_principles": {
+      "problem": "During a regional outage, the failover script can't run because it needs IAM in the failed region and a CI pipeline that's also down.",
+      "truths": [
+        "Failover tools have their own dependencies.",
+        "Rarely used tools rot.",
+        "Humans under stress make mistakes."
+      ],
+      "derivation": [
+        "**Minimise dependencies** of the switch (ARC routing controls across 5 regions).",
+        "**Pre-stage** everything the switch toggles.",
+        "**Practise** regularly.",
+        "Add **safety rules** (don't fail both sides).",
+        "Keep **break-glass credentials** independent."
+      ]
+    },
+    "analogy": {
+      "title": "A fire alarm wired to the mains it's meant to protect",
+      "story": "If the fire cuts the power, the alarm is silent.",
+      "mapping": [
+        [
+          "Alarm on mains",
+          "Failover tool depending on failed region"
+        ],
+        [
+          "Battery backup",
+          "Independent data-plane switch"
+        ],
+        [
+          "Fire drill",
+          "Failover rehearsal"
+        ]
+      ],
+      "breaks": "Fire alarms are simple; failover often requires coordinated multi-step changes."
+    },
+    "mindmap": {
+      "center": "Big Red Button",
+      "branches": [
+        {
+          "label": "Risks",
+          "children": [
+            "Hidden dependencies",
+            "Rot",
+            "Human error"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Data-plane switches",
+            "Pre-staged",
+            "Safety rules"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Route 53 ARC",
+            "Break-glass access"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Regular drills"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dependency audit of a failover",
+      "scenario": "Findings.",
+      "flow": [
+        "Script runs in CI (in failed region) ✗",
+        "Uses SSO via primary-region IdP ✗",
+        "Edits Route 53 records (control plane) ✗",
+        "Redesign: ARC routing control toggled via any of 5 regional endpoints ✓"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failover independent of the failure."
+        }
+      ],
+      "code": [],
+      "outcome": "a button that works when pressed."
+    },
+    "summary": {
+      "points": [
+        "Audit switch dependencies.",
+        "Data-plane switches.",
+        "Rehearse."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main risk of a manual failover script?",
+        "a": "Its own dependencies (APIs, credentials, CI systems) may be impaired by the same outage."
+      }
+    ]
+  },
+  "limiting-the-blast-radius-cellular-architecture": {
+    "core": "Cell-based architecture splits a service into independent, identical cells (full stacks), each serving a subset of customers, behind a thin routing layer. A bad deploy, poison request or overload affects only one cell, limiting blast radius. Shuffle sharding assigns customers to combinations of cells or nodes so two customers rarely share all resources.",
+    "first_principles": {
+      "problem": "One customer's malformed request crashes the shared fleet and takes down every customer.",
+      "truths": [
+        "Shared everything means shared failure.",
+        "Independent copies contain faults.",
+        "Routing must be simpler than the cells."
+      ],
+      "derivation": [
+        "Define a **cell** (full stack) with a max size.",
+        "**Partition** customers by key to cells.",
+        "Keep the **router thin** and highly available.",
+        "**Deploy cell by cell**.",
+        "Use **shuffle sharding** for isolation between tenants."
+      ]
+    },
+    "analogy": {
+      "title": "Watertight compartments in a ship",
+      "story": "A breach floods one compartment; the ship stays afloat.",
+      "mapping": [
+        [
+          "Compartments",
+          "Cells"
+        ],
+        [
+          "Bulkheads",
+          "Isolation boundaries"
+        ],
+        [
+          "Breach",
+          "Failure"
+        ]
+      ],
+      "breaks": "Compartments are fixed; cells can be added as you grow."
+    },
+    "mindmap": {
+      "center": "Cells",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Independent full stacks",
+            "Subset of customers"
+          ]
+        },
+        {
+          "label": "Router",
+          "children": [
+            "Thin",
+            "Highly available"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Small blast radius",
+            "Predictable scale"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Cell-by-cell deploys",
+            "Shuffle sharding"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Ops complexity",
+            "Routing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Blast radius maths",
+      "scenario": "10 cells.",
+      "flow": [
+        "Monolithic fleet: poison request → 100% impact",
+        "10 cells: → 10% impact",
+        "Shuffle sharding: two customers share all nodes with tiny probability"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failures become partial, not total."
+        }
+      ],
+      "code": [],
+      "outcome": "contained failures."
+    },
+    "summary": {
+      "points": [
+        "Split into cells.",
+        "Thin router.",
+        "Deploy cell by cell."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must the cell router be simpler than the cells?",
+        "a": "It's shared by all cells; if it's complex, it becomes the single point of failure the cells were meant to avoid."
+      }
+    ]
+  }
+}

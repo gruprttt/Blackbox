@@ -1,0 +1,425 @@
+{
+  "introduction-breaking-things-on-purpose": {
+    "core": "Chaos engineering injects controlled failures to verify that systems behave as expected under stress, revealing weaknesses before real incidents do. AWS Fault Injection Service (FIS) runs managed experiments against AWS resources (EC2, ECS, EKS, RDS, network, APIs) with guardrails and stop conditions.",
+    "first_principles": {
+      "problem": "A team believes its service survives an AZ failure but has never tested it, until a real outage proves otherwise.",
+      "truths": [
+        "Untested resilience is assumed, not known.",
+        "Real failures happen at bad times.",
+        "Controlled experiments limit harm."
+      ],
+      "derivation": [
+        "Form a **hypothesis** of steady state.",
+        "Inject **realistic faults**.",
+        "Limit **blast radius**.",
+        "Define **stop conditions**.",
+        "**Learn and fix**, then automate."
+      ]
+    },
+    "analogy": {
+      "title": "Fire drills",
+      "story": "You practise evacuating when nothing is burning, so the real thing goes smoothly.",
+      "mapping": [
+        [
+          "Fire drill",
+          "Chaos experiment"
+        ],
+        [
+          "Evacuation plan",
+          "Resilience design"
+        ],
+        [
+          "Fire marshal",
+          "Stop conditions"
+        ]
+      ],
+      "breaks": "Fire drills don't cause fires; chaos experiments cause real (controlled) failures."
+    },
+    "mindmap": {
+      "center": "Chaos Engineering",
+      "branches": [
+        {
+          "label": "Principles",
+          "children": [
+            "Steady-state hypothesis",
+            "Real faults",
+            "Minimise blast radius",
+            "Automate"
+          ]
+        },
+        {
+          "label": "FIS",
+          "children": [
+            "Managed",
+            "AWS-native actions",
+            "Stop conditions"
+          ]
+        },
+        {
+          "label": "Outcomes",
+          "children": [
+            "Found weaknesses",
+            "Confidence"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "First experiment",
+      "scenario": "Hypothesis.",
+      "flow": [
+        "Hypothesis: losing 1 of 3 AZs keeps error rate < 1%",
+        "Inject: stop instances in us-east-1a",
+        "Observe: error rate 7% for 4 min",
+        "Finding: health check grace too long"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fixed before a real AZ failure."
+        }
+      ],
+      "code": [],
+      "outcome": "resilience verified, not assumed."
+    },
+    "summary": {
+      "points": [
+        "Test on purpose.",
+        "Control the blast radius.",
+        "Learn and fix."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a steady-state hypothesis?",
+        "a": "A measurable statement of normal behaviour (e.g. error rate < 1%) that should hold during the experiment."
+      }
+    ]
+  },
+  "the-experiment-anatomy-templates-actions-targets-and-stop-conditions": {
+    "core": "An FIS experiment template defines actions (what fault: stop instances, inject CPU stress, throttle APIs, disrupt network, fail over RDS, terminate EKS pods), targets (which resources, by ARN, tags or filters, with selection mode like PERCENT(25)), stop conditions (CloudWatch alarms that halt the experiment) and an IAM role FIS uses.",
+    "first_principles": {
+      "problem": "An unbounded experiment hits all production instances because targets weren't scoped.",
+      "truths": [
+        "Faults must target specific resources.",
+        "Experiments need emergency brakes.",
+        "FIS needs permissions to act."
+      ],
+      "derivation": [
+        "Choose **actions** with durations.",
+        "Scope **targets** by tags + selection mode.",
+        "Attach **stop conditions** (alarms).",
+        "Grant a **least-privilege role**.",
+        "Use **experiment reports** and logs."
+      ]
+    },
+    "analogy": {
+      "title": "A controlled demolition plan",
+      "story": "Which walls, how much charge, safety perimeter and an abort button.",
+      "mapping": [
+        [
+          "Walls",
+          "Targets"
+        ],
+        [
+          "Charges",
+          "Actions"
+        ],
+        [
+          "Abort button",
+          "Stop conditions"
+        ]
+      ],
+      "breaks": "Demolitions are irreversible; most FIS actions end automatically after their duration."
+    },
+    "mindmap": {
+      "center": "Experiment Template",
+      "branches": [
+        {
+          "label": "Actions",
+          "children": [
+            "Stop/terminate",
+            "CPU/memory stress",
+            "Network disruption",
+            "API throttle",
+            "RDS failover",
+            "Pod faults"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "ARN",
+            "Tags",
+            "Filters",
+            "Selection mode"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Stop conditions",
+            "Duration"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "IAM role"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Logs",
+            "Reports"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Template snippet",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "30% of staging web instances stopped for 10 min; auto-abort on 5xx alarm."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"targets\": {\"web\": {\"resourceType\": \"aws:ec2:instance\", \"resourceTags\": {\"app\": \"web\", \"env\": \"staging\"}, \"selectionMode\": \"PERCENT(30)\"}},\n  \"actions\": {\"stop\": {\"actionId\": \"aws:ec2:stop-instances\", \"targets\": {\"Instances\": \"web\"}, \"parameters\": {\"startInstancesAfterDuration\": \"PT10M\"}}},\n  \"stopConditions\": [{\"source\": \"aws:cloudwatch:alarm\", \"value\": \"arn:aws:cloudwatch:eu-west-1:123:alarm:web-5xx-high\"}],\n  \"roleArn\": \"arn:aws:iam::123:role/fis-runner\"\n}"
+        }
+      ],
+      "outcome": "bounded, safe experiments."
+    },
+    "summary": {
+      "points": [
+        "Actions, targets, stop conditions.",
+        "Scope with tags.",
+        "Always have a brake."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the purpose of an FIS stop condition?",
+        "a": "To automatically halt the experiment when a CloudWatch alarm indicates unacceptable impact."
+      }
+    ]
+  },
+  "deep-dive-the-ssm-integration-for-os-level-faults": {
+    "core": "For faults inside instances (CPU, memory and disk stress, process kill, network latency and packet loss), FIS runs Systems Manager documents (AWSFIS-Run-CPU-Stress, AWSFIS-Run-Network-Latency…) via the aws:ssm:send-command action on targeted instances. ECS and EKS actions inject similar faults into tasks and pods.",
+    "first_principles": {
+      "problem": "Stopping instances doesn't test how the app behaves under slow disks or network latency.",
+      "truths": [
+        "Many failures are partial, not total.",
+        "OS-level faults need an agent.",
+        "SSM already runs on instances."
+      ],
+      "derivation": [
+        "Ensure **SSM Agent** and instance role.",
+        "Use **AWSFIS-Run-*** documents.",
+        "Set **duration and intensity** parameters.",
+        "Target by **tags**.",
+        "Observe **latency and error** SLIs."
+      ]
+    },
+    "analogy": {
+      "title": "Simulating a sprained ankle instead of removing a player",
+      "story": "You learn how the team copes when someone is slowed down, not just absent.",
+      "mapping": [
+        [
+          "Sprained ankle",
+          "Latency/CPU stress"
+        ],
+        [
+          "Removed player",
+          "Stopped instance"
+        ],
+        [
+          "Team coping",
+          "System resilience"
+        ]
+      ],
+      "breaks": "Sprains heal slowly; FIS faults end exactly at the configured duration."
+    },
+    "mindmap": {
+      "center": "SSM-Based Faults",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "aws:ssm:send-command",
+            "AWSFIS documents"
+          ]
+        },
+        {
+          "label": "Faults",
+          "children": [
+            "CPU stress",
+            "Memory stress",
+            "Disk fill",
+            "Network latency",
+            "Packet loss",
+            "Kill process"
+          ]
+        },
+        {
+          "label": "Containers",
+          "children": [
+            "ECS task actions",
+            "EKS pod actions"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "SSM Agent",
+            "IAM role"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Network latency injection",
+      "scenario": "Action.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Client timeouts too short; retries amplify load."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"actionId\": \"aws:ssm:send-command\",\n  \"parameters\": {\n    \"documentArn\": \"arn:aws:ssm:eu-west-1::document/AWSFIS-Run-Network-Latency\",\n    \"documentParameters\": \"{\\\"DurationSeconds\\\":\\\"300\\\",\\\"DelayMilliseconds\\\":\\\"200\\\",\\\"Interface\\\":\\\"eth0\\\"}\",\n    \"duration\": \"PT6M\"\n  },\n  \"targets\": {\"Instances\": \"api\"}\n}"
+        }
+      ],
+      "outcome": "partial failures tested."
+    },
+    "summary": {
+      "points": [
+        "SSM runs in-guest faults.",
+        "Test degradation, not just death.",
+        "Observe SLIs."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does FIS inject CPU stress inside an EC2 instance?",
+        "a": "By running an SSM document (e.g. AWSFIS-Run-CPU-Stress) via the aws:ssm:send-command action."
+      }
+    ]
+  },
+  "designing-safe-chaos-experiments-the-gameday-workflow": {
+    "core": "Safe chaos follows a workflow: pick a critical scenario, write a steady-state hypothesis with SLIs, start small in staging, then limited production scope, define stop conditions and rollback, inform stakeholders, run as a game day with observers, document findings and fix them, then automate the experiment in CI/CD or on a schedule.",
+    "first_principles": {
+      "problem": "An ad-hoc chaos test in production causes a real outage and the programme gets cancelled.",
+      "truths": [
+        "Trust is earned gradually.",
+        "Communication prevents surprise.",
+        "Repeated experiments catch regressions."
+      ],
+      "derivation": [
+        "**Scenario** from real risks (AZ loss, dependency latency).",
+        "**Hypothesis + SLIs**.",
+        "**Staging first**, then small prod scope.",
+        "**Stop conditions + rollback plan**.",
+        "**Game day** roles: facilitator, observers, scribe.",
+        "**Fix, then automate**."
+      ]
+    },
+    "analogy": {
+      "title": "Earthquake drills that increase in realism",
+      "story": "Tabletop first, then a building drill, then a city-wide exercise.",
+      "mapping": [
+        [
+          "Tabletop",
+          "Staging experiment"
+        ],
+        [
+          "Building drill",
+          "Limited prod"
+        ],
+        [
+          "City exercise",
+          "Full game day"
+        ]
+      ],
+      "breaks": "Drills follow scripts; real systems may react unexpectedly, which is the point."
+    },
+    "mindmap": {
+      "center": "Game Day Workflow",
+      "branches": [
+        {
+          "label": "Plan",
+          "children": [
+            "Scenario",
+            "Hypothesis",
+            "SLIs"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Staging first",
+            "Small scope",
+            "Stop conditions",
+            "Rollback"
+          ]
+        },
+        {
+          "label": "Run",
+          "children": [
+            "Roles",
+            "Comms",
+            "Observation"
+          ]
+        },
+        {
+          "label": "After",
+          "children": [
+            "Findings",
+            "Fixes",
+            "Automation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Quarterly game day",
+      "scenario": "Agenda.",
+      "flow": [
+        "Scenario: Aurora writer failover during peak",
+        "Hypothesis: checkout errors < 0.5%, recovery < 60 s",
+        "Run in staging, then 10% prod traffic window",
+        "Findings: connection pool doesn't refresh DNS → fix",
+        "Add experiment to monthly schedule"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confidence grows, programme survives."
+        }
+      ],
+      "code": [],
+      "outcome": "a sustainable chaos practice."
+    },
+    "summary": {
+      "points": [
+        "Start small.",
+        "Communicate and observe.",
+        "Fix and automate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why start chaos experiments in staging?",
+        "a": "To validate the experiment and safety controls before risking customer impact in production."
+      }
+    ]
+  }
+}

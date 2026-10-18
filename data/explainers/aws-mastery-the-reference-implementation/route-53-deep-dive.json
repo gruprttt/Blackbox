@@ -1,0 +1,723 @@
+{
+  "introduction-more-than-just-a-phone-book": {
+    "core": "Route 53 is AWS's DNS service: an authoritative DNS with a 100% availability SLA, domain registration, health checking and traffic policies. Routing policies (simple, weighted, latency, geolocation, geoproximity, failover, multivalue, IP-based) turn DNS into a global traffic controller.",
+    "first_principles": {
+      "problem": "Teams treat DNS as a static address book and miss its role in failover and traffic shaping.",
+      "truths": [
+        "Every connection starts with a DNS lookup.",
+        "DNS answers can vary by policy.",
+        "Health checks make answers dynamic."
+      ],
+      "derivation": [
+        "Host **public and private hosted zones**.",
+        "Use **alias records** for AWS targets.",
+        "Apply **routing policies**.",
+        "Attach **health checks**.",
+        "Use **Resolver** for hybrid DNS."
+      ]
+    },
+    "analogy": {
+      "title": "A smart switchboard rather than a phone book",
+      "story": "It connects callers to the nearest open office, or the backup when one closes.",
+      "mapping": [
+        [
+          "Phone book",
+          "Static DNS"
+        ],
+        [
+          "Smart switchboard",
+          "Routing policies"
+        ],
+        [
+          "Closed office",
+          "Unhealthy endpoint"
+        ]
+      ],
+      "breaks": "Switchboards connect in real time; DNS answers are cached for the TTL."
+    },
+    "mindmap": {
+      "center": "Route 53",
+      "branches": [
+        {
+          "label": "Zones",
+          "children": [
+            "Public",
+            "Private"
+          ]
+        },
+        {
+          "label": "Records",
+          "children": [
+            "A/AAAA",
+            "CNAME",
+            "Alias"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "Simple",
+            "Weighted",
+            "Latency",
+            "Geo",
+            "Geoproximity",
+            "Failover",
+            "Multivalue"
+          ]
+        },
+        {
+          "label": "Health",
+          "children": [
+            "Health checks"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "Resolver endpoints"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Global app DNS",
+      "scenario": "Policies.",
+      "flow": [
+        "api.example.com latency-based to 3 regions",
+        "Each record health-checked",
+        "Unhealthy region removed automatically"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Users routed to nearest healthy region."
+        }
+      ],
+      "code": [],
+      "outcome": "DNS as a traffic controller."
+    },
+    "summary": {
+      "points": [
+        "Authoritative DNS.",
+        "Routing policies.",
+        "Health-aware answers."
+      ]
+    },
+    "check": [
+      {
+        "q": "What availability SLA does Route 53 DNS offer?",
+        "a": "100%."
+      }
+    ]
+  },
+  "routing-policies-simple-weighted-multi-value": {
+    "core": "Simple routing returns one record set (possibly multiple values, unhealth-checked). Weighted splits traffic across records by weight for canaries and blue/green. Multivalue answer returns up to eight healthy records at random, a simple form of client-side load balancing with health checks.",
+    "first_principles": {
+      "problem": "A team wants to send 5% of traffic to a new stack without a load balancer change.",
+      "truths": [
+        "DNS can return different answers to different resolvers.",
+        "Weights give proportional distribution.",
+        "Health checks remove bad answers."
+      ],
+      "derivation": [
+        "**Simple** for single resources.",
+        "**Weighted** (e.g. 95/5) for canaries and migrations.",
+        "**Multivalue** for up to 8 healthy IPs.",
+        "Attach **health checks**.",
+        "Keep **TTLs low** for quick shifts."
+      ]
+    },
+    "analogy": {
+      "title": "Handing out directions at a fork in the road",
+      "story": "Always the same way (simple), 95 of 100 people left and 5 right (weighted), or any of several open roads (multivalue).",
+      "mapping": [
+        [
+          "Same direction",
+          "Simple"
+        ],
+        [
+          "Proportional split",
+          "Weighted"
+        ],
+        [
+          "Several open roads",
+          "Multivalue"
+        ]
+      ],
+      "breaks": "Directions are followed immediately; DNS caching makes splits approximate."
+    },
+    "mindmap": {
+      "center": "Simple/Weighted/Multivalue",
+      "branches": [
+        {
+          "label": "Simple",
+          "children": [
+            "One record set",
+            "No health checks"
+          ]
+        },
+        {
+          "label": "Weighted",
+          "children": [
+            "Proportional",
+            "Canary",
+            "Blue/green"
+          ]
+        },
+        {
+          "label": "Multivalue",
+          "children": [
+            "Up to 8 healthy",
+            "Random"
+          ]
+        },
+        {
+          "label": "Tips",
+          "children": [
+            "Low TTL",
+            "Health checks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Canary via weights",
+      "scenario": "Records.",
+      "flow": [
+        "api → blue ALB weight 95",
+        "api → green ALB weight 5",
+        "Watch metrics, shift to 50/50, then 0/100"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Gradual migration through DNS."
+        }
+      ],
+      "code": [],
+      "outcome": "controlled traffic shifting."
+    },
+    "summary": {
+      "points": [
+        "Simple for one target.",
+        "Weighted for splits.",
+        "Multivalue for basic balancing."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many healthy records can a multivalue answer return?",
+        "a": "Up to eight."
+      }
+    ]
+  },
+  "routing-policies-latency-vs-geolocation": {
+    "core": "Latency-based routing answers with the AWS region that gives the user's resolver the lowest measured network latency, optimising performance. Geolocation routing answers based on the user's location (continent, country, US state) for compliance, localisation or licensing, with a default record for unmatched locations.",
+    "first_principles": {
+      "problem": "EU users must be served from EU regions for data residency, but other users should get the fastest region.",
+      "truths": [
+        "Network latency doesn't follow borders.",
+        "Legal requirements follow geography.",
+        "Resolver location approximates user location (EDNS Client Subnet helps)."
+      ],
+      "derivation": [
+        "**Latency** for performance.",
+        "**Geolocation** for compliance and content.",
+        "Always add a **default** geolocation record.",
+        "Combine via **nested policies** (geo → latency).",
+        "Attach **health checks**."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing a supermarket by drive time versus by country rules",
+      "story": "Usually go to the quickest; but some products must be bought in your own country.",
+      "mapping": [
+        [
+          "Quickest drive",
+          "Latency routing"
+        ],
+        [
+          "Country rules",
+          "Geolocation"
+        ],
+        [
+          "Default shop",
+          "Default record"
+        ]
+      ],
+      "breaks": "Drivers know where they are; DNS infers location from resolver IPs."
+    },
+    "mindmap": {
+      "center": "Latency vs Geolocation",
+      "branches": [
+        {
+          "label": "Latency",
+          "children": [
+            "Lowest latency region",
+            "Performance"
+          ]
+        },
+        {
+          "label": "Geolocation",
+          "children": [
+            "Continent/country/state",
+            "Compliance",
+            "Localisation"
+          ]
+        },
+        {
+          "label": "Must",
+          "children": [
+            "Default record"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "Nested policies",
+            "Traffic flow"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Residency + performance",
+      "scenario": "Nested.",
+      "flow": [
+        "Geolocation: Europe → EU alias record set",
+        "EU set: latency between eu-west-1 and eu-central-1",
+        "Default: latency across all regions"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Compliant for EU, fastest elsewhere."
+        }
+      ],
+      "code": [],
+      "outcome": "routing by both law and speed."
+    },
+    "summary": {
+      "points": [
+        "Latency for speed.",
+        "Geolocation for rules.",
+        "Default record required."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add a default geolocation record?",
+        "a": "Requests from locations with no matching record would otherwise get no answer (NXDOMAIN/NODATA)."
+      }
+    ]
+  },
+  "geoproximity-routing-shifting-traffic-by-bias": {
+    "core": "Geoproximity routing sends users to the geographically nearest resource (AWS region or lat/long coordinates), with a bias (−99 to +99) that expands or shrinks each resource's catchment area. It's configured via Traffic Flow and lets you gradually shift traffic between regions geographically.",
+    "first_principles": {
+      "problem": "A new region should gradually take more nearby traffic from an overloaded one.",
+      "truths": [
+        "Proximity approximates latency.",
+        "Boundaries can be shifted.",
+        "Gradual shifts reduce risk."
+      ],
+      "derivation": [
+        "Define **resources** with regions or coordinates.",
+        "Set **bias** to grow/shrink areas.",
+        "Use **Traffic Flow** visual editor.",
+        "**Increase bias** gradually.",
+        "Combine with **health checks**."
+      ]
+    },
+    "analogy": {
+      "title": "Moving school catchment boundaries",
+      "story": "Expand one school's zone so more nearby families attend it.",
+      "mapping": [
+        [
+          "Schools",
+          "Resources"
+        ],
+        [
+          "Catchment zones",
+          "Geographic areas"
+        ],
+        [
+          "Moving boundaries",
+          "Bias"
+        ]
+      ],
+      "breaks": "School zones change yearly; bias changes take effect after DNS TTLs."
+    },
+    "mindmap": {
+      "center": "Geoproximity",
+      "branches": [
+        {
+          "label": "Basis",
+          "children": [
+            "Distance",
+            "Region or lat/long"
+          ]
+        },
+        {
+          "label": "Bias",
+          "children": [
+            "−99 to +99",
+            "Expand/shrink area"
+          ]
+        },
+        {
+          "label": "Tool",
+          "children": [
+            "Traffic Flow"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Gradual shifts",
+            "Load balancing by geography"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shifting to a new region",
+      "scenario": "Bias steps.",
+      "flow": [
+        "eu-central-1 bias 0 → 25 → 50",
+        "More of Eastern Europe routed there",
+        "eu-west-1 load drops"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Controlled geographic rebalancing."
+        }
+      ],
+      "code": [],
+      "outcome": "traffic moved without hard cutovers."
+    },
+    "summary": {
+      "points": [
+        "Nearest resource.",
+        "Bias shifts boundaries.",
+        "Gradual changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a positive bias do in geoproximity routing?",
+        "a": "Expands the resource's geographic area so it attracts more traffic."
+      }
+    ]
+  },
+  "failover-routing-active-passive-disaster-recovery": {
+    "core": "Failover routing answers with the primary record while its health check passes and switches to the secondary when it fails. It's the DNS backbone of active-passive DR: primary region (or ALB) and a standby region or static S3 maintenance page, with low TTLs and evaluate-target-health on alias records.",
+    "first_principles": {
+      "problem": "During a regional outage, someone must manually change DNS, which takes time and depends on the control plane.",
+      "truths": [
+        "Health checks run continuously in the data plane.",
+        "DNS answers switch automatically.",
+        "Caching delays the switch by the TTL."
+      ],
+      "derivation": [
+        "**Primary** record with health check.",
+        "**Secondary** record (DR region or static page).",
+        "**Alias + evaluate target health**.",
+        "**Low TTL** (60 s).",
+        "**Test** failover regularly."
+      ]
+    },
+    "analogy": {
+      "title": "An automatic transfer switch for a building's power",
+      "story": "When mains fails, it switches to the generator by itself.",
+      "mapping": [
+        [
+          "Mains",
+          "Primary"
+        ],
+        [
+          "Generator",
+          "Secondary"
+        ],
+        [
+          "Transfer switch",
+          "Failover routing"
+        ]
+      ],
+      "breaks": "Transfer switches act in milliseconds; DNS clients may cache old answers for the TTL."
+    },
+    "mindmap": {
+      "center": "Failover Routing",
+      "branches": [
+        {
+          "label": "Records",
+          "children": [
+            "Primary",
+            "Secondary"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Health checks",
+            "Evaluate target health"
+          ]
+        },
+        {
+          "label": "DR",
+          "children": [
+            "Active-passive",
+            "Static fallback"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Low TTL"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Regular tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Active-passive web app",
+      "scenario": "Records.",
+      "flow": [
+        "Primary: alias → us-east-1 ALB, health check on /health",
+        "Secondary: alias → eu-west-1 ALB",
+        "Primary fails 3 checks → answers switch",
+        "Clients reconnect within ~1–2 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hands-off regional failover."
+        }
+      ],
+      "code": [],
+      "outcome": "automated DR at the DNS layer."
+    },
+    "summary": {
+      "points": [
+        "Primary + secondary.",
+        "Health-check driven.",
+        "Low TTLs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What determines when failover routing switches to the secondary?",
+        "a": "The primary record's health check (or alias target health) becoming unhealthy."
+      }
+    ]
+  },
+  "health-checks-the-heartbeat-monitor": {
+    "core": "Route 53 health checks probe endpoints (HTTP/HTTPS/TCP, optional string matching) from checkers in multiple regions, mark them unhealthy when enough checkers fail, and can be calculated (combining child checks) or based on CloudWatch alarms for private resources. They drive DNS answers and can trigger alerts.",
+    "first_principles": {
+      "problem": "A private database endpoint can't be health-checked from the internet, and one flaky checker shouldn't trigger failover.",
+      "truths": [
+        "Checkers are distributed globally.",
+        "Majority voting reduces false positives.",
+        "Private endpoints need indirect signals."
+      ],
+      "derivation": [
+        "**Endpoint checks** with path and string match.",
+        "Tune **interval** (10/30 s) and **failure threshold**.",
+        "**Calculated checks** for 'N of M healthy'.",
+        "**CloudWatch alarm checks** for private resources.",
+        "Use **inverted** checks for maintenance switches."
+      ]
+    },
+    "analogy": {
+      "title": "Several doctors independently checking a pulse",
+      "story": "You only declare an emergency if most agree.",
+      "mapping": [
+        [
+          "Doctors",
+          "Health checkers"
+        ],
+        [
+          "Majority agreement",
+          "Threshold of failed checkers"
+        ],
+        [
+          "Indirect tests",
+          "CloudWatch alarm checks"
+        ]
+      ],
+      "breaks": "Doctors examine the patient; checkers only see what the endpoint returns, so design meaningful /health pages."
+    },
+    "mindmap": {
+      "center": "Health Checks",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Endpoint",
+            "Calculated",
+            "CloudWatch alarm"
+          ]
+        },
+        {
+          "label": "Settings",
+          "children": [
+            "Interval",
+            "Threshold",
+            "String match",
+            "Regions"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "DNS failover",
+            "Alerts"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Meaningful /health",
+            "Avoid deep dependency checks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Calculated health check",
+      "scenario": "Logic.",
+      "flow": [
+        "Child checks: web-a, web-b, web-c",
+        "Parent healthy if ≥ 2 children healthy",
+        "Region marked down only on broad failure"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No failover on one bad instance."
+        }
+      ],
+      "code": [],
+      "outcome": "trustworthy health signals."
+    },
+    "summary": {
+      "points": [
+        "Distributed checkers.",
+        "Calculated for nuance.",
+        "Alarms for private."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can Route 53 health-check a private resource?",
+        "a": "With a health check based on a CloudWatch alarm that monitors the resource."
+      }
+    ]
+  },
+  "alias-records-vs-cname-records": {
+    "core": "A CNAME maps a name to another name and can't exist at the zone apex (example.com). A Route 53 alias record points directly to AWS resources (CloudFront, ALB/NLB, S3 website, API Gateway, another record in the zone), works at the apex, resolves inside Route 53 with no extra lookup, follows target IP changes automatically and is free for AWS targets.",
+    "first_principles": {
+      "problem": "example.com must point to a CloudFront distribution, but DNS forbids a CNAME at the apex.",
+      "truths": [
+        "DNS forbids CNAMEs at the apex alongside SOA/NS.",
+        "AWS resource IPs change.",
+        "Extra lookups add latency."
+      ],
+      "derivation": [
+        "Use **alias A/AAAA** for AWS targets.",
+        "Use **CNAME** only for non-AWS names on subdomains.",
+        "Enable **evaluate target health**.",
+        "Remember alias **queries are free** for AWS targets.",
+        "Use alias for **apex** domains."
+      ]
+    },
+    "analogy": {
+      "title": "A forwarding address versus a direct address the post office updates itself",
+      "story": "The forwarding address sends mail elsewhere; the alias delivers straight to wherever the resource is now.",
+      "mapping": [
+        [
+          "Forwarding address",
+          "CNAME"
+        ],
+        [
+          "Self-updating direct address",
+          "Alias"
+        ],
+        [
+          "Front door of the estate",
+          "Zone apex"
+        ]
+      ],
+      "breaks": "Post offices are slow to update; alias records reflect target changes immediately."
+    },
+    "mindmap": {
+      "center": "Alias vs CNAME",
+      "branches": [
+        {
+          "label": "CNAME",
+          "children": [
+            "Name → name",
+            "Not at apex",
+            "Extra lookup",
+            "Charged"
+          ]
+        },
+        {
+          "label": "Alias",
+          "children": [
+            "Name → AWS resource",
+            "Apex OK",
+            "Free for AWS targets",
+            "Health-aware"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "CloudFront",
+            "ELB",
+            "S3 website",
+            "API Gateway",
+            "Same-zone records"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Apex to CloudFront",
+      "scenario": "Record.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Apex domain served by CloudFront."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Name\": \"example.com\", \"Type\": \"A\",\n  \"AliasTarget\": {\"HostedZoneId\": \"Z2FDTNDATAQYW2\", \"DNSName\": \"d111111abcdef8.cloudfront.net\", \"EvaluateTargetHealth\": false}\n}"
+        }
+      ],
+      "outcome": "clean, free, apex-capable records."
+    },
+    "summary": {
+      "points": [
+        "Alias for AWS targets.",
+        "Works at apex.",
+        "CNAME for external names."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you use a CNAME at example.com?",
+        "a": "DNS rules forbid a CNAME at the zone apex because it must coexist with SOA and NS records."
+      }
+    ]
+  }
+}

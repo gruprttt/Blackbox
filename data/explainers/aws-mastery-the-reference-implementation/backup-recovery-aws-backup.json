@@ -1,0 +1,421 @@
+{
+  "introduction-from-scripts-to-policy": {
+    "core": "AWS Backup replaces per-service backup scripts with central policy: backup plans define schedules, retention and copies; resource assignments select resources by tags or ARNs across EC2, EBS, RDS, Aurora, DynamoDB, EFS, FSx, S3 and more; and Organizations backup policies apply them across accounts with central reporting.",
+    "first_principles": {
+      "problem": "Each team scripts its own snapshots; some forget, retention is inconsistent and audits fail.",
+      "truths": [
+        "Manual scripts drift and fail silently.",
+        "Policies scale across accounts.",
+        "Audits need evidence."
+      ],
+      "derivation": [
+        "Define **backup plans** (schedule, retention, lifecycle).",
+        "Assign resources by **tags** (backup=daily).",
+        "Use **org-wide backup policies**.",
+        "Enable **Backup Audit Manager** reports.",
+        "**Test restores** regularly."
+      ]
+    },
+    "analogy": {
+      "title": "A building's automatic sprinkler system",
+      "story": "Instead of people remembering to carry buckets, coverage is built in everywhere.",
+      "mapping": [
+        [
+          "Buckets",
+          "Scripts"
+        ],
+        [
+          "Sprinkler system",
+          "Backup plans"
+        ],
+        [
+          "Inspection certificate",
+          "Audit Manager reports"
+        ]
+      ],
+      "breaks": "Sprinklers activate on fire; backups must also be restored to prove they work."
+    },
+    "mindmap": {
+      "center": "AWS Backup",
+      "branches": [
+        {
+          "label": "Plans",
+          "children": [
+            "Schedules",
+            "Retention",
+            "Lifecycle",
+            "Copies"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "Tags",
+            "ARNs"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Organizations policies"
+          ]
+        },
+        {
+          "label": "Governance",
+          "children": [
+            "Audit Manager",
+            "Vault Lock"
+          ]
+        },
+        {
+          "label": "Coverage",
+          "children": [
+            "EBS",
+            "RDS",
+            "DynamoDB",
+            "EFS",
+            "S3",
+            "FSx"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tag-based coverage",
+      "scenario": "Flow.",
+      "flow": [
+        "Tag resources backup=daily",
+        "Plan: daily 03:00, keep 35 days",
+        "Monthly, keep 1 year, move to cold after 90 days",
+        "Audit report confirms coverage"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Consistent backups everywhere."
+        }
+      ],
+      "code": [],
+      "outcome": "policy-driven protection."
+    },
+    "summary": {
+      "points": [
+        "Central plans.",
+        "Tag-based assignment.",
+        "Audit and test."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you include resources in an AWS Backup plan at scale?",
+        "a": "Resource assignments using tags (or ARNs), ideally applied via Organizations backup policies."
+      }
+    ]
+  },
+  "cross-region-cross-account-copies": {
+    "core": "Backup plans can copy recovery points to vaults in other regions (regional disaster) and other accounts (account compromise or deletion). A dedicated, locked-down backup account owned by a separate team, with its own KMS keys, means attackers who compromise production can't delete the copies.",
+    "first_principles": {
+      "problem": "Ransomware with admin access to the production account deletes both resources and their backups.",
+      "truths": [
+        "Same-account backups share the blast radius.",
+        "Regions can fail.",
+        "Separate ownership blocks single-credential attacks."
+      ],
+      "derivation": [
+        "Add **copy actions** to plans (another region).",
+        "Copy to a **central backup account** vault.",
+        "Use **separate KMS keys** in the destination.",
+        "Restrict vault access with **vault policies**.",
+        "Combine with **Vault Lock**."
+      ]
+    },
+    "analogy": {
+      "title": "Keeping copies of house deeds in a bank safe-deposit box in another city",
+      "story": "A fire or burglar at home can't reach them.",
+      "mapping": [
+        [
+          "Home",
+          "Production account"
+        ],
+        [
+          "Safe-deposit box",
+          "Backup account vault"
+        ],
+        [
+          "Another city",
+          "Another region"
+        ]
+      ],
+      "breaks": "Safe-deposit boxes need a visit; restores from copies can be automated."
+    },
+    "mindmap": {
+      "center": "Cross-Region/Account",
+      "branches": [
+        {
+          "label": "Copies",
+          "children": [
+            "Other region",
+            "Other account"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Separate team",
+            "Separate KMS keys",
+            "Vault policies"
+          ]
+        },
+        {
+          "label": "Threats",
+          "children": [
+            "Region outage",
+            "Account compromise"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "Vault Lock"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Copy rule",
+      "scenario": "Plan JSON snippet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Copies survive loss of the production account and region."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "\"CopyActions\": [{\n  \"DestinationBackupVaultArn\": \"arn:aws:backup:eu-west-2:999988887777:backup-vault:central-dr\",\n  \"Lifecycle\": {\"DeleteAfterDays\": 90}\n}]"
+        }
+      ],
+      "outcome": "backups outside the blast radius."
+    },
+    "summary": {
+      "points": [
+        "Copy across regions.",
+        "Copy across accounts.",
+        "Separate keys and owners."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why copy backups to a different account?",
+        "a": "So compromise or deletion of the production account can't destroy the backups."
+      }
+    ]
+  },
+  "vault-lock-the-indestructible-safety-net": {
+    "core": "Backup Vault Lock enforces WORM on a vault: minimum and maximum retention, and prevention of deleting recovery points or changing lifecycle, even by root. Governance mode can be removed by authorised users; compliance mode becomes immutable after a cooling-off period (grace time). It's built for ransomware resilience and regulations.",
+    "first_principles": {
+      "problem": "A compromised admin shortens retention and deletes recovery points before the attack.",
+      "truths": [
+        "Privileged users can normally delete backups.",
+        "Immutability must survive admin compromise.",
+        "Compliance needs provable retention."
+      ],
+      "derivation": [
+        "Apply **Vault Lock** with min/max retention.",
+        "Use **compliance mode** for immutability.",
+        "Set a **grace time** to test before it locks.",
+        "Lock the **central backup vault**.",
+        "Document **retention commitments**."
+      ]
+    },
+    "analogy": {
+      "title": "A time-locked safe",
+      "story": "Once the timer is set and confirmed, nobody, not even the owner, can open it early.",
+      "mapping": [
+        [
+          "Time lock",
+          "Compliance mode"
+        ],
+        [
+          "Confirmation window",
+          "Grace time"
+        ],
+        [
+          "Safe contents",
+          "Recovery points"
+        ]
+      ],
+      "breaks": "Safes can be drilled; compliance-mode vaults can't be unlocked by AWS support either."
+    },
+    "mindmap": {
+      "center": "Vault Lock",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "Governance",
+            "Compliance"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Min retention",
+            "Max retention",
+            "No deletion"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Grace time"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Ransomware",
+            "Regulation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lock a vault",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "After 3 days, nobody can delete backups younger than 35 days."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws backup put-backup-vault-lock-configuration --backup-vault-name central-dr \\\n  --min-retention-days 35 --max-retention-days 365 --changeable-for-days 3"
+        }
+      ],
+      "outcome": "truly immutable backups."
+    },
+    "summary": {
+      "points": [
+        "WORM for backups.",
+        "Compliance is permanent.",
+        "Test during grace time."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens after the grace time in compliance mode?",
+        "a": "The lock becomes immutable and can't be changed or removed by anyone."
+      }
+    ]
+  },
+  "backup-plans-schedules-and-lifecycle-rules": {
+    "core": "Backup plan rules set frequency (cron or hourly/daily/weekly), backup windows (start and completion), retention (delete after N days), lifecycle to cold storage (for supported resources), copy actions and continuous backup (PITR for RDS, S3, Aurora) where available. Multiple rules give tiered retention (daily 35 d, monthly 1 y, yearly 7 y).",
+    "first_principles": {
+      "problem": "One daily rule with 7-year retention makes storage costs explode.",
+      "truths": [
+        "Recent restore points matter most.",
+        "Long retention needs fewer points.",
+        "Cold storage is cheaper but has minimums."
+      ],
+      "derivation": [
+        "**Daily** short retention.",
+        "**Monthly/yearly** long retention.",
+        "**Cold storage** after 90+ days (min 90 days in cold).",
+        "**Continuous backup** for point-in-time recovery.",
+        "Set **windows** to avoid peak load."
+      ]
+    },
+    "analogy": {
+      "title": "Keeping photos",
+      "story": "Every day's photos for a month, one per month for a year and one per year forever.",
+      "mapping": [
+        [
+          "Daily photos",
+          "Daily rule"
+        ],
+        [
+          "Monthly keepers",
+          "Monthly rule"
+        ],
+        [
+          "Photo album in the attic",
+          "Cold storage"
+        ]
+      ],
+      "breaks": "Photos are free to keep; backups cost per GB-month."
+    },
+    "mindmap": {
+      "center": "Backup Plans",
+      "branches": [
+        {
+          "label": "Schedule",
+          "children": [
+            "cron",
+            "Windows"
+          ]
+        },
+        {
+          "label": "Retention",
+          "children": [
+            "Tiered rules"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Cold storage",
+            "90-day minimum"
+          ]
+        },
+        {
+          "label": "PITR",
+          "children": [
+            "Continuous backup"
+          ]
+        },
+        {
+          "label": "Copies",
+          "children": [
+            "Cross-region/account"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tiered plan",
+      "scenario": "Rules.",
+      "flow": [
+        "Daily 03:00, keep 35 days, continuous backup on",
+        "Monthly 1st, keep 365 days, cold after 90",
+        "Yearly Jan 1, keep 7 years, cold after 90"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Compliance met at a fraction of cost."
+        }
+      ],
+      "code": [],
+      "outcome": "right recovery points at the right cost."
+    },
+    "summary": {
+      "points": [
+        "Tiered retention.",
+        "Cold for long-term.",
+        "PITR where possible."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the minimum time a recovery point must stay in cold storage?",
+        "a": "90 days."
+      }
+    ]
+  }
+}

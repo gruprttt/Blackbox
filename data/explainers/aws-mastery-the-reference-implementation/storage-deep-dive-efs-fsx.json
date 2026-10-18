@@ -1,0 +1,622 @@
+{
+  "introduction-the-shared-drive-problem": {
+    "core": "Many applications need a shared filesystem that several servers mount at once: content management, home directories, ML datasets, legacy Windows apps. EBS is single-instance and S3 isn't a filesystem, so AWS offers managed file services: EFS (NFS for Linux) and the FSx family (Windows, Lustre, NetApp ONTAP, OpenZFS).",
+    "first_principles": {
+      "problem": "A fleet of web servers needs the same uploaded files, and copying them around breaks consistency.",
+      "truths": [
+        "Block volumes attach to one instance.",
+        "Object storage lacks POSIX semantics.",
+        "Different ecosystems need different protocols (NFS, SMB)."
+      ],
+      "derivation": [
+        "Identify **protocol** (NFS, SMB, Lustre).",
+        "Identify **performance** (latency, throughput).",
+        "Identify **features** (snapshots, AD, multi-protocol).",
+        "Choose **EFS** or the right **FSx**."
+      ]
+    },
+    "analogy": {
+      "title": "A shared network drive at the office",
+      "story": "Everyone sees the same folders, but you choose the drive type that fits your team's computers and workload.",
+      "mapping": [
+        [
+          "Network drive",
+          "EFS/FSx"
+        ],
+        [
+          "Office computers",
+          "EC2/containers"
+        ],
+        [
+          "Drive type",
+          "Protocol/service"
+        ]
+      ],
+      "breaks": "Office drives sit in one room; managed file systems replicate across AZs."
+    },
+    "mindmap": {
+      "center": "Shared Files",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Many servers",
+            "POSIX/SMB semantics"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "EFS",
+            "FSx Windows",
+            "FSx Lustre",
+            "FSx ONTAP",
+            "FSx OpenZFS"
+          ]
+        },
+        {
+          "label": "Choose by",
+          "children": [
+            "Protocol",
+            "Performance",
+            "Features"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Picking a file service",
+      "scenario": "Requirements.",
+      "flow": [
+        "Linux web servers, elastic size → EFS",
+        "Windows app needing AD + SMB → FSx Windows",
+        "HPC scratch, 100s GB/s → FSx Lustre"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Protocol and workload decide."
+        }
+      ],
+      "code": [],
+      "outcome": "shared storage that fits."
+    },
+    "summary": {
+      "points": [
+        "EBS isn't shared.",
+        "S3 isn't a filesystem.",
+        "Choose by protocol and workload."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not use S3 as a shared filesystem for a legacy app?",
+        "a": "S3 lacks POSIX semantics like file locking, renames and partial writes that many apps expect."
+      }
+    ]
+  },
+  "amazon-efs-the-linux-standard": {
+    "core": "EFS is a fully managed, elastic NFSv4.1 filesystem for Linux that grows and shrinks automatically, is accessible from many instances, containers and Lambda across AZs, and offers storage classes (Standard, IA, Archive) with lifecycle management. Throughput modes are Elastic (default), Provisioned or Bursting.",
+    "first_principles": {
+      "problem": "Containers across AZs need shared, persistent storage without capacity planning.",
+      "truths": [
+        "NFS is the Linux standard for shared files.",
+        "Elastic capacity removes provisioning.",
+        "Latency is higher than local disk."
+      ],
+      "derivation": [
+        "**Mount targets** per AZ.",
+        "**Elastic throughput** for spiky workloads.",
+        "**Lifecycle** to IA/Archive.",
+        "**Access points** for per-app roots and POSIX identities.",
+        "Use **EFS CSI driver** in EKS."
+      ]
+    },
+    "analogy": {
+      "title": "A cloud-hosted shared folder that expands like a balloon",
+      "story": "It grows as you add files and shrinks as you delete them.",
+      "mapping": [
+        [
+          "Balloon",
+          "Elastic capacity"
+        ],
+        [
+          "Shared folder",
+          "NFS mount"
+        ],
+        [
+          "Archive box",
+          "IA/Archive classes"
+        ]
+      ],
+      "breaks": "Balloons have limits; EFS scales to petabytes."
+    },
+    "mindmap": {
+      "center": "EFS",
+      "branches": [
+        {
+          "label": "Protocol",
+          "children": [
+            "NFSv4.1",
+            "Linux"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Elastic",
+            "Multi-AZ"
+          ]
+        },
+        {
+          "label": "Throughput",
+          "children": [
+            "Elastic",
+            "Provisioned",
+            "Bursting"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Standard",
+            "IA",
+            "Archive",
+            "Lifecycle"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "Mount targets",
+            "Access points",
+            "CSI driver"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mount EFS",
+      "scenario": "With TLS.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All web servers see the same uploads."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sudo yum install -y amazon-efs-utils\nsudo mount -t efs -o tls fs-0abc123:/ /mnt/shared"
+        }
+      ],
+      "outcome": "shared Linux storage with no capacity planning."
+    },
+    "summary": {
+      "points": [
+        "Managed NFS.",
+        "Elastic and multi-AZ.",
+        "Lifecycle to cheaper classes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is an EFS access point?",
+        "a": "An application-specific entry point that enforces a root directory and POSIX user/group identity."
+      }
+    ]
+  },
+  "fsx-for-windows-file-server-the-corporate-s-drive": {
+    "core": "FSx for Windows File Server provides fully managed native Windows file shares over SMB, integrated with Active Directory for permissions (NTFS ACLs), with DFS namespaces, shadow copies, deduplication and Multi-AZ deployment. It suits lifting Windows workloads and user shares to AWS.",
+    "first_principles": {
+      "problem": "A company moving to AWS needs its Windows 'S: drive' with AD permissions intact.",
+      "truths": [
+        "Windows apps expect SMB and NTFS ACLs.",
+        "AD is the identity system.",
+        "Managing Windows file servers is toil."
+      ],
+      "derivation": [
+        "Join to **AWS Managed AD** or self-managed AD.",
+        "Choose **Multi-AZ** for HA.",
+        "Use **SSD or HDD** storage by workload.",
+        "Enable **shadow copies** and **backups**.",
+        "Migrate with **DataSync** or Robocopy."
+      ]
+    },
+    "analogy": {
+      "title": "The office file server, minus the server cupboard",
+      "story": "Same drive letters and permissions; someone else patches it.",
+      "mapping": [
+        [
+          "S: drive",
+          "SMB share"
+        ],
+        [
+          "Folder permissions",
+          "NTFS ACLs"
+        ],
+        [
+          "IT patching",
+          "AWS managed"
+        ]
+      ],
+      "breaks": "The old server sat on the LAN; FSx is reached over VPN/Direct Connect from offices."
+    },
+    "mindmap": {
+      "center": "FSx for Windows",
+      "branches": [
+        {
+          "label": "Protocol",
+          "children": [
+            "SMB"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Active Directory",
+            "NTFS ACLs"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "DFS",
+            "Shadow copies",
+            "Dedup"
+          ]
+        },
+        {
+          "label": "HA",
+          "children": [
+            "Multi-AZ"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "DataSync",
+            "Robocopy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Migrating a department share",
+      "scenario": "Steps.",
+      "flow": [
+        "Create Multi-AZ FSx joined to corp AD",
+        "DataSync from on-prem server",
+        "Update DFS namespace target",
+        "Users see no change"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Seamless cutover."
+        }
+      ],
+      "code": [],
+      "outcome": "Windows shares without servers to manage."
+    },
+    "summary": {
+      "points": [
+        "Native SMB.",
+        "AD-integrated.",
+        "Multi-AZ."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why choose FSx for Windows over EFS for Windows apps?",
+        "a": "EFS is NFS for Linux; Windows apps need SMB with NTFS ACLs and AD integration."
+      }
+    ]
+  },
+  "fsx-for-lustre-the-speed-demon": {
+    "core": "FSx for Lustre is a managed parallel filesystem delivering hundreds of GB/s and millions of IOPS with sub-ms latency for HPC and ML. It links to S3 buckets, lazily loading objects as files and exporting results back. Scratch deployments are cheapest for temporary jobs; persistent ones replicate within an AZ.",
+    "first_principles": {
+      "problem": "GPU training jobs stall reading millions of files from S3.",
+      "truths": [
+        "Parallel filesystems stripe across servers.",
+        "S3 is durable but not POSIX-fast.",
+        "Many jobs are temporary."
+      ],
+      "derivation": [
+        "**Link to S3** (data repository association).",
+        "Choose **scratch** for short jobs, **persistent** for longer.",
+        "Size **throughput per TiB**.",
+        "Mount with the **Lustre client**.",
+        "**Export** results to S3."
+      ]
+    },
+    "analogy": {
+      "title": "A pit lane fuel rig fed from the main tank",
+      "story": "S3 is the big tank; Lustre delivers fuel at race speed to the cars.",
+      "mapping": [
+        [
+          "Main tank",
+          "S3"
+        ],
+        [
+          "Fuel rig",
+          "FSx for Lustre"
+        ],
+        [
+          "Race cars",
+          "GPU instances"
+        ]
+      ],
+      "breaks": "Fuel is consumed; data is reused across epochs, so caching pays."
+    },
+    "mindmap": {
+      "center": "FSx for Lustre",
+      "branches": [
+        {
+          "label": "Performance",
+          "children": [
+            "100s GB/s",
+            "Sub-ms"
+          ]
+        },
+        {
+          "label": "S3 link",
+          "children": [
+            "Lazy load",
+            "Export"
+          ]
+        },
+        {
+          "label": "Deployment",
+          "children": [
+            "Scratch",
+            "Persistent"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "ML training",
+            "HPC",
+            "Genomics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ML training setup",
+      "scenario": "Flow.",
+      "flow": [
+        "Dataset in S3",
+        "FSx Lustre scratch linked to bucket",
+        "64 GPUs read at 50 GB/s",
+        "Checkpoints exported to S3"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "GPU utilisation from 40% to 90%."
+        }
+      ],
+      "code": [],
+      "outcome": "storage that keeps GPUs fed."
+    },
+    "summary": {
+      "points": [
+        "Parallel and fast.",
+        "Linked to S3.",
+        "Scratch for temporary jobs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does linking FSx for Lustre to S3 provide?",
+        "a": "S3 objects appear as files and are loaded on first access, with results exportable back to S3."
+      }
+    ]
+  },
+  "fsx-for-netapp-ontap-the-enterprise-swiss-army-knife": {
+    "core": "FSx for NetApp ONTAP runs NetApp's ONTAP as a managed service: multi-protocol (NFS, SMB, iSCSI, NVMe/TCP), instant snapshots and clones, SnapMirror replication, deduplication/compression and automatic tiering to cheaper capacity storage. It's ideal for migrating existing NetApp estates or needing many protocols on one system.",
+    "first_principles": {
+      "problem": "An enterprise relies on NetApp features like SnapMirror and FlexClone and won't re-platform.",
+      "truths": [
+        "Enterprises have ONTAP workflows and tooling.",
+        "Multi-protocol access serves mixed environments.",
+        "Storage efficiency cuts cost."
+      ],
+      "derivation": [
+        "Use **SnapMirror** to migrate/replicate from on-prem.",
+        "Serve **NFS + SMB + iSCSI** from one filesystem.",
+        "Use **FlexClone** for instant dev/test copies.",
+        "Enable **capacity pool tiering**.",
+        "Choose **Multi-AZ** for HA."
+      ]
+    },
+    "analogy": {
+      "title": "A Swiss Army knife",
+      "story": "One tool with many blades for different jobs.",
+      "mapping": [
+        [
+          "Blades",
+          "Protocols and features"
+        ],
+        [
+          "One handle",
+          "One filesystem"
+        ]
+      ],
+      "breaks": "Swiss Army knives are simple; ONTAP needs storage-admin skills."
+    },
+    "mindmap": {
+      "center": "FSx ONTAP",
+      "branches": [
+        {
+          "label": "Protocols",
+          "children": [
+            "NFS",
+            "SMB",
+            "iSCSI",
+            "NVMe/TCP"
+          ]
+        },
+        {
+          "label": "Data mgmt",
+          "children": [
+            "Snapshots",
+            "FlexClone",
+            "SnapMirror"
+          ]
+        },
+        {
+          "label": "Efficiency",
+          "children": [
+            "Dedup",
+            "Compression",
+            "Tiering"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "NetApp migration",
+            "Mixed workloads",
+            "VMware Cloud"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Instant test environments",
+      "scenario": "FlexClone.",
+      "flow": [
+        "Production DB volume 2 TB",
+        "FlexClone in seconds, near-zero space",
+        "Each developer gets a clone",
+        "Delete when done"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Realistic test data without copying 2 TB each time."
+        }
+      ],
+      "code": [],
+      "outcome": "enterprise storage features, managed."
+    },
+    "summary": {
+      "points": [
+        "Multi-protocol.",
+        "Snapshots and clones.",
+        "SnapMirror migration."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes FlexClone useful for dev/test?",
+        "a": "It creates writable copies instantly that share unchanged blocks, using almost no extra space."
+      }
+    ]
+  },
+  "fsx-for-openzfs-the-developers-nfs": {
+    "core": "FSx for OpenZFS offers managed ZFS over NFS with very low latency (hundreds of microseconds), high IOPS, instant snapshots and clones, and compression. It's a strong fit for migrating Linux/ZFS workloads, build farms and latency-sensitive NFS apps that EFS is too slow for.",
+    "first_principles": {
+      "problem": "A CI build farm on EFS is slow because of many small-file metadata operations.",
+      "truths": [
+        "ZFS offers snapshots, clones and checksums.",
+        "Lower latency helps small-file workloads.",
+        "EFS optimises for elasticity over latency."
+      ],
+      "derivation": [
+        "Choose **OpenZFS** for low-latency NFS.",
+        "Use **snapshots/clones** for test copies.",
+        "Enable **compression** (LZ4/Zstd).",
+        "Size **throughput and IOPS**.",
+        "Consider **Multi-AZ** deployment."
+      ]
+    },
+    "analogy": {
+      "title": "A fast local workshop versus a big shared warehouse",
+      "story": "The workshop is quicker for lots of small tasks; the warehouse scales endlessly.",
+      "mapping": [
+        [
+          "Workshop",
+          "FSx OpenZFS"
+        ],
+        [
+          "Warehouse",
+          "EFS"
+        ],
+        [
+          "Small tasks",
+          "Small-file metadata ops"
+        ]
+      ],
+      "breaks": "Workshops are local; OpenZFS is still network storage."
+    },
+    "mindmap": {
+      "center": "FSx OpenZFS",
+      "branches": [
+        {
+          "label": "Protocol",
+          "children": [
+            "NFS v3/v4"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "~100s µs latency",
+            "High IOPS"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Snapshots",
+            "Clones",
+            "Compression"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Build farms",
+            "ZFS migrations",
+            "Low-latency NFS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Moving a build cache",
+      "scenario": "EFS → OpenZFS.",
+      "flow": [
+        "npm/maven caches with millions of small files",
+        "EFS: builds 22 min",
+        "OpenZFS: builds 9 min"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Developers wait less."
+        }
+      ],
+      "code": [],
+      "outcome": "fast NFS for demanding workloads."
+    },
+    "summary": {
+      "points": [
+        "Low-latency NFS.",
+        "ZFS features.",
+        "Great for small files."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you choose FSx for OpenZFS over EFS?",
+        "a": "For latency-sensitive or small-file-heavy NFS workloads, or when migrating ZFS-based systems."
+      }
+    ]
+  }
+}

@@ -1,0 +1,411 @@
+{
+  "introduction-serverless-containers": {
+    "core": "Fargate runs containers without servers: you specify CPU and memory per task or pod, and AWS provisions an isolated Firecracker microVM for it. No AMIs, patching, cluster capacity or bin packing. You pay per vCPU-second and GB-second, and it works with both ECS and EKS.",
+    "first_principles": {
+      "problem": "A team spends time patching and scaling EC2 hosts for a handful of container services.",
+      "truths": [
+        "Host management is undifferentiated toil.",
+        "Per-task isolation improves security.",
+        "Some flexibility is lost (no host access)."
+      ],
+      "derivation": [
+        "Specify **task-level CPU/memory**.",
+        "Let AWS handle **hosts and patching**.",
+        "Get **microVM isolation** per task.",
+        "Accept limits: **no privileged/host mode, no DaemonSets on EKS**.",
+        "Use **Fargate Spot** for interruptible work."
+      ]
+    },
+    "analogy": {
+      "title": "Taking taxis instead of owning a car",
+      "story": "No maintenance or parking, and you pay per trip, but you can't modify the engine.",
+      "mapping": [
+        [
+          "Taxi",
+          "Fargate task"
+        ],
+        [
+          "Car maintenance",
+          "Host patching"
+        ],
+        [
+          "Pay per trip",
+          "Per-second billing"
+        ]
+      ],
+      "breaks": "Taxis are shared; each Fargate task gets its own isolated microVM."
+    },
+    "mindmap": {
+      "center": "Fargate",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Task-level resources",
+            "MicroVM per task"
+          ]
+        },
+        {
+          "label": "Removes",
+          "children": [
+            "Hosts",
+            "Patching",
+            "Capacity planning"
+          ]
+        },
+        {
+          "label": "Works with",
+          "children": [
+            "ECS",
+            "EKS"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "No host access",
+            "No privileged",
+            "No DaemonSets (EKS)"
+          ]
+        },
+        {
+          "label": "Savings",
+          "children": [
+            "Fargate Spot",
+            "Savings Plans"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Run a task on Fargate",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Container runs with no servers to manage."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ecs run-task --cluster prod --launch-type FARGATE --task-definition report:12 \\\n  --network-configuration 'awsvpcConfiguration={subnets=[subnet-a],securityGroups=[sg-1],assignPublicIp=DISABLED}'"
+        }
+      ],
+      "outcome": "containers without hosts."
+    },
+    "summary": {
+      "points": [
+        "No servers.",
+        "Per-task isolation.",
+        "Some limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "What isolation boundary does each Fargate task get?",
+        "a": "Its own Firecracker microVM, not shared with other tasks."
+      }
+    ]
+  },
+  "fargate-platform-versions-13-vs-14": {
+    "core": "Fargate platform versions define the runtime environment. Platform 1.4.0 (current Linux baseline) moved to containerd, routes all task traffic (including image pulls and secrets) through the task ENI, added 20 GB+ ephemeral storage (configurable to 200 GB), EFS support and better metrics. 1.3.0 used a separate Fargate-owned ENI for platform traffic.",
+    "first_principles": {
+      "problem": "After moving to 1.4.0, tasks in private subnets fail to pull images because they lack a route or VPC endpoints.",
+      "truths": [
+        "Platform traffic now uses your ENI.",
+        "Network paths must allow ECR, S3 and Secrets Manager.",
+        "Newer versions add features."
+      ],
+      "derivation": [
+        "Use **LATEST (1.4.0)**.",
+        "Provide **NAT or VPC endpoints** (ecr.api, ecr.dkr, s3, logs, secretsmanager).",
+        "Configure **ephemeral storage** as needed.",
+        "Use **EFS volumes** for shared persistence.",
+        "Check **security groups** for outbound access."
+      ]
+    },
+    "analogy": {
+      "title": "A building where deliveries now use your front door",
+      "story": "Previously the landlord had a separate service entrance; now everything comes through your door, so it must be open.",
+      "mapping": [
+        [
+          "Separate service entrance",
+          "1.3.0 platform ENI"
+        ],
+        [
+          "Your front door",
+          "Task ENI in 1.4.0"
+        ],
+        [
+          "Door rules",
+          "Security groups/endpoints"
+        ]
+      ],
+      "breaks": "Delivery doors don't need routing tables; ENIs do."
+    },
+    "mindmap": {
+      "center": "Platform Versions",
+      "branches": [
+        {
+          "label": "1.3.0",
+          "children": [
+            "Docker",
+            "Separate platform ENI"
+          ]
+        },
+        {
+          "label": "1.4.0",
+          "children": [
+            "containerd",
+            "All traffic via task ENI",
+            "Ephemeral storage up to 200 GB",
+            "EFS"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "Need NAT/endpoints"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Use LATEST"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Private subnet requirements",
+      "scenario": "Endpoints.",
+      "flow": [
+        "Interface endpoints: ecr.api, ecr.dkr, logs, secretsmanager",
+        "Gateway endpoint: s3 (image layers)",
+        "Tasks pull images privately"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Private Fargate works without NAT."
+        }
+      ],
+      "code": [],
+      "outcome": "platform behaviour understood."
+    },
+    "summary": {
+      "points": [
+        "1.4.0 uses task ENI for everything.",
+        "Plan network paths.",
+        "More storage and EFS."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might Fargate 1.4.0 tasks fail to pull images in private subnets?",
+        "a": "Image pulls go through the task ENI, so the subnet needs NAT or VPC endpoints for ECR and S3."
+      }
+    ]
+  },
+  "fargate-networking-the-eni-per-task-model": {
+    "core": "Every Fargate task (or EKS Fargate pod) gets its own ENI with a private IP in your subnet, using awsvpc mode. Each task can have its own security groups and appears in flow logs, but tasks consume subnet IPs and ENI quotas, and ENI attachment adds a few seconds to startup.",
+    "first_principles": {
+      "problem": "A burst of 2,000 tasks fails because the subnets run out of IP addresses.",
+      "truths": [
+        "One ENI per task means one IP per task.",
+        "Security groups apply per task.",
+        "ENI creation takes time."
+      ],
+      "derivation": [
+        "Size **subnets** for peak tasks.",
+        "Spread across **multiple AZ subnets**.",
+        "Use **task-level security groups**.",
+        "Watch **ENI and IP quotas**.",
+        "Keep tasks **private**; use ALB for ingress."
+      ]
+    },
+    "analogy": {
+      "title": "Each tenant gets their own front door and doorbell",
+      "story": "Great for security and identity, but you need enough doors.",
+      "mapping": [
+        [
+          "Front door",
+          "ENI"
+        ],
+        [
+          "Door number",
+          "Private IP"
+        ],
+        [
+          "Door lock rules",
+          "Security groups"
+        ]
+      ],
+      "breaks": "Buildings plan doors at construction; subnet size is likewise fixed later."
+    },
+    "mindmap": {
+      "center": "ENI per Task",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "awsvpc",
+            "Own ENI and IP"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Per-task SGs",
+            "Flow logs",
+            "Isolation"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "IP consumption",
+            "ENI quotas",
+            "Startup time"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Big subnets",
+            "Multi-AZ",
+            "Private + ALB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Capacity check",
+      "scenario": "IP maths.",
+      "flow": [
+        "Peak 2,000 tasks",
+        "3 private /21 subnets ≈ 6,100 usable IPs",
+        "Headroom for other resources ✓"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bursts don't hit IP limits."
+        }
+      ],
+      "code": [],
+      "outcome": "network capacity planned for tasks."
+    },
+    "summary": {
+      "points": [
+        "One ENI per task.",
+        "Per-task security groups.",
+        "Plan IP space."
+      ]
+    },
+    "check": [
+      {
+        "q": "What resource does each Fargate task consume in your subnet?",
+        "a": "One ENI with one private IP address."
+      }
+    ]
+  },
+  "fargate-pricing-the-math-that-matters": {
+    "core": "Fargate bills per second for requested vCPU and memory (plus extra ephemeral storage), from start to stop, rounded up to one minute minimum. It costs more per unit than well-packed EC2, but you pay nothing for idle host capacity. Fargate Spot (up to ~70% off), Graviton (ARM, ~20% cheaper) and Compute Savings Plans cut the cost.",
+    "first_principles": {
+      "problem": "A team compares Fargate's per-vCPU price to EC2 and concludes it's too expensive, ignoring EC2 idle capacity and ops time.",
+      "truths": [
+        "EC2 clusters rarely run at 100% utilisation.",
+        "Fargate charges only for task size.",
+        "Discounts apply to Fargate too."
+      ],
+      "derivation": [
+        "Cost = **vCPU-hours × rate + GB-hours × rate**.",
+        "Compare against EC2 **effective utilisation**.",
+        "**Right-size** task CPU/memory.",
+        "Use **ARM64**, **Fargate Spot** and **Savings Plans**.",
+        "Include **ops cost** of managing hosts."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel room versus renting a whole flat",
+      "story": "Per night, the hotel costs more, but you don't pay for empty rooms.",
+      "mapping": [
+        [
+          "Hotel night",
+          "Fargate task-hour"
+        ],
+        [
+          "Whole flat",
+          "EC2 host"
+        ],
+        [
+          "Empty rooms",
+          "Unused capacity"
+        ]
+      ],
+      "breaks": "Hotels have fixed room sizes; Fargate sizes are flexible within valid combinations."
+    },
+    "mindmap": {
+      "center": "Fargate Pricing",
+      "branches": [
+        {
+          "label": "Billing",
+          "children": [
+            "Per second",
+            "vCPU + memory",
+            "1-min minimum"
+          ]
+        },
+        {
+          "label": "Compare",
+          "children": [
+            "EC2 utilisation",
+            "Ops time"
+          ]
+        },
+        {
+          "label": "Savings",
+          "children": [
+            "Fargate Spot",
+            "Graviton",
+            "Savings Plans",
+            "Right-sizing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Monthly cost estimate",
+      "scenario": "Approximate.",
+      "flow": [
+        "10 tasks × 0.5 vCPU, 1 GB, 24/7",
+        "≈ 10 × (0.5 × $0.04 + 1 × $0.0044) × 730 h ≈ $178",
+        "ARM + Savings Plan → ≈ $110"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Realistic cost picture."
+        }
+      ],
+      "code": [],
+      "outcome": "informed Fargate vs EC2 decisions."
+    },
+    "summary": {
+      "points": [
+        "Pay for task size.",
+        "Compare to real EC2 utilisation.",
+        "Use ARM, Spot, Savings Plans."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can Fargate be cheaper overall despite higher unit prices?",
+        "a": "You don't pay for idle host capacity or the engineering time to manage and pack EC2 hosts."
+      }
+    ]
+  }
+}

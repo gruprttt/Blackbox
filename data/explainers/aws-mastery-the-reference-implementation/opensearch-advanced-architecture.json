@@ -1,0 +1,635 @@
+{
+  "introduction-beyond-the-search-box": {
+    "core": "OpenSearch Service runs managed OpenSearch (an Elasticsearch fork) for full-text search, log analytics, observability and vector search. Data lives in indices split into shards distributed across data nodes. Production clusters need careful node roles, shard sizing, storage tiers and cross-cluster features.",
+    "first_principles": {
+      "problem": "A logging cluster with default settings goes red under load and costs a fortune in hot storage.",
+      "truths": [
+        "Search uses inverted indexes.",
+        "Shards distribute data and work.",
+        "Old data is queried rarely."
+      ],
+      "derivation": [
+        "Separate **master and data roles**.",
+        "Size **shards** (10–50 GB).",
+        "Use **hot/UltraWarm/cold** tiers.",
+        "Manage with **ISM policies**.",
+        "Federate with **cross-cluster search/replication**."
+      ]
+    },
+    "analogy": {
+      "title": "A library with a card catalogue, branches and archives",
+      "story": "Fast lookups, books spread across branches and old volumes moved to cheaper storage.",
+      "mapping": [
+        [
+          "Card catalogue",
+          "Inverted index"
+        ],
+        [
+          "Branches",
+          "Shards/nodes"
+        ],
+        [
+          "Archives",
+          "Warm/cold tiers"
+        ]
+      ],
+      "breaks": "Library catalogues are updated slowly; OpenSearch indexes thousands of documents per second."
+    },
+    "mindmap": {
+      "center": "OpenSearch",
+      "branches": [
+        {
+          "label": "Uses",
+          "children": [
+            "Search",
+            "Logs",
+            "Vectors"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "Indices",
+            "Shards",
+            "Replicas"
+          ]
+        },
+        {
+          "label": "Nodes",
+          "children": [
+            "Master",
+            "Data",
+            "UltraWarm"
+          ]
+        },
+        {
+          "label": "Tiers",
+          "children": [
+            "Hot",
+            "UltraWarm",
+            "Cold"
+          ]
+        },
+        {
+          "label": "Federation",
+          "children": [
+            "Cross-cluster search",
+            "CCR"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Log analytics cluster",
+      "scenario": "Baseline.",
+      "flow": [
+        "3 dedicated masters",
+        "6 hot data nodes, daily indices",
+        "ISM: hot 7 d → UltraWarm 30 d → cold 1 y",
+        "Dashboards for queries"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stable cluster, controlled cost."
+        }
+      ],
+      "code": [],
+      "outcome": "production-grade search architecture."
+    },
+    "summary": {
+      "points": [
+        "Shards distribute.",
+        "Tiers save money.",
+        "Separate roles."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is an OpenSearch shard?",
+        "a": "A partition of an index, an independent Lucene index, distributed across nodes."
+      }
+    ]
+  },
+  "the-brain-vs-the-body-dedicated-master-nodes": {
+    "core": "Cluster manager (master) nodes maintain cluster state (index metadata, shard allocation) and elect a leader; data nodes store and query shards. Dedicated masters (3, across AZs, for quorum) keep cluster management stable when data nodes are busy. Without them, heavy queries can starve state updates and cause split-brain or red clusters.",
+    "first_principles": {
+      "problem": "Under heavy indexing, the cluster becomes unresponsive and shards stop allocating.",
+      "truths": [
+        "Cluster state must be managed reliably.",
+        "Quorum needs an odd number of voters.",
+        "Data work can starve management work."
+      ],
+      "derivation": [
+        "Use **3 dedicated master nodes** (odd, multi-AZ).",
+        "Size masters by **shard and index count**.",
+        "Keep masters **free of data**.",
+        "Enable **Multi-AZ with standby**.",
+        "Watch **cluster state size** and shard count."
+      ]
+    },
+    "analogy": {
+      "title": "A brain and a body",
+      "story": "The body does heavy lifting; the brain coordinates and must not be exhausted by lifting too.",
+      "mapping": [
+        [
+          "Brain",
+          "Master nodes"
+        ],
+        [
+          "Body",
+          "Data nodes"
+        ],
+        [
+          "Coordination",
+          "Cluster state"
+        ]
+      ],
+      "breaks": "Brains can't be replaced; master nodes can, as long as quorum holds."
+    },
+    "mindmap": {
+      "center": "Master Nodes",
+      "branches": [
+        {
+          "label": "Role",
+          "children": [
+            "Cluster state",
+            "Shard allocation",
+            "Elections"
+          ]
+        },
+        {
+          "label": "Best practice",
+          "children": [
+            "3 dedicated",
+            "Multi-AZ",
+            "No data"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "Shard/index count"
+          ]
+        },
+        {
+          "label": "Failure modes",
+          "children": [
+            "Split brain",
+            "Red cluster"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stabilising a cluster",
+      "scenario": "Change.",
+      "flow": [
+        "Before: data nodes also master-eligible, frequent timeouts",
+        "Add 3 dedicated m7g.large masters",
+        "Cluster state updates stable under load"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No more red during ingest spikes."
+        }
+      ],
+      "code": [],
+      "outcome": "stable cluster management."
+    },
+    "summary": {
+      "points": [
+        "Separate brain and body.",
+        "Three masters.",
+        "Size by shard count."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use three dedicated master nodes?",
+        "a": "An odd number maintains quorum for leader election and avoids split-brain, while dedicated nodes stay responsive."
+      }
+    ]
+  },
+  "the-storage-tiers-hot-warm-and-cold": {
+    "core": "Hot tier data nodes use fast local/EBS storage for active indexing and frequent queries. UltraWarm stores read-only indices on S3 with caching nodes, cutting cost by up to ~90%. Cold storage detaches indices entirely to S3 at the lowest cost, attaching them on demand. ISM policies move indices between tiers by age or size.",
+    "first_principles": {
+      "problem": "A year of logs on hot storage costs ten times what the queries justify.",
+      "truths": [
+        "Access frequency drops with age.",
+        "S3 is far cheaper than SSD.",
+        "Old logs are rarely queried but must be retained."
+      ],
+      "derivation": [
+        "**Hot** for recent, write-heavy indices.",
+        "**UltraWarm** for read-only, occasionally queried data.",
+        "**Cold** for compliance retention.",
+        "Automate with **ISM**.",
+        "**Force-merge** before migrating."
+      ]
+    },
+    "analogy": {
+      "title": "Kitchen counter, pantry and basement storage",
+      "story": "Today's ingredients on the counter, this month's in the pantry and old preserves in the basement.",
+      "mapping": [
+        [
+          "Counter",
+          "Hot"
+        ],
+        [
+          "Pantry",
+          "UltraWarm"
+        ],
+        [
+          "Basement",
+          "Cold"
+        ]
+      ],
+      "breaks": "Basement items are fetched by hand; cold indices are attached through an API."
+    },
+    "mindmap": {
+      "center": "Storage Tiers",
+      "branches": [
+        {
+          "label": "Hot",
+          "children": [
+            "Fast",
+            "Writable",
+            "Expensive"
+          ]
+        },
+        {
+          "label": "UltraWarm",
+          "children": [
+            "S3-backed",
+            "Read-only",
+            "Cached"
+          ]
+        },
+        {
+          "label": "Cold",
+          "children": [
+            "Detached",
+            "Cheapest",
+            "Attach on demand"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "ISM policies",
+            "Force merge"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ISM policy",
+      "scenario": "Lifecycle.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Storage cost drops by most of the bill."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\"policy\": {\"states\": [\n  {\"name\": \"hot\", \"actions\": [], \"transitions\": [{\"state_name\": \"warm\", \"conditions\": {\"min_index_age\": \"7d\"}}]},\n  {\"name\": \"warm\", \"actions\": [{\"warm_migration\": {}}], \"transitions\": [{\"state_name\": \"cold\", \"conditions\": {\"min_index_age\": \"30d\"}}]},\n  {\"name\": \"cold\", \"actions\": [{\"cold_migration\": {\"timestamp_field\": \"@timestamp\"}}]}\n]}}"
+        }
+      ],
+      "outcome": "retention without hot-tier cost."
+    },
+    "summary": {
+      "points": [
+        "Hot, warm, cold.",
+        "S3-backed tiers.",
+        "Automate with ISM."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can you write to indices in UltraWarm?",
+        "a": "No; UltraWarm indices are read-only."
+      }
+    ]
+  },
+  "deep-dive-how-ultrawarm-works": {
+    "core": "UltraWarm nodes keep index data in S3 and use local storage as a cache for frequently accessed segments. Queries fetch needed blocks from S3 into the cache, with prefetching. Indices must be read-only and are typically force-merged to fewer segments first. Performance is slower than hot for cold-cache queries but far cheaper.",
+    "first_principles": {
+      "problem": "Teams are surprised that the first query on an UltraWarm index is slow and later ones are fast.",
+      "truths": [
+        "S3 has higher latency than local disk.",
+        "Caching hides repeated latency.",
+        "Fewer segments mean fewer fetches."
+      ],
+      "derivation": [
+        "**Migrate** only read-only indices.",
+        "**Force-merge** before migration.",
+        "Size **UltraWarm nodes** for cache and concurrency.",
+        "Expect **cold-cache latency**.",
+        "Keep **dashboards** on hot where latency matters."
+      ]
+    },
+    "analogy": {
+      "title": "A library annex with a small reading-room shelf",
+      "story": "Books live in the warehouse; recently requested ones sit on the reading-room shelf.",
+      "mapping": [
+        [
+          "Warehouse",
+          "S3"
+        ],
+        [
+          "Reading-room shelf",
+          "Local cache"
+        ],
+        [
+          "Fetching a book",
+          "Block download"
+        ]
+      ],
+      "breaks": "Librarians predict popular books; UltraWarm uses access patterns and prefetching."
+    },
+    "mindmap": {
+      "center": "UltraWarm Internals",
+      "branches": [
+        {
+          "label": "Storage",
+          "children": [
+            "S3 primary copy"
+          ]
+        },
+        {
+          "label": "Cache",
+          "children": [
+            "Local SSD",
+            "Prefetching"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Read-only",
+            "Force-merged"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Cold-cache slower",
+            "Warm-cache good"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "Cache",
+            "Concurrency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Query latency pattern",
+      "scenario": "Observed.",
+      "flow": [
+        "First query over 30-day-old index: 4 s",
+        "Repeat query: 300 ms",
+        "Hot equivalent: 150 ms"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Great for occasional investigations."
+        }
+      ],
+      "code": [],
+      "outcome": "realistic expectations for warm data."
+    },
+    "summary": {
+      "points": [
+        "S3 + cache.",
+        "Read-only, force-merged.",
+        "First query slower."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why force-merge an index before moving it to UltraWarm?",
+        "a": "Fewer, larger segments mean fewer S3 fetches and better query performance."
+      }
+    ]
+  },
+  "cross-cluster-search-the-federation": {
+    "core": "Cross-cluster search lets a coordinating cluster query indices on connected remote clusters (e.g. per team, per region or per environment) in a single request, using connection aliases (remote:index). Data stays in place, isolation and scaling are per cluster, and searches federate across them.",
+    "first_principles": {
+      "problem": "Security analysts need to search logs from ten regional clusters at once.",
+      "truths": [
+        "Moving all data to one cluster is costly.",
+        "Isolation benefits from separate clusters.",
+        "Queries can be federated."
+      ],
+      "derivation": [
+        "Create **outbound connections** from the coordinating domain.",
+        "**Accept** on remote domains.",
+        "Query **alias:index** patterns.",
+        "Mind **latency and fine-grained access control**.",
+        "Use for **read-only federation**."
+      ]
+    },
+    "analogy": {
+      "title": "A federated library catalogue",
+      "story": "Search once and see results from every branch without moving the books.",
+      "mapping": [
+        [
+          "Branches",
+          "Remote clusters"
+        ],
+        [
+          "Federated catalogue",
+          "Coordinating cluster"
+        ],
+        [
+          "Books staying put",
+          "Data in place"
+        ]
+      ],
+      "breaks": "Library federations can be slow to sync; CCS queries live data on each request."
+    },
+    "mindmap": {
+      "center": "Cross-Cluster Search",
+      "branches": [
+        {
+          "label": "Setup",
+          "children": [
+            "Outbound connection",
+            "Accept inbound"
+          ]
+        },
+        {
+          "label": "Query",
+          "children": [
+            "alias:index",
+            "Wildcards"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Data in place",
+            "Isolation"
+          ]
+        },
+        {
+          "label": "Considerations",
+          "children": [
+            "Latency",
+            "Access control",
+            "Version compatibility"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Querying regions",
+      "scenario": "Request.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One query, three regions."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "GET eu-logs:app-*,us-logs:app-*,ap-logs:app-*/_search\n{\"query\": {\"match\": {\"user.id\": \"u-981\"}}}"
+        }
+      ],
+      "outcome": "federated visibility."
+    },
+    "summary": {
+      "points": [
+        "Query remote clusters.",
+        "Data stays local.",
+        "Mind latency."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you refer to a remote index in cross-cluster search?",
+        "a": "With the connection alias prefix, e.g. alias:index-name."
+      }
+    ]
+  },
+  "cross-cluster-replication-ccr": {
+    "core": "Cross-cluster replication copies indices from a leader cluster to follower clusters asynchronously, near real time. Followers are read-only, providing low-latency regional reads and a warm disaster-recovery copy. Auto-follow rules replicate new indices matching patterns automatically.",
+    "first_principles": {
+      "problem": "A search application needs fast reads in two regions and a standby if one region fails.",
+      "truths": [
+        "Async replication gives local copies.",
+        "Single-leader avoids write conflicts.",
+        "New indices should replicate automatically."
+      ],
+      "derivation": [
+        "Establish a **connection** (follower → leader).",
+        "Start **replication** per index or **auto-follow** by pattern.",
+        "Serve **reads** from followers.",
+        "On DR, **stop replication** and promote follower to writable.",
+        "Monitor **lag**."
+      ]
+    },
+    "analogy": {
+      "title": "A newspaper's regional printing plants",
+      "story": "Headquarters writes the edition; plants print local copies moments later.",
+      "mapping": [
+        [
+          "Headquarters",
+          "Leader cluster"
+        ],
+        [
+          "Regional plants",
+          "Followers"
+        ],
+        [
+          "New editions",
+          "Auto-follow indices"
+        ]
+      ],
+      "breaks": "Newspapers are read-only everywhere; promoted followers can become writable after DR."
+    },
+    "mindmap": {
+      "center": "CCR",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Leader",
+            "Followers",
+            "Async"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Auto-follow",
+            "Per-index replication"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Regional reads",
+            "DR"
+          ]
+        },
+        {
+          "label": "DR",
+          "children": [
+            "Stop replication",
+            "Promote"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "Lag"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Auto-follow rule",
+      "scenario": "Request.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every new products index replicates to EU."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "POST _plugins/_replication/_autofollow\n{\"leader_alias\": \"us-leader\", \"name\": \"products\", \"pattern\": \"products-*\", \"use_roles\": {\"leader_cluster_role\": \"all_access\", \"follower_cluster_role\": \"all_access\"}}"
+        }
+      ],
+      "outcome": "regional read copies and DR."
+    },
+    "summary": {
+      "points": [
+        "Leader to followers.",
+        "Read-only followers.",
+        "Promote for DR."
+      ]
+    },
+    "check": [
+      {
+        "q": "Are CCR follower indices writable?",
+        "a": "No, they're read-only until replication is stopped and they're promoted."
+      }
+    ]
+  }
+}

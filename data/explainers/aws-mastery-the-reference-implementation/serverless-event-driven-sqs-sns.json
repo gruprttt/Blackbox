@@ -1,0 +1,616 @@
+{
+  "introduction-decoupling-with-messages": {
+    "core": "Queues and topics decouple services in time and load. SQS buffers messages so consumers process at their own pace (point-to-point); SNS pushes each message to all subscribers (pub/sub). Together they absorb spikes, isolate failures and let systems scale independently.",
+    "first_principles": {
+      "problem": "A traffic spike overwhelms a downstream service called synchronously, and failures cascade upstream.",
+      "truths": [
+        "Producers and consumers run at different speeds.",
+        "Buffers absorb bursts.",
+        "Async boundaries contain failures."
+      ],
+      "derivation": [
+        "Use **SQS** to buffer work.",
+        "Use **SNS** to broadcast.",
+        "**Scale consumers** by queue depth.",
+        "**Retry** with DLQs.",
+        "Design **idempotent** consumers."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant ticket rail",
+      "story": "Waiters pin orders; cooks take them when ready, and a rush doesn't crash the kitchen.",
+      "mapping": [
+        [
+          "Ticket rail",
+          "SQS queue"
+        ],
+        [
+          "Waiters",
+          "Producers"
+        ],
+        [
+          "Cooks",
+          "Consumers"
+        ],
+        [
+          "Announcement to all staff",
+          "SNS"
+        ]
+      ],
+      "breaks": "Tickets are taken by one cook; SNS gives every subscriber its own copy."
+    },
+    "mindmap": {
+      "center": "Messaging",
+      "branches": [
+        {
+          "label": "SQS",
+          "children": [
+            "Queue",
+            "Pull",
+            "Buffer"
+          ]
+        },
+        {
+          "label": "SNS",
+          "children": [
+            "Topic",
+            "Push",
+            "Fan-out"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Decoupling",
+            "Spike absorption",
+            "Failure isolation"
+          ]
+        },
+        {
+          "label": "Duties",
+          "children": [
+            "Idempotency",
+            "DLQs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Absorbing a spike",
+      "scenario": "Before and after.",
+      "flow": [
+        "Sync: 5,000 req/s → downstream crashes",
+        "Async: SQS buffers, consumers process 800/s",
+        "Backlog drains in minutes, nothing lost"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Graceful degradation."
+        }
+      ],
+      "code": [],
+      "outcome": "resilient, decoupled services."
+    },
+    "summary": {
+      "points": [
+        "SQS buffers.",
+        "SNS broadcasts.",
+        "Async contains failure."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the core difference between SQS and SNS?",
+        "a": "SQS is a pull-based queue where each message goes to one consumer; SNS pushes each message to all subscribers."
+      }
+    ]
+  },
+  "sqs-standard-vs-fifo-speed-vs-order": {
+    "core": "Standard queues offer nearly unlimited throughput with at-least-once delivery and best-effort ordering. FIFO queues guarantee ordering within a message group and exactly-once processing via deduplication within 5 minutes, with throughput limits (up to 300 msg/s per API action, 3,000 with batching, higher in high-throughput mode).",
+    "first_principles": {
+      "problem": "Bank ledger updates processed out of order corrupt balances.",
+      "truths": [
+        "Ordering limits parallelism.",
+        "Duplicates happen in distributed systems.",
+        "Ordering often matters only per entity."
+      ],
+      "derivation": [
+        "**Standard** by default for throughput.",
+        "**FIFO** when order matters.",
+        "**MessageGroupId** per entity (account) for parallel ordered streams.",
+        "**Deduplication ID** or content-based dedup.",
+        "Enable **high-throughput FIFO** if needed."
+      ]
+    },
+    "analogy": {
+      "title": "A crowd entering a stadium versus a single-file queue per ticket desk",
+      "story": "The crowd is fast but unordered; each desk keeps strict order.",
+      "mapping": [
+        [
+          "Crowd",
+          "Standard queue"
+        ],
+        [
+          "Single-file desks",
+          "FIFO message groups"
+        ],
+        [
+          "Ticket check",
+          "Deduplication"
+        ]
+      ],
+      "breaks": "Desks serve different people; message groups must be chosen to match ordering needs."
+    },
+    "mindmap": {
+      "center": "Standard vs FIFO",
+      "branches": [
+        {
+          "label": "Standard",
+          "children": [
+            "Unlimited throughput",
+            "At least once",
+            "Best-effort order"
+          ]
+        },
+        {
+          "label": "FIFO",
+          "children": [
+            "Ordered per group",
+            "Exactly-once processing",
+            "Throughput limits"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "MessageGroupId",
+            "MessageDeduplicationId"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Order needed?"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ordered per account",
+      "scenario": "FIFO send.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each account ordered; accounts processed in parallel."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "sqs.send_message(QueueUrl=q, MessageBody=json.dumps(txn),\n    MessageGroupId=f'acct-{txn[\"account\"]}',\n    MessageDeduplicationId=txn['id'])"
+        }
+      ],
+      "outcome": "correct ordering without serialising everything."
+    },
+    "summary": {
+      "points": [
+        "Standard for speed.",
+        "FIFO for order.",
+        "Group IDs for parallelism."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does FIFO keep parallelism while preserving order?",
+        "a": "Ordering is per MessageGroupId, so different groups are processed in parallel."
+      }
+    ]
+  },
+  "the-fan-out-pattern-sns-sqs": {
+    "core": "Fan-out publishes once to an SNS topic subscribed by several SQS queues, giving each consumer its own durable buffer, retries and pace. Subscription filter policies route only relevant messages to each queue, and raw message delivery avoids SNS wrapping.",
+    "first_principles": {
+      "problem": "Three services need every order event, but one slow consumer shouldn't affect the others.",
+      "truths": [
+        "Each consumer needs isolation.",
+        "Queues provide durability and backpressure.",
+        "Not every consumer needs every message."
+      ],
+      "derivation": [
+        "**SNS topic** per event type/domain.",
+        "**SQS queue** per consumer.",
+        "**Filter policies** on subscriptions.",
+        "**Raw delivery** for clean bodies.",
+        "**Queue policies** allowing the topic."
+      ]
+    },
+    "analogy": {
+      "title": "A newsletter delivered to separate mailboxes",
+      "story": "Each subscriber reads at their own pace from their own box.",
+      "mapping": [
+        [
+          "Newsletter",
+          "SNS message"
+        ],
+        [
+          "Mailboxes",
+          "SQS queues"
+        ],
+        [
+          "Subscriber preferences",
+          "Filter policies"
+        ]
+      ],
+      "breaks": "Mailboxes don't retry; SQS consumers retry and use DLQs independently."
+    },
+    "mindmap": {
+      "center": "Fan-out",
+      "branches": [
+        {
+          "label": "Pieces",
+          "children": [
+            "SNS topic",
+            "SQS per consumer"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Isolation",
+            "Durability",
+            "Independent scaling"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Filter policies",
+            "Raw delivery",
+            "FIFO topics"
+          ]
+        },
+        {
+          "label": "Setup",
+          "children": [
+            "Queue policy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Filter policy",
+      "scenario": "Only EU orders.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "EU fulfilment queue receives only EU orders."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\"region\": [\"eu-west-1\", \"eu-central-1\"], \"total\": [{\"numeric\": [\">\", 0]}]}"
+        }
+      ],
+      "outcome": "independent, filtered consumers."
+    },
+    "summary": {
+      "points": [
+        "SNS + SQS per consumer.",
+        "Filter at subscription.",
+        "Isolated failures."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why put an SQS queue behind each SNS subscriber?",
+        "a": "It gives each consumer durable buffering, retries and independent pace, isolating slow or failing consumers."
+      }
+    ]
+  },
+  "visibility-timeout-preventing-double-work": {
+    "core": "When a consumer receives a message, SQS hides it for the visibility timeout. If the consumer deletes it in time, it's done; if not (crash or slow), it reappears for another consumer. Set the timeout above the worst-case processing time (≥ 6× Lambda timeout for ESM), and extend it for long jobs.",
+    "first_principles": {
+      "problem": "Long jobs exceed the 30-second default, so messages reappear and are processed twice.",
+      "truths": [
+        "Messages aren't deleted on receive.",
+        "Crashed consumers must not lose messages.",
+        "Too-short timeouts cause duplicates."
+      ],
+      "derivation": [
+        "Set **timeout > processing time**.",
+        "**Delete** after success.",
+        "**ChangeMessageVisibility** to extend long work.",
+        "For Lambda: **≥ 6× function timeout**.",
+        "Still be **idempotent**."
+      ]
+    },
+    "analogy": {
+      "title": "Checking out a library book",
+      "story": "While it's on loan nobody else sees it; if you don't return it by the due date, it goes back on the shelf.",
+      "mapping": [
+        [
+          "Loan period",
+          "Visibility timeout"
+        ],
+        [
+          "Returning the book",
+          "Delete message"
+        ],
+        [
+          "Back on the shelf",
+          "Message reappears"
+        ]
+      ],
+      "breaks": "Library books can be renewed indefinitely; visibility can extend up to 12 hours max."
+    },
+    "mindmap": {
+      "center": "Visibility Timeout",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Hidden on receive",
+            "Reappears if not deleted"
+          ]
+        },
+        {
+          "label": "Settings",
+          "children": [
+            "Default 30 s",
+            "Max 12 h"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "> processing time",
+            "Extend for long jobs",
+            "6× Lambda timeout"
+          ]
+        },
+        {
+          "label": "Still",
+          "children": [
+            "Idempotency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Extending visibility",
+      "scenario": "Long job.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No duplicate processing of long jobs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "msg = sqs.receive_message(QueueUrl=q, VisibilityTimeout=120)['Messages'][0]\n# halfway through a long job:\nsqs.change_message_visibility(QueueUrl=q, ReceiptHandle=msg['ReceiptHandle'], VisibilityTimeout=300)\nprocess(msg)\nsqs.delete_message(QueueUrl=q, ReceiptHandle=msg['ReceiptHandle'])"
+        }
+      ],
+      "outcome": "each message handled once in normal operation."
+    },
+    "summary": {
+      "points": [
+        "Hide while processing.",
+        "Timeout > work time.",
+        "Delete on success."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if a consumer crashes before deleting a message?",
+        "a": "After the visibility timeout expires, the message becomes visible again for another consumer."
+      }
+    ]
+  },
+  "dead-letter-queues-dlq-the-graveyard": {
+    "core": "A DLQ receives messages that failed processing maxReceiveCount times (redrive policy). It stops poison messages from looping forever, preserves them for inspection, and supports redrive back to the source queue after a fix. Always alarm on DLQ depth.",
+    "first_principles": {
+      "problem": "A malformed message fails forever, consuming capacity and hiding other issues.",
+      "truths": [
+        "Some messages will never succeed without a fix.",
+        "Infinite retries waste resources.",
+        "Failed messages need investigation."
+      ],
+      "derivation": [
+        "Create a **DLQ** (same type: FIFO for FIFO).",
+        "Set **maxReceiveCount** (3–5).",
+        "**Alarm** on ApproximateNumberOfMessagesVisible > 0.",
+        "**Inspect** and fix.",
+        "**Redrive** to source."
+      ]
+    },
+    "analogy": {
+      "title": "A hospital's isolation ward",
+      "story": "Patients who don't respond to standard treatment are moved aside for specialist attention.",
+      "mapping": [
+        [
+          "Isolation ward",
+          "DLQ"
+        ],
+        [
+          "Standard treatment",
+          "Normal retries"
+        ],
+        [
+          "Specialist",
+          "Engineer investigating"
+        ]
+      ],
+      "breaks": "Patients recover on their own sometimes; DLQ messages wait until someone acts."
+    },
+    "mindmap": {
+      "center": "DLQs",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "maxReceiveCount",
+            "Redrive policy"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Stop loops",
+            "Preserve evidence"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Alarm on depth",
+            "Inspect",
+            "Redrive"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Same queue type",
+            "Retention ≥ source"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Redrive policy",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Poison messages parked after 5 tries."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws sqs set-queue-attributes --queue-url $Q --attributes \\\n  '{\"RedrivePolicy\":\"{\\\"deadLetterTargetArn\\\":\\\"arn:aws:sqs:eu-west-1:123:orders-dlq\\\",\\\"maxReceiveCount\\\":\\\"5\\\"}\"}'"
+        }
+      ],
+      "outcome": "healthy queues with failures visible."
+    },
+    "summary": {
+      "points": [
+        "Park repeated failures.",
+        "Alarm on DLQ depth.",
+        "Redrive after fixing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why set DLQ retention longer than the source queue's?",
+        "a": "The message's original enqueue timestamp is kept, so it could expire soon after arriving in the DLQ."
+      }
+    ]
+  },
+  "sqs-long-polling-vs-short-polling": {
+    "core": "Short polling returns immediately, even with no messages, sampling a subset of servers, which wastes requests and money and can miss messages. Long polling (WaitTimeSeconds up to 20) waits until messages arrive or the timeout elapses and queries all servers, reducing empty responses, cost and latency.",
+    "first_principles": {
+      "problem": "A consumer polls an idle queue in a tight loop, generating millions of empty requests per day.",
+      "truths": [
+        "Every request costs money.",
+        "Empty responses add no value.",
+        "Waiting server-side is efficient."
+      ],
+      "derivation": [
+        "Set **ReceiveMessageWaitTimeSeconds = 20** on the queue.",
+        "Or pass **WaitTimeSeconds** per call.",
+        "Use **MaxNumberOfMessages = 10** for batching.",
+        "Lambda ESM **long-polls automatically**."
+      ]
+    },
+    "analogy": {
+      "title": "Checking the post every second versus waiting by the letterbox",
+      "story": "Waiting means you know immediately when post arrives, without endless trips.",
+      "mapping": [
+        [
+          "Constant trips",
+          "Short polling"
+        ],
+        [
+          "Waiting by the box",
+          "Long polling"
+        ],
+        [
+          "Post arriving",
+          "Message"
+        ]
+      ],
+      "breaks": "Waiting by the letterbox ties you up; long polling releases after at most 20 s."
+    },
+    "mindmap": {
+      "center": "Polling",
+      "branches": [
+        {
+          "label": "Short",
+          "children": [
+            "Immediate return",
+            "Empty responses",
+            "Sampled servers"
+          ]
+        },
+        {
+          "label": "Long",
+          "children": [
+            "Wait up to 20 s",
+            "All servers",
+            "Fewer requests"
+          ]
+        },
+        {
+          "label": "Tips",
+          "children": [
+            "Batch 10",
+            "Queue default"
+          ]
+        },
+        {
+          "label": "Lambda",
+          "children": [
+            "Automatic"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cost of an idle consumer",
+      "scenario": "Comparison.",
+      "flow": [
+        "Short polling: ~86k requests/day/consumer",
+        "Long polling 20 s: ~4.3k requests/day",
+        "~95% fewer requests"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Lower cost and faster pickup."
+        }
+      ],
+      "code": [],
+      "outcome": "efficient consumers."
+    },
+    "summary": {
+      "points": [
+        "Always long-poll.",
+        "20-second wait.",
+        "Batch receives."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the maximum WaitTimeSeconds for SQS long polling?",
+        "a": "20 seconds."
+      }
+    ]
+  }
+}

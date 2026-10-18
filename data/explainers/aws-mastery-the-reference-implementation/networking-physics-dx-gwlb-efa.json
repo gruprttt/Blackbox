@@ -1,0 +1,422 @@
+{
+  "introduction-when-standard-networking-isnt-enough": {
+    "core": "Some workloads outgrow internet VPNs and ordinary ENIs: hybrid data centres need consistent, high-bandwidth private links (Direct Connect), security teams need transparent inline inspection by third-party appliances (Gateway Load Balancer), and HPC/ML needs OS-bypass, low-latency interconnects (Elastic Fabric Adapter).",
+    "first_principles": {
+      "problem": "A hybrid enterprise sees jittery VPN performance, appliance chokepoints and slow multi-node training.",
+      "truths": [
+        "The internet is variable.",
+        "Inline appliances must scale and be transparent.",
+        "Kernel networking adds latency."
+      ],
+      "derivation": [
+        "**Direct Connect** for dedicated private links.",
+        "**GWLB** for scalable transparent appliances.",
+        "**EFA** for HPC/ML collective communication.",
+        "Choose by **workload physics**."
+      ]
+    },
+    "analogy": {
+      "title": "Specialist roads",
+      "story": "A private freight railway, a customs checkpoint every truck passes through, and a pneumatic tube for urgent parcels.",
+      "mapping": [
+        [
+          "Freight railway",
+          "Direct Connect"
+        ],
+        [
+          "Customs checkpoint",
+          "GWLB + appliances"
+        ],
+        [
+          "Pneumatic tube",
+          "EFA"
+        ]
+      ],
+      "breaks": "Real infrastructure takes years to build; DX takes weeks, GWLB and EFA minutes."
+    },
+    "mindmap": {
+      "center": "Networking Physics",
+      "branches": [
+        {
+          "label": "Hybrid",
+          "children": [
+            "Direct Connect"
+          ]
+        },
+        {
+          "label": "Inspection",
+          "children": [
+            "Gateway Load Balancer"
+          ]
+        },
+        {
+          "label": "HPC/ML",
+          "children": [
+            "EFA"
+          ]
+        },
+        {
+          "label": "Drivers",
+          "children": [
+            "Bandwidth",
+            "Latency",
+            "Consistency",
+            "Transparency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Matching need to service",
+      "scenario": "Mapping.",
+      "flow": [
+        "10 Gbps steady to on-prem → DX",
+        "All egress through Palo Alto firewalls → GWLB",
+        "256-GPU training → EFA"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Physics dictates the tool."
+        }
+      ],
+      "code": [],
+      "outcome": "the right specialised network."
+    },
+    "summary": {
+      "points": [
+        "DX for hybrid.",
+        "GWLB for appliances.",
+        "EFA for HPC."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which service provides OS-bypass networking for MPI and NCCL?",
+        "a": "Elastic Fabric Adapter (EFA)."
+      }
+    ]
+  },
+  "direct-connect-dx-the-physical-layer": {
+    "core": "Direct Connect is a physical fibre cross-connect from your router to AWS at a DX location, giving private, consistent bandwidth (1/10/100 Gbps dedicated or hosted sub-rate) and lower data-transfer-out pricing. Virtual interfaces (private, public, transit) carry BGP sessions to VPCs, AWS public services or Transit Gateways via a DX Gateway.",
+    "first_principles": {
+      "problem": "Large nightly data transfers over VPN are slow, unpredictable and expensive.",
+      "truths": [
+        "Dedicated fibre gives consistent latency.",
+        "BGP exchanges routes.",
+        "A single link is a single point of failure."
+      ],
+      "derivation": [
+        "Order a **dedicated or hosted connection**.",
+        "Create **VIFs** (private/transit/public).",
+        "Use a **DX Gateway** to reach many VPCs/regions.",
+        "Build **redundancy** (two locations, or DX + VPN backup).",
+        "Add **MACsec** or IPsec for encryption."
+      ]
+    },
+    "analogy": {
+      "title": "A private motorway lane from your warehouse to the port",
+      "story": "No public traffic, predictable travel time, but if the lane closes you need another route.",
+      "mapping": [
+        [
+          "Private lane",
+          "DX connection"
+        ],
+        [
+          "Lane signs",
+          "BGP routes"
+        ],
+        [
+          "Alternative route",
+          "Redundant DX/VPN"
+        ]
+      ],
+      "breaks": "A motorway lane is public road; DX traffic isn't encrypted by default, so add MACsec/IPsec if needed."
+    },
+    "mindmap": {
+      "center": "Direct Connect",
+      "branches": [
+        {
+          "label": "Connections",
+          "children": [
+            "Dedicated",
+            "Hosted"
+          ]
+        },
+        {
+          "label": "VIFs",
+          "children": [
+            "Private",
+            "Transit",
+            "Public"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "BGP",
+            "DX Gateway"
+          ]
+        },
+        {
+          "label": "Resilience",
+          "children": [
+            "Two locations",
+            "VPN backup"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "MACsec",
+            "IPsec"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Resilient hybrid design",
+      "scenario": "Topology.",
+      "flow": [
+        "Two 10G DX at two locations",
+        "Transit VIFs → DX Gateway → TGWs in 2 regions",
+        "Site-to-Site VPN as tertiary backup",
+        "BGP prefers DX"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Survives a DX location failure."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, predictable, resilient hybrid connectivity."
+    },
+    "summary": {
+      "points": [
+        "Physical private link.",
+        "BGP over VIFs.",
+        "Always redundant."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is Direct Connect traffic encrypted by default?",
+        "a": "No; use MACsec on supported connections or run IPsec VPN over DX."
+      }
+    ]
+  },
+  "gateway-load-balancer-gwlb-the-transparent-inspection-problem": {
+    "core": "GWLB inserts fleets of third-party virtual appliances (firewalls, IDS/IPS) transparently into traffic paths. It operates at layer 3, preserving source/destination IPs, encapsulates packets with GENEVE to appliances, keeps flows sticky to one appliance, health-checks and scales them, and is reached via GWLB endpoints placed in route tables.",
+    "first_principles": {
+      "problem": "A single firewall instance chokes throughput and fails as a single point of failure, and NAT hides original IPs.",
+      "truths": [
+        "Inspection must see original packets.",
+        "Appliances need horizontal scaling.",
+        "Flows must stay on the same appliance (stateful)."
+      ],
+      "derivation": [
+        "Deploy appliances behind **GWLB**.",
+        "**GENEVE** encapsulation preserves packets.",
+        "**Flow stickiness** for stateful inspection.",
+        "**GWLB endpoints** in route tables steer traffic.",
+        "**Centralise** in an inspection VPC with TGW."
+      ]
+    },
+    "analogy": {
+      "title": "An airport security lane system",
+      "story": "Passengers are routed to any free scanner, keep their identity, and the same scanner handles their whole bag.",
+      "mapping": [
+        [
+          "Scanners",
+          "Appliances"
+        ],
+        [
+          "Lane routing",
+          "GWLB"
+        ],
+        [
+          "Same scanner for your bag",
+          "Flow stickiness"
+        ]
+      ],
+      "breaks": "Passengers know they're being scanned; GWLB is transparent to endpoints."
+    },
+    "mindmap": {
+      "center": "GWLB",
+      "branches": [
+        {
+          "label": "Layer",
+          "children": [
+            "L3 transparent"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "GENEVE",
+            "Flow stickiness",
+            "Health checks"
+          ]
+        },
+        {
+          "label": "Steering",
+          "children": [
+            "GWLB endpoints",
+            "Route tables"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Inspection VPC",
+            "North-south",
+            "East-west"
+          ]
+        },
+        {
+          "label": "Vendors",
+          "children": [
+            "Palo Alto",
+            "Fortinet",
+            "Check Point"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ingress inspection",
+      "scenario": "Route path.",
+      "flow": [
+        "IGW edge route table → GWLB endpoint",
+        "GWLB → firewall fleet (GENEVE)",
+        "Back to endpoint → app subnet",
+        "Original IPs preserved"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Scalable, transparent inspection."
+        }
+      ],
+      "code": [],
+      "outcome": "appliances without chokepoints."
+    },
+    "summary": {
+      "points": [
+        "Transparent L3 insertion.",
+        "Scales appliances.",
+        "Steered by routes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What protocol does GWLB use to send packets to appliances?",
+        "a": "GENEVE encapsulation (UDP 6081)."
+      }
+    ]
+  },
+  "elastic-fabric-adapter-efa-bypassing-the-operating-system": {
+    "core": "EFA is a network interface that lets HPC and ML apps (MPI, NCCL via libfabric) bypass the kernel and talk directly to the network hardware using AWS's Scalable Reliable Datagram protocol, giving low, consistent latency and high throughput for collective operations across thousands of instances.",
+    "first_principles": {
+      "problem": "All-reduce across 64 GPU nodes is limited by TCP latency and kernel overhead.",
+      "truths": [
+        "Kernel network stacks add latency and CPU cost.",
+        "Collectives are latency-sensitive.",
+        "SRD spreads packets across many paths."
+      ],
+      "derivation": [
+        "Use **EFA-enabled instances** (p5, trn1, hpc7g…).",
+        "Launch in a **cluster placement group**.",
+        "Use **libfabric** with MPI/NCCL (aws-ofi-nccl).",
+        "Allow **all traffic within the SG** for EFA.",
+        "Benchmark with **nccl-tests**."
+      ]
+    },
+    "analogy": {
+      "title": "A private pneumatic tube between offices",
+      "story": "Messages skip the mailroom entirely and arrive almost instantly.",
+      "mapping": [
+        [
+          "Mailroom",
+          "OS kernel stack"
+        ],
+        [
+          "Pneumatic tube",
+          "OS-bypass"
+        ],
+        [
+          "Many tubes",
+          "SRD multipath"
+        ]
+      ],
+      "breaks": "Tubes are point to point; EFA scales to thousands of nodes."
+    },
+    "mindmap": {
+      "center": "EFA",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "OS-bypass",
+            "libfabric",
+            "SRD"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "MPI",
+            "NCCL",
+            "Distributed training"
+          ]
+        },
+        {
+          "label": "Setup",
+          "children": [
+            "EFA instances",
+            "Placement group",
+            "SG self-reference"
+          ]
+        },
+        {
+          "label": "Validate",
+          "children": [
+            "nccl-tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Checking EFA",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bus bandwidth near hardware limits."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "fi_info -p efa\n# run NCCL all-reduce benchmark across nodes\nmpirun -np 16 -x FI_PROVIDER=efa ./all_reduce_perf -b 8 -e 4G -f 2"
+        }
+      ],
+      "outcome": "fast multi-node collectives."
+    },
+    "summary": {
+      "points": [
+        "Bypass the kernel.",
+        "SRD multipath.",
+        "For HPC and ML."
+      ]
+    },
+    "check": [
+      {
+        "q": "What protocol does EFA use under the hood?",
+        "a": "AWS's Scalable Reliable Datagram (SRD)."
+      }
+    ]
+  }
+}

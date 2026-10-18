@@ -1,0 +1,509 @@
+{
+  "introduction-the-aws-vending-machine": {
+    "core": "Identity pools (federated identities) are a credential vending machine: present a valid identity (Cognito user pool token, Google, Apple, SAML, OIDC or none for guests) and receive temporary AWS credentials for an IAM role, letting browser and mobile apps call AWS services directly and securely.",
+    "first_principles": {
+      "problem": "A mobile app embeds long-lived AWS access keys to upload to S3, and they get extracted.",
+      "truths": [
+        "Client apps can't keep secrets.",
+        "Temporary credentials expire.",
+        "Roles limit what credentials can do."
+      ],
+      "derivation": [
+        "Create an **identity pool** with providers.",
+        "Map to **authenticated/unauthenticated roles**.",
+        "App calls **GetId + GetCredentialsForIdentity**.",
+        "Use credentials with **AWS SDKs**.",
+        "Scope roles with **policy variables**."
+      ]
+    },
+    "analogy": {
+      "title": "A vending machine that accepts verified tokens",
+      "story": "Insert a valid token and get a limited-value card that expires soon.",
+      "mapping": [
+        [
+          "Token",
+          "Identity provider token"
+        ],
+        [
+          "Card",
+          "Temporary credentials"
+        ],
+        [
+          "Card limits",
+          "IAM role policy"
+        ]
+      ],
+      "breaks": "Vending cards work anywhere; credentials only allow what the role permits."
+    },
+    "mindmap": {
+      "center": "Identity Pools",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "User pool",
+            "Social",
+            "SAML/OIDC",
+            "Guest"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Temporary AWS credentials"
+          ]
+        },
+        {
+          "label": "Roles",
+          "children": [
+            "Authenticated",
+            "Unauthenticated",
+            "Rule-based"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Direct S3/DynamoDB/IoT access"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "No embedded keys",
+      "scenario": "Before/after.",
+      "flow": [
+        "Before: hard-coded access keys in app",
+        "After: sign-in → identity pool → 1-hour credentials",
+        "Role allows only user's S3 prefix"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Extracted credentials are short-lived and narrow."
+        }
+      ],
+      "code": [],
+      "outcome": "safe direct AWS access from clients."
+    },
+    "summary": {
+      "points": [
+        "Swap identity for credentials.",
+        "Temporary and scoped.",
+        "No embedded keys."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do identity pools return?",
+        "a": "Temporary AWS credentials for an IAM role."
+      }
+    ]
+  },
+  "authentication-vs-authorization-roles": {
+    "core": "Identity pools assign IAM roles: one for authenticated users, an optional one for unauthenticated (guest) users, and rule-based or token-based role mapping (e.g. from cognito:groups or preferred_role claims). The role's policies decide what AWS actions are allowed; authentication alone grants nothing.",
+    "first_principles": {
+      "problem": "All signed-in users get the same broad role, so regular users can access admin resources.",
+      "truths": [
+        "Authentication proves identity; authorisation grants actions.",
+        "Different users need different permissions.",
+        "Claims can drive role selection."
+      ],
+      "derivation": [
+        "Define **authenticated** and **unauthenticated** roles.",
+        "Use **role mapping** from groups/claims.",
+        "Keep guest role **minimal**.",
+        "Trust policy restricts **identity pool ID and amr**.",
+        "Use **least privilege**."
+      ]
+    },
+    "analogy": {
+      "title": "Different coloured wristbands at a venue",
+      "story": "Entry proves you have a ticket; the colour decides which areas you can enter.",
+      "mapping": [
+        [
+          "Ticket check",
+          "Authentication"
+        ],
+        [
+          "Wristband colour",
+          "IAM role"
+        ],
+        [
+          "Area access",
+          "Permissions"
+        ]
+      ],
+      "breaks": "Wristbands are fixed for the night; role mappings can change per session."
+    },
+    "mindmap": {
+      "center": "Roles in Identity Pools",
+      "branches": [
+        {
+          "label": "Roles",
+          "children": [
+            "Authenticated",
+            "Unauthenticated"
+          ]
+        },
+        {
+          "label": "Mapping",
+          "children": [
+            "Token-based",
+            "Rule-based",
+            "Groups"
+          ]
+        },
+        {
+          "label": "Trust",
+          "children": [
+            "cognito-identity.amazonaws.com",
+            "aud = pool ID",
+            "amr"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "Least privilege"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Group-based role mapping",
+      "scenario": "Rule.",
+      "flow": [
+        "User in 'admins' group → admin role",
+        "Others → standard user role",
+        "Guests → read-only public assets"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Permissions follow user type."
+        }
+      ],
+      "code": [],
+      "outcome": "correct authorisation for every user class."
+    },
+    "summary": {
+      "points": [
+        "Auth ≠ authz.",
+        "Map roles from claims.",
+        "Minimal guest access."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the 'amr' condition in an identity pool role trust policy distinguish?",
+        "a": "Whether the identity is authenticated or unauthenticated."
+      }
+    ]
+  },
+  "the-flow-from-app-to-s3": {
+    "core": "The flow: the user signs in to a user pool and gets an ID token; the app calls GetId with the token to get an identity ID, then GetCredentialsForIdentity to obtain temporary credentials (enhanced flow) for the mapped role; the SDK signs S3 requests with those credentials. Amplify and SDK credential providers automate this.",
+    "first_principles": {
+      "problem": "Developers are confused about how a login turns into permission to upload a file.",
+      "truths": [
+        "Each step exchanges one proof for another.",
+        "SDKs can refresh credentials automatically.",
+        "Identity IDs are stable per user."
+      ],
+      "derivation": [
+        "**Sign in** → ID token.",
+        "**GetId** → identity ID.",
+        "**GetCredentialsForIdentity** → temporary credentials.",
+        "**SDK** signs S3 PutObject.",
+        "**Refresh** before expiry."
+      ]
+    },
+    "analogy": {
+      "title": "Checking into a hotel",
+      "story": "Show ID at reception, get a room number, then a key card that opens your room until checkout.",
+      "mapping": [
+        [
+          "ID at reception",
+          "ID token"
+        ],
+        [
+          "Room number",
+          "Identity ID"
+        ],
+        [
+          "Key card",
+          "Temporary credentials"
+        ]
+      ],
+      "breaks": "Key cards don't renew themselves; SDK credential providers do."
+    },
+    "mindmap": {
+      "center": "App to S3 Flow",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Sign in",
+            "GetId",
+            "GetCredentialsForIdentity",
+            "Signed S3 call"
+          ]
+        },
+        {
+          "label": "Helpers",
+          "children": [
+            "Amplify",
+            "SDK credential providers"
+          ]
+        },
+        {
+          "label": "Refresh",
+          "children": [
+            "Before expiry"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Stable identity ID"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "JavaScript SDK",
+      "scenario": "Credentials provider.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Direct, signed upload with no backend."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';\nimport { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';\nconst s3 = new S3Client({ region, credentials: fromCognitoIdentityPool({\n  identityPoolId, logins: { [`cognito-idp.${region}.amazonaws.com/${userPoolId}`]: idToken } }) });\nawait s3.send(new PutObjectCommand({ Bucket: 'uploads', Key: `private/${identityId}/photo.jpg`, Body: file }));"
+        }
+      ],
+      "outcome": "end-to-end flow understood."
+    },
+    "summary": {
+      "points": [
+        "Token → identity → credentials.",
+        "SDK automates it.",
+        "Scope keys per identity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which API returns temporary credentials in the identity pool enhanced flow?",
+        "a": "GetCredentialsForIdentity."
+      }
+    ]
+  },
+  "row-level-security-iam-policy-variables": {
+    "core": "IAM policy variables like ${cognito-identity.amazonaws.com:sub} insert the caller's identity ID into policies, so one role can restrict each user to their own S3 prefix or their own DynamoDB items (dynamodb:LeadingKeys). This gives per-user data isolation without per-user policies.",
+    "first_principles": {
+      "problem": "All authenticated users share a role that can read every user's files.",
+      "truths": [
+        "One role serves many users.",
+        "Policy variables resolve per request.",
+        "Data can be keyed by identity."
+      ],
+      "derivation": [
+        "Prefix S3 keys with **identity ID**.",
+        "Use **${cognito-identity.amazonaws.com:sub}** in Resource.",
+        "Use **dynamodb:LeadingKeys** for item-level isolation.",
+        "Use **principal tags** (ABAC) for attributes like tenant.",
+        "**Test** cross-user access is denied."
+      ]
+    },
+    "analogy": {
+      "title": "Personal lockers opened by your own badge number",
+      "story": "Every badge works on the locker with its own number only.",
+      "mapping": [
+        [
+          "Badge number",
+          "Identity ID"
+        ],
+        [
+          "Locker",
+          "S3 prefix / DynamoDB partition"
+        ],
+        [
+          "Same locker rules",
+          "One policy"
+        ]
+      ],
+      "breaks": "Lockers are physical; policy variables are evaluated per request."
+    },
+    "mindmap": {
+      "center": "Row-Level Security",
+      "branches": [
+        {
+          "label": "Variables",
+          "children": [
+            "cognito-identity sub",
+            "Principal tags"
+          ]
+        },
+        {
+          "label": "S3",
+          "children": [
+            "Per-user prefix"
+          ]
+        },
+        {
+          "label": "DynamoDB",
+          "children": [
+            "LeadingKeys"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "One policy, many users"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Deny cross-user tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Per-user S3 policy",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each user can only touch their own folder."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Action\": [\"s3:GetObject\", \"s3:PutObject\"],\n  \"Resource\": \"arn:aws:s3:::uploads/private/${cognito-identity.amazonaws.com:sub}/*\"\n}"
+        }
+      ],
+      "outcome": "per-user isolation at the IAM layer."
+    },
+    "summary": {
+      "points": [
+        "Policy variables.",
+        "Key data by identity.",
+        "One policy scales."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you restrict a DynamoDB table to a user's own items via IAM?",
+        "a": "Use the dynamodb:LeadingKeys condition with the identity ID policy variable as the partition key."
+      }
+    ]
+  },
+  "identity-pool-vs-user-pool-knowing-which-to-use": {
+    "core": "Use a user pool when you need sign-up, sign-in and tokens for your own APIs. Use an identity pool when clients must call AWS services directly with IAM credentials, including guest access or federated identities from other IdPs. Use both when signed-in users also need direct AWS access.",
+    "first_principles": {
+      "problem": "A team adds an identity pool just to protect its own API, when JWT authorizers would do.",
+      "truths": [
+        "Your APIs can validate JWTs.",
+        "AWS APIs need SigV4 credentials.",
+        "Many apps need both."
+      ],
+      "derivation": [
+        "**Own APIs** → user pool + JWT authorizer.",
+        "**Direct AWS access** → identity pool.",
+        "**Guest AWS access** → identity pool unauthenticated role.",
+        "**External IdP to AWS** → identity pool federation.",
+        "**Both** for full apps."
+      ]
+    },
+    "analogy": {
+      "title": "A membership card versus a cash card",
+      "story": "The membership card gets you into the club; the cash card lets you buy things from AWS's shop.",
+      "mapping": [
+        [
+          "Membership card",
+          "User pool tokens"
+        ],
+        [
+          "Cash card",
+          "AWS credentials"
+        ],
+        [
+          "Club",
+          "Your app/API"
+        ]
+      ],
+      "breaks": "Cards are separate; identity pools usually accept user pool tokens to issue credentials."
+    },
+    "mindmap": {
+      "center": "Which Pool?",
+      "branches": [
+        {
+          "label": "User pool",
+          "children": [
+            "Sign-in",
+            "JWTs",
+            "Own APIs"
+          ]
+        },
+        {
+          "label": "Identity pool",
+          "children": [
+            "AWS credentials",
+            "Guests",
+            "Federation"
+          ]
+        },
+        {
+          "label": "Both",
+          "children": [
+            "Login + direct AWS"
+          ]
+        },
+        {
+          "label": "Anti-pattern",
+          "children": [
+            "Identity pool to protect own API"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three scenarios",
+      "scenario": "Decisions.",
+      "flow": [
+        "Web app calling own REST API → user pool",
+        "Anonymous analytics to Kinesis → identity pool (guest)",
+        "Signed-in uploads to S3 → both"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Match the tool to the target API."
+        }
+      ],
+      "code": [],
+      "outcome": "clean, minimal identity design."
+    },
+    "summary": {
+      "points": [
+        "User pool for app auth.",
+        "Identity pool for AWS access.",
+        "Both when needed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which pool do you need for guest users to send data directly to Kinesis?",
+        "a": "An identity pool with an unauthenticated role."
+      }
+    ]
+  }
+}

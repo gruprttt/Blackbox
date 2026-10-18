@@ -1,0 +1,416 @@
+{
+  "introduction-stop-grepping-production": {
+    "core": "SSH-ing into servers to grep logs doesn't scale and disappears with ephemeral instances. CloudWatch centralises logs and metrics: Logs Insights queries across log groups, metric filters turn log patterns into metrics, and alarms (including composite alarms) notify and act on signals.",
+    "first_principles": {
+      "problem": "During an incident, engineers log into 30 instances to grep logs that may already be gone.",
+      "truths": [
+        "Ephemeral compute loses local logs.",
+        "Central logs are queryable at once.",
+        "Metrics are cheaper to alert on than raw logs."
+      ],
+      "derivation": [
+        "**Ship logs** to CloudWatch (agent, awslogs driver, Lambda).",
+        "**Query** with Logs Insights.",
+        "**Extract metrics** with metric filters or EMF.",
+        "**Alarm** on metrics.",
+        "**Combine** alarms to reduce noise."
+      ]
+    },
+    "analogy": {
+      "title": "A central security control room",
+      "story": "All camera feeds in one place, with motion alerts, instead of walking to each camera.",
+      "mapping": [
+        [
+          "Camera feeds",
+          "Log groups"
+        ],
+        [
+          "Searching footage",
+          "Logs Insights"
+        ],
+        [
+          "Motion alerts",
+          "Alarms"
+        ]
+      ],
+      "breaks": "Cameras record visually; logs need structure to be queryable."
+    },
+    "mindmap": {
+      "center": "CloudWatch Advanced",
+      "branches": [
+        {
+          "label": "Logs",
+          "children": [
+            "Central log groups",
+            "Insights queries"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "Metric filters",
+            "EMF"
+          ]
+        },
+        {
+          "label": "Alarms",
+          "children": [
+            "Metric alarms",
+            "Composite alarms",
+            "Anomaly detection"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Structured JSON logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Incident triage",
+      "scenario": "Before/after.",
+      "flow": [
+        "Before: SSH + grep across hosts",
+        "After: one Insights query across all services",
+        "Error spike found in 30 seconds"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster diagnosis."
+        }
+      ],
+      "code": [],
+      "outcome": "centralised observability."
+    },
+    "summary": {
+      "points": [
+        "Centralise logs.",
+        "Query, don't grep.",
+        "Alarm on metrics."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why log in structured JSON?",
+        "a": "Fields become queryable and filterable in Logs Insights and metric filters."
+      }
+    ]
+  },
+  "cloudwatch-logs-insights": {
+    "core": "Logs Insights is a purpose-built query language over log groups: fields, filter, parse, stats (count, avg, pct), sort and limit, with auto-discovered JSON fields. It's billed per GB scanned, so narrow time ranges and log groups. Saved queries and dashboard widgets make investigations repeatable.",
+    "first_principles": {
+      "problem": "Engineers can't compute p99 latency or top error endpoints from raw logs quickly.",
+      "truths": [
+        "Logs contain rich fields.",
+        "Aggregations reveal patterns.",
+        "Scanning costs money."
+      ],
+      "derivation": [
+        "**filter** for relevant lines.",
+        "**parse** unstructured text.",
+        "**stats** by fields and time bins.",
+        "**Limit time range** and groups.",
+        "**Save** useful queries."
+      ]
+    },
+    "analogy": {
+      "title": "A spreadsheet pivot table over your logs",
+      "story": "Filter, group and summarise in seconds.",
+      "mapping": [
+        [
+          "Rows",
+          "Log events"
+        ],
+        [
+          "Pivot",
+          "stats by"
+        ],
+        [
+          "Filters",
+          "filter clauses"
+        ]
+      ],
+      "breaks": "Spreadsheets hold small data; Insights scans gigabytes per query and bills for it."
+    },
+    "mindmap": {
+      "center": "Logs Insights",
+      "branches": [
+        {
+          "label": "Commands",
+          "children": [
+            "fields",
+            "filter",
+            "parse",
+            "stats",
+            "sort",
+            "limit"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "count",
+            "avg",
+            "pct",
+            "bin"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Per GB scanned"
+          ]
+        },
+        {
+          "label": "Reuse",
+          "children": [
+            "Saved queries",
+            "Dashboards"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "p99 latency by route",
+      "scenario": "Query.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Slowest routes surfaced instantly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "fields @timestamp, route, latency_ms\n| filter status >= 200\n| stats pct(latency_ms, 99) as p99, count(*) as n by route, bin(5m)\n| sort p99 desc\n| limit 20"
+        }
+      ],
+      "outcome": "answers from logs in seconds."
+    },
+    "summary": {
+      "points": [
+        "Query language for logs.",
+        "stats for aggregation.",
+        "Scope to save cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "How is Logs Insights billed?",
+        "a": "By the amount of log data scanned per query."
+      }
+    ]
+  },
+  "metric-filters-logs-to-metrics": {
+    "core": "Metric filters watch incoming log events for patterns (terms or JSON field conditions) and publish CloudWatch metrics, such as a count of ERROR lines or the value of a latency field. Alarms can then fire on those metrics. The Embedded Metric Format (EMF) lets apps emit metrics inside structured logs directly.",
+    "first_principles": {
+      "problem": "A team wants an alert when payment failures exceed 10 per minute, but only has logs.",
+      "truths": [
+        "Alarms work on metrics, not raw logs.",
+        "Patterns can be matched as logs arrive.",
+        "Metrics are cheap to store and alert on."
+      ],
+      "derivation": [
+        "Define **filter pattern** (e.g. { $.event = \"payment_failed\" }).",
+        "Set **metric name, namespace, value**.",
+        "Add **dimensions** for breakdowns.",
+        "**Alarm** on the metric.",
+        "Prefer **EMF** for new code."
+      ]
+    },
+    "analogy": {
+      "title": "A tally counter clicked whenever a word appears in the transcript",
+      "story": "You watch the counter, not the whole transcript.",
+      "mapping": [
+        [
+          "Word",
+          "Filter pattern"
+        ],
+        [
+          "Tally counter",
+          "Metric"
+        ],
+        [
+          "Watching the counter",
+          "Alarm"
+        ]
+      ],
+      "breaks": "Tally counters can be reset; metric filters only count events ingested after creation."
+    },
+    "mindmap": {
+      "center": "Metric Filters",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "Log events",
+            "Patterns"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Custom metrics",
+            "Dimensions"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Error counts",
+            "Latency values"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "Embedded Metric Format"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Not retroactive"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Payment failure metric",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Alarm",
+          "detail": "PaymentFailures sum > 10 over 1 minute."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws logs put-metric-filter --log-group-name /app/payments --filter-name failures \\\n  --filter-pattern '{ $.event = \"payment_failed\" }' \\\n  --metric-transformations metricName=PaymentFailures,metricNamespace=App,metricValue=1"
+        }
+      ],
+      "outcome": "log-derived alerts."
+    },
+    "summary": {
+      "points": [
+        "Logs → metrics.",
+        "Alarm on them.",
+        "EMF for new apps."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do metric filters apply to logs ingested before the filter was created?",
+        "a": "No; they only process new log events."
+      }
+    ]
+  },
+  "composite-alarms": {
+    "core": "Composite alarms combine other alarms with boolean logic (AND, OR, NOT) into one actionable signal, e.g. page only if errors are high AND latency is high, or suppress alarms during deployments. They cut alert noise and alert fatigue while keeping underlying alarms for dashboards.",
+    "first_principles": {
+      "problem": "On-call receives 15 pages for one incident because every related alarm fires separately.",
+      "truths": [
+        "One incident triggers many symptoms.",
+        "Noise causes alert fatigue.",
+        "Combining signals improves precision."
+      ],
+      "derivation": [
+        "Create **child alarms** (no notifications).",
+        "Build **composite rule** (ALARM(a) AND ALARM(b)).",
+        "Use **actions suppression** (e.g. during deploys).",
+        "Notify only from the **composite**.",
+        "Keep **runbook links** in descriptions."
+      ]
+    },
+    "analogy": {
+      "title": "A smoke detector that only sounds when both smoke and heat are present",
+      "story": "Fewer false alarms from burnt toast.",
+      "mapping": [
+        [
+          "Smoke sensor",
+          "Error alarm"
+        ],
+        [
+          "Heat sensor",
+          "Latency alarm"
+        ],
+        [
+          "Combined alarm",
+          "Composite alarm"
+        ]
+      ],
+      "breaks": "Fire detectors react instantly; composite alarms depend on child alarm evaluation periods."
+    },
+    "mindmap": {
+      "center": "Composite Alarms",
+      "branches": [
+        {
+          "label": "Logic",
+          "children": [
+            "AND",
+            "OR",
+            "NOT"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Less noise",
+            "Actionable pages"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Actions suppression",
+            "Hierarchy"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Children silent",
+            "Runbook links"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Customer-impact alarm",
+      "scenario": "Rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One page per real incident."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "ALARM(\"api-5xx-high\") AND (ALARM(\"api-p99-high\") OR ALARM(\"checkout-fail-high\")) AND NOT ALARM(\"deploy-in-progress\")"
+        }
+      ],
+      "outcome": "precise, low-noise alerting."
+    },
+    "summary": {
+      "points": [
+        "Combine alarms.",
+        "Page from composites.",
+        "Suppress during known events."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do composite alarms reduce alert fatigue?",
+        "a": "They combine related symptoms into one signal and only notify when the combined condition holds."
+      }
+    ]
+  }
+}

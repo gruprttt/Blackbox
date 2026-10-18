@@ -1,0 +1,523 @@
+{
+  "introduction-the-layers-of-the-edge": {
+    "core": "CloudFront's edge is layered: hundreds of edge locations close to users, regional edge caches with larger capacity behind them, optional Origin Shield as a single caching layer in front of the origin, and the origin itself. Each layer absorbs requests so fewer reach the next, improving latency and protecting origins.",
+    "first_principles": {
+      "problem": "Origin servers are overwhelmed by cache misses from hundreds of edge locations.",
+      "truths": [
+        "Each edge cache misses independently.",
+        "Larger mid-tier caches hold more.",
+        "Collapsing requests reduces origin load."
+      ],
+      "derivation": [
+        "**Edge locations** serve hot content.",
+        "**Regional edge caches** catch long-tail content.",
+        "**Origin Shield** collapses misses globally.",
+        "Tune **cache keys and TTLs**.",
+        "Run **edge compute** where needed."
+      ]
+    },
+    "analogy": {
+      "title": "Neighbourhood shops, regional warehouses and the factory",
+      "story": "Most shoppers are served locally; only rare items go back to the factory.",
+      "mapping": [
+        [
+          "Neighbourhood shop",
+          "Edge location"
+        ],
+        [
+          "Regional warehouse",
+          "Regional edge cache"
+        ],
+        [
+          "Factory",
+          "Origin"
+        ]
+      ],
+      "breaks": "Shops restock on schedule; caches fill on demand."
+    },
+    "mindmap": {
+      "center": "Edge Layers",
+      "branches": [
+        {
+          "label": "Tiers",
+          "children": [
+            "Edge location",
+            "Regional edge cache",
+            "Origin Shield",
+            "Origin"
+          ]
+        },
+        {
+          "label": "Goals",
+          "children": [
+            "Latency",
+            "Origin offload"
+          ]
+        },
+        {
+          "label": "Levers",
+          "children": [
+            "Cache key",
+            "TTL",
+            "Shield"
+          ]
+        },
+        {
+          "label": "Compute",
+          "children": [
+            "Functions",
+            "Lambda@Edge"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Request path",
+      "scenario": "Miss cascade.",
+      "flow": [
+        "User → Paris edge (miss)",
+        "→ Frankfurt regional cache (miss)",
+        "→ Origin Shield in us-east-1 (hit)",
+        "Origin untouched"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One origin fetch serves the world."
+        }
+      ],
+      "code": [],
+      "outcome": "layered caching understood."
+    },
+    "summary": {
+      "points": [
+        "Multiple cache tiers.",
+        "Each absorbs load.",
+        "Shield protects origin."
+      ]
+    },
+    "check": [
+      {
+        "q": "What sits between edge locations and Origin Shield?",
+        "a": "Regional edge caches."
+      }
+    ]
+  },
+  "origin-shield-the-super-cache": {
+    "core": "Origin Shield is an optional extra caching layer in one chosen region in front of your origin. All regional edge caches route misses through it, so concurrent requests for the same object collapse into one origin fetch, raising cache hit ratio, reducing origin load and egress, and helping multi-CDN or live-streaming setups.",
+    "first_principles": {
+      "problem": "A video launch causes hundreds of simultaneous origin requests for the same segments from different regions.",
+      "truths": [
+        "Separate caches miss separately.",
+        "A single funnel deduplicates requests.",
+        "Origin capacity is limited."
+      ],
+      "derivation": [
+        "Enable **Origin Shield** in the region **closest to the origin**.",
+        "Benefit most for **global audiences**, **live video**, **expensive origins**.",
+        "Weigh **extra per-request cost**.",
+        "Monitor **origin request rate**."
+      ]
+    },
+    "analogy": {
+      "title": "A single wholesaler buying for all regional shops",
+      "story": "Instead of every shop calling the factory, one buyer places one order.",
+      "mapping": [
+        [
+          "Wholesaler",
+          "Origin Shield"
+        ],
+        [
+          "Regional shops",
+          "Regional caches"
+        ],
+        [
+          "Factory",
+          "Origin"
+        ]
+      ],
+      "breaks": "Wholesalers add markup; Shield adds a small per-request fee."
+    },
+    "mindmap": {
+      "center": "Origin Shield",
+      "branches": [
+        {
+          "label": "Role",
+          "children": [
+            "Central cache layer",
+            "Request collapsing"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Higher hit ratio",
+            "Lower origin load",
+            "Lower egress"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Near origin"
+          ]
+        },
+        {
+          "label": "Best for",
+          "children": [
+            "Live video",
+            "Global traffic",
+            "Costly origins"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enabling Shield",
+      "scenario": "Effect.",
+      "flow": [
+        "Before: origin 4,000 req/s at launch",
+        "Enable Shield in us-east-1",
+        "After: origin ~300 req/s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Origin survives the launch."
+        }
+      ],
+      "code": [],
+      "outcome": "protected, efficient origins."
+    },
+    "summary": {
+      "points": [
+        "Extra cache tier.",
+        "Collapses misses.",
+        "Place near origin."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should you place Origin Shield?",
+        "a": "In the AWS region closest to (or hosting) your origin."
+      }
+    ]
+  },
+  "compute-at-the-edge-lambdaedge-vs-cloudfront-functions": {
+    "core": "CloudFront Functions are lightweight JavaScript running at every edge location for viewer request/response events, with sub-ms execution and very low cost, good for header manipulation, redirects, URL rewrites and simple auth. Lambda@Edge runs Node/Python at regional edge caches on all four events (including origin request/response), with network access and more time, for heavier logic.",
+    "first_principles": {
+      "problem": "A team uses Lambda@Edge for simple header rewrites, paying more and adding latency.",
+      "truths": [
+        "Most edge logic is simple.",
+        "Heavier logic needs network and longer runtime.",
+        "Running closer to viewers is faster."
+      ],
+      "derivation": [
+        "**CloudFront Functions** for viewer events: headers, redirects, rewrites, token checks.",
+        "**Lambda@Edge** for origin events, network calls, larger payloads.",
+        "Use **KeyValueStore** with Functions for config.",
+        "Keep logic **idempotent and fast**."
+      ]
+    },
+    "analogy": {
+      "title": "A doorman versus a concierge desk",
+      "story": "The doorman handles quick tasks instantly at every door; the concierge handles complex requests from a few desks.",
+      "mapping": [
+        [
+          "Doorman",
+          "CloudFront Functions"
+        ],
+        [
+          "Concierge",
+          "Lambda@Edge"
+        ],
+        [
+          "Every door",
+          "All edge locations"
+        ]
+      ],
+      "breaks": "Doormen can make calls; CloudFront Functions have no network access."
+    },
+    "mindmap": {
+      "center": "Edge Compute",
+      "branches": [
+        {
+          "label": "CloudFront Functions",
+          "children": [
+            "JS",
+            "Viewer events",
+            "Sub-ms",
+            "No network",
+            "KeyValueStore"
+          ]
+        },
+        {
+          "label": "Lambda@Edge",
+          "children": [
+            "Node/Python",
+            "All 4 events",
+            "Network",
+            "Regional edge"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Redirects",
+            "Headers",
+            "Auth",
+            "A/B testing",
+            "Origin selection"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "URL rewrite",
+      "scenario": "CloudFront Function.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Static site routing at near-zero cost."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "function handler(event) {\n  var req = event.request;\n  if (req.uri.endsWith('/')) req.uri += 'index.html';\n  else if (!req.uri.includes('.')) req.uri += '/index.html';\n  return req;\n}"
+        }
+      ],
+      "outcome": "edge logic at the right tier."
+    },
+    "summary": {
+      "points": [
+        "Functions for simple viewer logic.",
+        "Lambda@Edge for heavy logic.",
+        "Choose by need."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which edge compute option can run on origin request events?",
+        "a": "Lambda@Edge (CloudFront Functions only run on viewer events)."
+      }
+    ]
+  },
+  "securing-content-signed-urls-vs-signed-cookies": {
+    "core": "Signed URLs and signed cookies restrict CloudFront content to authorised users, using a key group's private key to sign policies with expiry, IP ranges or path wildcards. Signed URLs suit individual files; signed cookies suit many files (HLS segments, a member area) without changing URLs. Origin access control keeps S3 private behind CloudFront.",
+    "first_principles": {
+      "problem": "Premium videos are downloadable by anyone with the link, and the S3 bucket is public.",
+      "truths": [
+        "Links get shared.",
+        "Expiry and scope limit misuse.",
+        "Origins should only accept CloudFront traffic."
+      ],
+      "derivation": [
+        "Create a **key group** with public keys.",
+        "Sign **URLs** for single objects.",
+        "Set **cookies** for many objects/paths.",
+        "Use **custom policies** (expiry, IP, wildcards).",
+        "Use **OAC** so S3 only serves CloudFront."
+      ]
+    },
+    "analogy": {
+      "title": "Event tickets versus a wristband",
+      "story": "A ticket admits you to one show; a wristband lets you into every stage at the festival.",
+      "mapping": [
+        [
+          "Ticket",
+          "Signed URL"
+        ],
+        [
+          "Wristband",
+          "Signed cookie"
+        ],
+        [
+          "Festival gates",
+          "CloudFront"
+        ]
+      ],
+      "breaks": "Wristbands are hard to copy; cookies and URLs can be shared, so keep expiries short."
+    },
+    "mindmap": {
+      "center": "Signed Access",
+      "branches": [
+        {
+          "label": "Signed URLs",
+          "children": [
+            "Single object",
+            "In the link"
+          ]
+        },
+        {
+          "label": "Signed cookies",
+          "children": [
+            "Many objects",
+            "Unchanged URLs"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "Canned",
+            "Custom (expiry, IP, wildcard)"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "Key groups"
+          ]
+        },
+        {
+          "label": "Origin",
+          "children": [
+            "OAC for S3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Member-only streaming",
+      "scenario": "Flow.",
+      "flow": [
+        "User logs in → app sets signed cookies for /videos/123/*",
+        "Player fetches HLS segments with cookies",
+        "Cookies expire in 2 hours",
+        "S3 private via OAC"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only paying users stream, links useless elsewhere."
+        }
+      ],
+      "code": [],
+      "outcome": "private content at the edge."
+    },
+    "summary": {
+      "points": [
+        "URLs for one file.",
+        "Cookies for many.",
+        "Lock origin with OAC."
+      ]
+    },
+    "check": [
+      {
+        "q": "When are signed cookies better than signed URLs?",
+        "a": "When granting access to many files, such as video segments or a whole section, without changing URLs."
+      }
+    ]
+  },
+  "cache-behavior-and-cache-key-engineering": {
+    "core": "The cache key decides whether two requests share a cached object. Include only what changes the response (specific query strings, headers, cookies) via cache policies; forward extra values to the origin with origin request policies instead. Path-based cache behaviours apply different TTLs and policies per route. Over-broad keys destroy hit ratios.",
+    "first_principles": {
+      "problem": "Forwarding all headers and cookies makes every request unique, and the cache hit ratio is 5%.",
+      "truths": [
+        "Unique keys mean cache misses.",
+        "Origins may need data that doesn't affect the response.",
+        "Different paths have different freshness needs."
+      ],
+      "derivation": [
+        "**Minimise cache key** (whitelist needed params).",
+        "Use **origin request policies** for non-key data.",
+        "Define **behaviours per path** (/static/*, /api/*).",
+        "Set **TTLs** and honour Cache-Control.",
+        "**Normalise** (lowercase, sort, drop tracking params)."
+      ]
+    },
+    "analogy": {
+      "title": "Labelling leftovers in a fridge",
+      "story": "If every container is labelled with the time to the second, you never reuse anything.",
+      "mapping": [
+        [
+          "Label",
+          "Cache key"
+        ],
+        [
+          "Over-specific labels",
+          "Too many key dimensions"
+        ],
+        [
+          "Sections of the fridge",
+          "Cache behaviours"
+        ]
+      ],
+      "breaks": "Fridges spoil food; caches expire by TTL, not by smell."
+    },
+    "mindmap": {
+      "center": "Cache Keys",
+      "branches": [
+        {
+          "label": "Key inputs",
+          "children": [
+            "Path",
+            "Query strings",
+            "Headers",
+            "Cookies"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "Cache policy",
+            "Origin request policy",
+            "Response headers policy"
+          ]
+        },
+        {
+          "label": "Behaviours",
+          "children": [
+            "Per path",
+            "TTLs"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "Normalise",
+            "Drop tracking params"
+          ]
+        },
+        {
+          "label": "Metric",
+          "children": [
+            "Hit ratio"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing the hit ratio",
+      "scenario": "Change.",
+      "flow": [
+        "Before: all headers + cookies in key → 5% hits",
+        "After: key = path + 'lang' query param; auth cookie forwarded only on /api/*",
+        "Static assets: 1-year TTL with hashed filenames",
+        "Hit ratio 92%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Origin load drops sharply."
+        }
+      ],
+      "code": [],
+      "outcome": "efficient, correct caching."
+    },
+    "summary": {
+      "points": [
+        "Lean cache keys.",
+        "Forward separately.",
+        "Behaviours per path."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between a cache policy and an origin request policy?",
+        "a": "The cache policy defines the cache key (and TTLs); the origin request policy adds values sent to the origin without affecting the key."
+      }
+    ]
+  }
+}

@@ -1,0 +1,414 @@
+{
+  "introduction-the-hard-drive-in-the-cloud": {
+    "core": "EBS provides network-attached block volumes for EC2: persistent disks that survive instance stops, live in one AZ, replicate within that AZ, and can be resized, snapshotted and changed in type online. Unlike instance store, data persists independently of the instance.",
+    "first_principles": {
+      "problem": "An engineer stores database files on instance store and loses them when the instance stops.",
+      "truths": [
+        "Instance store is ephemeral.",
+        "Block storage needs low latency, so it lives in one AZ.",
+        "Network-attached volumes can move between instances."
+      ],
+      "derivation": [
+        "Use **EBS** for persistent block storage.",
+        "Remember **AZ scope**: volumes attach only within their AZ.",
+        "Use **snapshots** to move across AZs/regions.",
+        "**Encrypt** by default with KMS.",
+        "Use **Elastic Volumes** to resize live."
+      ]
+    },
+    "analogy": {
+      "title": "An external hard drive you can plug into any computer in the room",
+      "story": "Unplug it, and your data's still there.",
+      "mapping": [
+        [
+          "External drive",
+          "EBS volume"
+        ],
+        [
+          "Room",
+          "AZ"
+        ],
+        [
+          "Computer",
+          "EC2 instance"
+        ]
+      ],
+      "breaks": "Hard drives can move between rooms; EBS needs a snapshot to change AZ."
+    },
+    "mindmap": {
+      "center": "EBS Basics",
+      "branches": [
+        {
+          "label": "Traits",
+          "children": [
+            "Persistent",
+            "Network-attached",
+            "AZ-scoped"
+          ]
+        },
+        {
+          "label": "vs Instance store",
+          "children": [
+            "Survives stop",
+            "Lower raw IOPS"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Snapshots",
+            "Elastic Volumes",
+            "Encryption"
+          ]
+        },
+        {
+          "label": "Durability",
+          "children": [
+            "Replicated within AZ"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Grow a volume online",
+      "scenario": "No downtime.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "More space without stopping the app."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 modify-volume --volume-id vol-123 --size 500\n# then inside the instance:\nsudo growpart /dev/nvme1n1 1 && sudo xfs_growfs /data"
+        }
+      ],
+      "outcome": "durable, flexible disks."
+    },
+    "summary": {
+      "points": [
+        "Persistent block storage.",
+        "Lives in one AZ.",
+        "Snapshot to move."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can you attach an EBS volume to an instance in another AZ?",
+        "a": "No; create a snapshot and restore it in the target AZ."
+      }
+    ]
+  },
+  "volume-types-the-performance-matrix": {
+    "core": "EBS types: gp3 (general SSD, 3,000 IOPS and 125 MB/s baseline, independently provisionable), io2 Block Express (high, consistent IOPS up to 256k, sub-ms latency, 99.999% durability), st1 (throughput HDD for big sequential reads) and sc1 (cold HDD). Instance-level EBS bandwidth limits also apply.",
+    "first_principles": {
+      "problem": "A database on gp2 hits IOPS limits tied to volume size, and the team overprovisions terabytes to get IOPS.",
+      "truths": [
+        "Workloads are IOPS-bound or throughput-bound.",
+        "gp3 decouples IOPS from size.",
+        "Instances cap total EBS bandwidth."
+      ],
+      "derivation": [
+        "Default to **gp3**; tune IOPS/throughput separately.",
+        "**io2** for latency-critical databases.",
+        "**st1** for streaming big data.",
+        "**sc1** for cold sequential data.",
+        "Check **instance EBS limits**."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing roads",
+      "story": "A good dual carriageway for most traffic (gp3), a dedicated racetrack (io2) and wide freight roads for slow heavy loads (st1).",
+      "mapping": [
+        [
+          "Dual carriageway",
+          "gp3"
+        ],
+        [
+          "Racetrack",
+          "io2"
+        ],
+        [
+          "Freight road",
+          "st1/sc1"
+        ]
+      ],
+      "breaks": "Roads don't have per-car speed limits tied to the vehicle; instance bandwidth caps EBS speed."
+    },
+    "mindmap": {
+      "center": "EBS Types",
+      "branches": [
+        {
+          "label": "SSD",
+          "children": [
+            "gp3",
+            "io2 Block Express"
+          ]
+        },
+        {
+          "label": "HDD",
+          "children": [
+            "st1",
+            "sc1"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "IOPS",
+            "Throughput",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Instance EBS bandwidth"
+          ]
+        },
+        {
+          "label": "Tip",
+          "children": [
+            "gp2 → gp3 migration saves ~20%"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "gp2 → gp3 migration",
+      "scenario": "Same performance, cheaper.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Smaller volume, needed IOPS, lower bill."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 modify-volume --volume-id vol-123 --volume-type gp3 --iops 6000 --throughput 250"
+        }
+      ],
+      "outcome": "performance bought precisely."
+    },
+    "summary": {
+      "points": [
+        "gp3 by default.",
+        "io2 for critical DBs.",
+        "Mind instance limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key advantage of gp3 over gp2?",
+        "a": "IOPS and throughput can be provisioned independently of volume size, at a lower base price."
+      }
+    ]
+  },
+  "multi-attach-clustering-in-the-cloud": {
+    "core": "io1/io2 volumes support Multi-Attach: one volume attached to up to 16 Nitro instances in the same AZ. EBS doesn't coordinate writes, so applications must use a cluster-aware filesystem (GFS2, OCFS2) or application-level fencing. Standard filesystems like ext4 or XFS will corrupt.",
+    "first_principles": {
+      "problem": "Two instances mount the same XFS volume via Multi-Attach and corrupt it within minutes.",
+      "truths": [
+        "Block devices have no locking.",
+        "Normal filesystems assume a single writer.",
+        "Clustered apps need shared storage."
+      ],
+      "derivation": [
+        "Use **io1/io2** with Multi-Attach enabled.",
+        "Same **AZ**, Nitro instances.",
+        "Use a **cluster-aware filesystem** or app-managed I/O fencing.",
+        "Prefer **EFS/FSx** when you just need shared files."
+      ]
+    },
+    "analogy": {
+      "title": "Several people writing in one notebook at once",
+      "story": "Without strict turn-taking, the pages become nonsense.",
+      "mapping": [
+        [
+          "Notebook",
+          "Volume"
+        ],
+        [
+          "Writers",
+          "Instances"
+        ],
+        [
+          "Turn-taking rules",
+          "Cluster filesystem"
+        ]
+      ],
+      "breaks": "People can see each other writing; instances can't see each other's cached writes."
+    },
+    "mindmap": {
+      "center": "Multi-Attach",
+      "branches": [
+        {
+          "label": "Requirements",
+          "children": [
+            "io1/io2",
+            "Same AZ",
+            "Nitro"
+          ]
+        },
+        {
+          "label": "Danger",
+          "children": [
+            "ext4/XFS corruption"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "GFS2",
+            "OCFS2",
+            "Clustered DBs with fencing"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "EFS",
+            "FSx"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing shared storage",
+      "scenario": "Decision.",
+      "flow": [
+        "Need: shared web assets → EFS",
+        "Need: Oracle RAC-style cluster → io2 Multi-Attach + cluster FS"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Multi-Attach is for cluster-aware software only."
+        }
+      ],
+      "code": [],
+      "outcome": "shared block storage used safely."
+    },
+    "summary": {
+      "points": [
+        "Up to 16 instances.",
+        "No write coordination.",
+        "Cluster-aware FS required."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you use XFS with Multi-Attach?",
+        "a": "XFS assumes a single writer; concurrent writers corrupt its metadata."
+      }
+    ]
+  },
+  "snapshots-data-lifecycle-manager-dlm": {
+    "core": "EBS snapshots are incremental, point-in-time backups stored in S3-backed storage: only changed blocks are saved, but each snapshot restores a full volume. Data Lifecycle Manager automates creation, retention, cross-region copies and archiving on schedules by tag. Restores lazy-load unless Fast Snapshot Restore is enabled.",
+    "first_principles": {
+      "problem": "Manual snapshots are forgotten, and restored volumes are slow at first.",
+      "truths": [
+        "Incremental snapshots save space.",
+        "Unscheduled backups don't happen.",
+        "Restored volumes fetch blocks on first read."
+      ],
+      "derivation": [
+        "**DLM policies** by tag (daily, keep 14).",
+        "**Cross-region copy** for DR.",
+        "**Archive tier** for long retention.",
+        "**Fast Snapshot Restore** for instant performance.",
+        "Use **AWS Backup** for org-wide policy."
+      ]
+    },
+    "analogy": {
+      "title": "Saving only the changes in a document's version history",
+      "story": "Each version can be opened in full, but storage holds only the edits.",
+      "mapping": [
+        [
+          "Version history",
+          "Snapshots"
+        ],
+        [
+          "Edits",
+          "Changed blocks"
+        ],
+        [
+          "Auto-save",
+          "DLM"
+        ]
+      ],
+      "breaks": "Opening a document version is instant; restored volumes lazy-load blocks unless pre-warmed."
+    },
+    "mindmap": {
+      "center": "Snapshots & DLM",
+      "branches": [
+        {
+          "label": "Snapshots",
+          "children": [
+            "Incremental",
+            "Full restore",
+            "S3-backed"
+          ]
+        },
+        {
+          "label": "DLM",
+          "children": [
+            "Schedules",
+            "Retention",
+            "Tags",
+            "Cross-region"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Lazy load",
+            "Fast Snapshot Restore"
+          ]
+        },
+        {
+          "label": "Long-term",
+          "children": [
+            "Archive tier",
+            "AWS Backup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "DLM policy",
+      "scenario": "Daily with DR copy.",
+      "flow": [
+        "Target: tag Backup=daily",
+        "Create at 03:00 UTC, keep 14",
+        "Copy to eu-west-2, keep 7",
+        "Monthly archive, keep 12"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Consistent backups without manual work."
+        }
+      ],
+      "code": [],
+      "outcome": "automated, recoverable volumes."
+    },
+    "summary": {
+      "points": [
+        "Incremental but full-restore.",
+        "Automate with DLM.",
+        "Pre-warm critical restores."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might a volume restored from a snapshot be slow initially?",
+        "a": "Blocks are lazily loaded from snapshot storage on first access unless Fast Snapshot Restore is enabled."
+      }
+    ]
+  }
+}

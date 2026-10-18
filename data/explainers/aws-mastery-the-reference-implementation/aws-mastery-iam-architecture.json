@@ -1,0 +1,618 @@
+{
+  "introduction-who-are-you-and-what-can-you-do": {
+    "core": "IAM answers two questions for every API call: authentication (who are you: a user, role or federated identity) and authorisation (what can you do: policies allowing or denying actions on resources under conditions). Every AWS request is evaluated this way.",
+    "first_principles": {
+      "problem": "Teams share long-lived access keys with admin rights, and a leaked key compromises everything.",
+      "truths": [
+        "Every API call is signed and evaluated.",
+        "Least privilege limits blast radius.",
+        "Temporary credentials expire."
+      ],
+      "derivation": [
+        "Use **roles** with temporary credentials (STS).",
+        "**Federate** humans via IAM Identity Center/SSO.",
+        "Write **least-privilege policies**.",
+        "Avoid **long-lived access keys**.",
+        "**Audit** with CloudTrail and Access Analyzer."
+      ]
+    },
+    "analogy": {
+      "title": "A building with ID badges and door permissions",
+      "story": "Your badge says who you are; door rules say where you can go.",
+      "mapping": [
+        [
+          "Badge",
+          "Identity/credentials"
+        ],
+        [
+          "Door rules",
+          "Policies"
+        ],
+        [
+          "Visitor pass",
+          "Temporary role credentials"
+        ]
+      ],
+      "breaks": "Badges are physical; credentials can be stolen and used from anywhere unless conditions restrict them."
+    },
+    "mindmap": {
+      "center": "IAM Basics",
+      "branches": [
+        {
+          "label": "Authentication",
+          "children": [
+            "Users",
+            "Roles",
+            "Federation"
+          ]
+        },
+        {
+          "label": "Authorisation",
+          "children": [
+            "Policies",
+            "Actions",
+            "Resources",
+            "Conditions"
+          ]
+        },
+        {
+          "label": "Best practice",
+          "children": [
+            "Roles",
+            "SSO",
+            "Least privilege",
+            "No long-lived keys"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "CloudTrail",
+            "Access Analyzer"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A least-privilege policy",
+      "scenario": "Read one bucket.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Leaked credentials can only read reports."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [{\n    \"Effect\": \"Allow\",\n    \"Action\": [\"s3:GetObject\"],\n    \"Resource\": \"arn:aws:s3:::reports-bucket/*\"\n  }]\n}"
+        }
+      ],
+      "outcome": "small blast radius."
+    },
+    "summary": {
+      "points": [
+        "Who are you, what can you do.",
+        "Roles over keys.",
+        "Least privilege."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefer IAM roles over IAM users' access keys?",
+        "a": "Roles provide temporary, automatically rotated credentials, reducing the impact of leaks."
+      }
+    ]
+  },
+  "the-core-logic-how-aws-decides-policy-evaluation-flow": {
+    "core": "AWS starts from implicit deny. An explicit Deny anywhere wins. Otherwise access requires an Allow, and every applicable boundary (SCPs, resource control policies, permission boundaries, session policies) must also allow. Identity and resource policies combine (within an account either can allow). Cross-account access needs both sides to allow.",
+    "first_principles": {
+      "problem": "A user has AdministratorAccess but still gets AccessDenied, and nobody knows why.",
+      "truths": [
+        "Default is deny.",
+        "Explicit deny always wins.",
+        "Guardrails cap maximum permissions."
+      ],
+      "derivation": [
+        "Check **explicit denies** first (any policy).",
+        "Check **SCPs/RCPs** allow it.",
+        "Check **permission boundary** and **session policy**.",
+        "Check **identity or resource policy** allows it.",
+        "Cross-account: **both** identity and resource policies must allow."
+      ]
+    },
+    "analogy": {
+      "title": "A nightclub entry check",
+      "story": "You need to be on the guest list, pass the dress code and age check, and anyone on the banned list is refused outright.",
+      "mapping": [
+        [
+          "Banned list",
+          "Explicit deny"
+        ],
+        [
+          "Guest list",
+          "Allow policy"
+        ],
+        [
+          "Dress code and age",
+          "SCPs and boundaries"
+        ]
+      ],
+      "breaks": "Bouncers can make exceptions; IAM evaluation is deterministic."
+    },
+    "mindmap": {
+      "center": "Policy Evaluation",
+      "branches": [
+        {
+          "label": "Start",
+          "children": [
+            "Implicit deny"
+          ]
+        },
+        {
+          "label": "Override",
+          "children": [
+            "Explicit deny wins"
+          ]
+        },
+        {
+          "label": "Guardrails",
+          "children": [
+            "SCP",
+            "RCP",
+            "Boundary",
+            "Session policy"
+          ]
+        },
+        {
+          "label": "Grants",
+          "children": [
+            "Identity policy",
+            "Resource policy"
+          ]
+        },
+        {
+          "label": "Cross-account",
+          "children": [
+            "Both sides allow"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Debugging AccessDenied",
+      "scenario": "Admin user.",
+      "flow": [
+        "Identity policy: Allow * ✓",
+        "SCP: Deny ec2:* outside eu-west-1 ✗",
+        "Request in us-east-1 → denied"
+      ],
+      "steps": [
+        {
+          "label": "Tool",
+          "detail": "IAM Policy Simulator and the error's 'explicit deny in SCP' message."
+        }
+      ],
+      "code": [],
+      "outcome": "the blocking layer found."
+    },
+    "summary": {
+      "points": [
+        "Default deny.",
+        "Explicit deny wins.",
+        "All guardrails must allow."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can an identity policy Allow override an SCP Deny?",
+        "a": "No: an explicit deny anywhere, including an SCP, always wins."
+      }
+    ]
+  },
+  "service-control-policies-scps-the-organizations-guardrails": {
+    "core": "SCPs are AWS Organizations policies attached to the root, OUs or accounts that set the maximum permissions for all principals in those accounts (except the management account). They grant nothing themselves; they restrict, e.g. deny leaving the organisation, disabling CloudTrail or using unapproved regions.",
+    "first_principles": {
+      "problem": "A developer with admin rights in a sandbox account disables CloudTrail and launches resources in unapproved regions.",
+      "truths": [
+        "Account admins can do anything their policies allow.",
+        "Org-level guardrails need to bind admins too.",
+        "SCPs filter; they don't grant."
+      ],
+      "derivation": [
+        "Attach **deny-list SCPs** to OUs.",
+        "Common guardrails: **region restriction**, **protect CloudTrail/Config**, **deny root actions**, **deny leaving org**.",
+        "Use **conditions** to exempt break-glass roles.",
+        "**Test** in a sandbox OU first."
+      ]
+    },
+    "analogy": {
+      "title": "A national constitution",
+      "story": "Local governments can make laws, but none can override constitutional limits.",
+      "mapping": [
+        [
+          "Constitution",
+          "SCP"
+        ],
+        [
+          "Local laws",
+          "IAM policies"
+        ],
+        [
+          "Unconstitutional law",
+          "Action blocked by SCP"
+        ]
+      ],
+      "breaks": "Constitutions grant rights; SCPs only ever restrict."
+    },
+    "mindmap": {
+      "center": "SCPs",
+      "branches": [
+        {
+          "label": "Scope",
+          "children": [
+            "Root",
+            "OU",
+            "Account"
+          ]
+        },
+        {
+          "label": "Effect",
+          "children": [
+            "Max permissions",
+            "No grants"
+          ]
+        },
+        {
+          "label": "Guardrails",
+          "children": [
+            "Regions",
+            "CloudTrail",
+            "Leave org",
+            "Root user"
+          ]
+        },
+        {
+          "label": "Exempt",
+          "children": [
+            "Management account",
+            "Conditions for break-glass"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Region restriction SCP",
+      "scenario": "Deny outside approved regions.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Even admins can't launch in us-east-1; global services exempted."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Deny\",\n  \"NotAction\": [\"iam:*\", \"organizations:*\", \"sts:*\", \"cloudfront:*\", \"route53:*\"],\n  \"Resource\": \"*\",\n  \"Condition\": {\"StringNotEquals\": {\"aws:RequestedRegion\": [\"eu-west-1\", \"eu-central-1\"]}}\n}"
+        }
+      ],
+      "outcome": "org-wide guardrails enforced."
+    },
+    "summary": {
+      "points": [
+        "Maximum permissions.",
+        "Never grant.",
+        "Bind account admins."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does an SCP apply to the organisation's management account?",
+        "a": "No, which is why the management account should be tightly controlled and not run workloads."
+      }
+    ]
+  },
+  "permission-boundaries-the-sandbox-for-delegated-administration": {
+    "core": "A permission boundary is a managed policy attached to a user or role that caps its maximum permissions. It lets you delegate IAM role creation to developers safely: they can create roles only if those roles carry the same boundary, preventing privilege escalation.",
+    "first_principles": {
+      "problem": "Developers need to create roles for their Lambda functions, but could create an admin role and escalate.",
+      "truths": [
+        "Effective permissions = identity policy ∩ boundary.",
+        "Delegated admins can escalate without limits.",
+        "Conditions can require a boundary on created roles."
+      ],
+      "derivation": [
+        "Define a **boundary policy** (allowed services).",
+        "Allow devs **iam:CreateRole** only with **iam:PermissionsBoundary** condition.",
+        "Deny **modifying/removing** the boundary.",
+        "Combine with **naming conventions** (path/prefix)."
+      ]
+    },
+    "analogy": {
+      "title": "A company credit card with a spending limit",
+      "story": "You can buy what you need, and any card you issue to your team has the same limit.",
+      "mapping": [
+        [
+          "Spending limit",
+          "Boundary"
+        ],
+        [
+          "Purchases",
+          "Permissions"
+        ],
+        [
+          "Issuing cards",
+          "Creating roles"
+        ]
+      ],
+      "breaks": "Credit limits are monetary; boundaries limit actions and resources."
+    },
+    "mindmap": {
+      "center": "Permission Boundaries",
+      "branches": [
+        {
+          "label": "Effect",
+          "children": [
+            "Intersection with identity policy"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Delegated IAM",
+            "Prevent escalation"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Require boundary on CreateRole",
+            "Deny boundary removal"
+          ]
+        },
+        {
+          "label": "Not",
+          "children": [
+            "A grant"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Require boundary on created roles",
+      "scenario": "Policy snippet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Devs self-serve roles, never beyond DevBoundary."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Action\": [\"iam:CreateRole\", \"iam:AttachRolePolicy\"],\n  \"Resource\": \"arn:aws:iam::*:role/app/*\",\n  \"Condition\": {\"StringEquals\": {\"iam:PermissionsBoundary\": \"arn:aws:iam::123456789012:policy/DevBoundary\"}}\n}"
+        }
+      ],
+      "outcome": "safe delegated administration."
+    },
+    "summary": {
+      "points": [
+        "Caps max permissions.",
+        "Enables self-service IAM.",
+        "Prevents escalation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are a role's effective permissions with a boundary?",
+        "a": "The intersection of its identity policies and its permission boundary."
+      }
+    ]
+  },
+  "cross-account-roles-trusting-strangers-safely": {
+    "core": "Cross-account access uses a role in the target account whose trust policy allows a principal from the source account to call sts:AssumeRole. The source principal also needs permission to assume it. For third parties, require an ExternalId to prevent the confused-deputy problem.",
+    "first_principles": {
+      "problem": "A SaaS vendor needs read access to your account without you handing over access keys.",
+      "truths": [
+        "Trust and permissions are separate policies.",
+        "Temporary credentials are safer than keys.",
+        "Vendors serving many customers can be tricked into acting for the wrong one."
+      ],
+      "derivation": [
+        "Create a **role in the target account**.",
+        "**Trust policy** names the source account/role.",
+        "**Permissions policy** grants least privilege.",
+        "Add **sts:ExternalId** condition for third parties.",
+        "Source side allows **sts:AssumeRole**."
+      ]
+    },
+    "analogy": {
+      "title": "A guest key with a passphrase",
+      "story": "The building lets a named company in, but only if they quote your unique passphrase.",
+      "mapping": [
+        [
+          "Guest key",
+          "Assumed role"
+        ],
+        [
+          "Named company",
+          "Trusted account"
+        ],
+        [
+          "Passphrase",
+          "ExternalId"
+        ]
+      ],
+      "breaks": "Physical keys don't expire; role sessions do, typically within 1–12 hours."
+    },
+    "mindmap": {
+      "center": "Cross-Account Roles",
+      "branches": [
+        {
+          "label": "Pieces",
+          "children": [
+            "Trust policy",
+            "Permissions policy",
+            "Source allow"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "sts:AssumeRole",
+            "Temp credentials"
+          ]
+        },
+        {
+          "label": "Third parties",
+          "children": [
+            "ExternalId",
+            "Confused deputy"
+          ]
+        },
+        {
+          "label": "Org",
+          "children": [
+            "aws:PrincipalOrgID conditions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Trust policy with ExternalId",
+      "scenario": "Vendor access.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only the vendor, acting for you, can assume the role."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Principal\": {\"AWS\": \"arn:aws:iam::999988887777:root\"},\n  \"Action\": \"sts:AssumeRole\",\n  \"Condition\": {\"StringEquals\": {\"sts:ExternalId\": \"cust-4f9a2\"}}\n}"
+        }
+      ],
+      "outcome": "safe third-party access without keys."
+    },
+    "summary": {
+      "points": [
+        "Trust + permissions.",
+        "Temporary credentials.",
+        "ExternalId for vendors."
+      ]
+    },
+    "check": [
+      {
+        "q": "What attack does ExternalId prevent?",
+        "a": "The confused deputy, where another customer tricks the vendor into using its access to your account."
+      }
+    ]
+  },
+  "abac-attribute-based-access-control": {
+    "core": "ABAC grants access based on matching tags: a principal tagged team=payments can access resources tagged team=payments, using conditions like aws:ResourceTag/team == ${aws:PrincipalTag/team}. One policy scales across teams and new resources without editing policies for each.",
+    "first_principles": {
+      "problem": "Every new project needs new IAM policies listing ARNs, and the policy count explodes.",
+      "truths": [
+        "Tags describe ownership.",
+        "Conditions can compare principal and resource tags.",
+        "Static ARN lists don't scale."
+      ],
+      "derivation": [
+        "Define a **tagging standard** (team, env, project).",
+        "Tag **principals** (via SSO session tags) and **resources**.",
+        "Write policies with **tag-matching conditions**.",
+        "**Enforce** tags at creation (aws:RequestTag, SCPs).",
+        "Prevent **tag tampering**."
+      ]
+    },
+    "analogy": {
+      "title": "Colour-coded keycards and doors",
+      "story": "A blue card opens every blue door, including doors built tomorrow.",
+      "mapping": [
+        [
+          "Card colour",
+          "Principal tag"
+        ],
+        [
+          "Door colour",
+          "Resource tag"
+        ],
+        [
+          "New doors",
+          "New resources"
+        ]
+      ],
+      "breaks": "Colours can't be repainted by holders, but tags can be changed unless you deny it."
+    },
+    "mindmap": {
+      "center": "ABAC",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Principal tags",
+            "Resource tags",
+            "Condition matching"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Scales",
+            "Fewer policies"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Tag standard",
+            "Enforced tagging",
+            "Tag protection"
+          ]
+        },
+        {
+          "label": "vs RBAC",
+          "children": [
+            "Roles per job"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Team-scoped EC2 control",
+      "scenario": "Policy condition.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One policy for all teams."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Action\": [\"ec2:StartInstances\", \"ec2:StopInstances\"],\n  \"Resource\": \"*\",\n  \"Condition\": {\"StringEquals\": {\"aws:ResourceTag/team\": \"${aws:PrincipalTag/team}\"}}\n}"
+        }
+      ],
+      "outcome": "permissions that scale with tags."
+    },
+    "summary": {
+      "points": [
+        "Match tags.",
+        "Enforce tagging.",
+        "Protect tags."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you prevent users from changing resource tags under ABAC?",
+        "a": "Retagging a resource with their own team tag would grant them access to it."
+      }
+    ]
+  }
+}

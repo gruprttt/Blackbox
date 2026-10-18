@@ -1,0 +1,417 @@
+{
+  "introduction-kafka-without-the-headache": {
+    "core": "Amazon MSK runs Apache Kafka as a managed service: AWS provisions brokers across AZs, handles patching, replacement and metadata management, and integrates with IAM auth, encryption, CloudWatch and MSK Connect. You keep Kafka's APIs and ecosystem without operating the cluster's infrastructure.",
+    "first_principles": {
+      "problem": "Self-managed Kafka needs a dedicated team for broker failures, upgrades and ZooKeeper.",
+      "truths": [
+        "Kafka is powerful but operationally heavy.",
+        "The ecosystem (Connect, Streams, clients) is valuable.",
+        "Managed infra reduces toil."
+      ],
+      "derivation": [
+        "Choose **provisioned** or **serverless** MSK.",
+        "Spread brokers across **3 AZs**.",
+        "Use **IAM auth** and TLS.",
+        "Set **replication factor 3, min.insync.replicas 2**.",
+        "Use **MSK Connect** for connectors."
+      ]
+    },
+    "analogy": {
+      "title": "Hiring a managed fleet for your own delivery routes",
+      "story": "You decide what goes where; someone else maintains the trucks.",
+      "mapping": [
+        [
+          "Trucks",
+          "Brokers"
+        ],
+        [
+          "Routes",
+          "Topics/partitions"
+        ],
+        [
+          "Maintenance company",
+          "AWS"
+        ]
+      ],
+      "breaks": "Fleet managers decide truck counts with you; in provisioned MSK, you still size brokers and partitions."
+    },
+    "mindmap": {
+      "center": "MSK",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "Provisioned",
+            "Serverless",
+            "Express brokers"
+          ]
+        },
+        {
+          "label": "Managed",
+          "children": [
+            "Brokers",
+            "Patching",
+            "Metadata"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "IAM",
+            "TLS",
+            "KMS"
+          ]
+        },
+        {
+          "label": "Ecosystem",
+          "children": [
+            "MSK Connect",
+            "Kafka clients"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "RF 3",
+            "min.insync 2"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Durable topic config",
+      "scenario": "Kafka CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Survives a broker or AZ loss without data loss (acks=all)."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kafka-topics.sh --bootstrap-server $BS --create --topic orders \\\n  --partitions 12 --replication-factor 3 --config min.insync.replicas=2"
+        }
+      ],
+      "outcome": "Kafka without infrastructure toil."
+    },
+    "summary": {
+      "points": [
+        "Managed Kafka.",
+        "Kafka APIs unchanged.",
+        "Configure durability."
+      ]
+    },
+    "check": [
+      {
+        "q": "What replication settings give durability across AZ failure in MSK?",
+        "a": "Replication factor 3 with min.insync.replicas=2 and producer acks=all."
+      }
+    ]
+  },
+  "zookeeperless-mode-kraft": {
+    "core": "KRaft replaces ZooKeeper with a Raft-based quorum of Kafka controllers that store cluster metadata in an internal log. It simplifies architecture (one system instead of two), speeds controller failover and metadata propagation, and supports far more partitions. MSK supports KRaft mode on newer Kafka versions.",
+    "first_principles": {
+      "problem": "ZooKeeper is a separate distributed system to secure, scale and debug, and limits partition counts.",
+      "truths": [
+        "Two consensus systems double complexity.",
+        "Metadata as a log replicates efficiently.",
+        "Raft provides leader election."
+      ],
+      "derivation": [
+        "Use **KRaft-mode** clusters for new deployments.",
+        "Controllers form a **Raft quorum**.",
+        "Metadata stored in **__cluster_metadata** log.",
+        "Benefit from **faster failover**.",
+        "Plan **migration** of existing ZK clusters."
+      ]
+    },
+    "analogy": {
+      "title": "Merging two committees into one",
+      "story": "Instead of the operations team asking a separate records committee for every decision, it keeps its own minutes.",
+      "mapping": [
+        [
+          "Records committee",
+          "ZooKeeper"
+        ],
+        [
+          "Own minutes",
+          "Metadata log"
+        ],
+        [
+          "Chairperson election",
+          "Raft leader"
+        ]
+      ],
+      "breaks": "Committee mergers involve politics; KRaft migration needs careful version planning."
+    },
+    "mindmap": {
+      "center": "KRaft",
+      "branches": [
+        {
+          "label": "Replaces",
+          "children": [
+            "ZooKeeper"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Raft quorum",
+            "Metadata log"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Simpler",
+            "Faster failover",
+            "More partitions"
+          ]
+        },
+        {
+          "label": "MSK",
+          "children": [
+            "KRaft mode on new versions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Controller failover",
+      "scenario": "Comparison.",
+      "flow": [
+        "ZooKeeper mode: controller re-election + metadata reload (seconds to minutes at scale)",
+        "KRaft: standby controllers already have the log → near-instant"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shorter disruption during failures."
+        }
+      ],
+      "code": [],
+      "outcome": "simpler, more scalable Kafka."
+    },
+    "summary": {
+      "points": [
+        "No ZooKeeper.",
+        "Raft metadata log.",
+        "Faster and simpler."
+      ]
+    },
+    "check": [
+      {
+        "q": "What consensus protocol does KRaft use?",
+        "a": "Raft."
+      }
+    ]
+  },
+  "tiered-storage-infinite-retention": {
+    "core": "MSK tiered storage keeps recent segments on broker EBS (primary tier) and moves older segments to a low-cost, S3-backed tier transparently. Consumers read old data through normal Kafka APIs. Retention can be months or years without huge broker disks, and broker scaling and recovery are faster because less data lives locally.",
+    "first_principles": {
+      "problem": "Keeping 90 days of events for replay requires enormous, expensive broker disks.",
+      "truths": [
+        "Most reads target recent data.",
+        "Object storage is much cheaper than EBS.",
+        "Less local data speeds rebalancing."
+      ],
+      "derivation": [
+        "Enable **tiered storage** on the cluster.",
+        "Set **local.retention** (hot) and **retention.ms** (total).",
+        "Consumers read **transparently**.",
+        "Expect **higher latency** for old data.",
+        "Pay **per GB-month + retrieval**."
+      ]
+    },
+    "analogy": {
+      "title": "A newsroom archive",
+      "story": "This week's papers on the desk, older issues in the basement archive, all retrievable.",
+      "mapping": [
+        [
+          "Desk",
+          "Broker EBS"
+        ],
+        [
+          "Basement",
+          "Tiered storage"
+        ],
+        [
+          "Retrieval",
+          "Reading old offsets"
+        ]
+      ],
+      "breaks": "Basements need a librarian; Kafka fetches old segments automatically."
+    },
+    "mindmap": {
+      "center": "Tiered Storage",
+      "branches": [
+        {
+          "label": "Tiers",
+          "children": [
+            "Local EBS",
+            "Low-cost remote tier"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "local.retention.ms",
+            "retention.ms"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Cheap long retention",
+            "Faster scaling"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Latency for old reads"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Topic config",
+      "scenario": "Retention.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "1 day local, 90 days total, small broker disks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kafka-configs.sh --bootstrap-server $BS --alter --entity-type topics --entity-name events \\\n  --add-config remote.storage.enable=true,local.retention.ms=86400000,retention.ms=7776000000"
+        }
+      ],
+      "outcome": "long retention at low cost."
+    },
+    "summary": {
+      "points": [
+        "Hot local, cold remote.",
+        "Transparent reads.",
+        "Cheaper retention."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does local.retention.ms control with tiered storage?",
+        "a": "How long segments stay on broker local storage before only existing in the remote tier."
+      }
+    ]
+  },
+  "msk-serverless-zero-capacity-planning": {
+    "core": "MSK Serverless runs Kafka without sizing brokers or storage: it scales throughput automatically, bills per partition-hour and data, and requires IAM authentication. Limits exist (per-cluster throughput, partition counts, retention caps), so it suits variable or moderate workloads and teams that want no capacity planning.",
+    "first_principles": {
+      "problem": "A team with spiky, unpredictable Kafka usage over-provisions brokers that sit idle.",
+      "truths": [
+        "Capacity planning Kafka is hard.",
+        "Usage-based billing fits variable load.",
+        "Serverless brings limits."
+      ],
+      "derivation": [
+        "Use **Serverless** for variable/moderate throughput.",
+        "Use **IAM auth** (required).",
+        "Check **quotas** (throughput, partitions, retention).",
+        "Use **provisioned** for very high or steady loads.",
+        "Monitor **cost per partition**."
+      ]
+    },
+    "analogy": {
+      "title": "Pay-as-you-go electricity versus building a power station",
+      "story": "You just plug in and pay for usage, within your connection's limits.",
+      "mapping": [
+        [
+          "Plugging in",
+          "Creating topics"
+        ],
+        [
+          "Metered bill",
+          "Partition-hours + data"
+        ],
+        [
+          "Connection limit",
+          "Serverless quotas"
+        ]
+      ],
+      "breaks": "Electricity scales almost without limit; serverless clusters have throughput caps."
+    },
+    "mindmap": {
+      "center": "MSK Serverless",
+      "branches": [
+        {
+          "label": "Benefits",
+          "children": [
+            "No sizing",
+            "Auto-scaling",
+            "Usage billing"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "IAM auth"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Throughput",
+            "Partitions",
+            "Retention"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Variable load",
+            "Small teams"
+          ]
+        },
+        {
+          "label": "Else",
+          "children": [
+            "Provisioned/Express"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing a mode",
+      "scenario": "Two workloads.",
+      "flow": [
+        "Dev/test and spiky integrations → Serverless",
+        "Steady 500 MB/s core event bus → Provisioned"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Serverless for convenience, provisioned for scale."
+        }
+      ],
+      "code": [],
+      "outcome": "Kafka without capacity planning where it fits."
+    },
+    "summary": {
+      "points": [
+        "No brokers to size.",
+        "IAM required.",
+        "Mind the limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which authentication does MSK Serverless require?",
+        "a": "IAM access control."
+      }
+    ]
+  }
+}

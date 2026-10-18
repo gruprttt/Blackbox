@@ -1,0 +1,628 @@
+{
+  "introduction-the-distributed-needle-in-a-haystack": {
+    "core": "In microservices, one slow request may cross API Gateway, Lambda, three services, a queue and two databases. Distributed tracing follows the request end to end with a trace ID, recording timing for each hop, so you can find exactly where latency or errors originate. AWS X-Ray (and OpenTelemetry via ADOT) provide this.",
+    "first_principles": {
+      "problem": "p99 latency doubled, and each team insists its service is fine.",
+      "truths": [
+        "Requests span many services.",
+        "Logs per service lack the full path.",
+        "A propagated ID links the pieces."
+      ],
+      "derivation": [
+        "**Propagate trace context** (X-Amzn-Trace-Id / W3C traceparent).",
+        "**Instrument** services with SDK/ADOT.",
+        "**Record** segments and subsegments.",
+        "**Sample** to control cost.",
+        "**Analyse** traces and service maps."
+      ]
+    },
+    "analogy": {
+      "title": "A parcel tracking number",
+      "story": "Every depot scans the same number, so you see exactly where the parcel got stuck.",
+      "mapping": [
+        [
+          "Tracking number",
+          "Trace ID"
+        ],
+        [
+          "Depot scans",
+          "Segments"
+        ],
+        [
+          "Delay at a depot",
+          "Slow span"
+        ]
+      ],
+      "breaks": "Parcels follow one path; requests fan out to many services in parallel."
+    },
+    "mindmap": {
+      "center": "Distributed Tracing",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Trace",
+            "Segment",
+            "Subsegment"
+          ]
+        },
+        {
+          "label": "Propagation",
+          "children": [
+            "Trace header",
+            "W3C"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "X-Ray SDK",
+            "ADOT/OpenTelemetry"
+          ]
+        },
+        {
+          "label": "Views",
+          "children": [
+            "Service map",
+            "Trace timeline"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "Sampling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding the slow hop",
+      "scenario": "Trace.",
+      "flow": [
+        "Trace: API 20 ms → orders 30 ms → inventory 900 ms → DB 870 ms",
+        "Inventory's DB query is the culprit",
+        "Missing index added"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Root cause in minutes, no blame game."
+        }
+      ],
+      "code": [],
+      "outcome": "end-to-end visibility."
+    },
+    "summary": {
+      "points": [
+        "One ID across services.",
+        "Timing per hop.",
+        "Sample wisely."
+      ]
+    },
+    "check": [
+      {
+        "q": "What links spans from different services into one trace?",
+        "a": "A propagated trace ID in request headers."
+      }
+    ]
+  },
+  "x-ray-architecture-the-daemon-the-udp-sidecar": {
+    "core": "Instrumented apps send segment documents over UDP (port 2000) to a local X-Ray daemon or ADOT collector, which batches and forwards them to the X-Ray API. UDP keeps the app non-blocking. On ECS/EKS the daemon runs as a sidecar or DaemonSet; Lambda and API Gateway integrate natively.",
+    "first_principles": {
+      "problem": "Sending trace data synchronously from the app adds latency and failure modes.",
+      "truths": [
+        "Fire-and-forget UDP doesn't block requests.",
+        "Batching reduces API calls.",
+        "Managed services can emit traces themselves."
+      ],
+      "derivation": [
+        "Run **daemon/ADOT collector** locally (sidecar/DaemonSet).",
+        "SDK sends to **127.0.0.1:2000/udp**.",
+        "Grant collector **xray:PutTraceSegments**.",
+        "Enable **active tracing** for Lambda/API Gateway.",
+        "Prefer **ADOT** for OpenTelemetry standardisation."
+      ]
+    },
+    "analogy": {
+      "title": "Dropping letters in a local postbox",
+      "story": "You don't wait for delivery; the postal van collects and ships them in bulk.",
+      "mapping": [
+        [
+          "Postbox",
+          "Local daemon"
+        ],
+        [
+          "Letters",
+          "Segments over UDP"
+        ],
+        [
+          "Postal van",
+          "Batch upload to X-Ray"
+        ]
+      ],
+      "breaks": "Post is reliable; UDP can drop segments under extreme load."
+    },
+    "mindmap": {
+      "center": "X-Ray Architecture",
+      "branches": [
+        {
+          "label": "App",
+          "children": [
+            "SDK",
+            "UDP 2000"
+          ]
+        },
+        {
+          "label": "Collector",
+          "children": [
+            "X-Ray daemon",
+            "ADOT"
+          ]
+        },
+        {
+          "label": "Deploy",
+          "children": [
+            "Sidecar",
+            "DaemonSet",
+            "Agent"
+          ]
+        },
+        {
+          "label": "Native",
+          "children": [
+            "Lambda",
+            "API Gateway"
+          ]
+        },
+        {
+          "label": "IAM",
+          "children": [
+            "PutTraceSegments"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ECS sidecar",
+      "scenario": "Task definition snippet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "App traces flow with no request-path blocking."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"name\": \"xray-daemon\", \"image\": \"public.ecr.aws/xray/aws-xray-daemon:latest\",\n  \"portMappings\": [{\"containerPort\": 2000, \"protocol\": \"udp\"}], \"essential\": false\n}"
+        }
+      ],
+      "outcome": "low-overhead trace collection."
+    },
+    "summary": {
+      "points": [
+        "UDP to local collector.",
+        "Batch upload.",
+        "Native for Lambda."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does the X-Ray SDK send segments over UDP?",
+        "a": "So tracing never blocks or slows the application's request path."
+      }
+    ]
+  },
+  "sampling-rules-managing-cost-noise": {
+    "core": "Tracing every request is costly and noisy. X-Ray sampling rules set a reservoir (fixed traces per second) plus a fixed rate (percentage beyond that), matched by service, method, URL path and host, with priorities. The default is 1 request/s plus 5%. Raise sampling for critical paths and errors; lower it for health checks.",
+    "first_principles": {
+      "problem": "Traces cost too much at 50,000 rps, and health checks dominate the samples.",
+      "truths": [
+        "Statistical samples reveal patterns.",
+        "Some paths matter more.",
+        "Rules can target specific requests."
+      ],
+      "derivation": [
+        "Keep **reservoir** to guarantee some traces per second.",
+        "Set **fixed rate** for the rest.",
+        "**Exclude** health checks (rate 0).",
+        "**Boost** critical endpoints.",
+        "Use **tail-based sampling** (ADOT) to keep errors/slow traces."
+      ]
+    },
+    "analogy": {
+      "title": "Quality control sampling on a production line",
+      "story": "Inspect a few items every minute, plus extra from the critical line.",
+      "mapping": [
+        [
+          "Items inspected",
+          "Sampled traces"
+        ],
+        [
+          "Every minute quota",
+          "Reservoir"
+        ],
+        [
+          "Percentage of rest",
+          "Fixed rate"
+        ]
+      ],
+      "breaks": "Factory samples are random; head-based sampling decides before knowing if a request will fail."
+    },
+    "mindmap": {
+      "center": "Sampling",
+      "branches": [
+        {
+          "label": "Parameters",
+          "children": [
+            "Reservoir",
+            "Fixed rate",
+            "Priority"
+          ]
+        },
+        {
+          "label": "Matching",
+          "children": [
+            "Service",
+            "Method",
+            "URL path",
+            "Host"
+          ]
+        },
+        {
+          "label": "Default",
+          "children": [
+            "1/s + 5%"
+          ]
+        },
+        {
+          "label": "Advanced",
+          "children": [
+            "Tail-based via ADOT"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sampling rules",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No health-check noise; rich checkout traces."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "[\n  {\"RuleName\": \"health\", \"Priority\": 1, \"URLPath\": \"/health\", \"ReservoirSize\": 0, \"FixedRate\": 0.0, \"ServiceName\": \"*\", \"HTTPMethod\": \"*\", \"Host\": \"*\", \"ResourceARN\": \"*\", \"ServiceType\": \"*\", \"Version\": 1},\n  {\"RuleName\": \"checkout\", \"Priority\": 10, \"URLPath\": \"/checkout*\", \"ReservoirSize\": 10, \"FixedRate\": 0.2, \"ServiceName\": \"*\", \"HTTPMethod\": \"*\", \"Host\": \"*\", \"ResourceARN\": \"*\", \"ServiceType\": \"*\", \"Version\": 1}\n]"
+        }
+      ],
+      "outcome": "useful traces at controlled cost."
+    },
+    "summary": {
+      "points": [
+        "Reservoir + rate.",
+        "Target what matters.",
+        "Tail sampling for errors."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's X-Ray's default sampling rule?",
+        "a": "The first request each second (reservoir 1) plus 5% of additional requests."
+      }
+    ]
+  },
+  "segments-vs-subsegments-the-anatomy-of-a-trace": {
+    "core": "A trace is a tree. Each service that handles the request creates a segment (its work, with name, timing, HTTP data and errors), and within it subsegments record downstream calls (AWS SDK, HTTP, SQL) or custom code blocks. Subsegments for remote calls become inferred nodes in the service map.",
+    "first_principles": {
+      "problem": "A trace shows a service took 2 seconds but not which internal call caused it.",
+      "truths": [
+        "Work nests inside requests.",
+        "Downstream calls dominate latency.",
+        "Custom blocks need explicit instrumentation."
+      ],
+      "derivation": [
+        "**Segment** per service hop.",
+        "**Auto-instrument** AWS SDK and HTTP clients.",
+        "Add **custom subsegments** for heavy code.",
+        "Record **errors, faults, throttles**.",
+        "Read the **timeline** waterfall."
+      ]
+    },
+    "analogy": {
+      "title": "A project timeline with tasks and sub-tasks",
+      "story": "Each department's task has sub-tasks showing exactly where time went.",
+      "mapping": [
+        [
+          "Department task",
+          "Segment"
+        ],
+        [
+          "Sub-tasks",
+          "Subsegments"
+        ],
+        [
+          "Gantt chart",
+          "Trace timeline"
+        ]
+      ],
+      "breaks": "Projects run sequentially often; subsegments can overlap in parallel."
+    },
+    "mindmap": {
+      "center": "Trace Anatomy",
+      "branches": [
+        {
+          "label": "Trace",
+          "children": [
+            "Tree of segments"
+          ]
+        },
+        {
+          "label": "Segment",
+          "children": [
+            "Service work",
+            "HTTP",
+            "Errors"
+          ]
+        },
+        {
+          "label": "Subsegment",
+          "children": [
+            "AWS calls",
+            "HTTP calls",
+            "SQL",
+            "Custom"
+          ]
+        },
+        {
+          "label": "Status",
+          "children": [
+            "Error 4xx",
+            "Fault 5xx",
+            "Throttle 429"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Custom subsegment",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "PDF rendering shows as its own 1.6 s block."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from aws_xray_sdk.core import xray_recorder, patch_all\npatch_all()  # auto-instrument boto3, requests\n\n@xray_recorder.capture('render_invoice_pdf')\ndef render(invoice):\n    ..."
+        }
+      ],
+      "outcome": "pinpointed internal latency."
+    },
+    "summary": {
+      "points": [
+        "Segments per service.",
+        "Subsegments per call.",
+        "Instrument heavy code."
+      ]
+    },
+    "check": [
+      {
+        "q": "What creates inferred nodes in the X-Ray service map?",
+        "a": "Subsegments for downstream calls to services that aren't instrumented themselves (e.g. DynamoDB, external APIs)."
+      }
+    ]
+  },
+  "annotations-vs-metadata-making-traces-searchable": {
+    "core": "Annotations are indexed key-value pairs (string, number, boolean, up to 50 per trace) you can filter on with filter expressions (annotation.customer_tier = \"gold\"). Metadata is non-indexed, arbitrary data (objects, payloads) stored for viewing but not searching. Put business identifiers in annotations and debug detail in metadata.",
+    "first_principles": {
+      "problem": "Support asks for traces of a specific customer's failed orders, but nothing in traces identifies the customer.",
+      "truths": [
+        "Search needs indexed fields.",
+        "Index slots are limited.",
+        "Rich context helps debugging."
+      ],
+      "derivation": [
+        "Add **annotations** for searchable IDs (customer_id, order_id, tenant).",
+        "Add **metadata** for payloads and debug info.",
+        "Use **filter expressions** in the console/API.",
+        "Avoid **PII** in traces.",
+        "Create **groups** from filter expressions."
+      ]
+    },
+    "analogy": {
+      "title": "Labels on folders versus notes inside them",
+      "story": "Labels let you find folders fast; notes inside give detail once opened.",
+      "mapping": [
+        [
+          "Folder labels",
+          "Annotations"
+        ],
+        [
+          "Notes inside",
+          "Metadata"
+        ],
+        [
+          "Filing search",
+          "Filter expressions"
+        ]
+      ],
+      "breaks": "Folder labels are unlimited; X-Ray caps annotations per trace."
+    },
+    "mindmap": {
+      "center": "Annotations vs Metadata",
+      "branches": [
+        {
+          "label": "Annotations",
+          "children": [
+            "Indexed",
+            "Searchable",
+            "≤50"
+          ]
+        },
+        {
+          "label": "Metadata",
+          "children": [
+            "Not indexed",
+            "Any JSON"
+          ]
+        },
+        {
+          "label": "Search",
+          "children": [
+            "Filter expressions",
+            "Groups"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "No PII"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Annotate and search",
+      "scenario": "Code + filter.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Customer's failed traces found instantly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "xray_recorder.put_annotation('customer_id', 'c-42')\nxray_recorder.put_annotation('order_status', 'failed')\nxray_recorder.put_metadata('payload', order_dict)\n# Console filter: annotation.customer_id = \"c-42\" AND fault"
+        }
+      ],
+      "outcome": "business-searchable traces."
+    },
+    "summary": {
+      "points": [
+        "Annotations to search.",
+        "Metadata to inspect.",
+        "No PII."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which can you filter traces by: annotations or metadata?",
+        "a": "Annotations, because they're indexed."
+      }
+    ]
+  },
+  "the-x-ray-service-map-reading-your-architectures-health": {
+    "core": "The service map is a live graph of services and dependencies built from traces. Each node shows request rate, latency distribution and error/fault/throttle percentages (colour rings), and edges show call relationships. It reveals hot spots, unexpected dependencies and cascading failures at a glance.",
+    "first_principles": {
+      "problem": "Nobody has an accurate diagram of how 40 services actually call each other.",
+      "truths": [
+        "Traces reveal real call paths.",
+        "Health varies per edge.",
+        "Visual patterns speed diagnosis."
+      ],
+      "derivation": [
+        "Read **node colours** (red faults, orange errors, purple throttles).",
+        "Check **latency histograms** per node.",
+        "Follow **edges** to find the origin.",
+        "Use **groups** for filtered maps.",
+        "Integrate with **CloudWatch ServiceLens/Application Signals**."
+      ]
+    },
+    "analogy": {
+      "title": "A live traffic map",
+      "story": "Red roads show congestion; you can see where a jam starts and how it spreads.",
+      "mapping": [
+        [
+          "Roads",
+          "Edges"
+        ],
+        [
+          "Junctions",
+          "Services"
+        ],
+        [
+          "Red segments",
+          "Faulty dependencies"
+        ]
+      ],
+      "breaks": "Traffic maps show physical flow; service maps only show sampled, instrumented calls."
+    },
+    "mindmap": {
+      "center": "Service Map",
+      "branches": [
+        {
+          "label": "Nodes",
+          "children": [
+            "Services",
+            "Inferred dependencies"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Latency",
+            "Errors",
+            "Faults",
+            "Throttles"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Hot spots",
+            "Hidden dependencies",
+            "Cascades"
+          ]
+        },
+        {
+          "label": "Extensions",
+          "children": [
+            "Groups",
+            "Application Signals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reading a cascade",
+      "scenario": "Map.",
+      "flow": [
+        "Checkout node red",
+        "Edge to payments shows 30% faults",
+        "Payments → third-party API node throttling",
+        "Root cause: provider rate limit"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Origin found by following red edges."
+        }
+      ],
+      "code": [],
+      "outcome": "architecture health at a glance."
+    },
+    "summary": {
+      "points": [
+        "Live dependency graph.",
+        "Colour-coded health.",
+        "Follow the red."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a purple ring on an X-Ray node indicate?",
+        "a": "Throttling (429 responses)."
+      }
+    ]
+  }
+}

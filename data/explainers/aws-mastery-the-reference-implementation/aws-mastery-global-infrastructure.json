@@ -1,0 +1,506 @@
+{
+  "introduction-the-reference-implementation-of-cloud": {
+    "core": "AWS is the reference implementation of cloud computing. Most cloud concepts (regions, availability zones, IAM, VPCs, object storage) were popularised by AWS, and other clouds map onto them. Learning AWS's physical and logical layout gives you a mental model that transfers across providers.",
+    "first_principles": {
+      "problem": "Engineers learn services in isolation and can't reason about where things physically run or how failures spread.",
+      "truths": [
+        "Cloud resources live in physical buildings.",
+        "Failure domains shape architecture.",
+        "Abstractions map across clouds."
+      ],
+      "derivation": [
+        "Start from **physical layout** (regions, AZs, edge).",
+        "Map **services to scopes** (global, regional, zonal).",
+        "Design for **failure domains**.",
+        "Translate concepts to **other clouds**."
+      ]
+    },
+    "analogy": {
+      "title": "A global franchise with a standard operating manual",
+      "story": "Every branch follows the same blueprint, so learning one teaches you all.",
+      "mapping": [
+        [
+          "Branches",
+          "Regions"
+        ],
+        [
+          "Manual",
+          "AWS service model"
+        ],
+        [
+          "Competitors copying",
+          "Other clouds"
+        ]
+      ],
+      "breaks": "Franchises are identical; AWS regions differ in services and prices."
+    },
+    "mindmap": {
+      "center": "AWS as Reference",
+      "branches": [
+        {
+          "label": "Layers",
+          "children": [
+            "Physical",
+            "Logical",
+            "Services"
+          ]
+        },
+        {
+          "label": "Scopes",
+          "children": [
+            "Global",
+            "Regional",
+            "Zonal"
+          ]
+        },
+        {
+          "label": "Why learn",
+          "children": [
+            "Transferable",
+            "Failure reasoning"
+          ]
+        },
+        {
+          "label": "Others",
+          "children": [
+            "Azure",
+            "GCP mappings"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Service scopes",
+      "scenario": "Where things live.",
+      "flow": [
+        "IAM, Route 53, CloudFront → global",
+        "S3 buckets, DynamoDB tables → regional",
+        "EC2 instances, EBS volumes → zonal"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "You know what an AZ outage affects."
+        }
+      ],
+      "code": [],
+      "outcome": "a transferable cloud mental model."
+    },
+    "summary": {
+      "points": [
+        "AWS defines the vocabulary.",
+        "Know service scopes.",
+        "Design for failure domains."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is an EBS volume global, regional or zonal?",
+        "a": "Zonal: it lives in a single availability zone."
+      }
+    ]
+  },
+  "the-hierarchy-regions-vs-azs-vs-data-centers": {
+    "core": "A region is a geographic area containing multiple availability zones (typically 3+). Each AZ is one or more data centres with independent power, cooling and networking, tens of kilometres apart and linked by low-latency fibre. Spreading across AZs survives data-centre failures; spreading across regions survives regional disasters.",
+    "first_principles": {
+      "problem": "An app in a single AZ goes down when that facility loses power.",
+      "truths": [
+        "Physical facilities fail.",
+        "Distance reduces correlated failure but adds latency.",
+        "AZ-to-AZ latency is ~1–2 ms."
+      ],
+      "derivation": [
+        "Deploy across **≥2 AZs** (ideally 3).",
+        "Use **multi-AZ** managed services (RDS Multi-AZ, Aurora).",
+        "Consider **multi-region** for DR or global users.",
+        "Remember AZ names are **mapped per account** (use AZ IDs)."
+      ]
+    },
+    "analogy": {
+      "title": "A bank with branches in different neighbourhoods of one city",
+      "story": "A fire in one branch doesn't stop the others; a citywide disaster needs a branch in another city.",
+      "mapping": [
+        [
+          "City",
+          "Region"
+        ],
+        [
+          "Branch",
+          "AZ"
+        ],
+        [
+          "Another city",
+          "Second region"
+        ]
+      ],
+      "breaks": "Branches are independent businesses; AZs are tightly networked for synchronous replication."
+    },
+    "mindmap": {
+      "center": "AWS Hierarchy",
+      "branches": [
+        {
+          "label": "Region",
+          "children": [
+            "Geographic",
+            "3+ AZs",
+            "Isolated"
+          ]
+        },
+        {
+          "label": "AZ",
+          "children": [
+            "1+ data centres",
+            "Independent power",
+            "~1–2 ms apart"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Multi-AZ HA",
+            "Multi-region DR"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "AZ ID vs name"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Multi-AZ web tier",
+      "scenario": "Auto Scaling group.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Losing one AZ keeps two-thirds of capacity."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws autoscaling create-auto-scaling-group --auto-scaling-group-name web \\\n  --vpc-zone-identifier subnet-a,subnet-b,subnet-c --min-size 3 --max-size 9 \\\n  --launch-template LaunchTemplateName=web"
+        }
+      ],
+      "outcome": "survives a data-centre failure."
+    },
+    "summary": {
+      "points": [
+        "Region > AZ > data centre.",
+        "Multi-AZ for HA.",
+        "Multi-region for DR."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do AZ names like us-east-1a differ between accounts?",
+        "a": "AWS maps names to physical AZs per account to spread load; use AZ IDs (use1-az1) to align across accounts."
+      }
+    ]
+  },
+  "the-edge-network-bringing-content-closer": {
+    "core": "AWS runs hundreds of edge locations (points of presence) worldwide, far more than regions. CloudFront caches content there, Route 53 answers DNS there, and Global Accelerator brings user traffic onto the AWS backbone close to the user, reducing latency and absorbing DDoS attacks.",
+    "first_principles": {
+      "problem": "Users in Sydney wait 300 ms per request to an origin in Virginia.",
+      "truths": [
+        "The speed of light limits latency.",
+        "Caching near users avoids long trips.",
+        "The AWS backbone is faster than the public internet."
+      ],
+      "derivation": [
+        "**Cache** static and cacheable content at the edge (CloudFront).",
+        "**Resolve DNS** at the edge (Route 53).",
+        "**Accelerate** dynamic traffic (Global Accelerator).",
+        "**Run logic** at the edge (CloudFront Functions, Lambda@Edge).",
+        "**Shield** absorbs attacks at the edge."
+      ]
+    },
+    "analogy": {
+      "title": "Local convenience stores supplied by a central warehouse",
+      "story": "Popular items are stocked nearby; rare ones are fetched from the warehouse.",
+      "mapping": [
+        [
+          "Convenience store",
+          "Edge location"
+        ],
+        [
+          "Warehouse",
+          "Origin region"
+        ],
+        [
+          "Popular items",
+          "Cached content"
+        ]
+      ],
+      "breaks": "Stores sell physical stock; edge caches can serve the same object to millions at once."
+    },
+    "mindmap": {
+      "center": "Edge Network",
+      "branches": [
+        {
+          "label": "Services",
+          "children": [
+            "CloudFront",
+            "Route 53",
+            "Global Accelerator",
+            "Shield"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Lower latency",
+            "DDoS absorption",
+            "Offload origin"
+          ]
+        },
+        {
+          "label": "Compute",
+          "children": [
+            "CloudFront Functions",
+            "Lambda@Edge"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Hundreds of PoPs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Serving a global site",
+      "scenario": "Before and after.",
+      "flow": [
+        "Origin only: Sydney TTFB 320 ms",
+        "CloudFront cache hit: 25 ms",
+        "Origin load −80%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster for users, cheaper for you."
+        }
+      ],
+      "code": [],
+      "outcome": "content delivered close to users."
+    },
+    "summary": {
+      "points": [
+        "Edge ≫ regions in count.",
+        "Cache near users.",
+        "Backbone for dynamic traffic."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between a region and an edge location?",
+        "a": "Regions host full services and data; edge locations cache content and handle DNS, CDN and network entry close to users."
+      }
+    ]
+  },
+  "special-zones-local-zones-wavelength": {
+    "core": "Local Zones extend a region into a metro area (e.g. Los Angeles) for single-digit-ms latency to nearby users with a subset of services (EC2, EBS, some databases). Wavelength Zones embed AWS compute inside telecom 5G networks for ultra-low-latency mobile apps. Both are anchored to a parent region.",
+    "first_principles": {
+      "problem": "A video-editing or gaming app needs < 10 ms latency to users far from any region.",
+      "truths": [
+        "Distance determines latency.",
+        "Not every city has a region.",
+        "5G traffic traverses carrier networks before reaching the internet."
+      ],
+      "derivation": [
+        "Use **Local Zones** for metro-latency workloads.",
+        "Use **Wavelength** for 5G edge apps.",
+        "Keep **control and data** stores in the parent region where possible.",
+        "Check **service availability** per zone."
+      ]
+    },
+    "analogy": {
+      "title": "A satellite branch office",
+      "story": "Close to local clients for quick meetings, but headquarters still handles most functions.",
+      "mapping": [
+        [
+          "Satellite office",
+          "Local Zone"
+        ],
+        [
+          "Headquarters",
+          "Parent region"
+        ],
+        [
+          "Inside a mobile mast",
+          "Wavelength"
+        ]
+      ],
+      "breaks": "Satellite offices can grow into HQs; Local Zones stay limited extensions."
+    },
+    "mindmap": {
+      "center": "Special Zones",
+      "branches": [
+        {
+          "label": "Local Zones",
+          "children": [
+            "Metro latency",
+            "Subset of services"
+          ]
+        },
+        {
+          "label": "Wavelength",
+          "children": [
+            "Inside 5G networks",
+            "Mobile edge"
+          ]
+        },
+        {
+          "label": "Outposts",
+          "children": [
+            "On-premises racks"
+          ]
+        },
+        {
+          "label": "Anchor",
+          "children": [
+            "Parent region"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enabling a Local Zone",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Subnets in LA serve Hollywood studios at ~2 ms."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 modify-availability-zone-group --group-name us-west-2-lax-1 --opt-in-status opted-in"
+        }
+      ],
+      "outcome": "latency-sensitive work close to users."
+    },
+    "summary": {
+      "points": [
+        "Local Zones for metros.",
+        "Wavelength for 5G.",
+        "Anchored to a region."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main limitation of Local Zones?",
+        "a": "They offer only a subset of AWS services and depend on a parent region."
+      }
+    ]
+  },
+  "partitions-the-hard-boundaries": {
+    "core": "A partition is a completely separate AWS instance: aws (commercial), aws-cn (China, operated by local partners) and aws-us-gov (GovCloud). Accounts, IAM, credentials and APIs don't cross partitions, and ARNs include the partition, so code must not hard-code arn:aws:.",
+    "first_principles": {
+      "problem": "A tool fails in GovCloud because it hard-codes 'arn:aws:' and commercial endpoints.",
+      "truths": [
+        "Partitions are isolated legal and technical domains.",
+        "Identities don't span partitions.",
+        "ARNs encode the partition."
+      ],
+      "derivation": [
+        "Use **${AWS::Partition}** or SDK partition helpers.",
+        "Maintain **separate accounts and credentials** per partition.",
+        "Check **service availability** per partition.",
+        "Plan **data residency** and compliance."
+      ]
+    },
+    "analogy": {
+      "title": "Separate countries with separate passports",
+      "story": "Your passport from one doesn't work in the other's systems.",
+      "mapping": [
+        [
+          "Country",
+          "Partition"
+        ],
+        [
+          "Passport",
+          "Credentials"
+        ],
+        [
+          "Border",
+          "Partition boundary"
+        ]
+      ],
+      "breaks": "Countries have treaties; partitions have no identity federation between them."
+    },
+    "mindmap": {
+      "center": "Partitions",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "aws",
+            "aws-cn",
+            "aws-us-gov"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Accounts",
+            "IAM",
+            "Endpoints"
+          ]
+        },
+        {
+          "label": "Code",
+          "children": [
+            "${AWS::Partition}",
+            "No hard-coded ARNs"
+          ]
+        },
+        {
+          "label": "Why",
+          "children": [
+            "Sovereignty",
+            "Compliance"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Partition-safe ARN",
+      "scenario": "CloudFormation.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Template works in commercial, China and GovCloud."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "Resource: !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/*'"
+        }
+      ],
+      "outcome": "portable infrastructure code."
+    },
+    "summary": {
+      "points": [
+        "Partitions are hard boundaries.",
+        "Never hard-code arn:aws.",
+        "Separate identities."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can an IAM role in the commercial partition be assumed from GovCloud?",
+        "a": "No: identities and trust don't cross partitions."
+      }
+    ]
+  }
+}

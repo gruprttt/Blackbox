@@ -1,0 +1,515 @@
+{
+  "introduction-from-tables-to-graphs": {
+    "core": "Real applications have many-to-many relationships (users in groups, products in orders, people following people). Advanced DynamoDB modelling represents these graph-like relationships with key patterns (adjacency lists, inverted indexes), handles hot keys with sharding and builds filtered views with sparse indexes, all without joins.",
+    "first_principles": {
+      "problem": "A social app needs 'who follows me' and 'whom do I follow' at millions of QPS.",
+      "truths": [
+        "Relationships are edges between entities.",
+        "Each direction needs its own access path.",
+        "Hot entities concentrate load."
+      ],
+      "derivation": [
+        "Model **edges as items**.",
+        "**Invert keys** in a GSI for the reverse direction.",
+        "**Shard** celebrity keys.",
+        "**Sparse indexes** for flagged subsets.",
+        "**Choose** patterns per access need."
+      ]
+    },
+    "analogy": {
+      "title": "A city transit map",
+      "story": "Stations are entities, lines are relationships, and you need to travel both directions.",
+      "mapping": [
+        [
+          "Stations",
+          "Entities"
+        ],
+        [
+          "Lines",
+          "Edges"
+        ],
+        [
+          "Return journey",
+          "Inverted index"
+        ]
+      ],
+      "breaks": "Transit maps are fixed; social graphs change every second."
+    },
+    "mindmap": {
+      "center": "Graph Modelling",
+      "branches": [
+        {
+          "label": "Patterns",
+          "children": [
+            "Adjacency list",
+            "Inverted GSI",
+            "Write sharding",
+            "Sparse index"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "Many-to-many",
+            "Hot entities",
+            "Filtered views"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Every access pattern has a key"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Follow graph",
+      "scenario": "Items.",
+      "flow": [
+        "PK=USER#a SK=FOLLOWS#b (a follows b)",
+        "GSI1PK=USER#b GSI1SK=FOLLOWER#a",
+        "Query PK → following; query GSI1 → followers"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Both directions in one Query each."
+        }
+      ],
+      "code": [],
+      "outcome": "graph access at key-value speed."
+    },
+    "summary": {
+      "points": [
+        "Edges as items.",
+        "Invert for reverse.",
+        "Plan for hot nodes."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you query both directions of a relationship in DynamoDB?",
+        "a": "Store the edge with keys for one direction and add a GSI with inverted keys for the other."
+      }
+    ]
+  },
+  "adjacency-lists-the-schema-pattern": {
+    "core": "In the adjacency list pattern, each node and each edge is an item in the same table. The node's partition holds its metadata item plus one item per edge (SK = related entity), and an inverted GSI swaps PK/SK to traverse edges backwards. Edge items can carry attributes (role, joined date).",
+    "first_principles": {
+      "problem": "Modelling invoices ↔ bills (many-to-many) with separate tables requires app-side joins.",
+      "truths": [
+        "Edges can be first-class items.",
+        "Same-partition items return together.",
+        "Edges have their own attributes."
+      ],
+      "derivation": [
+        "**Node item**: PK=ENTITY#id, SK=METADATA.",
+        "**Edge item**: PK=ENTITY#id, SK=OTHER#id.",
+        "**Inverted GSI**: PK=SK, SK=PK.",
+        "**Denormalise** key attributes onto edges.",
+        "Keep **edge counts** bounded per partition."
+      ]
+    },
+    "analogy": {
+      "title": "A contact book where each entry lists friends",
+      "story": "Look up a person and see their friends; the reverse index shows who lists them.",
+      "mapping": [
+        [
+          "Contact entry",
+          "Node item"
+        ],
+        [
+          "Friend listing",
+          "Edge item"
+        ],
+        [
+          "Reverse index",
+          "Inverted GSI"
+        ]
+      ],
+      "breaks": "Contact books are personal; DynamoDB edges must be kept consistent on both sides via the index."
+    },
+    "mindmap": {
+      "center": "Adjacency List",
+      "branches": [
+        {
+          "label": "Items",
+          "children": [
+            "Node (METADATA)",
+            "Edge (OTHER#id)"
+          ]
+        },
+        {
+          "label": "Reverse",
+          "children": [
+            "Inverted GSI"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Edge attributes",
+            "Denormalised fields"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Huge partitions",
+            "Fan-out on writes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Groups and members",
+      "scenario": "Queries.",
+      "flow": [
+        "PK=GROUP#9 SK=METADATA → group details",
+        "PK=GROUP#9 SK=USER#42 role=admin",
+        "Query GROUP#9 → group + members",
+        "GSI inverted: USER#42 → their groups"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Many-to-many without joins."
+        }
+      ],
+      "code": [],
+      "outcome": "relationships served by keys."
+    },
+    "summary": {
+      "points": [
+        "Nodes and edges as items.",
+        "Inverted GSI.",
+        "Attributes on edges."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the SK hold in an adjacency-list edge item?",
+        "a": "The identifier of the related entity (e.g. USER#42)."
+      }
+    ]
+  },
+  "write-sharding-solving-the-hot-partition": {
+    "core": "When one logical key gets more traffic than a partition can handle (a celebrity's follower list, a global counter, today's date), split it into N physical keys with a suffix. Random suffixes spread writes best but require reading all shards; calculated suffixes (hash of item ID) let you read one shard directly.",
+    "first_principles": {
+      "problem": "A celebrity's post gets 50,000 likes per second, all writing to PK=POST#1.",
+      "truths": [
+        "A partition handles ~1,000 WCU.",
+        "Spreading keys spreads load.",
+        "Reads must know where to look."
+      ],
+      "derivation": [
+        "Pick **N** from expected peak ÷ per-partition limit.",
+        "**Random suffix** for write-heavy aggregates.",
+        "**Calculated suffix** (hash(id) % N) for item lookups.",
+        "**Scatter-gather** reads in parallel.",
+        "Combine with **aggregation** (periodic rollups)."
+      ]
+    },
+    "analogy": {
+      "title": "Splitting a long queue across numbered tills",
+      "story": "Customers go to till number = last digit of their ticket, so staff know where to find any customer.",
+      "mapping": [
+        [
+          "Tills",
+          "Shards"
+        ],
+        [
+          "Ticket digit",
+          "Calculated suffix"
+        ],
+        [
+          "Checking all tills",
+          "Scatter-gather"
+        ]
+      ],
+      "breaks": "Tills are visible; shard counts are hidden in code and hard to change later."
+    },
+    "mindmap": {
+      "center": "Write Sharding",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Partition throughput limit"
+          ]
+        },
+        {
+          "label": "Random",
+          "children": [
+            "Best spread",
+            "Read all shards"
+          ]
+        },
+        {
+          "label": "Calculated",
+          "children": [
+            "hash(id) % N",
+            "Direct reads"
+          ]
+        },
+        {
+          "label": "Reads",
+          "children": [
+            "Scatter-gather",
+            "Rollups"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "Peak ÷ limit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sharded like counter",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "50× write ceiling."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "N = 50\ndef like(post_id):\n    s = random.randrange(N)\n    table.update_item(Key={'PK': f'POST#{post_id}#{s}', 'SK': 'LIKES'},\n        UpdateExpression='ADD cnt :one', ExpressionAttributeValues={':one': 1})\n\ndef total(post_id):\n    return sum(get(f'POST#{post_id}#{s}') for s in range(N))  # parallelise in practice"
+        }
+      ],
+      "outcome": "viral load absorbed."
+    },
+    "summary": {
+      "points": [
+        "Split hot keys.",
+        "Random vs calculated.",
+        "Gather on read."
+      ]
+    },
+    "check": [
+      {
+        "q": "When should you use a calculated suffix instead of a random one?",
+        "a": "When you need to read a specific item directly, since you can recompute its shard from its ID."
+      }
+    ]
+  },
+  "sparse-indexes-the-to-do-list-pattern": {
+    "core": "A GSI only contains items that have its key attributes. Setting an attribute (e.g. pending=true or GSI_OPEN=timestamp) only on items needing attention creates a sparse index, a cheap, small 'to-do list' that you query instead of scanning. Removing the attribute drops the item from the index.",
+    "first_principles": {
+      "problem": "Finding the 0.1% of orders awaiting review requires scanning millions of items.",
+      "truths": [
+        "GSIs skip items missing the key.",
+        "Small indexes are cheap to query.",
+        "Attributes can be added and removed."
+      ],
+      "derivation": [
+        "Add an **index attribute only when relevant**.",
+        "**Query** the GSI for the subset.",
+        "**Remove** the attribute when done.",
+        "Use a **timestamp SK** for ordering.",
+        "Shard the GSI PK if the list is **hot**."
+      ]
+    },
+    "analogy": {
+      "title": "Sticky notes on files that need attention",
+      "story": "You look only at files with sticky notes, then peel them off when done.",
+      "mapping": [
+        [
+          "Sticky note",
+          "Index attribute"
+        ],
+        [
+          "Looking for notes",
+          "Querying sparse GSI"
+        ],
+        [
+          "Peeling off",
+          "Removing attribute"
+        ]
+      ],
+      "breaks": "Sticky notes fall off by accident; DynamoDB only removes the attribute when you do."
+    },
+    "mindmap": {
+      "center": "Sparse Indexes",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "GSI includes only items with key"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Queues",
+            "Flags",
+            "Admin views"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Add attr",
+            "Query",
+            "Remove attr"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Small",
+            "Cheap",
+            "No scans"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Orders awaiting review",
+      "scenario": "Pattern.",
+      "flow": [
+        "Flagged order gets GSI_REVIEW=2026-10-18T10:00",
+        "Reviewers query GSI_REVIEW sorted by time",
+        "Approved → REMOVE GSI_REVIEW"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Instant review queue over millions of orders."
+        }
+      ],
+      "code": [],
+      "outcome": "filtered views without scans."
+    },
+    "summary": {
+      "points": [
+        "Index only what matters.",
+        "Query the small list.",
+        "Remove when done."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes an index 'sparse'?",
+        "a": "Only items that have the GSI's key attributes appear in it."
+      }
+    ]
+  },
+  "putting-it-all-together-choosing-the-right-pattern": {
+    "core": "Choose patterns from access needs: item collections for one-to-many, adjacency lists plus inverted GSIs for many-to-many, write sharding for hot keys, sparse indexes for filtered subsets, composite sort keys for hierarchical or time-range queries, and Streams for aggregates. Document every access pattern against the key or index that serves it.",
+    "first_principles": {
+      "problem": "Teams know individual patterns but combine them inconsistently.",
+      "truths": [
+        "Each pattern solves a specific shape.",
+        "Patterns combine in one table.",
+        "Documentation prevents drift."
+      ],
+      "derivation": [
+        "Build an **access-pattern matrix**.",
+        "Map each to **PK/SK or GSI**.",
+        "Add **sharding** where load concentrates.",
+        "Add **sparse indexes** for workflows.",
+        "Use **Streams** for derived data."
+      ]
+    },
+    "analogy": {
+      "title": "A carpenter's joinery techniques",
+      "story": "Dovetail, mortise and tenon or dowel, each chosen for the joint in front of you.",
+      "mapping": [
+        [
+          "Joints",
+          "Access patterns"
+        ],
+        [
+          "Techniques",
+          "Modelling patterns"
+        ],
+        [
+          "Plan drawing",
+          "Access-pattern matrix"
+        ]
+      ],
+      "breaks": "Furniture is built once; access patterns evolve, so leave room for new GSIs."
+    },
+    "mindmap": {
+      "center": "Choosing Patterns",
+      "branches": [
+        {
+          "label": "One-to-many",
+          "children": [
+            "Item collection"
+          ]
+        },
+        {
+          "label": "Many-to-many",
+          "children": [
+            "Adjacency + inverted GSI"
+          ]
+        },
+        {
+          "label": "Hot keys",
+          "children": [
+            "Write sharding"
+          ]
+        },
+        {
+          "label": "Subsets",
+          "children": [
+            "Sparse index"
+          ]
+        },
+        {
+          "label": "Ranges",
+          "children": [
+            "Composite SK"
+          ]
+        },
+        {
+          "label": "Derived",
+          "children": [
+            "Streams"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Access-pattern matrix",
+      "scenario": "Snippet.",
+      "flow": [
+        "Get user + orders → PK=USER#id",
+        "Orders by status → GSI1 STATUS#x",
+        "Group members ↔ groups → adjacency + GSI2",
+        "Open tickets → sparse GSI3",
+        "Trending counts → sharded counters"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every query has a home."
+        }
+      ],
+      "code": [],
+      "outcome": "a coherent, scalable model."
+    },
+    "summary": {
+      "points": [
+        "Patterns per shape.",
+        "Matrix everything.",
+        "Combine deliberately."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which pattern suits 'list only open support tickets'?",
+        "a": "A sparse index populated only on open tickets."
+      }
+    ]
+  }
+}

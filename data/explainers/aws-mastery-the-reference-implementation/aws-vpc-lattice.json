@@ -1,0 +1,529 @@
+{
+  "introduction-wiring-vs-directory": {
+    "core": "Traditional service connectivity is wiring: peering, Transit Gateway, routes, security groups and load balancers between networks. VPC Lattice is a directory approach: services register once, consumers discover them by name, and Lattice handles routing, load balancing and auth across VPCs and accounts at layer 7, independent of network topology.",
+    "first_principles": {
+      "problem": "Connecting 80 microservices across 30 accounts requires a maze of routes, peering and internal load balancers.",
+      "truths": [
+        "Network wiring scales poorly.",
+        "Services care about names, not routes.",
+        "Auth should be per service request."
+      ],
+      "derivation": [
+        "Define **services** and **target groups**.",
+        "Group into **service networks**.",
+        "**Associate** consumer VPCs.",
+        "Apply **auth policies** (IAM).",
+        "Share via **RAM** across accounts."
+      ]
+    },
+    "analogy": {
+      "title": "A phone directory versus running cables between houses",
+      "story": "Instead of wiring every house to every other, everyone looks up numbers in one directory.",
+      "mapping": [
+        [
+          "Cables",
+          "Peering/routes"
+        ],
+        [
+          "Directory",
+          "Service network"
+        ],
+        [
+          "Phone numbers",
+          "Service names"
+        ]
+      ],
+      "breaks": "Phone directories don't enforce who can call; Lattice auth policies do."
+    },
+    "mindmap": {
+      "center": "VPC Lattice",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Services",
+            "Service networks",
+            "Target groups"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No routing",
+            "Cross-account",
+            "L7"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "IAM auth policies",
+            "SigV4"
+          ]
+        },
+        {
+          "label": "Sharing",
+          "children": [
+            "RAM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before and after",
+      "scenario": "Connectivity.",
+      "flow": [
+        "Before: TGW + 30 route tables + internal ALBs",
+        "After: services registered, consumer VPCs associated",
+        "Calls by DNS name with IAM auth"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Topology-independent connectivity."
+        }
+      ],
+      "code": [],
+      "outcome": "simpler service-to-service networking."
+    },
+    "summary": {
+      "points": [
+        "Directory, not wiring.",
+        "L7 across VPCs.",
+        "IAM auth."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does VPC Lattice abstract away?",
+        "a": "Network-level wiring like peering, routes and internal load balancers between VPCs."
+      }
+    ]
+  },
+  "the-core-hierarchy": {
+    "core": "Lattice objects: a service network (logical boundary consumers associate with), services (with listeners and rules routing by path, header or method), target groups (instances, IPs, Lambda, ALB, ECS/EKS via controller) and associations linking VPCs and services to the network. Auth policies attach at network and service levels.",
+    "first_principles": {
+      "problem": "Teams can't see how requests get from a consumer VPC to a target behind a Lattice service.",
+      "truths": [
+        "Hierarchy defines boundaries and routing.",
+        "Listeners and rules route requests.",
+        "Targets can be heterogeneous."
+      ],
+      "derivation": [
+        "Create **service network**.",
+        "Create **service** with **listener + rules**.",
+        "Define **target groups**.",
+        "**Associate** service and consumer VPCs to the network.",
+        "Apply **auth policies** at both levels."
+      ]
+    },
+    "analogy": {
+      "title": "A shopping mall",
+      "story": "The mall (service network), shops (services), staff behind counters (targets), and doors connecting car parks (VPC associations).",
+      "mapping": [
+        [
+          "Mall",
+          "Service network"
+        ],
+        [
+          "Shops",
+          "Services"
+        ],
+        [
+          "Staff",
+          "Targets"
+        ],
+        [
+          "Car park doors",
+          "VPC associations"
+        ]
+      ],
+      "breaks": "Malls have one owner; Lattice services can belong to different accounts."
+    },
+    "mindmap": {
+      "center": "Lattice Hierarchy",
+      "branches": [
+        {
+          "label": "Service network",
+          "children": [
+            "Boundary",
+            "Associations"
+          ]
+        },
+        {
+          "label": "Service",
+          "children": [
+            "Listeners",
+            "Rules",
+            "Custom domain"
+          ]
+        },
+        {
+          "label": "Target groups",
+          "children": [
+            "Instance",
+            "IP",
+            "Lambda",
+            "ALB"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "Network auth",
+            "Service auth"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Path-based routing",
+      "scenario": "Rules.",
+      "flow": [
+        "Service orders.internal",
+        "Listener HTTPS 443",
+        "/v1/* → orders-v1 target group (ECS)",
+        "/v2/* → orders-v2 target group (Lambda)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Mixed compute behind one service name."
+        }
+      ],
+      "code": [],
+      "outcome": "clear service topology."
+    },
+    "summary": {
+      "points": [
+        "Network, services, targets.",
+        "Rules route.",
+        "Associations connect."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do consumers associate their VPC with in Lattice?",
+        "a": "A service network."
+      }
+    ]
+  },
+  "the-killer-feature-overlapping-ips": {
+    "core": "Because Lattice uses a link-local data path and proxies requests at layer 7, consumer and provider VPCs can have overlapping CIDRs. No routes between VPCs are needed, which solves a classic blocker after acquisitions or when teams independently chose 10.0.0.0/16.",
+    "first_principles": {
+      "problem": "After an acquisition, both companies use 10.0.0.0/16 and can't peer or route between VPCs.",
+      "truths": [
+        "Routing requires unique address space.",
+        "Proxying at L7 avoids routing.",
+        "Re-IPing is expensive."
+      ],
+      "derivation": [
+        "Use **Lattice** to connect services without routing.",
+        "Keep existing **CIDRs**.",
+        "Target **specific services**, not whole networks.",
+        "Combine with **PrivateLink** for non-HTTP needs.",
+        "Plan **IPAM** for the future anyway."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist relaying messages between two buildings with identical room numbers",
+      "story": "Room 101 exists in both, but the receptionist knows which building each message is for.",
+      "mapping": [
+        [
+          "Identical room numbers",
+          "Overlapping CIDRs"
+        ],
+        [
+          "Receptionist",
+          "Lattice proxy"
+        ],
+        [
+          "Building name",
+          "Service name"
+        ]
+      ],
+      "breaks": "Receptionists relay any message; Lattice handles HTTP/gRPC (and TCP via resource configurations), not arbitrary protocols everywhere."
+    },
+    "mindmap": {
+      "center": "Overlapping IPs",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Duplicate CIDRs",
+            "No routing"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "L7 proxy",
+            "Link-local path"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No re-IP",
+            "Service-level access"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "PrivateLink",
+            "NAT tricks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Post-acquisition integration",
+      "scenario": "Flow.",
+      "flow": [
+        "Both VPCs 10.0.0.0/16",
+        "Acquired company's billing service registered in Lattice",
+        "Parent VPC associated with service network",
+        "Calls succeed without routing"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Integration in days, not a re-IP project."
+        }
+      ],
+      "code": [],
+      "outcome": "connectivity despite overlap."
+    },
+    "summary": {
+      "points": [
+        "Overlap allowed.",
+        "No routes needed.",
+        "Service-level exposure."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can Lattice connect VPCs with overlapping CIDRs?",
+        "a": "It proxies requests at the application layer rather than routing packets between the networks."
+      }
+    ]
+  },
+  "zero-trust-iam-auth-policies": {
+    "core": "Lattice auth policies are IAM resource policies on service networks and services. With auth type AWS_IAM, callers sign requests with SigV4, and policies allow or deny by principal, org, tags, path or method. That's zero-trust per request: network location grants nothing, and identity does.",
+    "first_principles": {
+      "problem": "Any workload inside the VPC can call the payments API because security groups only check IPs.",
+      "truths": [
+        "Network position isn't identity.",
+        "Per-request auth limits lateral movement.",
+        "IAM already identifies workloads."
+      ],
+      "derivation": [
+        "Set **auth type AWS_IAM**.",
+        "Network policy: allow **org principals**.",
+        "Service policy: allow **specific roles/paths**.",
+        "Clients **sign with SigV4** (SDK/sidecar).",
+        "Log with **access logs**."
+      ]
+    },
+    "analogy": {
+      "title": "Checking every visitor's badge at each office door",
+      "story": "Being inside the building doesn't get you into the finance office.",
+      "mapping": [
+        [
+          "Building",
+          "VPC/network"
+        ],
+        [
+          "Office door check",
+          "Service auth policy"
+        ],
+        [
+          "Badge",
+          "IAM identity"
+        ]
+      ],
+      "breaks": "Badge checks slow visitors; SigV4 signing adds minimal latency."
+    },
+    "mindmap": {
+      "center": "Lattice Auth",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "IAM resource policies",
+            "SigV4"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Service network",
+            "Service"
+          ]
+        },
+        {
+          "label": "Conditions",
+          "children": [
+            "Principal",
+            "Org",
+            "Tags",
+            "Path",
+            "Method"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "Zero trust"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "Access logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Service auth policy",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only checkout can POST to payments."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/checkout-task\"},\n  \"Action\": \"vpc-lattice-svcs:Invoke\",\n  \"Resource\": \"*\",\n  \"Condition\": {\"StringEquals\": {\"vpc-lattice-svcs:RequestMethod\": \"POST\"}}\n}"
+        }
+      ],
+      "outcome": "identity-based service access."
+    },
+    "summary": {
+      "points": [
+        "IAM per request.",
+        "Network ≠ trust.",
+        "Fine-grained conditions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must clients do when a Lattice service uses AWS_IAM auth?",
+        "a": "Sign their requests with SigV4 using IAM credentials."
+      }
+    ]
+  },
+  "lattice-vs-alternatives-when-to-use-what": {
+    "core": "Use VPC Lattice for HTTP/gRPC service-to-service communication across many VPCs and accounts with IAM auth and no network plumbing. Use Transit Gateway for broad network-level connectivity (any protocol, on-prem). Use PrivateLink to expose a single service to many consumers. Use a service mesh (App Mesh successors, Istio) for in-cluster traffic policies and mTLS.",
+    "first_principles": {
+      "problem": "A team replaces Transit Gateway with Lattice and discovers its databases and on-prem systems still need network routing.",
+      "truths": [
+        "Lattice operates at the application layer.",
+        "Some traffic needs network-level paths.",
+        "Tools can coexist."
+      ],
+      "derivation": [
+        "**Lattice**: app-layer, cross-account, IAM auth.",
+        "**TGW**: network-wide, any protocol, hybrid.",
+        "**PrivateLink**: one service, many consumers, overlap-safe.",
+        "**Mesh**: in-cluster policies.",
+        "**Combine** as needed."
+      ]
+    },
+    "analogy": {
+      "title": "Postal services versus roads",
+      "story": "Lattice delivers named parcels to the right office; roads let any vehicle go anywhere.",
+      "mapping": [
+        [
+          "Parcel delivery",
+          "Lattice"
+        ],
+        [
+          "Road network",
+          "Transit Gateway"
+        ],
+        [
+          "Private courier line",
+          "PrivateLink"
+        ]
+      ],
+      "breaks": "You can't drive a parcel service on its own; Lattice still runs over AWS networking underneath."
+    },
+    "mindmap": {
+      "center": "Lattice vs Alternatives",
+      "branches": [
+        {
+          "label": "Lattice",
+          "children": [
+            "HTTP/gRPC",
+            "IAM auth",
+            "Cross-account"
+          ]
+        },
+        {
+          "label": "TGW",
+          "children": [
+            "Any protocol",
+            "Hybrid",
+            "Routing"
+          ]
+        },
+        {
+          "label": "PrivateLink",
+          "children": [
+            "Single service",
+            "Many consumers"
+          ]
+        },
+        {
+          "label": "Mesh",
+          "children": [
+            "In-cluster",
+            "mTLS"
+          ]
+        },
+        {
+          "label": "Approach",
+          "children": [
+            "Combine"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hybrid estate",
+      "scenario": "Placement.",
+      "flow": [
+        "Microservice APIs across accounts → Lattice",
+        "Databases and on-prem → TGW + DX",
+        "SaaS vendor endpoint → PrivateLink"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Layer tools by traffic type."
+        }
+      ],
+      "code": [],
+      "outcome": "the right connectivity per use case."
+    },
+    "summary": {
+      "points": [
+        "Lattice for app traffic.",
+        "TGW for networks.",
+        "PrivateLink for single services."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is Transit Gateway still needed alongside Lattice?",
+        "a": "For network-level connectivity: non-HTTP protocols, broad VPC-to-VPC routing and on-prem/hybrid links."
+      }
+    ]
+  }
+}

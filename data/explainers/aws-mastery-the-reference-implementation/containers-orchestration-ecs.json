@@ -1,0 +1,532 @@
+{
+  "introduction-the-aws-native-orchestrator": {
+    "core": "ECS is AWS's own container orchestrator: a free, fully managed control plane deeply integrated with IAM, ALB, CloudWatch, Cloud Map and Service Connect. You define tasks and services; ECS schedules them onto EC2 or Fargate capacity. It's simpler than Kubernetes, with fewer concepts and less to operate.",
+    "first_principles": {
+      "problem": "A small team wants to run containers on AWS without Kubernetes complexity.",
+      "truths": [
+        "Orchestration needs scheduling, health and scaling.",
+        "Fewer abstractions mean less to learn.",
+        "Native integrations reduce glue."
+      ],
+      "derivation": [
+        "Define **task definitions**.",
+        "Run **services** for long-lived workloads.",
+        "Choose **capacity** (Fargate, EC2, capacity providers).",
+        "Integrate **ALB, IAM task roles, logs**.",
+        "Use **Service Connect** for service-to-service."
+      ]
+    },
+    "analogy": {
+      "title": "An appliance with sensible defaults versus a modular hi-fi kit",
+      "story": "It just works for most needs, with fewer knobs.",
+      "mapping": [
+        [
+          "Appliance",
+          "ECS"
+        ],
+        [
+          "Modular kit",
+          "Kubernetes"
+        ],
+        [
+          "Defaults",
+          "Native integrations"
+        ]
+      ],
+      "breaks": "Appliances can't be extended much; ECS lacks Kubernetes' ecosystem of operators and CRDs."
+    },
+    "mindmap": {
+      "center": "ECS",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Cluster",
+            "Task definition",
+            "Task",
+            "Service"
+          ]
+        },
+        {
+          "label": "Capacity",
+          "children": [
+            "Fargate",
+            "EC2",
+            "Capacity providers"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "ALB",
+            "IAM",
+            "CloudWatch",
+            "Service Connect"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Control plane free"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deploy a web service",
+      "scenario": "Steps.",
+      "flow": [
+        "Register task definition (image, CPU, memory, port)",
+        "Create service with desired count 3 behind ALB",
+        "ECS keeps 3 healthy tasks",
+        "Rolling deploys on new revisions"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Containers in production quickly."
+        }
+      ],
+      "code": [],
+      "outcome": "simple, managed orchestration."
+    },
+    "summary": {
+      "points": [
+        "AWS-native.",
+        "Few concepts.",
+        "Free control plane."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the ECS control plane cost?",
+        "a": "Nothing; you pay only for the compute (EC2 or Fargate) and other resources."
+      }
+    ]
+  },
+  "task-definitions-the-blueprint": {
+    "core": "A task definition is a versioned JSON blueprint: container images, CPU/memory, port mappings, environment and secrets (from Secrets Manager/SSM), log configuration, health checks, volumes, network mode (awsvpc), and two IAM roles: the task execution role (pull images, write logs, fetch secrets) and the task role (the app's AWS permissions).",
+    "first_principles": {
+      "problem": "Secrets are baked into images and every container shares broad permissions.",
+      "truths": [
+        "Configuration should be declarative and versioned.",
+        "Platform actions and app actions need different permissions.",
+        "Secrets must not live in images."
+      ],
+      "derivation": [
+        "Use **awsvpc** networking.",
+        "Inject **secrets** via valueFrom.",
+        "Separate **executionRoleArn** and **taskRoleArn**.",
+        "Set **healthCheck** and **logConfiguration**.",
+        "Register a **new revision** per change."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe card for a dish",
+      "story": "Ingredients, quantities, cooking method and which kitchen tools it may use.",
+      "mapping": [
+        [
+          "Ingredients",
+          "Images and env"
+        ],
+        [
+          "Quantities",
+          "CPU/memory"
+        ],
+        [
+          "Tools allowed",
+          "IAM roles"
+        ]
+      ],
+      "breaks": "Recipe cards get edited in place; task definitions are immutable revisions."
+    },
+    "mindmap": {
+      "center": "Task Definition",
+      "branches": [
+        {
+          "label": "Containers",
+          "children": [
+            "Image",
+            "Ports",
+            "Env",
+            "Secrets"
+          ]
+        },
+        {
+          "label": "Resources",
+          "children": [
+            "CPU",
+            "Memory"
+          ]
+        },
+        {
+          "label": "Roles",
+          "children": [
+            "Execution role",
+            "Task role"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Health check",
+            "Logs",
+            "Volumes"
+          ]
+        },
+        {
+          "label": "Versioning",
+          "children": [
+            "Revisions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Container snippet",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Secrets injected at runtime; least-privilege app role."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"family\": \"api\", \"networkMode\": \"awsvpc\", \"cpu\": \"512\", \"memory\": \"1024\",\n  \"executionRoleArn\": \"arn:aws:iam::123:role/ecsExec\", \"taskRoleArn\": \"arn:aws:iam::123:role/api\",\n  \"containerDefinitions\": [{\n    \"name\": \"api\", \"image\": \"123.dkr.ecr.eu-west-1.amazonaws.com/api:1.4.2\",\n    \"portMappings\": [{\"containerPort\": 8080}],\n    \"secrets\": [{\"name\": \"DB_PASS\", \"valueFrom\": \"arn:aws:secretsmanager:eu-west-1:123:secret:db\"}],\n    \"logConfiguration\": {\"logDriver\": \"awslogs\", \"options\": {\"awslogs-group\": \"/ecs/api\", \"awslogs-region\": \"eu-west-1\", \"awslogs-stream-prefix\": \"api\"}}\n  }]\n}"
+        }
+      ],
+      "outcome": "declarative, secure task configuration."
+    },
+    "summary": {
+      "points": [
+        "Versioned blueprint.",
+        "Two IAM roles.",
+        "Secrets via references."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between the task execution role and the task role?",
+        "a": "The execution role lets ECS pull images, push logs and fetch secrets; the task role grants the application's own AWS permissions."
+      }
+    ]
+  },
+  "services-the-fleet-manager": {
+    "core": "An ECS service keeps a desired number of tasks running, replaces unhealthy ones, registers them with load balancer target groups, autoscales on metrics, and deploys new revisions using rolling updates (with the deployment circuit breaker for automatic rollback) or blue/green via CodeDeploy.",
+    "first_principles": {
+      "problem": "A bad deploy keeps replacing healthy tasks with crashing ones until the service is down.",
+      "truths": [
+        "Desired state needs reconciliation.",
+        "Deploys need safety limits.",
+        "Load changes over time."
+      ],
+      "derivation": [
+        "Set **desiredCount** and **minimumHealthyPercent/maximumPercent**.",
+        "Enable **deployment circuit breaker with rollback**.",
+        "Attach **ALB target groups** and health checks.",
+        "Configure **Service Auto Scaling** (target tracking).",
+        "Use **placement strategies** across AZs."
+      ]
+    },
+    "analogy": {
+      "title": "A shift supervisor keeping enough staff on the floor",
+      "story": "Replaces anyone who leaves, staggers shift changes and calls more people in when it's busy.",
+      "mapping": [
+        [
+          "Supervisor",
+          "ECS service scheduler"
+        ],
+        [
+          "Staff",
+          "Tasks"
+        ],
+        [
+          "Staggered shift change",
+          "Rolling deploy"
+        ]
+      ],
+      "breaks": "Supervisors use judgement; services follow configured thresholds exactly."
+    },
+    "mindmap": {
+      "center": "ECS Services",
+      "branches": [
+        {
+          "label": "Reconcile",
+          "children": [
+            "Desired count",
+            "Health replacement"
+          ]
+        },
+        {
+          "label": "Deploy",
+          "children": [
+            "Rolling",
+            "Circuit breaker",
+            "Blue/green"
+          ]
+        },
+        {
+          "label": "Traffic",
+          "children": [
+            "ALB/NLB",
+            "Service Connect"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Target tracking",
+            "Step scaling"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Spread across AZ"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe rolling deploy",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failed deploys roll back automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "\"deploymentConfiguration\": {\n  \"minimumHealthyPercent\": 100,\n  \"maximumPercent\": 200,\n  \"deploymentCircuitBreaker\": {\"enable\": true, \"rollback\": true}\n}"
+        }
+      ],
+      "outcome": "self-healing, safely deployed fleets."
+    },
+    "summary": {
+      "points": [
+        "Maintain desired tasks.",
+        "Circuit breaker rollbacks.",
+        "Autoscale on metrics."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the ECS deployment circuit breaker do?",
+        "a": "Detects a deployment that can't reach steady state and, if enabled, rolls back to the last working revision."
+      }
+    ]
+  },
+  "capacity-providers-the-bridge-to-infrastructure": {
+    "core": "Capacity providers connect services to infrastructure: FARGATE, FARGATE_SPOT, or EC2 Auto Scaling groups with managed scaling (ECS scales the ASG to fit tasks) and managed termination protection. Capacity provider strategies split tasks by base and weight, e.g. a base on Fargate and the rest on Fargate Spot.",
+    "first_principles": {
+      "problem": "An EC2-backed cluster runs out of capacity and tasks sit in PROVISIONING.",
+      "truths": [
+        "Tasks need somewhere to run.",
+        "Cluster capacity must track task demand.",
+        "Mixing purchase options saves money."
+      ],
+      "derivation": [
+        "Use **Fargate/Fargate Spot** providers for serverless.",
+        "Use **ASG capacity providers with managed scaling** for EC2.",
+        "Enable **managed termination protection**.",
+        "Define **strategy** (base + weights).",
+        "Set **targetCapacity** for headroom."
+      ]
+    },
+    "analogy": {
+      "title": "Staffing agencies supplying workers",
+      "story": "You tell the supervisor how many workers you want from each agency.",
+      "mapping": [
+        [
+          "Agencies",
+          "Capacity providers"
+        ],
+        [
+          "Mix of agencies",
+          "Strategy weights"
+        ],
+        [
+          "Minimum guaranteed staff",
+          "Base"
+        ]
+      ],
+      "breaks": "Agencies send people instantly; EC2 capacity takes minutes to launch."
+    },
+    "mindmap": {
+      "center": "Capacity Providers",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "FARGATE",
+            "FARGATE_SPOT",
+            "ASG"
+          ]
+        },
+        {
+          "label": "EC2 features",
+          "children": [
+            "Managed scaling",
+            "Termination protection",
+            "targetCapacity"
+          ]
+        },
+        {
+          "label": "Strategy",
+          "children": [
+            "Base",
+            "Weight"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Cost mix",
+            "Auto capacity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fargate + Spot mix",
+      "scenario": "Strategy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "2 guaranteed tasks, then 75% on Spot."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "\"capacityProviderStrategy\": [\n  {\"capacityProvider\": \"FARGATE\", \"base\": 2, \"weight\": 1},\n  {\"capacityProvider\": \"FARGATE_SPOT\", \"weight\": 3}\n]"
+        }
+      ],
+      "outcome": "capacity that tracks demand cheaply."
+    },
+    "summary": {
+      "points": [
+        "Bridge tasks to compute.",
+        "Managed scaling for EC2.",
+        "Base + weight strategies."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does managed scaling on an ASG capacity provider do?",
+        "a": "ECS adjusts the ASG's desired capacity to fit the tasks that need placing, at the configured target capacity."
+      }
+    ]
+  },
+  "ecs-vs-eks-the-trade-offs": {
+    "core": "ECS is simpler, AWS-native and free at the control-plane level, which is great for teams standardised on AWS that want low operational overhead. EKS offers the Kubernetes ecosystem, portability and extensibility (CRDs, operators, Helm) at the cost of more complexity and a per-cluster fee. Choose by team skills, ecosystem needs and multi-cloud requirements.",
+    "first_principles": {
+      "problem": "A startup adopts Kubernetes for prestige and spends a quarter on platform work instead of product.",
+      "truths": [
+        "Complexity costs engineering time.",
+        "Ecosystems provide reusable tooling.",
+        "Portability matters only if you'll use it."
+      ],
+      "derivation": [
+        "**ECS** for AWS-only, small teams, simple services.",
+        "**EKS** for Kubernetes skills, ecosystem tools, portability.",
+        "Consider **operational headcount**.",
+        "Both run on **Fargate or EC2**.",
+        "Avoid choosing by **hype**."
+      ]
+    },
+    "analogy": {
+      "title": "An automatic car versus a manual sports car",
+      "story": "The automatic is easy and reliable; the manual gives control and fun but needs skill.",
+      "mapping": [
+        [
+          "Automatic",
+          "ECS"
+        ],
+        [
+          "Manual sports car",
+          "EKS"
+        ],
+        [
+          "Driving skill",
+          "Kubernetes expertise"
+        ]
+      ],
+      "breaks": "Cars don't come with app stores; Kubernetes' ecosystem is a major part of its value."
+    },
+    "mindmap": {
+      "center": "ECS vs EKS",
+      "branches": [
+        {
+          "label": "ECS",
+          "children": [
+            "Simple",
+            "AWS-native",
+            "Free control plane"
+          ]
+        },
+        {
+          "label": "EKS",
+          "children": [
+            "Ecosystem",
+            "Portable",
+            "Extensible",
+            "Cluster fee"
+          ]
+        },
+        {
+          "label": "Decide",
+          "children": [
+            "Skills",
+            "Ecosystem needs",
+            "Multi-cloud",
+            "Team size"
+          ]
+        },
+        {
+          "label": "Shared",
+          "children": [
+            "Fargate",
+            "EC2"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two organisations",
+      "scenario": "Choices.",
+      "flow": [
+        "10-engineer SaaS, AWS only → ECS on Fargate",
+        "Platform team, 300 engineers, operators and GitOps → EKS"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Fit the tool to the team."
+        }
+      ],
+      "code": [],
+      "outcome": "orchestration matched to context."
+    },
+    "summary": {
+      "points": [
+        "ECS for simplicity.",
+        "EKS for ecosystem.",
+        "Decide by team and needs."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is EKS the better choice than ECS?",
+        "a": "When you need the Kubernetes ecosystem (operators, Helm, CRDs), existing Kubernetes skills or portability across clouds."
+      }
+    ]
+  }
+}

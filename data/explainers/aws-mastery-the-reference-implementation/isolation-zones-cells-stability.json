@@ -1,0 +1,515 @@
+{
+  "introduction-limiting-the-blast-radius": {
+    "core": "Blast radius is how much of your system and customer base a single failure can affect. You can't prevent all failures, but you can bound their impact with isolation: AZs and regions, cells, shuffle sharding, and statically stable designs that don't need changes to survive.",
+    "first_principles": {
+      "problem": "A single bad config push takes down every customer at once.",
+      "truths": [
+        "Failures are inevitable.",
+        "Shared components spread failures.",
+        "Isolation trades efficiency for safety."
+      ],
+      "derivation": [
+        "**Identify** shared dependencies.",
+        "**Partition** into independent units.",
+        "**Deploy** progressively by unit.",
+        "**Pre-provision** for static stability.",
+        "**Measure** blast radius per failure mode."
+      ]
+    },
+    "analogy": {
+      "title": "Fire doors in a building",
+      "story": "A fire is contained to one section instead of spreading through every floor.",
+      "mapping": [
+        [
+          "Fire doors",
+          "Isolation boundaries"
+        ],
+        [
+          "Sections",
+          "Cells/AZs"
+        ],
+        [
+          "Fire",
+          "Failure"
+        ]
+      ],
+      "breaks": "Fires spread physically; software failures spread through shared code, config and dependencies."
+    },
+    "mindmap": {
+      "center": "Blast Radius",
+      "branches": [
+        {
+          "label": "Boundaries",
+          "children": [
+            "AZ",
+            "Region",
+            "Cell",
+            "Shard"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Cells",
+            "Shuffle sharding",
+            "Static stability",
+            "Progressive deploys"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Less pooling efficiency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measuring impact",
+      "scenario": "Before/after.",
+      "flow": [
+        "Before: global config push → 100% customers",
+        "After: push per cell, 1 of 20 first → 5% max"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bad change caught at small scale."
+        }
+      ],
+      "code": [],
+      "outcome": "bounded failures."
+    },
+    "summary": {
+      "points": [
+        "Failures happen.",
+        "Bound their reach.",
+        "Deploy progressively."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is blast radius?",
+        "a": "The scope of systems and customers affected by a single failure."
+      }
+    ]
+  },
+  "cell-based-architecture-the-ultimate-bulkhead": {
+    "core": "Cells are complete, independent copies of a service stack (compute, data, queues) serving a partition of customers, with a thin routing layer mapping customer → cell. Cells have a fixed maximum size, so scaling adds cells, and failures, overloads or bad deploys stay within one cell.",
+    "first_principles": {
+      "problem": "A shared database overload during one tenant's spike degrades the service for all tenants.",
+      "truths": [
+        "Independent stacks don't share failure.",
+        "Fixed-size units are testable.",
+        "Routing must be minimal and reliable."
+      ],
+      "derivation": [
+        "Choose a **partition key** (tenant, region, account).",
+        "Define **cell capacity limits**.",
+        "Build a **thin, static router** (mapping table, DNS).",
+        "**Deploy cell by cell**.",
+        "Support **cell migration** of tenants."
+      ]
+    },
+    "analogy": {
+      "title": "Bulkheads in a submarine",
+      "story": "Each compartment has its own air and seals; one flooded compartment doesn't sink the vessel.",
+      "mapping": [
+        [
+          "Compartments",
+          "Cells"
+        ],
+        [
+          "Seals",
+          "No shared dependencies"
+        ],
+        [
+          "Hull",
+          "Thin routing layer"
+        ]
+      ],
+      "breaks": "Submarines have fixed compartments; you add cells as customers grow."
+    },
+    "mindmap": {
+      "center": "Cell Architecture",
+      "branches": [
+        {
+          "label": "Cell",
+          "children": [
+            "Full stack",
+            "Max size",
+            "Subset of customers"
+          ]
+        },
+        {
+          "label": "Router",
+          "children": [
+            "Thin",
+            "Static mapping"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Cell-by-cell deploys",
+            "Tenant migration"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Contained failures",
+            "Predictable scaling"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Duplication",
+            "Complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SaaS cell layout",
+      "scenario": "Design.",
+      "flow": [
+        "Tenant ID hashed → cell 1–12",
+        "Each cell: ALB, ECS service, Aurora, SQS",
+        "Router: DynamoDB mapping cached at edge",
+        "Deploy: cell 1 → wait → 2–4 → rest"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One noisy tenant affects ~8% at most."
+        }
+      ],
+      "code": [],
+      "outcome": "failures stay local."
+    },
+    "summary": {
+      "points": [
+        "Independent full stacks.",
+        "Thin router.",
+        "Scale by adding cells."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a cell-based system scale?",
+        "a": "By adding more fixed-size cells rather than growing a single shared stack."
+      }
+    ]
+  },
+  "shuffle-sharding-the-math-of-resilience": {
+    "core": "Shuffle sharding assigns each customer to a random combination of k workers out of n. A poison customer can only break its own k workers, and the chance another customer shares all k is tiny (1 / C(n,k)). With 8 workers and k=2 there are 28 shards; with 100 workers and k=5, about 75 million.",
+    "first_principles": {
+      "problem": "In simple sharding, a bad customer takes down its whole shard and every customer on it.",
+      "truths": [
+        "Combinations grow combinatorially.",
+        "Clients can retry on other workers in their shard.",
+        "Full overlap is what causes shared outage."
+      ],
+      "derivation": [
+        "Pick **n workers**, **k per customer**.",
+        "Assign **random combination** per customer.",
+        "Clients **retry across their k**.",
+        "Overlap probability ≈ **1 / C(n,k)**.",
+        "Route53 name servers use this pattern."
+      ]
+    },
+    "analogy": {
+      "title": "Giving each guest a random pair of keys to different doors",
+      "story": "If one guest jams their doors, almost nobody else uses exactly the same pair.",
+      "mapping": [
+        [
+          "Doors",
+          "Workers"
+        ],
+        [
+          "Key pair",
+          "Shuffle shard"
+        ],
+        [
+          "Jammed doors",
+          "Poisoned workers"
+        ]
+      ],
+      "breaks": "Guests choose doors; shuffle sharding needs clients that retry across their assigned workers."
+    },
+    "mindmap": {
+      "center": "Shuffle Sharding",
+      "branches": [
+        {
+          "label": "Setup",
+          "children": [
+            "n workers",
+            "k per customer"
+          ]
+        },
+        {
+          "label": "Maths",
+          "children": [
+            "C(n,k) shards",
+            "Overlap ≈ 1/C(n,k)"
+          ]
+        },
+        {
+          "label": "Requirement",
+          "children": [
+            "Client retries within shard"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Route 53",
+            "Multi-tenant APIs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Impact maths",
+      "scenario": "8 workers.",
+      "flow": [
+        "Simple sharding (4 shards of 2): bad customer hurts 25% of customers",
+        "Shuffle sharding (k=2 of 8): 28 combinations",
+        "Another customer fully overlaps with probability 1/28 ≈ 3.6%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Partial overlap survives via retries."
+        }
+      ],
+      "code": [],
+      "outcome": "dramatically smaller blast radius."
+    },
+    "summary": {
+      "points": [
+        "Random combos.",
+        "Combinatorial isolation.",
+        "Retry within shard."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many unique shuffle shards exist with 8 workers and 2 per customer?",
+        "a": "28 (8 choose 2)."
+      }
+    ]
+  },
+  "static-stability-surviving-without-changing": {
+    "core": "A statically stable system rides through failure using resources and state it already has: pre-provisioned capacity in remaining AZs, cached configuration, pre-established connections and data-plane-driven failover. It doesn't need to launch, reconfigure or call control planes while things are breaking.",
+    "first_principles": {
+      "problem": "Recovery depends on autoscaling and config updates, both of which are impaired during the incident.",
+      "truths": [
+        "Reactive actions use control planes.",
+        "Impairments often affect those same planes.",
+        "Existing state keeps working."
+      ],
+      "derivation": [
+        "**Overprovision** across fault domains.",
+        "**Cache** config with fail-static behaviour.",
+        "**Pre-warm** failover paths.",
+        "Prefer **health-check-driven routing**.",
+        "**Game-day** the no-change assumption."
+      ]
+    },
+    "analogy": {
+      "title": "A ship with full lifeboats already lowered",
+      "story": "In an emergency, you step in; nothing needs to be built or ordered.",
+      "mapping": [
+        [
+          "Lowered lifeboats",
+          "Pre-provisioned capacity"
+        ],
+        [
+          "Building boats",
+          "Launching resources"
+        ],
+        [
+          "Emergency",
+          "Outage"
+        ]
+      ],
+      "breaks": "Lifeboats sit unused; idle capacity costs money every hour."
+    },
+    "mindmap": {
+      "center": "Static Stability",
+      "branches": [
+        {
+          "label": "Principle",
+          "children": [
+            "Survive without changes"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Overprovision",
+            "Fail static",
+            "Pre-warmed failover",
+            "Health-check routing"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Control-plane recovery"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Game days"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "EC2 in 3 AZs",
+      "scenario": "Design.",
+      "flow": [
+        "Steady load needs 6 instances",
+        "Run 3 per AZ (9 total)",
+        "AZ fails → 6 remain, health checks drop the bad AZ",
+        "No scaling action needed"
+      ],
+      "steps": [
+        {
+          "label": "Cost",
+          "detail": "50% overprovisioning."
+        }
+      ],
+      "code": [],
+      "outcome": "resilience without reaction."
+    },
+    "summary": {
+      "points": [
+        "Don't depend on change.",
+        "Pre-provision.",
+        "Fail static."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't static stability rely on autoscaling during an AZ failure?",
+        "a": "Autoscaling uses control-plane APIs and capacity that may be impaired; static stability already has enough capacity running."
+      }
+    ]
+  },
+  "putting-it-together-the-isolation-zone-stack": {
+    "core": "Layer isolation techniques: regions for disaster recovery, AZs with static stability for facility failures, cells for software and tenant failures, shuffle sharding within cells for noisy or poisonous clients, and progressive deployments across all of them. Each layer catches failures the others don't.",
+    "first_principles": {
+      "problem": "Teams apply one isolation technique and assume they're covered.",
+      "truths": [
+        "Failures occur at many scales.",
+        "Each technique addresses specific failure modes.",
+        "Layers compound protection."
+      ],
+      "derivation": [
+        "**Region**: DR, data sovereignty.",
+        "**AZ**: facility failures, static stability.",
+        "**Cell**: bad deploys, overload.",
+        "**Shuffle shard**: poison tenants.",
+        "**Progressive delivery**: wave by wave."
+      ]
+    },
+    "analogy": {
+      "title": "Russian dolls of protection",
+      "story": "Each layer encloses and protects the next.",
+      "mapping": [
+        [
+          "Outer doll",
+          "Region"
+        ],
+        [
+          "Middle dolls",
+          "AZs, cells"
+        ],
+        [
+          "Inner doll",
+          "Shuffle shard"
+        ]
+      ],
+      "breaks": "Dolls nest neatly; real architectures have cross-cutting shared services that must be isolated too."
+    },
+    "mindmap": {
+      "center": "Isolation Stack",
+      "branches": [
+        {
+          "label": "Region",
+          "children": [
+            "DR"
+          ]
+        },
+        {
+          "label": "AZ",
+          "children": [
+            "Static stability"
+          ]
+        },
+        {
+          "label": "Cell",
+          "children": [
+            "Bulkheads"
+          ]
+        },
+        {
+          "label": "Shard",
+          "children": [
+            "Shuffle sharding"
+          ]
+        },
+        {
+          "label": "Delivery",
+          "children": [
+            "Waves",
+            "Bake time"
+          ]
+        },
+        {
+          "label": "Shared services",
+          "children": [
+            "Isolate too"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deployment waves",
+      "scenario": "Across layers.",
+      "flow": [
+        "Wave 1: one cell in one AZ in one region",
+        "Wave 2: rest of that region's cells",
+        "Wave 3: other regions, one at a time",
+        "Automatic rollback on alarms"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bad changes caught at minimal blast radius."
+        }
+      ],
+      "code": [],
+      "outcome": "defence in depth for availability."
+    },
+    "summary": {
+      "points": [
+        "Layer isolation.",
+        "Match technique to failure.",
+        "Deploy in waves."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which isolation layer protects against a single tenant's poison requests?",
+        "a": "Shuffle sharding (within cells)."
+      }
+    ]
+  }
+}

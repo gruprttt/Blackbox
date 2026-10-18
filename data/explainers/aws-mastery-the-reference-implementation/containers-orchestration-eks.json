@@ -1,0 +1,739 @@
+{
+  "introduction-kubernetes-the-aws-way": {
+    "core": "EKS runs upstream, conformant Kubernetes with an AWS-managed control plane, integrating Kubernetes concepts with AWS primitives: pods get VPC IPs, service accounts map to IAM roles, load balancers come from the AWS Load Balancer Controller, and nodes come from managed node groups, Karpenter or Fargate.",
+    "first_principles": {
+      "problem": "Self-managed Kubernetes on EC2 means running etcd, upgrades and HA control planes yourself.",
+      "truths": [
+        "The control plane is hard to operate.",
+        "Kubernetes is portable; integrations are cloud-specific.",
+        "AWS identity and networking differ from Kubernetes defaults."
+      ],
+      "derivation": [
+        "Let AWS run the **control plane**.",
+        "Choose **data plane** (managed nodes, Karpenter, Fargate).",
+        "Use **VPC CNI** for networking.",
+        "Map identity with **Pod Identity/IRSA**.",
+        "Manage **add-ons** and upgrades."
+      ]
+    },
+    "analogy": {
+      "title": "Leasing a managed office building",
+      "story": "The landlord runs security, lifts and power; you furnish the floors.",
+      "mapping": [
+        [
+          "Landlord",
+          "AWS control plane"
+        ],
+        [
+          "Floors",
+          "Worker nodes"
+        ],
+        [
+          "Building badges",
+          "IAM integration"
+        ]
+      ],
+      "breaks": "Landlords rarely force renovations; EKS versions reach end of standard support and need upgrades."
+    },
+    "mindmap": {
+      "center": "EKS",
+      "branches": [
+        {
+          "label": "Control plane",
+          "children": [
+            "Managed",
+            "Multi-AZ"
+          ]
+        },
+        {
+          "label": "Data plane",
+          "children": [
+            "Managed nodes",
+            "Karpenter",
+            "Fargate"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "VPC CNI",
+            "IAM",
+            "ALB controller",
+            "EBS/EFS CSI"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Upgrades",
+            "Add-ons"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create a cluster",
+      "scenario": "eksctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "HA control plane and nodes in minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "eksctl create cluster --name prod --region eu-west-1 --version 1.31 \\\n  --nodegroup-name system --node-type m7g.large --nodes 3 --managed"
+        }
+      ],
+      "outcome": "Kubernetes without control-plane toil."
+    },
+    "summary": {
+      "points": [
+        "Managed control plane.",
+        "AWS-native integrations.",
+        "You own the data plane."
+      ]
+    },
+    "check": [
+      {
+        "q": "What part of Kubernetes does EKS manage for you?",
+        "a": "The control plane: API servers, etcd and controllers, across multiple AZs."
+      }
+    ]
+  },
+  "managed-control-plane-architecture": {
+    "core": "Each EKS cluster's control plane runs in an AWS-owned VPC across three AZs: at least two API server instances behind a load balancer and a three-node etcd cluster, auto-scaled and patched by AWS. Worker nodes reach it through cross-account ENIs placed in your subnets, with public, private or both endpoint access.",
+    "first_principles": {
+      "problem": "Teams don't know why API access fails from inside the VPC after disabling the public endpoint.",
+      "truths": [
+        "Control planes need HA and quorum.",
+        "Nodes need a network path to the API server.",
+        "Endpoint exposure is a security choice."
+      ],
+      "derivation": [
+        "**API servers** scale with load.",
+        "**etcd** quorum across 3 AZs.",
+        "**Cross-account ENIs** in your subnets.",
+        "Choose **endpoint access** (private recommended).",
+        "Enable **control plane logging** (audit, authenticator)."
+      ]
+    },
+    "analogy": {
+      "title": "A bank's head office connected to branches by private lines",
+      "story": "The head office runs elsewhere, but private lines reach into every branch.",
+      "mapping": [
+        [
+          "Head office",
+          "Control plane VPC"
+        ],
+        [
+          "Private lines",
+          "Cross-account ENIs"
+        ],
+        [
+          "Branches",
+          "Your VPC subnets"
+        ]
+      ],
+      "breaks": "Head offices are visible; the EKS control plane is opaque except through APIs and logs."
+    },
+    "mindmap": {
+      "center": "Control Plane",
+      "branches": [
+        {
+          "label": "Components",
+          "children": [
+            "API servers",
+            "etcd (3)",
+            "Controllers"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "AWS VPC",
+            "3 AZs"
+          ]
+        },
+        {
+          "label": "Connectivity",
+          "children": [
+            "Cross-account ENIs",
+            "Public/private endpoint"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Auto-scaling",
+            "Logging",
+            "Upgrades"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Private endpoint access",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "API reachable only from the VPC (or connected networks)."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws eks update-cluster-config --name prod \\\n  --resources-vpc-config endpointPublicAccess=false,endpointPrivateAccess=true"
+        }
+      ],
+      "outcome": "secure, HA control plane."
+    },
+    "summary": {
+      "points": [
+        "AWS runs HA masters.",
+        "ENIs connect nodes.",
+        "Prefer private endpoints."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do worker nodes reach the EKS control plane?",
+        "a": "Through cross-account ENIs that EKS places in your VPC subnets (or the public endpoint)."
+      }
+    ]
+  },
+  "node-groups-managed-self-managed-and-fargate": {
+    "core": "EKS compute options: managed node groups (AWS-managed ASGs with graceful updates), self-managed nodes (full control over AMIs and bootstrap), Karpenter (flexible just-in-time nodes) and Fargate (a microVM per pod, no nodes to manage). Each trades control against operational effort.",
+    "first_principles": {
+      "problem": "A team spends days patching self-managed nodes when managed options would do.",
+      "truths": [
+        "Node management is toil.",
+        "Some workloads need custom AMIs or GPUs.",
+        "Fargate has feature limits (no DaemonSets, no privileged pods)."
+      ],
+      "derivation": [
+        "**Managed node groups** for baseline/system pods.",
+        "**Karpenter** for dynamic workloads.",
+        "**Self-managed** only for special needs.",
+        "**Fargate** for isolated or bursty pods.",
+        "Mix per **workload class**."
+      ]
+    },
+    "analogy": {
+      "title": "Company cars: managed lease, owned fleet or taxis",
+      "story": "Leased cars are maintained for you; owned cars give control; taxis need no garage at all.",
+      "mapping": [
+        [
+          "Managed lease",
+          "Managed node groups"
+        ],
+        [
+          "Owned fleet",
+          "Self-managed"
+        ],
+        [
+          "Taxis",
+          "Fargate"
+        ],
+        [
+          "Ride-hailing",
+          "Karpenter"
+        ]
+      ],
+      "breaks": "Cars don't host each other; nodes run many pods, so blast radius differs."
+    },
+    "mindmap": {
+      "center": "EKS Compute",
+      "branches": [
+        {
+          "label": "Managed nodes",
+          "children": [
+            "ASG",
+            "Graceful updates"
+          ]
+        },
+        {
+          "label": "Self-managed",
+          "children": [
+            "Custom AMIs",
+            "Full control"
+          ]
+        },
+        {
+          "label": "Karpenter",
+          "children": [
+            "Flexible",
+            "Fast"
+          ]
+        },
+        {
+          "label": "Fargate",
+          "children": [
+            "Pod per microVM",
+            "No DaemonSets"
+          ]
+        },
+        {
+          "label": "Mix",
+          "children": [
+            "By workload"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mixed cluster",
+      "scenario": "Layout.",
+      "flow": [
+        "Managed group (3 × m7g.large) for CoreDNS, Karpenter",
+        "Karpenter NodePools for apps",
+        "Fargate profile for untrusted batch jobs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Low toil, right isolation."
+        }
+      ],
+      "code": [],
+      "outcome": "compute matched to workload."
+    },
+    "summary": {
+      "points": [
+        "Managed by default.",
+        "Karpenter for scale.",
+        "Fargate for isolation."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name one limitation of EKS Fargate.",
+        "a": "No DaemonSets (also no privileged containers, no GPUs historically, no host networking)."
+      }
+    ]
+  },
+  "pod-networking-the-vpc-cni-plugin": {
+    "core": "The Amazon VPC CNI gives each pod a real VPC IP from the node's subnet by attaching ENIs and secondary IPs to the node. Pods are first-class VPC citizens (security groups, flow logs, direct routing), but the number of pods per node is limited by ENIs × IPs per ENI, and subnets can run out of IPs.",
+    "first_principles": {
+      "problem": "A cluster can't schedule pods because the subnet ran out of IP addresses.",
+      "truths": [
+        "Each pod consumes a VPC IP.",
+        "Instance types limit ENIs and IPs.",
+        "Warm pools pre-allocate IPs."
+      ],
+      "derivation": [
+        "**Plan subnets** large (/19 or bigger) or use **secondary CIDRs** (100.64.0.0/10).",
+        "Tune **WARM_IP_TARGET / MINIMUM_IP_TARGET**.",
+        "Know **max pods** per instance type.",
+        "Use **custom networking** for pod subnets.",
+        "Use **prefix delegation** to raise density."
+      ]
+    },
+    "analogy": {
+      "title": "Giving every employee a real company phone extension",
+      "story": "Calls route directly, but you can run out of extensions on a small switchboard.",
+      "mapping": [
+        [
+          "Extensions",
+          "Pod IPs"
+        ],
+        [
+          "Switchboard size",
+          "Subnet size"
+        ],
+        [
+          "Phone lines per desk",
+          "ENIs per node"
+        ]
+      ],
+      "breaks": "Phone extensions are cheap to add; subnet sizes are fixed once created."
+    },
+    "mindmap": {
+      "center": "VPC CNI",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Pod = VPC IP",
+            "ENIs + secondary IPs"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "ENIs × IPs",
+            "Subnet exhaustion"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "WARM_IP_TARGET",
+            "MINIMUM_IP_TARGET"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Custom networking",
+            "Prefix delegation",
+            "Security groups for pods"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Max pods on m5.large",
+      "scenario": "Maths.",
+      "flow": [
+        "3 ENIs × (10 IPs − 1) + 2 = 29 pods",
+        "Small subnet /24 = 251 IPs → ~8 nodes",
+        "Fix: secondary CIDR or prefix delegation"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "IP planning prevents scheduling failures."
+        }
+      ],
+      "code": [],
+      "outcome": "pods with native VPC networking."
+    },
+    "summary": {
+      "points": [
+        "Pods get VPC IPs.",
+        "Watch IP exhaustion.",
+        "Plan subnets."
+      ]
+    },
+    "check": [
+      {
+        "q": "What limits the number of pods per node with the VPC CNI (without prefix delegation)?",
+        "a": "The instance type's maximum ENIs and IPv4 addresses per ENI."
+      }
+    ]
+  },
+  "advanced-networking-prefix-delegation": {
+    "core": "Prefix delegation assigns /28 IPv4 prefixes (16 addresses) to ENI slots instead of single secondary IPs, multiplying pod density per node (e.g. 110+ pods on small instances) and speeding pod startup. It requires Nitro instances and subnets with contiguous free /28 blocks; IPv6 clusters avoid exhaustion entirely.",
+    "first_principles": {
+      "problem": "Small nodes cap at ~29 pods, wasting CPU and memory, and IP allocation slows pod startup.",
+      "truths": [
+        "ENI slots are limited.",
+        "Each slot can hold a prefix instead of one IP.",
+        "Fragmented subnets may lack free /28s."
+      ],
+      "derivation": [
+        "Set **ENABLE_PREFIX_DELEGATION=true**.",
+        "Update **max-pods** (or let Karpenter/managed groups calculate).",
+        "Use **fresh or defragmented subnets** (subnet CIDR reservations).",
+        "Consider **IPv6** for scale.",
+        "Tune **WARM_PREFIX_TARGET**."
+      ]
+    },
+    "analogy": {
+      "title": "Assigning blocks of 16 seats instead of single seats per booking",
+      "story": "Each reservation slot now covers a whole row.",
+      "mapping": [
+        [
+          "Booking slot",
+          "ENI slot"
+        ],
+        [
+          "Row of 16 seats",
+          "/28 prefix"
+        ],
+        [
+          "Fragmented seating",
+          "Fragmented subnet"
+        ]
+      ],
+      "breaks": "Rows can be split later; prefixes must be contiguous free blocks."
+    },
+    "mindmap": {
+      "center": "Prefix Delegation",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "/28 per ENI slot",
+            "16 IPs"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Higher density",
+            "Faster startup"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Nitro",
+            "Free /28s"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "ENABLE_PREFIX_DELEGATION",
+            "max-pods",
+            "WARM_PREFIX_TARGET"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "IPv6"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enabling it",
+      "scenario": "kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "m5.large from 29 to 110 pods."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl set env daemonset aws-node -n kube-system ENABLE_PREFIX_DELEGATION=true WARM_PREFIX_TARGET=1"
+        }
+      ],
+      "outcome": "denser, faster pod networking."
+    },
+    "summary": {
+      "points": [
+        "Prefixes instead of IPs.",
+        "Much higher density.",
+        "Needs contiguous space."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many IPs does each /28 prefix provide?",
+        "a": "16."
+      }
+    ]
+  },
+  "eks-add-ons-managing-operational-software": {
+    "core": "EKS add-ons are AWS-managed installations of operational components (VPC CNI, CoreDNS, kube-proxy, EBS/EFS CSI drivers, Pod Identity Agent, observability agents) with versions validated per cluster version, lifecycle via API/IaC, and conflict-resolution settings for custom configuration.",
+    "first_principles": {
+      "problem": "After a cluster upgrade, an old CoreDNS or CNI version breaks networking.",
+      "truths": [
+        "Core components must match the Kubernetes version.",
+        "Manual Helm installs drift.",
+        "Upgrades need ordering."
+      ],
+      "derivation": [
+        "Install core components as **managed add-ons**.",
+        "Pin and **upgrade with the cluster**.",
+        "Use **configuration values** for tuning.",
+        "Set **resolveConflicts** carefully.",
+        "Manage via **Terraform/CDK**."
+      ]
+    },
+    "analogy": {
+      "title": "Manufacturer-approved parts for your car",
+      "story": "Guaranteed to fit this model year and serviced by the dealer.",
+      "mapping": [
+        [
+          "Approved parts",
+          "Validated add-on versions"
+        ],
+        [
+          "Model year",
+          "Kubernetes version"
+        ],
+        [
+          "Dealer service",
+          "AWS lifecycle"
+        ]
+      ],
+      "breaks": "Car parts rarely change behaviour; add-on upgrades can change defaults, so read release notes."
+    },
+    "mindmap": {
+      "center": "EKS Add-ons",
+      "branches": [
+        {
+          "label": "Core",
+          "children": [
+            "VPC CNI",
+            "CoreDNS",
+            "kube-proxy"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "EBS CSI",
+            "EFS CSI"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Pod Identity Agent"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Version compatibility",
+            "Config values",
+            "resolveConflicts"
+          ]
+        },
+        {
+          "label": "IaC",
+          "children": [
+            "Terraform",
+            "CDK"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Upgrade an add-on",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Compatible CoreDNS with custom config kept."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws eks describe-addon-versions --addon-name coredns --kubernetes-version 1.31\naws eks update-addon --cluster-name prod --addon-name coredns --addon-version v1.11.3-eksbuild.1 --resolve-conflicts PRESERVE"
+        }
+      ],
+      "outcome": "core components kept in sync."
+    },
+    "summary": {
+      "points": [
+        "Managed core components.",
+        "Version-matched.",
+        "Upgrade with the cluster."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use managed add-ons for CoreDNS and the VPC CNI?",
+        "a": "AWS validates compatible versions per Kubernetes release and manages their lifecycle, reducing upgrade breakage."
+      }
+    ]
+  },
+  "irsa-iam-roles-for-service-accounts": {
+    "core": "IRSA lets pods assume IAM roles through their Kubernetes service account: the cluster's OIDC provider signs a projected token, and STS AssumeRoleWithWebIdentity exchanges it for credentials scoped to that role. Each workload gets least-privilege AWS access without node-wide credentials. EKS Pod Identity is a newer, simpler alternative.",
+    "first_principles": {
+      "problem": "All pods on a node share the node's IAM role, so any compromised pod can access everything.",
+      "truths": [
+        "Node roles are shared by all pods.",
+        "OIDC tokens can prove workload identity.",
+        "Trust policies can match service account names."
+      ],
+      "derivation": [
+        "Create the cluster **OIDC provider**.",
+        "Create a **role** trusting sub=system:serviceaccount:ns:name.",
+        "**Annotate** the service account with the role ARN.",
+        "SDKs pick up **web identity credentials** automatically.",
+        "Or use **Pod Identity associations**; block **IMDS** for pods."
+      ]
+    },
+    "analogy": {
+      "title": "Personal staff badges instead of one master key per floor",
+      "story": "Each worker opens only the doors their job needs.",
+      "mapping": [
+        [
+          "Master key",
+          "Node IAM role"
+        ],
+        [
+          "Personal badge",
+          "Pod's IAM role"
+        ],
+        [
+          "Badge office",
+          "OIDC + STS"
+        ]
+      ],
+      "breaks": "Badges are physical; tokens expire and rotate automatically."
+    },
+    "mindmap": {
+      "center": "IRSA",
+      "branches": [
+        {
+          "label": "Pieces",
+          "children": [
+            "OIDC provider",
+            "Service account",
+            "IAM role trust"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Projected token",
+            "AssumeRoleWithWebIdentity",
+            "Temp creds"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Least privilege per pod",
+            "Block IMDS"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "EKS Pod Identity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Annotated service account",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only uploader pods can write to the media bucket."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: uploader\n  namespace: media\n  annotations:\n    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/media-uploader"
+        }
+      ],
+      "outcome": "per-workload AWS permissions."
+    },
+    "summary": {
+      "points": [
+        "Pods get their own roles.",
+        "OIDC + STS.",
+        "Block node credentials."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should you block pod access to the instance metadata service when using IRSA?",
+        "a": "Otherwise pods could fall back to the node's IAM role credentials, bypassing least privilege."
+      }
+    ]
+  }
+}

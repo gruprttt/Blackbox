@@ -1,0 +1,632 @@
+{
+  "introduction-reimagining-the-relational-database": {
+    "core": "Aurora keeps MySQL/PostgreSQL compatibility but separates compute from a distributed, log-structured storage layer. The database ships only redo log records to storage, which builds pages itself, cutting network I/O, speeding failover and letting replicas share the same storage.",
+    "first_principles": {
+      "problem": "Traditional RDS replication copies whole data pages and binlogs, making replicas lag and failover slow.",
+      "truths": [
+        "Writing full pages repeatedly wastes I/O.",
+        "The log is the source of truth.",
+        "Shared storage avoids copying data to replicas."
+      ],
+      "derivation": [
+        "**Decouple** compute and storage.",
+        "**Ship redo logs** only.",
+        "**Storage nodes** materialise pages.",
+        "**Replicas** read shared storage.",
+        "**Failover** by promoting a replica in seconds."
+      ]
+    },
+    "analogy": {
+      "title": "Sending recipe edits instead of reprinting the cookbook",
+      "story": "Kitchens receive only the change notes and update their own copies.",
+      "mapping": [
+        [
+          "Edit notes",
+          "Redo log records"
+        ],
+        [
+          "Kitchens",
+          "Storage nodes"
+        ],
+        [
+          "Cookbook",
+          "Data pages"
+        ]
+      ],
+      "breaks": "Kitchens interpret notes; Aurora storage applies logs deterministically."
+    },
+    "mindmap": {
+      "center": "Aurora",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Log is the database",
+            "Compute/storage split"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Less I/O",
+            "Fast failover",
+            "Shared replicas"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "MySQL",
+            "PostgreSQL"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Serverless v2",
+            "Global Database",
+            "Backtrack"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Write path",
+      "scenario": "Aurora vs MySQL.",
+      "flow": [
+        "MySQL: data pages + doublewrite + binlog + redo",
+        "Aurora: redo log records to 6 storage copies",
+        "Far fewer bytes per transaction"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Higher throughput per instance."
+        }
+      ],
+      "code": [],
+      "outcome": "cloud-native relational performance."
+    },
+    "summary": {
+      "points": [
+        "The log is the database.",
+        "Storage does page work.",
+        "Replicas share storage."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an Aurora writer send to storage?",
+        "a": "Only redo log records; storage nodes build the data pages."
+      }
+    ]
+  },
+  "aurora-storage-architecture-6-copies-3-azs": {
+    "core": "Aurora storage splits data into 10 GB protection groups, each with six copies across three AZs. Writes need 4 of 6 acknowledgements and reads 3 of 6 (quorum), so Aurora tolerates losing an entire AZ plus one more node for reads, and an AZ for writes. Storage auto-grows to 128 TiB and self-heals.",
+    "first_principles": {
+      "problem": "A single AZ outage or disk failure shouldn't lose data or block writes.",
+      "truths": [
+        "Quorums tolerate minority failures.",
+        "Small segments repair fast.",
+        "AZs fail independently."
+      ],
+      "derivation": [
+        "**6 copies, 2 per AZ**.",
+        "**Write quorum 4/6**, **read quorum 3/6**.",
+        "**10 GB segments** repair in seconds.",
+        "**Continuous backup** to S3.",
+        "**Auto-scaling** storage."
+      ]
+    },
+    "analogy": {
+      "title": "Six witnesses in three towns",
+      "story": "A statement counts if four agree; you can lose a whole town and still reach agreement.",
+      "mapping": [
+        [
+          "Witnesses",
+          "Storage copies"
+        ],
+        [
+          "Towns",
+          "AZs"
+        ],
+        [
+          "Four agree",
+          "Write quorum"
+        ]
+      ],
+      "breaks": "Witnesses can disagree on facts; storage copies converge deterministically from logs."
+    },
+    "mindmap": {
+      "center": "Aurora Storage",
+      "branches": [
+        {
+          "label": "Layout",
+          "children": [
+            "6 copies",
+            "3 AZs",
+            "10 GB segments"
+          ]
+        },
+        {
+          "label": "Quorum",
+          "children": [
+            "Write 4/6",
+            "Read 3/6"
+          ]
+        },
+        {
+          "label": "Tolerates",
+          "children": [
+            "AZ loss (writes)",
+            "AZ + 1 (reads)"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Self-heal",
+            "Auto-grow 128 TiB",
+            "Backup to S3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AZ failure",
+      "scenario": "What happens.",
+      "flow": [
+        "AZ-b lost: 2 copies gone",
+        "4 copies remain → writes continue",
+        "Repair recreates copies elsewhere"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No data loss, writes continue."
+        }
+      ],
+      "code": [],
+      "outcome": "storage that survives an AZ."
+    },
+    "summary": {
+      "points": [
+        "Six copies, three AZs.",
+        "4/6 writes, 3/6 reads.",
+        "Small segments heal fast."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can Aurora keep writing after losing an AZ?",
+        "a": "Losing one AZ removes 2 of 6 copies, leaving 4, which still meets the 4/6 write quorum."
+      }
+    ]
+  },
+  "endpoints-how-to-connect": {
+    "core": "Aurora provides a cluster (writer) endpoint that always points to the current primary, a reader endpoint that load-balances across replicas, instance endpoints for specific nodes, and custom endpoints for groups of instances. Applications split reads and writes by endpoint, and DNS updates on failover.",
+    "first_principles": {
+      "problem": "Apps hard-code the primary instance hostname and break after failover.",
+      "truths": [
+        "Failover changes which instance is primary.",
+        "Reads can scale across replicas.",
+        "DNS-based endpoints abstract topology."
+      ],
+      "derivation": [
+        "Writes → **cluster endpoint**.",
+        "Reads → **reader endpoint**.",
+        "Analytics → **custom endpoint** on bigger replicas.",
+        "Keep **DNS TTL low** / use RDS Proxy or smart drivers.",
+        "Avoid **instance endpoints** in apps."
+      ]
+    },
+    "analogy": {
+      "title": "A company's main phone number",
+      "story": "Calls route to whoever is on duty, even when staff change.",
+      "mapping": [
+        [
+          "Main number",
+          "Cluster endpoint"
+        ],
+        [
+          "Support line pool",
+          "Reader endpoint"
+        ],
+        [
+          "Direct extension",
+          "Instance endpoint"
+        ]
+      ],
+      "breaks": "Phone systems switch instantly; DNS caching can delay failover unless clients respect TTLs."
+    },
+    "mindmap": {
+      "center": "Aurora Endpoints",
+      "branches": [
+        {
+          "label": "Cluster",
+          "children": [
+            "Writer",
+            "Follows failover"
+          ]
+        },
+        {
+          "label": "Reader",
+          "children": [
+            "Load-balanced replicas"
+          ]
+        },
+        {
+          "label": "Custom",
+          "children": [
+            "Instance groups"
+          ]
+        },
+        {
+          "label": "Instance",
+          "children": [
+            "Specific node"
+          ]
+        },
+        {
+          "label": "Helpers",
+          "children": [
+            "RDS Proxy",
+            "AWS JDBC wrapper"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Connection config",
+      "scenario": "App settings.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failover transparent; reads scale."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "db:\n  writer: mycluster.cluster-abc123.eu-west-1.rds.amazonaws.com\n  reader: mycluster.cluster-ro-abc123.eu-west-1.rds.amazonaws.com"
+        }
+      ],
+      "outcome": "topology-independent apps."
+    },
+    "summary": {
+      "points": [
+        "Writer vs reader endpoints.",
+        "Custom for workloads.",
+        "Never hard-code instances."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which endpoint should an app use for writes?",
+        "a": "The cluster (writer) endpoint, which always points to the current primary."
+      }
+    ]
+  },
+  "aurora-serverless-v2-instant-scaling": {
+    "core": "Aurora Serverless v2 scales capacity in fine-grained ACUs (Aurora Capacity Units, ~2 GiB memory each) within seconds, based on load, between a configured min and max, without dropping connections. It can mix with provisioned instances in one cluster and suits spiky, unpredictable or multi-tenant workloads.",
+    "first_principles": {
+      "problem": "A database sized for peak sits mostly idle, or a fixed size can't handle sudden spikes.",
+      "truths": [
+        "Load varies by hour and day.",
+        "Scaling in place avoids failovers.",
+        "Capacity has a floor for warm caches."
+      ],
+      "derivation": [
+        "Set **min/max ACUs**.",
+        "Scales in **0.5 ACU steps**.",
+        "**Mix** serverless readers with provisioned writers.",
+        "Set **min** high enough for buffer cache.",
+        "Compare **cost** at steady load."
+      ]
+    },
+    "analogy": {
+      "title": "An accordion",
+      "story": "It expands and contracts smoothly as the music demands.",
+      "mapping": [
+        [
+          "Expanding",
+          "Scaling up ACUs"
+        ],
+        [
+          "Contracting",
+          "Scaling down"
+        ],
+        [
+          "Music",
+          "Load"
+        ]
+      ],
+      "breaks": "Accordions have no minimum; v2 needs a minimum ACU, and steady loads may be cheaper provisioned."
+    },
+    "mindmap": {
+      "center": "Serverless v2",
+      "branches": [
+        {
+          "label": "Unit",
+          "children": [
+            "ACU ≈ 2 GiB"
+          ]
+        },
+        {
+          "label": "Scaling",
+          "children": [
+            "Seconds",
+            "0.5 ACU steps",
+            "No disconnects"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Min",
+            "Max"
+          ]
+        },
+        {
+          "label": "Fit",
+          "children": [
+            "Spiky",
+            "Dev/test",
+            "Multi-tenant"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Steady load cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spiky SaaS database",
+      "scenario": "Behaviour.",
+      "flow": [
+        "Night: 2 ACUs",
+        "Morning spike: 32 ACUs in seconds",
+        "Afternoon: settles at 12",
+        "Bill tracks usage"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No peak-sized idle capacity."
+        }
+      ],
+      "code": [],
+      "outcome": "capacity follows demand."
+    },
+    "summary": {
+      "points": [
+        "ACUs scale in seconds.",
+        "Min/max bounds.",
+        "Mix with provisioned."
+      ]
+    },
+    "check": [
+      {
+        "q": "When might provisioned Aurora be cheaper than Serverless v2?",
+        "a": "For steady, predictable high load, where reserved provisioned capacity costs less per hour."
+      }
+    ]
+  },
+  "aurora-global-database-speed-of-light-replication": {
+    "core": "Aurora Global Database replicates storage from a primary region to up to five secondary regions with typically < 1 second lag, using dedicated storage-level replication rather than the database engine. Secondaries serve local reads and can be promoted for disaster recovery (RPO ~1 s, RTO ~minutes), or switched over planned.",
+    "first_principles": {
+      "problem": "A global app needs fast local reads worldwide and regional disaster recovery.",
+      "truths": [
+        "Cross-region latency is ~50–150 ms.",
+        "Engine replication adds load and lag.",
+        "DR needs a warm copy elsewhere."
+      ],
+      "derivation": [
+        "**Storage-level** replication to secondaries.",
+        "**Local reads** in each region.",
+        "**Write forwarding** for occasional writes from secondaries.",
+        "**Managed failover/switchover**.",
+        "Plan **app reconnection** to new writer."
+      ]
+    },
+    "analogy": {
+      "title": "A newspaper printed simultaneously in several cities",
+      "story": "The master edition is edited in one city; presses elsewhere print it within a second.",
+      "mapping": [
+        [
+          "Editorial office",
+          "Primary region"
+        ],
+        [
+          "Remote presses",
+          "Secondary regions"
+        ],
+        [
+          "Moving the editors",
+          "Failover"
+        ]
+      ],
+      "breaks": "Newspapers are read-only elsewhere; write forwarding lets secondaries send writes back to the primary."
+    },
+    "mindmap": {
+      "center": "Global Database",
+      "branches": [
+        {
+          "label": "Replication",
+          "children": [
+            "Storage-level",
+            "< 1 s lag"
+          ]
+        },
+        {
+          "label": "Regions",
+          "children": [
+            "1 primary",
+            "Up to 5 secondary"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Local reads",
+            "DR"
+          ]
+        },
+        {
+          "label": "Failover",
+          "children": [
+            "Managed switchover",
+            "RPO ~1 s"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Write forwarding"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Regional outage",
+      "scenario": "DR flow.",
+      "flow": [
+        "us-east-1 impaired",
+        "Promote eu-west-1 secondary",
+        "Apps repoint to new writer",
+        "Lost writes ≤ ~1 s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Business continues in minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "global reads and regional DR."
+    },
+    "summary": {
+      "points": [
+        "Storage replication.",
+        "Sub-second lag.",
+        "Promote for DR."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Global Database use storage-level replication?",
+        "a": "It avoids engine overhead and achieves lower lag than logical/binlog replication."
+      }
+    ]
+  },
+  "aurora-vs-rds-choosing-the-right-tool": {
+    "core": "RDS runs standard engines (MySQL, PostgreSQL, MariaDB, Oracle, SQL Server, Db2) on EBS with Multi-AZ standby. Aurora offers higher performance, faster failover, up to 15 low-lag replicas, auto-growing storage, Serverless v2 and Global Database, at a higher price per hour and with I/O-based or I/O-optimized pricing. Choose by engine, scale, availability needs and cost.",
+    "first_principles": {
+      "problem": "A small internal app runs on Aurora and costs more than needed; a high-scale app on RDS struggles with replica lag.",
+      "truths": [
+        "Aurora's architecture costs more but scales better.",
+        "Some engines exist only on RDS.",
+        "I/O pricing matters for heavy workloads."
+      ],
+      "derivation": [
+        "**Oracle/SQL Server/Db2** → RDS.",
+        "**High scale, many replicas, fast failover** → Aurora.",
+        "**Small/steady** → RDS (or Aurora Serverless v2 for spiky).",
+        "**High I/O** → Aurora I/O-Optimized.",
+        "**Benchmark** cost with real workload."
+      ]
+    },
+    "analogy": {
+      "title": "A reliable saloon versus a performance car",
+      "story": "Both get you there; one is cheaper to run, the other handles much more.",
+      "mapping": [
+        [
+          "Saloon",
+          "RDS"
+        ],
+        [
+          "Performance car",
+          "Aurora"
+        ],
+        [
+          "Fuel cost",
+          "Instance + I/O pricing"
+        ]
+      ],
+      "breaks": "Cars can't change engines; you can migrate RDS to Aurora with a snapshot or replica."
+    },
+    "mindmap": {
+      "center": "Aurora vs RDS",
+      "branches": [
+        {
+          "label": "RDS",
+          "children": [
+            "Many engines",
+            "EBS",
+            "Multi-AZ standby",
+            "Cheaper small"
+          ]
+        },
+        {
+          "label": "Aurora",
+          "children": [
+            "Shared storage",
+            "15 replicas",
+            "Fast failover",
+            "Serverless v2",
+            "Global"
+          ]
+        },
+        {
+          "label": "Pricing",
+          "children": [
+            "Standard I/O",
+            "I/O-Optimized"
+          ]
+        },
+        {
+          "label": "Decide",
+          "children": [
+            "Engine",
+            "Scale",
+            "HA",
+            "Cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two decisions",
+      "scenario": "Workloads.",
+      "flow": [
+        "Internal CRUD app, 50 QPS → RDS PostgreSQL Multi-AZ",
+        "Consumer app, 20k QPS reads, global → Aurora + Global Database"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Pay for Aurora when you use its strengths."
+        }
+      ],
+      "code": [],
+      "outcome": "cost-appropriate database choice."
+    },
+    "summary": {
+      "points": [
+        "RDS for breadth and cost.",
+        "Aurora for scale and HA.",
+        "Benchmark."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which engines require RDS rather than Aurora?",
+        "a": "Oracle, SQL Server, Db2 and MariaDB."
+      }
+    ]
+  }
+}

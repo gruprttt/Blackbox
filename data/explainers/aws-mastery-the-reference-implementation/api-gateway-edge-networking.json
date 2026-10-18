@@ -1,0 +1,632 @@
+{
+  "introduction-the-digital-front-door": {
+    "core": "API Gateway is a managed front door for APIs: it terminates TLS, authenticates and authorises callers, throttles and meters usage, validates and transforms requests, routes to backends (Lambda, HTTP, AWS services, private VPC resources) and emits logs and metrics, so backends focus on business logic.",
+    "first_principles": {
+      "problem": "Every microservice re-implements auth, rate limiting and request validation inconsistently.",
+      "truths": [
+        "Cross-cutting concerns repeat across services.",
+        "A single entry point simplifies security.",
+        "Managed edges scale automatically."
+      ],
+      "derivation": [
+        "Centralise **auth** (JWT, IAM, Lambda authorizers, Cognito).",
+        "**Throttle** and use **usage plans**.",
+        "**Validate** requests.",
+        "**Route** to integrations.",
+        "**Observe** with access logs and metrics."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel reception desk",
+      "story": "Checks ID, hands out keys, limits how many guests enter and directs them to the right room.",
+      "mapping": [
+        [
+          "Reception",
+          "API Gateway"
+        ],
+        [
+          "ID check",
+          "Authorizer"
+        ],
+        [
+          "Rooms",
+          "Backends"
+        ]
+      ],
+      "breaks": "Reception desks have queues; API Gateway scales to thousands of requests per second automatically."
+    },
+    "mindmap": {
+      "center": "API Gateway",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "REST",
+            "HTTP",
+            "WebSocket"
+          ]
+        },
+        {
+          "label": "Concerns",
+          "children": [
+            "Auth",
+            "Throttling",
+            "Validation",
+            "Transformation"
+          ]
+        },
+        {
+          "label": "Backends",
+          "children": [
+            "Lambda",
+            "HTTP",
+            "AWS services",
+            "VPC Link"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Stages",
+            "Logs",
+            "Metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Serverless API",
+      "scenario": "Flow.",
+      "flow": [
+        "Client → API Gateway (JWT authorizer)",
+        "Throttle 100 req/s per client",
+        "Route GET /orders → Lambda",
+        "Access logs to CloudWatch"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Backends contain only business logic."
+        }
+      ],
+      "code": [],
+      "outcome": "consistent API edge."
+    },
+    "summary": {
+      "points": [
+        "One front door.",
+        "Centralise cross-cutting concerns.",
+        "Managed scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "What cross-cutting concerns does API Gateway typically handle?",
+        "a": "Authentication/authorisation, throttling, request validation, routing and logging."
+      }
+    ]
+  },
+  "rest-apis-vs-http-apis-the-decision-matrix": {
+    "core": "HTTP APIs are cheaper (~70% less) and faster, with JWT authorizers, Lambda and HTTP integrations, CORS and private integrations: ideal for most proxies. REST APIs add API keys and usage plans, request validation and transformation (VTL), AWS WAF, caching, edge-optimised and private endpoints, and direct AWS service integrations.",
+    "first_principles": {
+      "problem": "A team picks REST APIs by default and pays more for features it never uses, or picks HTTP APIs and later needs WAF and usage plans.",
+      "truths": [
+        "Features cost money and latency.",
+        "Requirements change.",
+        "Migration between types takes effort."
+      ],
+      "derivation": [
+        "**HTTP API** for simple, low-latency Lambda/HTTP proxies with JWT.",
+        "**REST API** for usage plans, API keys, caching, WAF, VTL transforms, private endpoints.",
+        "**WebSocket API** for bidirectional real-time.",
+        "Decide from a **feature checklist**."
+      ]
+    },
+    "analogy": {
+      "title": "Economy versus business class",
+      "story": "Both fly you there; business adds lounges and perks at a higher price.",
+      "mapping": [
+        [
+          "Economy",
+          "HTTP API"
+        ],
+        [
+          "Business",
+          "REST API"
+        ],
+        [
+          "Perks",
+          "Usage plans, caching, WAF"
+        ]
+      ],
+      "breaks": "Upgrading seats is easy; switching API types means rebuilding config."
+    },
+    "mindmap": {
+      "center": "REST vs HTTP API",
+      "branches": [
+        {
+          "label": "HTTP API",
+          "children": [
+            "Cheaper",
+            "Faster",
+            "JWT",
+            "Simple proxy"
+          ]
+        },
+        {
+          "label": "REST API",
+          "children": [
+            "Usage plans",
+            "API keys",
+            "Caching",
+            "WAF",
+            "VTL",
+            "Private"
+          ]
+        },
+        {
+          "label": "WebSocket",
+          "children": [
+            "Real-time"
+          ]
+        },
+        {
+          "label": "Decide",
+          "children": [
+            "Feature checklist"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two APIs",
+      "scenario": "Choices.",
+      "flow": [
+        "Internal mobile backend, JWT, Lambda → HTTP API",
+        "Public partner API with keys, quotas, WAF → REST API"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Pay for features you need."
+        }
+      ],
+      "code": [],
+      "outcome": "right API type per use case."
+    },
+    "summary": {
+      "points": [
+        "HTTP API for most.",
+        "REST for advanced features.",
+        "Check requirements first."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which API Gateway type supports usage plans and API keys?",
+        "a": "REST APIs."
+      }
+    ]
+  },
+  "endpoint-types-edge-regional-private": {
+    "core": "REST APIs have three endpoint types. Edge-optimised routes clients through CloudFront's edge (AWS-managed distribution) for geographically spread clients. Regional serves clients in the same region or behind your own CloudFront. Private is reachable only from VPCs through interface endpoints, with resource policies restricting access.",
+    "first_principles": {
+      "problem": "An internal API is publicly reachable, and a global API is slow for distant users.",
+      "truths": [
+        "Distance adds latency.",
+        "Internal APIs shouldn't be public.",
+        "You may want to control your own CDN."
+      ],
+      "derivation": [
+        "**Edge-optimised** for global clients without your own CDN.",
+        "**Regional** + your own CloudFront for control (caching, WAF at edge).",
+        "**Private** via execute-api VPC endpoint + resource policy.",
+        "Use **custom domains** with ACM certs."
+      ]
+    },
+    "analogy": {
+      "title": "A shop's entrances",
+      "story": "A storefront on the high street (edge), a local entrance (regional) or a staff-only back door (private).",
+      "mapping": [
+        [
+          "High street storefront",
+          "Edge-optimised"
+        ],
+        [
+          "Local entrance",
+          "Regional"
+        ],
+        [
+          "Staff-only door",
+          "Private"
+        ]
+      ],
+      "breaks": "Shops have fixed doors; you can change endpoint type later with some reconfiguration."
+    },
+    "mindmap": {
+      "center": "Endpoint Types",
+      "branches": [
+        {
+          "label": "Edge-optimised",
+          "children": [
+            "CloudFront managed",
+            "Global clients"
+          ]
+        },
+        {
+          "label": "Regional",
+          "children": [
+            "Same region",
+            "Own CloudFront"
+          ]
+        },
+        {
+          "label": "Private",
+          "children": [
+            "VPC endpoint",
+            "Resource policy"
+          ]
+        },
+        {
+          "label": "Domains",
+          "children": [
+            "Custom domain",
+            "ACM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Private API policy",
+      "scenario": "Resource policy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only callers via that VPC endpoint can invoke."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Deny\", \"Principal\": \"*\", \"Action\": \"execute-api:Invoke\", \"Resource\": \"execute-api:/*\",\n  \"Condition\": {\"StringNotEquals\": {\"aws:SourceVpce\": \"vpce-0abc123\"}}\n}"
+        }
+      ],
+      "outcome": "exposure matched to audience."
+    },
+    "summary": {
+      "points": [
+        "Edge for global.",
+        "Regional for control.",
+        "Private for internal."
+      ]
+    },
+    "check": [
+      {
+        "q": "How is a private API Gateway endpoint reached?",
+        "a": "Through an execute-api interface VPC endpoint, restricted by a resource policy."
+      }
+    ]
+  },
+  "throttling-the-token-bucket-algorithm": {
+    "core": "API Gateway throttles with token buckets: a steady rate (requests per second refill) and a burst (bucket size). Limits apply at account/region level, then stage and method level, and per client via usage plans with API keys. Excess requests get 429 Too Many Requests, and clients should retry with exponential backoff and jitter.",
+    "first_principles": {
+      "problem": "One client's retry storm consumes the account's limit and throttles everyone else.",
+      "truths": [
+        "Shared limits need fair allocation.",
+        "Bursts are normal; sustained overload isn't.",
+        "Clients must handle 429s."
+      ],
+      "derivation": [
+        "Know the **account-level limit** (default ~10k rps, 5k burst).",
+        "Set **stage/method limits**.",
+        "Create **usage plans** per client tier.",
+        "Return **429**; clients **backoff with jitter**.",
+        "Protect backends with **lower route limits**."
+      ]
+    },
+    "analogy": {
+      "title": "Tokens dripping into a cup at a turnstile",
+      "story": "Each entry uses a token; a full cup allows a short rush, then entries match the drip rate.",
+      "mapping": [
+        [
+          "Drip rate",
+          "Rate limit"
+        ],
+        [
+          "Cup size",
+          "Burst"
+        ],
+        [
+          "No token",
+          "429 response"
+        ]
+      ],
+      "breaks": "Turnstiles block physically; clients can ignore 429s and keep retrying unless they're well-behaved."
+    },
+    "mindmap": {
+      "center": "Throttling",
+      "branches": [
+        {
+          "label": "Algorithm",
+          "children": [
+            "Token bucket",
+            "Rate",
+            "Burst"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Account",
+            "Stage",
+            "Method",
+            "Usage plan"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "429"
+          ]
+        },
+        {
+          "label": "Client",
+          "children": [
+            "Exponential backoff",
+            "Jitter"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Usage plan tiers",
+      "scenario": "Config.",
+      "flow": [
+        "Free tier: 10 rps, burst 20, 10k/day quota",
+        "Pro tier: 200 rps, burst 400, no quota",
+        "Keys assigned per customer"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fair, monetisable access."
+        }
+      ],
+      "code": [],
+      "outcome": "protected backends and fair clients."
+    },
+    "summary": {
+      "points": [
+        "Token bucket.",
+        "Layered limits.",
+        "Clients back off."
+      ]
+    },
+    "check": [
+      {
+        "q": "What status code does API Gateway return when throttling?",
+        "a": "429 Too Many Requests."
+      }
+    ]
+  },
+  "custom-authorizers-the-lambda-bouncer": {
+    "core": "A Lambda authorizer runs your code to validate a token (TOKEN type) or request parameters (REQUEST type) and returns an IAM policy (REST) or simple allow/deny with context (HTTP API). Results are cached by identity source for a TTL, so the authorizer doesn't run on every call. Use it for custom tokens, external IdPs or fine-grained rules.",
+    "first_principles": {
+      "problem": "An API must validate tokens from a legacy identity system that isn't OIDC-compatible.",
+      "truths": [
+        "Not all identity systems issue JWTs.",
+        "Authorisation logic can be custom.",
+        "Running auth per request adds latency and cost."
+      ],
+      "derivation": [
+        "Prefer **JWT/Cognito authorizers** when possible.",
+        "Use **Lambda authorizer** for custom logic.",
+        "Return **policy + context** (user ID, tenant).",
+        "Set **cache TTL** with the right identity sources.",
+        "**Fail closed** on errors."
+      ]
+    },
+    "analogy": {
+      "title": "A nightclub bouncer with a custom guest list",
+      "story": "Checks your ID against their rules and stamps your hand so you don't queue again for a while.",
+      "mapping": [
+        [
+          "Bouncer",
+          "Lambda authorizer"
+        ],
+        [
+          "Hand stamp",
+          "Cached result"
+        ],
+        [
+          "Guest list rules",
+          "Custom logic"
+        ]
+      ],
+      "breaks": "Hand stamps are checked by eye; cached policies must cover all routes the caller will use."
+    },
+    "mindmap": {
+      "center": "Lambda Authorizers",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "TOKEN",
+            "REQUEST"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "IAM policy (REST)",
+            "Simple response (HTTP)",
+            "Context"
+          ]
+        },
+        {
+          "label": "Caching",
+          "children": [
+            "TTL",
+            "Identity sources"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "JWT",
+            "Cognito",
+            "IAM"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Fail closed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Simple HTTP API authorizer",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Backend receives trusted userId and tenant."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def handler(event, _):\n    token = event['headers'].get('authorization', '')\n    user = legacy_validate(token)\n    if not user:\n        return {'isAuthorized': False}\n    return {'isAuthorized': True, 'context': {'userId': user.id, 'tenant': user.tenant}}"
+        }
+      ],
+      "outcome": "custom auth at the edge."
+    },
+    "summary": {
+      "points": [
+        "Custom validation.",
+        "Cache results.",
+        "Pass context downstream."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why cache Lambda authorizer results?",
+        "a": "To avoid invoking the authorizer on every request, reducing latency and cost."
+      }
+    ]
+  },
+  "integration-types-how-api-gateway-connects-to-your-backend": {
+    "core": "Integrations connect routes to backends: Lambda proxy (full request to Lambda), HTTP proxy (to any URL), AWS service integrations (directly call SQS, DynamoDB, Step Functions without Lambda), private integrations via VPC Link to NLB/ALB/Cloud Map, and mock integrations. Proxy integrations pass everything through; non-proxy ones transform with mapping templates.",
+    "first_principles": {
+      "problem": "A Lambda exists only to forward requests into SQS, adding cost and latency.",
+      "truths": [
+        "Glue functions add latency and failure points.",
+        "API Gateway can call AWS APIs directly.",
+        "Private backends need VPC connectivity."
+      ],
+      "derivation": [
+        "**Lambda proxy** for app logic.",
+        "**HTTP proxy** for existing services.",
+        "**AWS service integration** to skip glue Lambdas.",
+        "**VPC Link** for private ALB/NLB.",
+        "**Mock** for testing and CORS."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist routing calls",
+      "story": "Some go to staff (Lambda), some to another office (HTTP), some straight into the post tray (SQS).",
+      "mapping": [
+        [
+          "Staff",
+          "Lambda"
+        ],
+        [
+          "Other office",
+          "HTTP backend"
+        ],
+        [
+          "Post tray",
+          "Direct AWS service integration"
+        ]
+      ],
+      "breaks": "Receptionists can improvise; integrations need explicit mappings."
+    },
+    "mindmap": {
+      "center": "Integrations",
+      "branches": [
+        {
+          "label": "Lambda",
+          "children": [
+            "Proxy",
+            "Non-proxy"
+          ]
+        },
+        {
+          "label": "HTTP",
+          "children": [
+            "Proxy",
+            "Custom"
+          ]
+        },
+        {
+          "label": "AWS service",
+          "children": [
+            "SQS",
+            "DynamoDB",
+            "Step Functions",
+            "Kinesis"
+          ]
+        },
+        {
+          "label": "Private",
+          "children": [
+            "VPC Link",
+            "ALB/NLB/Cloud Map"
+          ]
+        },
+        {
+          "label": "Mock",
+          "children": [
+            "Testing",
+            "CORS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Direct SQS integration",
+      "scenario": "Flow.",
+      "flow": [
+        "POST /events",
+        "API Gateway SendMessage to SQS with IAM role",
+        "Return 202 Accepted",
+        "Workers consume asynchronously"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No glue Lambda; lower latency and cost."
+        }
+      ],
+      "code": [],
+      "outcome": "lean API backends."
+    },
+    "summary": {
+      "points": [
+        "Proxy for simplicity.",
+        "Direct service integrations.",
+        "VPC Link for private backends."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can API Gateway put a message on SQS without Lambda?",
+        "a": "Using an AWS service integration that calls SQS SendMessage with an IAM role."
+      }
+    ]
+  }
+}

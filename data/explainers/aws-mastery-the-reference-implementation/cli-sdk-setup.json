@@ -1,0 +1,620 @@
+{
+  "introduction-the-builders-tools": {
+    "core": "The AWS CLI and SDKs (boto3, JavaScript, Go, Java…) call the same signed HTTPS APIs as the console. Automating with them makes work repeatable, scriptable and reviewable. Correct setup of credentials, profiles, regions and MFA is the foundation for safe automation.",
+    "first_principles": {
+      "problem": "Engineers click through the console for repetitive tasks and can't reproduce what they did.",
+      "truths": [
+        "Every console action is an API call.",
+        "Scripts are repeatable.",
+        "Credentials must be handled carefully."
+      ],
+      "derivation": [
+        "Install **AWS CLI v2**.",
+        "Use **IAM Identity Center (SSO)** for credentials.",
+        "Configure **profiles and regions**.",
+        "Use **SDKs** for applications.",
+        "Never commit **access keys**."
+      ]
+    },
+    "analogy": {
+      "title": "Power tools versus hand tools",
+      "story": "Faster and repeatable, but you need to learn the safety switches.",
+      "mapping": [
+        [
+          "Power tools",
+          "CLI/SDK"
+        ],
+        [
+          "Hand tools",
+          "Console clicks"
+        ],
+        [
+          "Safety switches",
+          "Credential hygiene"
+        ]
+      ],
+      "breaks": "Power tools are physical; leaked credentials can be misused from anywhere."
+    },
+    "mindmap": {
+      "center": "CLI & SDK",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "CLI v2",
+            "boto3",
+            "JS/Go/Java SDKs"
+          ]
+        },
+        {
+          "label": "Auth",
+          "children": [
+            "SSO",
+            "Roles",
+            "Profiles"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Region",
+            "Output format"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "No hard-coded keys",
+            "Least privilege"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A repeatable task",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Same answer every time, scriptable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 describe-instances --filters Name=tag:env,Values=dev \\\n  --query 'Reservations[].Instances[].[InstanceId,State.Name]' --output table"
+        }
+      ],
+      "outcome": "automation-ready tooling."
+    },
+    "summary": {
+      "points": [
+        "Same APIs as console.",
+        "Repeatable scripts.",
+        "Credential safety first."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefer CLI/SDK automation over console clicks?",
+        "a": "It's repeatable, reviewable and scriptable, reducing human error."
+      }
+    ]
+  },
+  "initial-configuration-your-first-aws-configure": {
+    "core": "aws configure sso (or aws configure for keys) writes ~/.aws/config (profiles, region, output, SSO settings) and ~/.aws/credentials (static keys, if used). Modern setups use IAM Identity Center: aws sso login obtains short-lived credentials cached locally, avoiding long-lived access keys entirely.",
+    "first_principles": {
+      "problem": "A developer pastes admin access keys into aws configure and they leak in a screenshot.",
+      "truths": [
+        "Static keys are long-lived risks.",
+        "SSO tokens expire automatically.",
+        "Config and credentials files are separate."
+      ],
+      "derivation": [
+        "Run **aws configure sso**.",
+        "Set **default region and output**.",
+        "**aws sso login** daily.",
+        "Verify with **aws sts get-caller-identity**.",
+        "Avoid **static keys**; rotate if unavoidable."
+      ]
+    },
+    "analogy": {
+      "title": "A temporary visitor badge versus a permanent master key",
+      "story": "The badge expires tonight; the key works until someone changes the locks.",
+      "mapping": [
+        [
+          "Visitor badge",
+          "SSO session credentials"
+        ],
+        [
+          "Master key",
+          "Static access keys"
+        ],
+        [
+          "Front desk",
+          "Identity Center"
+        ]
+      ],
+      "breaks": "Badges are visible; credential files can be copied silently, so protect your laptop too."
+    },
+    "mindmap": {
+      "center": "Initial Config",
+      "branches": [
+        {
+          "label": "Files",
+          "children": [
+            "~/.aws/config",
+            "~/.aws/credentials"
+          ]
+        },
+        {
+          "label": "SSO",
+          "children": [
+            "configure sso",
+            "sso login",
+            "Token cache"
+          ]
+        },
+        {
+          "label": "Settings",
+          "children": [
+            "Region",
+            "Output"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "sts get-caller-identity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SSO profile",
+      "scenario": "Config file.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Use",
+          "detail": "aws sso login --profile dev && aws sts get-caller-identity --profile dev"
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[profile dev]\nsso_session = corp\nsso_account_id = 111122223333\nsso_role_name = Developer\nregion = eu-west-1\noutput = json\n\n[sso-session corp]\nsso_start_url = https://corp.awsapps.com/start\nsso_region = eu-west-1\nsso_registration_scopes = sso:account:access"
+        }
+      ],
+      "outcome": "short-lived, auditable CLI access."
+    },
+    "summary": {
+      "points": [
+        "Prefer SSO.",
+        "Know the two files.",
+        "Verify identity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which command shows who the CLI is authenticated as?",
+        "a": "aws sts get-caller-identity."
+      }
+    ]
+  },
+  "profiles-managing-multiple-aws-accounts": {
+    "core": "Named profiles in ~/.aws/config represent account/role/region combinations: SSO profiles, or role-chaining profiles (role_arn + source_profile) for cross-account assume-role. Select with --profile or AWS_PROFILE, and use clear naming (company-env-role) to avoid running commands in the wrong account.",
+    "first_principles": {
+      "problem": "An engineer deletes resources in production thinking they were in dev.",
+      "truths": [
+        "People work across many accounts.",
+        "Ambiguity causes costly mistakes.",
+        "Roles can be chained."
+      ],
+      "derivation": [
+        "One **profile per account/role**.",
+        "**Descriptive names** (acme-prod-readonly).",
+        "Use **role_arn + source_profile** for assume-role.",
+        "Set **AWS_PROFILE** per terminal; show it in your **prompt**.",
+        "Default to **read-only** roles in prod."
+      ]
+    },
+    "analogy": {
+      "title": "Separate, clearly labelled keyrings",
+      "story": "One for home, one for the office, one for the warehouse, so you don't open the wrong door.",
+      "mapping": [
+        [
+          "Keyrings",
+          "Profiles"
+        ],
+        [
+          "Labels",
+          "Profile names"
+        ],
+        [
+          "Wrong door",
+          "Wrong account"
+        ]
+      ],
+      "breaks": "Keys only open matching locks; credentials work in any account they're valid for, silently."
+    },
+    "mindmap": {
+      "center": "Profiles",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "SSO",
+            "Assume-role",
+            "Static (avoid)"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "--profile",
+            "AWS_PROFILE"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Clear names",
+            "Prompt indicator",
+            "Read-only prod"
+          ]
+        },
+        {
+          "label": "Chaining",
+          "children": [
+            "role_arn",
+            "source_profile",
+            "mfa_serial"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Assume-role profile",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explicit, MFA-gated prod admin access."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[profile acme-prod-admin]\nrole_arn = arn:aws:iam::999988887777:role/BreakGlassAdmin\nsource_profile = acme-identity\nmfa_serial = arn:aws:iam::111122223333:mfa/alice\nregion = eu-west-1"
+        }
+      ],
+      "outcome": "no wrong-account accidents."
+    },
+    "summary": {
+      "points": [
+        "Profile per context.",
+        "Clear names.",
+        "Show it in the prompt."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you make a profile assume a role in another account?",
+        "a": "Set role_arn and source_profile (optionally mfa_serial) in the profile."
+      }
+    ]
+  },
+  "credential-provider-chain-the-hierarchy-of-config": {
+    "core": "SDKs and the CLI search for credentials in order: explicit code/CLI options, environment variables (AWS_ACCESS_KEY_ID…), web identity token (IRSA/OIDC), shared config and credentials files (profiles, SSO), container credentials (ECS task role) and instance metadata (EC2 role). The first source found wins, which explains many 'wrong identity' surprises.",
+    "first_principles": {
+      "problem": "A script uses old environment-variable keys instead of the intended role, and gets AccessDenied.",
+      "truths": [
+        "Multiple credential sources can coexist.",
+        "Order determines which wins.",
+        "Environments differ (laptop, container, EC2)."
+      ],
+      "derivation": [
+        "Know the **chain order**.",
+        "**Unset stale env vars**.",
+        "In AWS compute, rely on **roles** (task/instance/IRSA).",
+        "Debug with **get-caller-identity**.",
+        "Avoid **hard-coded** credentials in code."
+      ]
+    },
+    "analogy": {
+      "title": "Checking pockets for keys in a fixed order",
+      "story": "Jacket first, then trousers, then bag; you use the first keys you find, even if they're old.",
+      "mapping": [
+        [
+          "Jacket pocket",
+          "Environment variables"
+        ],
+        [
+          "Bag",
+          "Config files"
+        ],
+        [
+          "Building key safe",
+          "Instance metadata"
+        ]
+      ],
+      "breaks": "You'd notice wrong keys; the SDK silently uses whatever it finds first."
+    },
+    "mindmap": {
+      "center": "Credential Chain",
+      "branches": [
+        {
+          "label": "Order",
+          "children": [
+            "Explicit",
+            "Env vars",
+            "Web identity",
+            "Shared files/SSO",
+            "Container role",
+            "Instance role"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Stale env vars",
+            "Hard-coded keys"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "get-caller-identity"
+          ]
+        },
+        {
+          "label": "Best",
+          "children": [
+            "Roles in AWS compute"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Debugging identity",
+      "scenario": "Shell.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Old keys in env took precedence over the SSO profile."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "env | grep AWS_\nunset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN\naws sts get-caller-identity"
+        }
+      ],
+      "outcome": "predictable credential resolution."
+    },
+    "summary": {
+      "points": [
+        "First found wins.",
+        "Env vars beat profiles.",
+        "Roles in AWS compute."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which takes precedence: environment variable credentials or a profile in ~/.aws/config?",
+        "a": "Environment variables (unless a profile is explicitly specified in code or via --profile)."
+      }
+    ]
+  },
+  "mfa-on-cli-the-access-denied-trap": {
+    "core": "If IAM policies require MFA (aws:MultiFactorAuthPresent), long-lived CLI keys get AccessDenied because their requests carry no MFA context. Solutions: use SSO (MFA at login), configure mfa_serial on an assume-role profile so the CLI prompts for a code, or call sts get-session-token with --serial-number and --token-code for temporary MFA credentials.",
+    "first_principles": {
+      "problem": "A user with MFA-enforced policies can use the console but gets AccessDenied on every CLI command.",
+      "truths": [
+        "Console sessions include MFA context.",
+        "Static keys don't.",
+        "Temporary credentials can carry MFA context."
+      ],
+      "derivation": [
+        "Prefer **SSO** (MFA enforced at sign-in).",
+        "Use **mfa_serial** in assume-role profiles.",
+        "Or **sts get-session-token** with MFA.",
+        "Write policies with **BoolIfExists** carefully.",
+        "Cache sessions to avoid repeated prompts."
+      ]
+    },
+    "analogy": {
+      "title": "A secure building that needs a badge plus a PIN",
+      "story": "Your badge alone works on the lobby door but not on secure floors until you enter the PIN.",
+      "mapping": [
+        [
+          "Badge",
+          "Access keys"
+        ],
+        [
+          "PIN",
+          "MFA code"
+        ],
+        [
+          "Secure floor",
+          "MFA-required actions"
+        ]
+      ],
+      "breaks": "PINs are typed each time; MFA sessions last for hours once established."
+    },
+    "mindmap": {
+      "center": "MFA on CLI",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Static keys lack MFA context"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "SSO",
+            "mfa_serial + role",
+            "get-session-token"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "aws:MultiFactorAuthPresent",
+            "BoolIfExists"
+          ]
+        },
+        {
+          "label": "UX",
+          "children": [
+            "Session caching"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "MFA session",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "CLI requests now carry MFA context for 12 hours."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws sts get-session-token --serial-number arn:aws:iam::111122223333:mfa/alice --token-code 123456 --duration-seconds 43200\n# export the returned AccessKeyId/SecretAccessKey/SessionToken"
+        }
+      ],
+      "outcome": "MFA-protected CLI access that works."
+    },
+    "summary": {
+      "points": [
+        "Static keys lack MFA.",
+        "Use SSO or mfa_serial.",
+        "Session tokens carry MFA."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do MFA-required policies deny plain access-key CLI calls?",
+        "a": "Requests signed with long-term keys don't include MFA authentication context."
+      }
+    ]
+  },
+  "boto3-session-management-writing-correct-python-code": {
+    "core": "In boto3, a Session holds credentials, region and configuration; clients and resources come from a session. Use explicit sessions per profile or role, create clients once and reuse them, configure retries and timeouts via botocore Config, and use paginators for list operations. Clients are thread-safe; sessions and resources aren't.",
+    "first_principles": {
+      "problem": "A script silently uses the wrong region, misses results past the first page and crashes under throttling.",
+      "truths": [
+        "Defaults depend on environment.",
+        "APIs paginate.",
+        "Throttling needs retries."
+      ],
+      "derivation": [
+        "Create **boto3.Session(profile_name, region_name)**.",
+        "**Reuse clients**.",
+        "Configure **retries (adaptive) and timeouts**.",
+        "Use **paginators**.",
+        "Share **clients, not sessions**, across threads."
+      ]
+    },
+    "analogy": {
+      "title": "A configured travel adapter",
+      "story": "Set it once for the right country and voltage, then plug in all your devices.",
+      "mapping": [
+        [
+          "Adapter settings",
+          "Session config"
+        ],
+        [
+          "Devices",
+          "Clients"
+        ],
+        [
+          "Country",
+          "Region/account"
+        ]
+      ],
+      "breaks": "Adapters don't page through results; you must use paginators."
+    },
+    "mindmap": {
+      "center": "boto3 Sessions",
+      "branches": [
+        {
+          "label": "Session",
+          "children": [
+            "Credentials",
+            "Region",
+            "Profile"
+          ]
+        },
+        {
+          "label": "Clients",
+          "children": [
+            "Reuse",
+            "Thread-safe"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Retries adaptive",
+            "Timeouts"
+          ]
+        },
+        {
+          "label": "Pagination",
+          "children": [
+            "get_paginator"
+          ]
+        },
+        {
+          "label": "Threads",
+          "children": [
+            "Session per thread"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Correct boto3 usage",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right account, all pages, resilient to throttling."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import boto3\nfrom botocore.config import Config\nsession = boto3.Session(profile_name='acme-dev', region_name='eu-west-1')\ns3 = session.client('s3', config=Config(retries={'mode': 'adaptive', 'max_attempts': 10}, connect_timeout=5, read_timeout=30))\nfor page in s3.get_paginator('list_objects_v2').paginate(Bucket='logs', Prefix='2026/10/'):\n    for obj in page.get('Contents', []):\n        print(obj['Key'])"
+        }
+      ],
+      "outcome": "correct, robust automation code."
+    },
+    "summary": {
+      "points": [
+        "Explicit sessions.",
+        "Paginate.",
+        "Configure retries."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use paginators in boto3?",
+        "a": "List APIs return results in pages; paginators automatically fetch all pages."
+      }
+    ]
+  }
+}

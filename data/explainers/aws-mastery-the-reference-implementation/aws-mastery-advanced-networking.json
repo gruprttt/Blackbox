@@ -1,0 +1,737 @@
+{
+  "introduction-when-simple-networking-breaks-down": {
+    "core": "A single VPC with public and private subnets is simple. At scale, with hundreds of VPCs across accounts and regions plus on-premises links, you need transitive routing hubs, private service access, centralised inspection and visibility, and the flat peering model breaks down.",
+    "first_principles": {
+      "problem": "50 VPCs need to talk to each other and to on-prem, and the peering mesh becomes unmanageable.",
+      "truths": [
+        "Full mesh needs n(n−1)/2 connections.",
+        "Overlapping CIDRs prevent routing.",
+        "Security teams need central inspection."
+      ],
+      "derivation": [
+        "Plan **non-overlapping CIDRs** (IPAM).",
+        "Use a **hub-and-spoke** (Transit Gateway).",
+        "Use **PrivateLink** for service access.",
+        "**Centralise** egress and inspection.",
+        "Enable **flow logs** everywhere."
+      ]
+    },
+    "analogy": {
+      "title": "A town's roads versus a national motorway network",
+      "story": "Local roads work for a village; a country needs motorways and junctions.",
+      "mapping": [
+        [
+          "Village roads",
+          "Single VPC"
+        ],
+        [
+          "Motorway hubs",
+          "Transit Gateway"
+        ],
+        [
+          "Private driveways",
+          "PrivateLink"
+        ]
+      ],
+      "breaks": "Roads carry anyone; network paths should be explicitly permitted."
+    },
+    "mindmap": {
+      "center": "Networking at Scale",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "Mesh explosion",
+            "Overlapping CIDRs",
+            "Inspection"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Transit Gateway",
+            "PrivateLink",
+            "IPAM",
+            "Flow logs"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Hub and spoke",
+            "Central egress"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Connection count",
+      "scenario": "Peering vs hub.",
+      "flow": [
+        "50 VPCs full mesh: 1,225 peerings",
+        "Transit Gateway: 50 attachments"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Linear instead of quadratic growth."
+        }
+      ],
+      "code": [],
+      "outcome": "a network that scales."
+    },
+    "summary": {
+      "points": [
+        "Mesh doesn't scale.",
+        "Plan IP space.",
+        "Hub and spoke."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many peering connections does a full mesh of 20 VPCs need?",
+        "a": "190 (20 × 19 ÷ 2)."
+      }
+    ]
+  },
+  "the-limits-of-vpc-peering": {
+    "core": "VPC peering connects two VPCs privately over the AWS backbone with no bandwidth bottleneck, but it's non-transitive (A–B and B–C doesn't give A–C), can't have overlapping CIDRs, can't use the peer's internet or VPN gateway (no edge-to-edge routing), and must be managed pairwise.",
+    "first_principles": {
+      "problem": "Traffic from VPC A to VPC C via B fails even though both peerings exist.",
+      "truths": [
+        "Peering is a point-to-point link.",
+        "Routes aren't propagated through peers.",
+        "CIDRs must be unique."
+      ],
+      "derivation": [
+        "Use peering for **a few VPCs** with heavy traffic.",
+        "Add **routes on both sides**.",
+        "Update **security groups** (can reference peer SGs in-region).",
+        "Move to **Transit Gateway** as count grows."
+      ]
+    },
+    "analogy": {
+      "title": "Private footbridges between neighbouring houses",
+      "story": "You can visit your neighbour, but you can't walk through their house to the next street.",
+      "mapping": [
+        [
+          "Footbridge",
+          "Peering connection"
+        ],
+        [
+          "Walking through",
+          "Transitive routing"
+        ],
+        [
+          "Next street",
+          "Third VPC"
+        ]
+      ],
+      "breaks": "Footbridges are physical; peering has no throughput cap beyond instance limits."
+    },
+    "mindmap": {
+      "center": "VPC Peering",
+      "branches": [
+        {
+          "label": "Pros",
+          "children": [
+            "Simple",
+            "No bandwidth bottleneck",
+            "Low cost"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Non-transitive",
+            "No overlap",
+            "No edge routing",
+            "Pairwise"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Routes both sides",
+            "SGs"
+          ]
+        },
+        {
+          "label": "Next",
+          "children": [
+            "Transit Gateway"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Peering setup",
+      "scenario": "Routes.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A and B talk; C still needs its own peering."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 create-vpc-peering-connection --vpc-id vpc-a --peer-vpc-id vpc-b\naws ec2 create-route --route-table-id rtb-a --destination-cidr-block 10.2.0.0/16 --vpc-peering-connection-id pcx-123\naws ec2 create-route --route-table-id rtb-b --destination-cidr-block 10.1.0.0/16 --vpc-peering-connection-id pcx-123"
+        }
+      ],
+      "outcome": "peering used where it fits."
+    },
+    "summary": {
+      "points": [
+        "Point to point.",
+        "Non-transitive.",
+        "Unique CIDRs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't VPC A reach the internet through VPC B's NAT gateway over peering?",
+        "a": "Peering doesn't support edge-to-edge routing through the peer's gateways."
+      }
+    ]
+  },
+  "the-solution-aws-transit-gateway-tgw": {
+    "core": "Transit Gateway is a regional hub router: VPCs, VPNs and Direct Connect attach to it, and its route tables control which attachments can reach which. It provides transitive routing, segmentation (separate route tables for prod/dev), inter-region peering and centralised egress or inspection.",
+    "first_principles": {
+      "problem": "Dozens of VPCs plus on-prem need managed, segmented connectivity.",
+      "truths": [
+        "A hub reduces connections to n.",
+        "Route tables can segment traffic.",
+        "Centralisation enables inspection."
+      ],
+      "derivation": [
+        "**Attach** VPCs, VPN, DX gateways.",
+        "Create **route tables** per segment.",
+        "**Associate** attachments and **propagate** routes.",
+        "**Share** via RAM across accounts.",
+        "Route egress through an **inspection VPC**."
+      ]
+    },
+    "analogy": {
+      "title": "An airport hub",
+      "story": "Every city connects to the hub, and the hub's rules decide which connections are allowed.",
+      "mapping": [
+        [
+          "Hub airport",
+          "TGW"
+        ],
+        [
+          "Spoke cities",
+          "VPCs"
+        ],
+        [
+          "Routing rules",
+          "TGW route tables"
+        ]
+      ],
+      "breaks": "Airports add travel time; TGW adds a small hop and per-GB processing cost."
+    },
+    "mindmap": {
+      "center": "Transit Gateway",
+      "branches": [
+        {
+          "label": "Attachments",
+          "children": [
+            "VPC",
+            "VPN",
+            "DX",
+            "Peering"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "Route tables",
+            "Association",
+            "Propagation"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Segmentation",
+            "Central egress",
+            "Inspection"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "RAM sharing",
+            "Per-GB cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Prod/dev segmentation",
+      "scenario": "Two route tables.",
+      "flow": [
+        "Prod VPCs associate with prod-rt",
+        "Dev VPCs associate with dev-rt",
+        "Both propagate to shared-services-rt",
+        "Prod and dev can't reach each other"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolation with shared services."
+        }
+      ],
+      "code": [],
+      "outcome": "scalable, segmented network."
+    },
+    "summary": {
+      "points": [
+        "Hub router.",
+        "Transitive routing.",
+        "Route tables segment."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does TGW isolate prod from dev while sharing services?",
+        "a": "Separate route tables: prod and dev only propagate to and learn routes from shared services, not each other."
+      }
+    ]
+  },
+  "privatelink-part-1-gateway-endpoints": {
+    "core": "Gateway endpoints let VPCs reach S3 and DynamoDB privately by adding a route (prefix list) in route tables. Traffic stays on the AWS network without NAT or internet gateways, is free, and can be restricted with endpoint policies and bucket policies (aws:SourceVpce).",
+    "first_principles": {
+      "problem": "Private subnets send terabytes to S3 through a NAT gateway, costing thousands a month.",
+      "truths": [
+        "NAT gateways charge per GB processed.",
+        "S3 and DynamoDB support gateway endpoints.",
+        "Routes direct traffic to the endpoint."
+      ],
+      "derivation": [
+        "Create **gateway endpoint** for S3/DynamoDB.",
+        "Associate with **route tables**.",
+        "Add **endpoint policy** (allowed buckets).",
+        "Use **bucket policy** with aws:SourceVpce.",
+        "Note: **in-region only**, not reachable from on-prem."
+      ]
+    },
+    "analogy": {
+      "title": "A private service road to the warehouse",
+      "story": "No toll booth (NAT), no public highway.",
+      "mapping": [
+        [
+          "Service road",
+          "Gateway endpoint"
+        ],
+        [
+          "Toll booth",
+          "NAT gateway charges"
+        ],
+        [
+          "Warehouse",
+          "S3"
+        ]
+      ],
+      "breaks": "Service roads can be used by anyone nearby; endpoint policies restrict exactly who and what."
+    },
+    "mindmap": {
+      "center": "Gateway Endpoints",
+      "branches": [
+        {
+          "label": "Services",
+          "children": [
+            "S3",
+            "DynamoDB"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Route table prefix list"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Free",
+            "Private",
+            "No NAT cost"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Endpoint policy",
+            "aws:SourceVpce"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Same region",
+            "Not from on-prem"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create an S3 gateway endpoint",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "NAT data-processing charges for S3 drop to zero."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 create-vpc-endpoint --vpc-id vpc-123 --service-name com.amazonaws.eu-west-1.s3 \\\n  --vpc-endpoint-type Gateway --route-table-ids rtb-private-a rtb-private-b"
+        }
+      ],
+      "outcome": "cheaper, private S3 access."
+    },
+    "summary": {
+      "points": [
+        "S3 and DynamoDB only.",
+        "Free and route-based.",
+        "Lock down with policies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do gateway endpoints save money?",
+        "a": "S3/DynamoDB traffic bypasses the NAT gateway, avoiding its per-GB processing charge."
+      }
+    ]
+  },
+  "privatelink-part-2-interface-endpoints": {
+    "core": "Interface endpoints (PrivateLink) place ENIs with private IPs in your subnets for AWS services (SQS, KMS, ECR, STS…) or third-party and internal services exposed via a Network Load Balancer. Consumers reach the service privately without routing between VPCs, and overlapping CIDRs don't matter.",
+    "first_principles": {
+      "problem": "A team wants to expose an internal API to 200 consumer VPCs without peering or exposing networks.",
+      "truths": [
+        "ENIs give private IPs in the consumer VPC.",
+        "Only the service, not the whole network, is exposed.",
+        "Private DNS can override public names."
+      ],
+      "derivation": [
+        "**AWS services**: create interface endpoints, enable private DNS.",
+        "**Your services**: NLB → endpoint service.",
+        "Consumers create **endpoints**; you **approve** them.",
+        "Secure with **security groups** on endpoint ENIs.",
+        "Cost: **per hour per AZ + per GB**."
+      ]
+    },
+    "analogy": {
+      "title": "A service hatch in a wall",
+      "story": "You can order through the hatch without either side entering the other's building.",
+      "mapping": [
+        [
+          "Hatch",
+          "Interface endpoint"
+        ],
+        [
+          "Kitchen",
+          "Provider service"
+        ],
+        [
+          "Your building",
+          "Consumer VPC"
+        ]
+      ],
+      "breaks": "Hatches are one-way in practice; PrivateLink is consumer-initiated only."
+    },
+    "mindmap": {
+      "center": "Interface Endpoints",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "ENIs",
+            "Private IPs",
+            "Private DNS"
+          ]
+        },
+        {
+          "label": "AWS services",
+          "children": [
+            "SQS",
+            "KMS",
+            "ECR",
+            "STS"
+          ]
+        },
+        {
+          "label": "Your services",
+          "children": [
+            "NLB",
+            "Endpoint service",
+            "Approval"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No routing",
+            "Overlap OK"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Hourly per AZ",
+            "Per GB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ECR pulls without NAT",
+      "scenario": "Endpoints for a private EKS cluster.",
+      "flow": [
+        "Interface endpoints: ecr.api, ecr.dkr, sts, logs",
+        "Gateway endpoint: s3 (image layers)",
+        "Nodes pull images fully privately"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No internet path needed."
+        }
+      ],
+      "code": [],
+      "outcome": "private access to services."
+    },
+    "summary": {
+      "points": [
+        "ENIs in your subnets.",
+        "Expose services, not networks.",
+        "Works with overlapping CIDRs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does PrivateLink work with overlapping CIDRs?",
+        "a": "Consumers connect to an ENI in their own VPC; there's no routing between the two networks."
+      }
+    ]
+  },
+  "seeing-the-invisible-vpc-flow-logs": {
+    "core": "VPC Flow Logs record metadata about IP traffic (source, destination, ports, protocol, bytes, ACCEPT/REJECT) at VPC, subnet or ENI level, delivered to CloudWatch Logs, S3 or Firehose. They show who talks to whom, reveal blocked traffic and support security investigations; they don't capture payloads.",
+    "first_principles": {
+      "problem": "A connection times out and nobody knows if a security group or NACL is dropping it.",
+      "truths": [
+        "Network traffic is invisible by default.",
+        "REJECT records show blocked flows.",
+        "Metadata is enough for most investigations."
+      ],
+      "derivation": [
+        "Enable at **VPC level** to S3.",
+        "Use **custom format** (add pkt-srcaddr, tcp-flags, flow-direction).",
+        "Query with **Athena**.",
+        "Look for **REJECTs**.",
+        "Use for **anomaly detection** (GuardDuty uses them)."
+      ]
+    },
+    "analogy": {
+      "title": "Phone call records without recordings",
+      "story": "You know who called whom, when and for how long, not what was said.",
+      "mapping": [
+        [
+          "Call records",
+          "Flow logs"
+        ],
+        [
+          "Who called whom",
+          "Src/dst IPs"
+        ],
+        [
+          "Blocked calls",
+          "REJECT"
+        ]
+      ],
+      "breaks": "Phone records are complete; flow logs are aggregated per window and may skip some traffic (e.g. DNS to Route 53 resolver)."
+    },
+    "mindmap": {
+      "center": "Flow Logs",
+      "branches": [
+        {
+          "label": "Scope",
+          "children": [
+            "VPC",
+            "Subnet",
+            "ENI"
+          ]
+        },
+        {
+          "label": "Fields",
+          "children": [
+            "Src/dst",
+            "Ports",
+            "Bytes",
+            "Action"
+          ]
+        },
+        {
+          "label": "Destinations",
+          "children": [
+            "CloudWatch",
+            "S3",
+            "Firehose"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Debug drops",
+            "Security",
+            "Cost analysis"
+          ]
+        },
+        {
+          "label": "Not",
+          "children": [
+            "Payloads"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find rejected traffic",
+      "scenario": "Athena.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Port 5432 rejected from the app subnet: missing SG rule."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT srcaddr, dstaddr, dstport, count(*) AS n\nFROM vpc_flow_logs\nWHERE action = 'REJECT' AND dstaddr = '10.0.3.25'\nGROUP BY 1,2,3 ORDER BY n DESC LIMIT 20;"
+        }
+      ],
+      "outcome": "invisible drops made visible."
+    },
+    "summary": {
+      "points": [
+        "Metadata, not payloads.",
+        "REJECT reveals blocks.",
+        "Query with Athena."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do flow logs capture packet contents?",
+        "a": "No, only metadata about flows (addresses, ports, bytes, action)."
+      }
+    ]
+  },
+  "global-accelerator-vs-cloudfront-improving-performance": {
+    "core": "CloudFront is a CDN: it caches HTTP(S) content at the edge and can accelerate dynamic HTTP. Global Accelerator provides two static anycast IPs that route TCP/UDP traffic onto the AWS backbone at the nearest edge, then to healthy regional endpoints, with fast failover. It doesn't cache.",
+    "first_principles": {
+      "problem": "A multiplayer game (UDP) and a static website both want lower global latency.",
+      "truths": [
+        "Caching only helps cacheable HTTP content.",
+        "Non-HTTP protocols need network-level acceleration.",
+        "Static IPs simplify allow-listing."
+      ],
+      "derivation": [
+        "**CloudFront** for HTTP, caching, edge functions.",
+        "**Global Accelerator** for TCP/UDP, static IPs, fast regional failover.",
+        "**Both** use edge locations and the AWS backbone.",
+        "Pick by **protocol and caching** needs."
+      ]
+    },
+    "analogy": {
+      "title": "A local shop stocking items versus an express lane onto the motorway",
+      "story": "The shop serves popular items locally; the express lane gets you to the distant store faster.",
+      "mapping": [
+        [
+          "Local stock",
+          "CloudFront cache"
+        ],
+        [
+          "Express lane",
+          "Global Accelerator"
+        ],
+        [
+          "Motorway",
+          "AWS backbone"
+        ]
+      ],
+      "breaks": "Express lanes help everyone; GA helps only traffic you route through its IPs."
+    },
+    "mindmap": {
+      "center": "GA vs CloudFront",
+      "branches": [
+        {
+          "label": "CloudFront",
+          "children": [
+            "HTTP(S)",
+            "Caching",
+            "Edge compute"
+          ]
+        },
+        {
+          "label": "Global Accelerator",
+          "children": [
+            "TCP/UDP",
+            "Anycast static IPs",
+            "Fast failover"
+          ]
+        },
+        {
+          "label": "Shared",
+          "children": [
+            "Edge network",
+            "Backbone",
+            "Shield"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Protocol",
+            "Caching need"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing per workload",
+      "scenario": "Two apps.",
+      "flow": [
+        "Static site + API → CloudFront",
+        "UDP game servers in 3 regions → Global Accelerator",
+        "Partner needs fixed IPs → Global Accelerator"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each workload gets the right acceleration."
+        }
+      ],
+      "code": [],
+      "outcome": "lower latency for every protocol."
+    },
+    "summary": {
+      "points": [
+        "CloudFront caches HTTP.",
+        "GA accelerates TCP/UDP.",
+        "Both use the backbone."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you choose Global Accelerator over CloudFront?",
+        "a": "For non-HTTP (TCP/UDP) traffic, static anycast IPs, or fast cross-region failover without caching."
+      }
+    ]
+  }
+}

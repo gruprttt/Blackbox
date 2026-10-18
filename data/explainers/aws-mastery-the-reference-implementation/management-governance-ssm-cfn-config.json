@@ -1,0 +1,422 @@
+{
+  "introduction-cattle-pets-and-guardrails": {
+    "core": "Pets are hand-configured servers you nurse back to health; cattle are identical, replaceable instances built from code. At scale you manage cattle with automation (Systems Manager, CloudFormation) and keep the herd safe with guardrails that detect and correct drift (AWS Config, CloudTrail).",
+    "first_principles": {
+      "problem": "Hand-tuned servers can't be rebuilt, and nobody knows who changed what.",
+      "truths": [
+        "Manual changes are unrepeatable.",
+        "Replaceable infrastructure recovers faster.",
+        "Visibility and rules prevent drift."
+      ],
+      "derivation": [
+        "**Define** infrastructure as code (CloudFormation/CDK).",
+        "**Operate** fleets with Systems Manager.",
+        "**Record** API activity with CloudTrail.",
+        "**Evaluate** configuration with Config rules.",
+        "**Auto-remediate** violations."
+      ]
+    },
+    "analogy": {
+      "title": "A farm with fences and ear tags",
+      "story": "Animals are tracked by tag, fences keep them safe, and sick ones are replaced rather than nursed for months.",
+      "mapping": [
+        [
+          "Ear tags",
+          "Resource tags/IDs"
+        ],
+        [
+          "Fences",
+          "Guardrails"
+        ],
+        [
+          "Replacing livestock",
+          "Recreating instances"
+        ]
+      ],
+      "breaks": "Animals aren't clones; cloud instances from one image are identical."
+    },
+    "mindmap": {
+      "center": "Cattle & Guardrails",
+      "branches": [
+        {
+          "label": "Pets",
+          "children": [
+            "Hand-configured",
+            "Fragile"
+          ]
+        },
+        {
+          "label": "Cattle",
+          "children": [
+            "Immutable",
+            "From code"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "CloudFormation",
+            "Systems Manager"
+          ]
+        },
+        {
+          "label": "Guardrails",
+          "children": [
+            "CloudTrail",
+            "Config",
+            "Remediation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Replacing a broken server",
+      "scenario": "Pets vs cattle.",
+      "flow": [
+        "Pet: SSH in, debug for hours",
+        "Cattle: terminate; ASG launches a fresh one from the template",
+        "Root cause investigated from logs later"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Recovery in minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "repeatable, governed infrastructure."
+    },
+    "summary": {
+      "points": [
+        "Cattle, not pets.",
+        "Automate operations.",
+        "Guardrails detect drift."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key operational benefit of 'cattle' infrastructure?",
+        "a": "Broken instances are replaced from code quickly instead of being repaired by hand."
+      }
+    ]
+  },
+  "systems-manager-the-end-of-the-bastion-host": {
+    "core": "Systems Manager's agent lets you manage instances without SSH keys, open ports or bastions. Session Manager gives audited shell access via IAM, Run Command executes scripts across fleets, Patch Manager automates patching, Parameter Store holds config and secrets, and Automation runs runbooks.",
+    "first_principles": {
+      "problem": "A bastion host with shared SSH keys is a security risk and nobody audits sessions.",
+      "truths": [
+        "Open SSH ports are attack surface.",
+        "Shared keys can't be attributed.",
+        "Fleets need bulk operations."
+      ],
+      "derivation": [
+        "Install the **SSM Agent** and grant the instance role.",
+        "Use **Session Manager** (logged to S3/CloudWatch).",
+        "Use **Run Command** for fleet scripts.",
+        "Use **Patch Manager** with maintenance windows.",
+        "Store config in **Parameter Store**."
+      ]
+    },
+    "analogy": {
+      "title": "A remote control room instead of walking into each machine room",
+      "story": "You operate every machine from one console, with every action recorded.",
+      "mapping": [
+        [
+          "Control room",
+          "Systems Manager"
+        ],
+        [
+          "Walking in",
+          "SSH via bastion"
+        ],
+        [
+          "Recorded actions",
+          "Session logs"
+        ]
+      ],
+      "breaks": "Control rooms need wiring; SSM needs the agent and outbound access (or VPC endpoints)."
+    },
+    "mindmap": {
+      "center": "Systems Manager",
+      "branches": [
+        {
+          "label": "Access",
+          "children": [
+            "Session Manager",
+            "No SSH/bastion"
+          ]
+        },
+        {
+          "label": "Fleet ops",
+          "children": [
+            "Run Command",
+            "Automation"
+          ]
+        },
+        {
+          "label": "Maintenance",
+          "children": [
+            "Patch Manager",
+            "Maintenance windows"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Parameter Store"
+          ]
+        },
+        {
+          "label": "Inventory",
+          "children": [
+            "Fleet Manager"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shell without SSH",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No port 22, every session logged."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ssm start-session --target i-0abc123\naws ssm send-command --document-name AWS-RunShellScript \\\n  --targets Key=tag:role,Values=web --parameters commands='systemctl restart nginx'"
+        }
+      ],
+      "outcome": "secure, auditable operations."
+    },
+    "summary": {
+      "points": [
+        "No bastions.",
+        "IAM-controlled access.",
+        "Fleet automation."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is Session Manager more secure than SSH via a bastion?",
+        "a": "No inbound ports or shared keys; access is controlled by IAM and every session is logged."
+      }
+    ]
+  },
+  "cloudformation-managing-reality-vs-code": {
+    "core": "CloudFormation turns templates into stacks of resources, computing create/update/delete changes and rolling back on failure. Change sets preview impact, drift detection finds manual changes, stack policies and DeletionPolicy protect critical resources, and StackSets deploy across accounts and regions.",
+    "first_principles": {
+      "problem": "Someone edits a security group in the console and the template no longer matches reality.",
+      "truths": [
+        "Code should be the source of truth.",
+        "Manual changes create drift.",
+        "Updates can replace resources."
+      ],
+      "derivation": [
+        "**Review change sets** before updates.",
+        "**Detect drift** regularly.",
+        "Protect with **DeletionPolicy: Retain/Snapshot**.",
+        "Use **stack policies** and termination protection.",
+        "**StackSets** for org-wide baselines."
+      ]
+    },
+    "analogy": {
+      "title": "An architect's blueprint versus the actual building",
+      "story": "If builders change things without updating the blueprint, the next renovation goes wrong.",
+      "mapping": [
+        [
+          "Blueprint",
+          "Template"
+        ],
+        [
+          "Building",
+          "Deployed resources"
+        ],
+        [
+          "Unrecorded changes",
+          "Drift"
+        ]
+      ],
+      "breaks": "Buildings can't be rebuilt from blueprints in minutes; stacks can."
+    },
+    "mindmap": {
+      "center": "CloudFormation",
+      "branches": [
+        {
+          "label": "Core",
+          "children": [
+            "Templates",
+            "Stacks",
+            "Rollback"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Change sets",
+            "DeletionPolicy",
+            "Stack policy",
+            "Termination protection"
+          ]
+        },
+        {
+          "label": "Drift",
+          "children": [
+            "Detection"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "StackSets",
+            "Nested stacks"
+          ]
+        },
+        {
+          "label": "Higher level",
+          "children": [
+            "CDK"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Preview a risky update",
+      "scenario": "Change set.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Replacement=True on the database → stop and rethink."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws cloudformation create-change-set --stack-name db --change-set-name resize \\\n  --template-body file://db.yaml\naws cloudformation describe-change-set --stack-name db --change-set-name resize \\\n  --query 'Changes[].ResourceChange.[LogicalResourceId,Action,Replacement]'"
+        }
+      ],
+      "outcome": "no surprise replacements."
+    },
+    "summary": {
+      "points": [
+        "Code is truth.",
+        "Preview changes.",
+        "Detect drift."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a change set show you?",
+        "a": "Which resources will be added, modified or replaced (and whether replacement occurs) before you execute the update."
+      }
+    ]
+  },
+  "aws-config-vs-cloudtrail": {
+    "core": "CloudTrail records API calls: who did what, when and from where. Config records resource configuration state and its history, and evaluates it against rules (e.g. 'S3 buckets must block public access'), optionally auto-remediating. Together they answer 'who changed it?' and 'is it compliant now?'.",
+    "first_principles": {
+      "problem": "A bucket became public and the team can't tell who did it or whether others are also exposed.",
+      "truths": [
+        "Actions and state are different questions.",
+        "Compliance must be checked continuously.",
+        "Audit logs must be tamper-resistant."
+      ],
+      "derivation": [
+        "**Org trail** for CloudTrail to a locked S3 bucket.",
+        "**Config recorder** in every account/region.",
+        "**Config rules** and conformance packs.",
+        "**Auto-remediation** via SSM Automation.",
+        "**Aggregator** for org-wide view."
+      ]
+    },
+    "analogy": {
+      "title": "CCTV versus a building inspector",
+      "story": "CCTV shows who walked in and did something; the inspector checks whether the building meets code right now.",
+      "mapping": [
+        [
+          "CCTV",
+          "CloudTrail"
+        ],
+        [
+          "Inspector",
+          "Config"
+        ],
+        [
+          "Building code",
+          "Config rules"
+        ]
+      ],
+      "breaks": "Inspectors visit occasionally; Config evaluates on every change."
+    },
+    "mindmap": {
+      "center": "Config vs CloudTrail",
+      "branches": [
+        {
+          "label": "CloudTrail",
+          "children": [
+            "API calls",
+            "Who/when/where",
+            "Org trail"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Resource state",
+            "History",
+            "Rules",
+            "Remediation"
+          ]
+        },
+        {
+          "label": "Together",
+          "children": [
+            "Root cause",
+            "Compliance"
+          ]
+        },
+        {
+          "label": "Org",
+          "children": [
+            "Aggregator",
+            "Conformance packs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Public bucket investigation",
+      "scenario": "Both tools.",
+      "flow": [
+        "Config rule flags bucket non-compliant",
+        "Config timeline shows policy change at 14:02",
+        "CloudTrail: PutBucketPolicy by role dev-admin from IP x",
+        "Auto-remediation re-enables Block Public Access"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Who, what, and fixed in minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "accountable, compliant infrastructure."
+    },
+    "summary": {
+      "points": [
+        "CloudTrail = actions.",
+        "Config = state + rules.",
+        "Use both."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which service tells you a resource's configuration history and compliance?",
+        "a": "AWS Config."
+      }
+    ]
+  }
+}

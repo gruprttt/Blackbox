@@ -1,0 +1,511 @@
+{
+  "introduction-streams-vs-firehose": {
+    "core": "Kinesis Data Streams is a durable, ordered, replayable log of records split into shards. You build consumers that read at their own pace, with retention from 24 hours to 365 days. Amazon Data Firehose is a fully managed delivery pipe that buffers, optionally transforms and loads streaming data into S3, Redshift, OpenSearch or HTTP endpoints, with no consumers to write.",
+    "first_principles": {
+      "problem": "A team writes custom consumer code just to land clickstream data in S3.",
+      "truths": [
+        "Some streams need custom real-time processing.",
+        "Many just need delivery to storage.",
+        "Managed delivery removes code."
+      ],
+      "derivation": [
+        "**Data Streams** for custom, ordered, multi-consumer real-time processing.",
+        "**Firehose** for managed delivery to sinks.",
+        "**Chain** them (Streams → Firehose) when you need both.",
+        "Choose by **latency and control** needs."
+      ]
+    },
+    "analogy": {
+      "title": "A conveyor belt versus a delivery service",
+      "story": "The belt carries items past workers who process them; the delivery service just takes boxes to the warehouse.",
+      "mapping": [
+        [
+          "Conveyor belt",
+          "Data Streams"
+        ],
+        [
+          "Workers",
+          "Consumers"
+        ],
+        [
+          "Delivery service",
+          "Firehose"
+        ]
+      ],
+      "breaks": "Conveyor items are gone once taken; stream records can be re-read until retention expires."
+    },
+    "mindmap": {
+      "center": "Kinesis Family",
+      "branches": [
+        {
+          "label": "Data Streams",
+          "children": [
+            "Shards",
+            "Ordered",
+            "Replay",
+            "Custom consumers"
+          ]
+        },
+        {
+          "label": "Firehose",
+          "children": [
+            "Managed delivery",
+            "Buffering",
+            "Transforms"
+          ]
+        },
+        {
+          "label": "Sinks",
+          "children": [
+            "S3",
+            "Redshift",
+            "OpenSearch",
+            "HTTP"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "Streams → Firehose"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two pipelines",
+      "scenario": "Choices.",
+      "flow": [
+        "Fraud detection reading every event in order → Data Streams + Lambda",
+        "Clickstream archive to S3 Parquet → Firehose"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Custom code only where needed."
+        }
+      ],
+      "code": [],
+      "outcome": "right streaming tool per job."
+    },
+    "summary": {
+      "points": [
+        "Streams for processing.",
+        "Firehose for delivery.",
+        "Combine when needed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Kinesis service requires no consumer code to load data into S3?",
+        "a": "Amazon Data Firehose."
+      }
+    ]
+  },
+  "kinesis-data-streams-sharding-physics": {
+    "core": "Each shard ingests up to 1 MB/s or 1,000 records/s and serves 2 MB/s of reads shared by standard consumers. Records route to shards by hashing the partition key, preserving order per key. Choose provisioned shard counts or on-demand mode, and pick high-cardinality partition keys to avoid hot shards.",
+    "first_principles": {
+      "problem": "Producers get ProvisionedThroughputExceeded because all records use the same partition key.",
+      "truths": [
+        "Shards have fixed throughput.",
+        "Partition keys determine shard placement.",
+        "Order is per shard."
+      ],
+      "derivation": [
+        "Shards needed = **max(ingest MB/s ÷ 1, records/s ÷ 1,000)**.",
+        "Use **high-cardinality partition keys**.",
+        "Use **on-demand** for unpredictable traffic.",
+        "**Reshard** (split/merge) in provisioned mode.",
+        "**Retry with backoff** on throttling."
+      ]
+    },
+    "analogy": {
+      "title": "Toll booths on a motorway",
+      "story": "Each booth handles a fixed number of cars per minute; cars are assigned booths by licence plate.",
+      "mapping": [
+        [
+          "Booths",
+          "Shards"
+        ],
+        [
+          "Licence plate",
+          "Partition key"
+        ],
+        [
+          "Queue at one booth",
+          "Hot shard"
+        ]
+      ],
+      "breaks": "Drivers can switch booths; records with the same key always go to the same shard."
+    },
+    "mindmap": {
+      "center": "Shard Physics",
+      "branches": [
+        {
+          "label": "Limits",
+          "children": [
+            "1 MB/s or 1k rec/s in",
+            "2 MB/s out shared"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "Partition key hash"
+          ]
+        },
+        {
+          "label": "Ordering",
+          "children": [
+            "Per shard/key"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Provisioned",
+            "On-demand"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "Hot shards",
+            "Throttling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing",
+      "scenario": "Maths.",
+      "flow": [
+        "Peak 6 MB/s, 4,000 records/s",
+        "Shards = max(6, 4) = 6",
+        "Add headroom → 8 shards",
+        "Partition key = user_id"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No throttling, per-user ordering."
+        }
+      ],
+      "code": [],
+      "outcome": "correctly sized stream."
+    },
+    "summary": {
+      "points": [
+        "Know shard limits.",
+        "Good partition keys.",
+        "On-demand for spikes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the write limit per Kinesis shard?",
+        "a": "1 MB/s or 1,000 records/s."
+      }
+    ]
+  },
+  "enhanced-fan-out-breaking-the-read-limit": {
+    "core": "Standard consumers share each shard's 2 MB/s read limit and poll with GetRecords (max 5 calls/s per shard), so several consumers slow each other. Enhanced fan-out gives each registered consumer its own dedicated 2 MB/s per shard pushed over HTTP/2 (SubscribeToShard), with ~70 ms latency, at extra cost.",
+    "first_principles": {
+      "problem": "Adding a fourth consumer causes lag and throttling for all consumers of the stream.",
+      "truths": [
+        "Shared read throughput divides among consumers.",
+        "Polling adds latency.",
+        "Push delivery reduces latency."
+      ],
+      "derivation": [
+        "Use **standard consumers** for 1–2 consumers.",
+        "Use **enhanced fan-out** for many or latency-sensitive consumers.",
+        "**Register** each EFO consumer.",
+        "Lambda ESM supports **EFO**.",
+        "Weigh **per-consumer-shard-hour cost**."
+      ]
+    },
+    "analogy": {
+      "title": "A shared tap versus individual taps",
+      "story": "With one tap, everyone waits their turn; with individual taps, everyone fills at full speed.",
+      "mapping": [
+        [
+          "Shared tap",
+          "Standard 2 MB/s per shard"
+        ],
+        [
+          "Individual taps",
+          "EFO per consumer"
+        ],
+        [
+          "Water pressure",
+          "Throughput"
+        ]
+      ],
+      "breaks": "Taps cost the same; each EFO consumer adds cost."
+    },
+    "mindmap": {
+      "center": "Enhanced Fan-Out",
+      "branches": [
+        {
+          "label": "Standard",
+          "children": [
+            "Shared 2 MB/s",
+            "Polling",
+            "5 calls/s"
+          ]
+        },
+        {
+          "label": "EFO",
+          "children": [
+            "Dedicated 2 MB/s per consumer",
+            "HTTP/2 push",
+            "~70 ms"
+          ]
+        },
+        {
+          "label": "Use when",
+          "children": [
+            "Many consumers",
+            "Low latency"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Per consumer-shard hour + data"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Registering an EFO consumer",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fraud detector gets its own throughput."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws kinesis register-stream-consumer --stream-arn arn:aws:kinesis:eu-west-1:123:stream/events --consumer-name fraud-detector"
+        }
+      ],
+      "outcome": "many consumers without contention."
+    },
+    "summary": {
+      "points": [
+        "Standard shares reads.",
+        "EFO dedicates reads.",
+        "Pay per consumer."
+      ]
+    },
+    "check": [
+      {
+        "q": "How much read throughput does each EFO consumer get per shard?",
+        "a": "A dedicated 2 MB/s."
+      }
+    ]
+  },
+  "kinesis-firehose-the-buffer-logic": {
+    "core": "Firehose buffers incoming records by size (e.g. 1–128 MB) or time (0–900 s), whichever comes first, then delivers a batch. It can transform with Lambda, convert JSON to Parquet/ORC using a Glue schema, compress, partition dynamically by record fields into S3 prefixes, and back up failed records.",
+    "first_principles": {
+      "problem": "Firehose writes millions of tiny files to S3, hurting Athena performance.",
+      "truths": [
+        "Bigger buffers mean fewer, larger files.",
+        "Columnar formats speed queries.",
+        "Partitioning prunes scans."
+      ],
+      "derivation": [
+        "Set **buffer size/interval** for file size vs latency.",
+        "Enable **format conversion** to Parquet.",
+        "Use **dynamic partitioning** (e.g. by tenant/date).",
+        "**Compress** output.",
+        "Configure **error output prefix**."
+      ]
+    },
+    "analogy": {
+      "title": "A bus that leaves when full or on schedule",
+      "story": "It waits to fill up, but never longer than the timetable allows.",
+      "mapping": [
+        [
+          "Bus capacity",
+          "Buffer size"
+        ],
+        [
+          "Timetable",
+          "Buffer interval"
+        ],
+        [
+          "Bus trip",
+          "Delivery batch"
+        ]
+      ],
+      "breaks": "Buses carry the same passengers; Firehose can transform and convert records en route."
+    },
+    "mindmap": {
+      "center": "Firehose Buffering",
+      "branches": [
+        {
+          "label": "Buffers",
+          "children": [
+            "Size",
+            "Interval"
+          ]
+        },
+        {
+          "label": "Transforms",
+          "children": [
+            "Lambda",
+            "Format conversion"
+          ]
+        },
+        {
+          "label": "S3 layout",
+          "children": [
+            "Dynamic partitioning",
+            "Prefixes",
+            "Compression"
+          ]
+        },
+        {
+          "label": "Errors",
+          "children": [
+            "Error prefix",
+            "Backup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parquet with partitions",
+      "scenario": "Config sketch.",
+      "flow": [
+        "Buffer 128 MB / 300 s",
+        "Convert JSON → Parquet via Glue table",
+        "Dynamic partition: tenant=!{partitionKeyFromQuery:tenant}/dt=!{timestamp:yyyy-MM-dd}",
+        "Files ~100 MB each"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Athena queries scan far less."
+        }
+      ],
+      "code": [],
+      "outcome": "analytics-ready data in S3."
+    },
+    "summary": {
+      "points": [
+        "Buffer by size or time.",
+        "Convert to Parquet.",
+        "Partition dynamically."
+      ]
+    },
+    "check": [
+      {
+        "q": "When does Firehose deliver a batch?",
+        "a": "When either the buffer size or the buffer interval is reached, whichever comes first."
+      }
+    ]
+  },
+  "kinesis-vs-sqs-choosing-the-right-tool": {
+    "core": "Kinesis is a replayable, ordered stream that many consumers read independently, with per-shard ordering and retention. Good for analytics, event sourcing and fan-out of high-volume data. SQS is a queue where each message is processed once by one consumer group and deleted, with per-message visibility, DLQs and simpler scaling. Good for task distribution.",
+    "first_principles": {
+      "problem": "A team uses SQS for analytics events that three teams need to read, duplicating queues and losing replay.",
+      "truths": [
+        "Streams retain data; queues delete on consumption.",
+        "Ordering needs shard/group keys.",
+        "Replays help recovery and new consumers."
+      ],
+      "derivation": [
+        "**Kinesis** for multiple consumers, ordering, replay, high throughput.",
+        "**SQS** for job queues, per-message retries, simple scaling.",
+        "**SNS + SQS** for fan-out of tasks.",
+        "**MSK** for Kafka ecosystem."
+      ]
+    },
+    "analogy": {
+      "title": "A recorded broadcast versus a to-do list",
+      "story": "The broadcast can be rewatched by anyone; to-do items are ticked off and gone.",
+      "mapping": [
+        [
+          "Recorded broadcast",
+          "Kinesis stream"
+        ],
+        [
+          "Viewers",
+          "Consumers"
+        ],
+        [
+          "To-do list",
+          "SQS queue"
+        ]
+      ],
+      "breaks": "Broadcasts are watched passively; consumers must track their own checkpoints."
+    },
+    "mindmap": {
+      "center": "Kinesis vs SQS",
+      "branches": [
+        {
+          "label": "Kinesis",
+          "children": [
+            "Replay",
+            "Ordering per shard",
+            "Multi-consumer",
+            "Retention"
+          ]
+        },
+        {
+          "label": "SQS",
+          "children": [
+            "Delete on processing",
+            "Per-message retries",
+            "DLQ",
+            "Simple"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Consumers count",
+            "Replay",
+            "Ordering",
+            "Task vs event"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two decisions",
+      "scenario": "Workloads.",
+      "flow": [
+        "Clickstream for analytics, ML and alerts → Kinesis",
+        "Image resize jobs → SQS"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Events to many readers vs tasks to workers."
+        }
+      ],
+      "code": [],
+      "outcome": "right primitive per pattern."
+    },
+    "summary": {
+      "points": [
+        "Kinesis = stream.",
+        "SQS = queue.",
+        "Decide by consumption model."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which service lets a new consumer replay last week's data?",
+        "a": "Kinesis Data Streams (within the retention period)."
+      }
+    ]
+  }
+}

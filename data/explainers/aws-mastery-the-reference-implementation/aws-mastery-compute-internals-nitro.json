@@ -1,0 +1,537 @@
+{
+  "introduction-its-not-just-a-virtual-machine": {
+    "core": "Modern EC2 instances run on the Nitro System, which offloads networking, storage and management from the host CPU onto dedicated hardware cards, with a minimal hypervisor. Nearly all the host's CPU and memory go to your instance, performance is close to bare metal, and isolation is enforced in hardware.",
+    "first_principles": {
+      "problem": "Traditional hypervisors steal CPU cycles for I/O and management, causing jitter and lower performance.",
+      "truths": [
+        "Software virtualisation of I/O costs host CPU.",
+        "Dedicated hardware can do it faster.",
+        "A smaller hypervisor means a smaller attack surface."
+      ],
+      "derivation": [
+        "**Offload** VPC networking and EBS to Nitro cards.",
+        "**Minimise** the hypervisor.",
+        "Use a **security chip** for hardware root of trust.",
+        "Enable **bare-metal** instances with the same model."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant chef with a dedicated support team",
+      "story": "Dishwashers, runners and buyers handle everything else, so the chef only cooks.",
+      "mapping": [
+        [
+          "Chef",
+          "Host CPU for your workload"
+        ],
+        [
+          "Support team",
+          "Nitro cards"
+        ],
+        [
+          "Kitchen manager",
+          "Lightweight hypervisor"
+        ]
+      ],
+      "breaks": "Kitchen staff can be reassigned; Nitro functions are fixed in hardware."
+    },
+    "mindmap": {
+      "center": "Nitro",
+      "branches": [
+        {
+          "label": "Offload",
+          "children": [
+            "Networking",
+            "EBS",
+            "Management"
+          ]
+        },
+        {
+          "label": "Hypervisor",
+          "children": [
+            "Minimal",
+            "KVM-based"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Nitro Security Chip",
+            "No operator access"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Near bare metal",
+            "Consistent performance"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Old vs Nitro host",
+      "scenario": "CPU budget.",
+      "flow": [
+        "Xen-era host: ~10–30% CPU to virtualisation and I/O",
+        "Nitro: nearly all cores to guests",
+        "Higher EBS and network throughput"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "More performance per dollar."
+        }
+      ],
+      "code": [],
+      "outcome": "near bare-metal virtual machines."
+    },
+    "summary": {
+      "points": [
+        "Offload to hardware.",
+        "Tiny hypervisor.",
+        "Hardware isolation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Nitro offload from the host CPU?",
+        "a": "Networking, storage (EBS) and management functions, onto dedicated Nitro cards."
+      }
+    ]
+  },
+  "the-three-pillars-of-nitro": {
+    "core": "Nitro has three parts. Nitro Cards (VPC networking with ENA, EBS NVMe, instance storage and management) do the I/O work. The Nitro Security Chip provides a hardware root of trust that verifies firmware. The Nitro Hypervisor is a stripped-down KVM-based layer that only allocates CPU and memory.",
+    "first_principles": {
+      "problem": "Engineers can't explain why Nitro instances show EBS volumes as NVMe or why AWS operators can't access instance memory.",
+      "truths": [
+        "Each function benefits from dedicated hardware.",
+        "Trust must start in hardware.",
+        "Less code means fewer vulnerabilities."
+      ],
+      "derivation": [
+        "**Cards**: ENA networking, NVMe EBS, local NVMe, controller.",
+        "**Security chip**: measured boot, firmware protection.",
+        "**Hypervisor**: CPU/memory partitioning only.",
+        "No **interactive operator access** to hosts."
+      ]
+    },
+    "analogy": {
+      "title": "A secure office building",
+      "story": "Mailroom and couriers (cards), tamper-proof foundations (security chip) and a minimal receptionist (hypervisor).",
+      "mapping": [
+        [
+          "Mailroom",
+          "Nitro cards"
+        ],
+        [
+          "Foundations",
+          "Security chip"
+        ],
+        [
+          "Receptionist",
+          "Hypervisor"
+        ]
+      ],
+      "breaks": "Office staff can be bribed; Nitro has no human access path by design."
+    },
+    "mindmap": {
+      "center": "Three Pillars",
+      "branches": [
+        {
+          "label": "Nitro Cards",
+          "children": [
+            "ENA",
+            "EBS NVMe",
+            "Instance store",
+            "Controller"
+          ]
+        },
+        {
+          "label": "Security Chip",
+          "children": [
+            "Root of trust",
+            "Firmware integrity"
+          ]
+        },
+        {
+          "label": "Hypervisor",
+          "children": [
+            "CPU/memory only",
+            "KVM-based"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "Performance",
+            "Isolation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Seeing Nitro from inside",
+      "scenario": "lsblk.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Use NVMe device names and udev links in fstab, not /dev/xvdf."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "lsblk\n# nvme0n1  8G   root EBS volume (exposed as NVMe by Nitro card)\n# nvme1n1  100G data EBS volume"
+        }
+      ],
+      "outcome": "Nitro behaviour understood."
+    },
+    "summary": {
+      "points": [
+        "Cards do I/O.",
+        "Chip roots trust.",
+        "Hypervisor stays tiny."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do EBS volumes appear as NVMe devices on Nitro instances?",
+        "a": "The Nitro card presents EBS to the guest through an NVMe interface."
+      }
+    ]
+  },
+  "decoding-instance-families-c-m-r-t": {
+    "core": "Instance names encode purpose: family letter (C compute, M general, R memory, T burstable, I storage, P/G accelerators, X large memory), generation number, attributes (g Graviton, a AMD, i Intel, d local NVMe, n network-enhanced) and size. Match the vCPU:memory ratio and features to the workload.",
+    "first_principles": {
+      "problem": "A memory-hungry cache runs on compute-optimised instances and swaps.",
+      "truths": [
+        "Workloads differ in CPU:memory ratio.",
+        "Newer generations are faster and often cheaper.",
+        "Graviton offers better price-performance for compatible code."
+      ],
+      "derivation": [
+        "**C**: ~2 GB/vCPU (compute).",
+        "**M**: ~4 GB/vCPU (balanced).",
+        "**R**: ~8 GB/vCPU (memory).",
+        "**T**: burstable credits (dev, low steady load).",
+        "Prefer **latest generation** and **Graviton** when possible.",
+        "**Right-size** from metrics."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing a vehicle by job",
+      "story": "Sports car (C), family car (M), lorry (R), moped for short trips (T).",
+      "mapping": [
+        [
+          "Sports car",
+          "C"
+        ],
+        [
+          "Family car",
+          "M"
+        ],
+        [
+          "Lorry",
+          "R"
+        ],
+        [
+          "Moped",
+          "T"
+        ]
+      ],
+      "breaks": "Vehicles are bought; instances can be swapped in minutes, so right-size continuously."
+    },
+    "mindmap": {
+      "center": "Instance Families",
+      "branches": [
+        {
+          "label": "General",
+          "children": [
+            "M",
+            "T"
+          ]
+        },
+        {
+          "label": "Compute",
+          "children": [
+            "C"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "R",
+            "X"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "I",
+            "D"
+          ]
+        },
+        {
+          "label": "Accelerated",
+          "children": [
+            "P",
+            "G",
+            "Inf",
+            "Trn"
+          ]
+        },
+        {
+          "label": "Suffixes",
+          "children": [
+            "g Graviton",
+            "a AMD",
+            "d NVMe",
+            "n network"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decoding m7gd.2xlarge",
+      "scenario": "Name parts.",
+      "flow": [
+        "m: general purpose",
+        "7: 7th generation",
+        "g: Graviton (ARM)",
+        "d: local NVMe",
+        "2xlarge: 8 vCPU, 32 GB"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "You can predict specs from the name."
+        }
+      ],
+      "code": [],
+      "outcome": "right instance for the workload."
+    },
+    "summary": {
+      "points": [
+        "Letter = purpose.",
+        "Number = generation.",
+        "Suffix = features."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the risk with T-family instances under sustained load?",
+        "a": "They run out of CPU credits and get throttled to baseline (or incur charges in unlimited mode)."
+      }
+    ]
+  },
+  "placement-groups-controlling-physical-location": {
+    "core": "Placement groups influence where instances land physically. Cluster packs instances close in one AZ for low-latency, high-bandwidth HPC. Spread puts each instance on distinct hardware (max 7 per AZ) for critical small fleets. Partition divides a fleet into racks-like partitions for large distributed systems like Kafka, HDFS and Cassandra.",
+    "first_principles": {
+      "problem": "A tightly coupled MPI job is slow because nodes are scattered across racks.",
+      "truths": [
+        "Physical proximity reduces latency.",
+        "Co-location increases correlated failure risk.",
+        "Distributed systems want failure-domain awareness."
+      ],
+      "derivation": [
+        "**Cluster**: HPC, ML training; same AZ.",
+        "**Spread**: few critical instances on separate hardware.",
+        "**Partition**: large replicated systems; expose partition to the app.",
+        "Launch **together** to avoid capacity errors."
+      ]
+    },
+    "analogy": {
+      "title": "Seating at an event",
+      "story": "Team members together at one table (cluster), VIPs at separate tables (spread), or sections for each department (partition).",
+      "mapping": [
+        [
+          "One table",
+          "Cluster"
+        ],
+        [
+          "Separate tables",
+          "Spread"
+        ],
+        [
+          "Sections",
+          "Partitions"
+        ]
+      ],
+      "breaks": "Event seating is visible; AWS hides exact hardware, exposing only partition numbers."
+    },
+    "mindmap": {
+      "center": "Placement Groups",
+      "branches": [
+        {
+          "label": "Cluster",
+          "children": [
+            "Low latency",
+            "Same AZ",
+            "HPC"
+          ]
+        },
+        {
+          "label": "Spread",
+          "children": [
+            "Distinct hardware",
+            "7/AZ"
+          ]
+        },
+        {
+          "label": "Partition",
+          "children": [
+            "Rack-like groups",
+            "Kafka/HDFS"
+          ]
+        },
+        {
+          "label": "Tips",
+          "children": [
+            "Launch together",
+            "Same instance type"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create a cluster placement group",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Up to 200 Gbps between nodes with low latency."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 create-placement-group --group-name mpi --strategy cluster\naws ec2 run-instances --placement GroupName=mpi --instance-type c7gn.16xlarge --count 16 ..."
+        }
+      ],
+      "outcome": "topology matched to workload."
+    },
+    "summary": {
+      "points": [
+        "Cluster for speed.",
+        "Spread for safety.",
+        "Partition for big distributed systems."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which placement strategy suits a 3-node critical database?",
+        "a": "Spread, so each node is on distinct hardware."
+      }
+    ]
+  },
+  "spot-instances-and-allocation-strategies": {
+    "core": "Spot instances use spare EC2 capacity at up to 90% off, but can be reclaimed with a 2-minute warning. Diversify across instance types and AZs, and use price-capacity-optimized allocation to pick the pools least likely to be interrupted. Design workloads to handle interruption (stateless, checkpointed, queue-driven).",
+    "first_principles": {
+      "problem": "A batch fleet on one Spot instance type gets interrupted repeatedly when that pool runs dry.",
+      "truths": [
+        "Each instance type per AZ is a separate capacity pool.",
+        "Interruptions are more likely in tight pools.",
+        "2 minutes is enough to drain or checkpoint."
+      ],
+      "derivation": [
+        "**Diversify**: many types, sizes, AZs.",
+        "**price-capacity-optimized** allocation.",
+        "Handle **interruption notices** (metadata/EventBridge).",
+        "Use **capacity rebalancing**.",
+        "Mix **On-Demand base + Spot** in ASGs."
+      ]
+    },
+    "analogy": {
+      "title": "Standby airline tickets",
+      "story": "Much cheaper, but you might be bumped, so be flexible about flights.",
+      "mapping": [
+        [
+          "Standby ticket",
+          "Spot instance"
+        ],
+        [
+          "Getting bumped",
+          "Interruption"
+        ],
+        [
+          "Flexible on flights",
+          "Diversified pools"
+        ]
+      ],
+      "breaks": "Bumped passengers wait; Spot gives a 2-minute warning to save work."
+    },
+    "mindmap": {
+      "center": "Spot",
+      "branches": [
+        {
+          "label": "Savings",
+          "children": [
+            "Up to 90%"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "2-min interruption"
+          ]
+        },
+        {
+          "label": "Strategy",
+          "children": [
+            "Diversify",
+            "price-capacity-optimized",
+            "Rebalancing"
+          ]
+        },
+        {
+          "label": "Workloads",
+          "children": [
+            "Batch",
+            "CI",
+            "Stateless",
+            "Checkpointed"
+          ]
+        },
+        {
+          "label": "Mix",
+          "children": [
+            "On-Demand base"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ASG mixed instances policy",
+      "scenario": "Excerpt.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Large savings with rare, handled interruptions."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "\"InstancesDistribution\": {\n  \"OnDemandBaseCapacity\": 2,\n  \"OnDemandPercentageAboveBaseCapacity\": 0,\n  \"SpotAllocationStrategy\": \"price-capacity-optimized\"\n},\n\"Overrides\": [{\"InstanceType\": \"m7g.large\"}, {\"InstanceType\": \"m6g.large\"}, {\"InstanceType\": \"c7g.xlarge\"}, {\"InstanceType\": \"m7i.large\"}]"
+        }
+      ],
+      "outcome": "cheap, resilient capacity."
+    },
+    "summary": {
+      "points": [
+        "Huge discount.",
+        "Diversify pools.",
+        "Design for interruption."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why diversify instance types for Spot?",
+        "a": "Each type/AZ is a separate pool; spreading across many reduces the chance that all capacity is reclaimed at once."
+      }
+    ]
+  }
+}

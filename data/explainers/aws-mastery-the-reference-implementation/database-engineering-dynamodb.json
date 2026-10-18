@@ -1,0 +1,821 @@
+{
+  "introduction-sql-vs-dynamodb": {
+    "core": "Relational databases model entities and use flexible joins at query time. DynamoDB is a key-value/document store that delivers single-digit-ms latency at any scale by requiring you to design tables around known access patterns, with no joins. You model the queries first and the data second.",
+    "first_principles": {
+      "problem": "A team ports a normalised SQL schema to DynamoDB table by table and ends up doing joins in application code.",
+      "truths": [
+        "Joins don't scale horizontally cheaply.",
+        "Key-based lookups scale linearly.",
+        "Access patterns are usually known."
+      ],
+      "derivation": [
+        "**List access patterns** first.",
+        "Design **keys** to serve them.",
+        "**Denormalise** and pre-join.",
+        "Use **GSIs** for alternate patterns.",
+        "Accept **write-time complexity** for read speed."
+      ]
+    },
+    "analogy": {
+      "title": "A filing system built around how you search",
+      "story": "Instead of one drawer per type, you file each document where you'll look for it.",
+      "mapping": [
+        [
+          "Drawers by type",
+          "Normalised tables"
+        ],
+        [
+          "Filed by lookup",
+          "Access-pattern design"
+        ],
+        [
+          "Copies in two drawers",
+          "Denormalisation/GSIs"
+        ]
+      ],
+      "breaks": "Paper copies drift silently; DynamoDB needs streams or transactions to keep copies consistent."
+    },
+    "mindmap": {
+      "center": "SQL vs DynamoDB",
+      "branches": [
+        {
+          "label": "SQL",
+          "children": [
+            "Normalise",
+            "Joins",
+            "Flexible queries"
+          ]
+        },
+        {
+          "label": "DynamoDB",
+          "children": [
+            "Access patterns",
+            "Keys",
+            "Denormalise",
+            "No joins"
+          ]
+        },
+        {
+          "label": "Strength",
+          "children": [
+            "Predictable latency at scale"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Upfront design"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Order lookup",
+      "scenario": "Two models.",
+      "flow": [
+        "SQL: JOIN orders, items, customers",
+        "DynamoDB: PK=CUSTOMER#42, SK=ORDER#2026-10-01 returns order + items in one Query"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One request, constant latency."
+        }
+      ],
+      "code": [],
+      "outcome": "data shaped for its queries."
+    },
+    "summary": {
+      "points": [
+        "Patterns first.",
+        "No joins.",
+        "Denormalise."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you know access patterns before designing a DynamoDB table?",
+        "a": "Efficient queries only work on keys and indexes designed for them; ad-hoc queries become expensive scans."
+      }
+    ]
+  },
+  "the-primary-key-partition-vs-sort": {
+    "core": "Every item has a primary key: a partition key alone, or partition key + sort key. The partition key is hashed to choose a storage partition; the sort key orders items within that partition, enabling range queries (begins_with, between) over an 'item collection'.",
+    "first_principles": {
+      "problem": "Fetching a user's recent orders requires scanning the whole table.",
+      "truths": [
+        "Hashing spreads data across partitions.",
+        "Sorted keys enable ranges.",
+        "Query needs the partition key."
+      ],
+      "derivation": [
+        "Pick a **high-cardinality partition key**.",
+        "Use a **sort key** for hierarchy/time.",
+        "**Query** by PK + SK condition.",
+        "**Composite** sort keys (STATUS#DATE).",
+        "Avoid **Scan** on hot paths."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet: drawer label and folder order",
+      "story": "The drawer (partition key) is chosen by name; folders inside are sorted (sort key).",
+      "mapping": [
+        [
+          "Drawer",
+          "Partition"
+        ],
+        [
+          "Folder order",
+          "Sort key"
+        ],
+        [
+          "Opening one drawer",
+          "Query"
+        ]
+      ],
+      "breaks": "Drawers are fixed-size; DynamoDB splits partitions automatically as they grow."
+    },
+    "mindmap": {
+      "center": "Primary Key",
+      "branches": [
+        {
+          "label": "Partition key",
+          "children": [
+            "Hashed",
+            "Distribution",
+            "Required for Query"
+          ]
+        },
+        {
+          "label": "Sort key",
+          "children": [
+            "Ordering",
+            "Ranges",
+            "begins_with"
+          ]
+        },
+        {
+          "label": "Item collection",
+          "children": [
+            "Same PK"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Scan"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Recent orders",
+      "scenario": "Query.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Latest 10 October orders in one request."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "table.query(\n    KeyConditionExpression=Key('PK').eq('USER#42') & Key('SK').begins_with('ORDER#2026-10'),\n    ScanIndexForward=False, Limit=10)"
+        }
+      ],
+      "outcome": "efficient range access."
+    },
+    "summary": {
+      "points": [
+        "PK distributes.",
+        "SK orders.",
+        "Query, don't scan."
+      ]
+    },
+    "check": [
+      {
+        "q": "What can a sort key enable that a partition key alone cannot?",
+        "a": "Range queries and ordering within an item collection."
+      }
+    ]
+  },
+  "single-table-design-adjacency-lists": {
+    "core": "Single-table design stores multiple entity types in one table with generic keys (PK, SK) so related items share a partition and come back in one Query. Adjacency lists model relationships (users ↔ groups) by storing edges as items, with a GSI that inverts PK and SK for the reverse lookup.",
+    "first_principles": {
+      "problem": "Fetching a user, their orders and their addresses takes three separate table queries.",
+      "truths": [
+        "Same-partition items return in one call.",
+        "Generic key names allow many entity types.",
+        "Inverted indexes serve reverse relationships."
+      ],
+      "derivation": [
+        "Use **generic PK/SK** attributes.",
+        "**Prefix** key values (USER#, ORDER#).",
+        "**Co-locate** related items in one partition.",
+        "**Adjacency list** items for many-to-many.",
+        "**Inverted GSI** (SK as PK) for reverse lookups."
+      ]
+    },
+    "analogy": {
+      "title": "A family photo album organised by household",
+      "story": "Open one household's page to see parents, kids and pets together.",
+      "mapping": [
+        [
+          "Household page",
+          "Partition"
+        ],
+        [
+          "Photos",
+          "Items of different types"
+        ],
+        [
+          "Index by person",
+          "Inverted GSI"
+        ]
+      ],
+      "breaks": "Albums are browsed visually; single-table design needs careful documentation to stay understandable."
+    },
+    "mindmap": {
+      "center": "Single-Table Design",
+      "branches": [
+        {
+          "label": "Keys",
+          "children": [
+            "Generic PK/SK",
+            "Prefixes"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "One query",
+            "Fewer round trips"
+          ]
+        },
+        {
+          "label": "Relationships",
+          "children": [
+            "Adjacency list",
+            "Inverted GSI"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Complexity",
+            "Docs needed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "User with orders",
+      "scenario": "Items.",
+      "flow": [
+        "PK=USER#42 SK=PROFILE",
+        "PK=USER#42 SK=ORDER#001",
+        "PK=USER#42 SK=ADDR#home",
+        "Query PK=USER#42 → all in one call"
+      ],
+      "steps": [
+        {
+          "label": "Reverse",
+          "detail": "GSI1PK=ORDER#001 → owning user."
+        }
+      ],
+      "code": [],
+      "outcome": "related data fetched together."
+    },
+    "summary": {
+      "points": [
+        "One table, many types.",
+        "Co-locate related items.",
+        "Invert for reverse lookups."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does an inverted GSI support many-to-many relationships?",
+        "a": "It swaps PK and SK, so you can query edges from the other side (e.g. group → members)."
+      }
+    ]
+  },
+  "gsi-overloading-one-index-to-rule-them-all": {
+    "core": "GSI overloading uses generic index attributes (GSI1PK, GSI1SK) whose meaning depends on the entity type, so one global secondary index serves many access patterns. It conserves the GSI limit (20 per table) and keeps related query patterns together.",
+    "first_principles": {
+      "problem": "Each new access pattern adds a GSI, multiplying write costs and hitting limits.",
+      "truths": [
+        "Every GSI duplicates writes.",
+        "GSIs are limited per table.",
+        "Generic attributes can hold different values per entity."
+      ],
+      "derivation": [
+        "Define **GSI1PK/GSI1SK** generically.",
+        "Populate **per entity type** for its pattern.",
+        "**Sparse indexes**: only items with the attribute appear.",
+        "Document an **access-pattern table**.",
+        "Project only **needed attributes**."
+      ]
+    },
+    "analogy": {
+      "title": "One reception desk serving several departments",
+      "story": "The same desk handles deliveries, visitors and post, depending on what arrives.",
+      "mapping": [
+        [
+          "Desk",
+          "GSI"
+        ],
+        [
+          "Different arrivals",
+          "Entity types"
+        ],
+        [
+          "Handling rule",
+          "Attribute meaning"
+        ]
+      ],
+      "breaks": "A desk can get overwhelmed; overloaded GSIs need their partition keys to stay well distributed."
+    },
+    "mindmap": {
+      "center": "GSI Overloading",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Generic GSI1PK/SK",
+            "Per-type values"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Fewer indexes",
+            "Lower write cost"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Sparse indexes",
+            "Projections"
+          ]
+        },
+        {
+          "label": "Discipline",
+          "children": [
+            "Access-pattern table"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One GSI, three patterns",
+      "scenario": "Values.",
+      "flow": [
+        "Order: GSI1PK=STATUS#SHIPPED, GSI1SK=date",
+        "Ticket: GSI1PK=AGENT#7, GSI1SK=priority",
+        "Invoice: GSI1PK=DUE#2026-10, GSI1SK=amount"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Three patterns, one index."
+        }
+      ],
+      "code": [],
+      "outcome": "flexible querying within limits."
+    },
+    "summary": {
+      "points": [
+        "Generic index attributes.",
+        "Sparse by design.",
+        "Document patterns."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a sparse index?",
+        "a": "A GSI that only contains items that have the index key attributes, making it a cheap filtered view."
+      }
+    ]
+  },
+  "hot-partitions-write-sharding": {
+    "core": "Each partition supports roughly 3,000 RCU and 1,000 WCU. If too many requests hit one partition key (a viral post, today's date), it throttles even if table capacity is fine. Write sharding appends a suffix (KEY#0–N) to spread load, with reads gathering across shards. Adaptive capacity helps but can't fix extreme skew.",
+    "first_principles": {
+      "problem": "All writes for 'events today' use PK=2026-10-18 and get throttled.",
+      "truths": [
+        "Per-partition throughput is capped.",
+        "Low-cardinality keys concentrate load.",
+        "Spreading keys spreads load."
+      ],
+      "derivation": [
+        "Choose **high-cardinality** keys.",
+        "**Shard** hot keys with random or calculated suffixes.",
+        "**Scatter-gather** reads across shards.",
+        "Use **calculated suffix** (hash of ID) for direct reads.",
+        "Monitor with **CloudWatch Contributor Insights**."
+      ]
+    },
+    "analogy": {
+      "title": "One checkout for a whole stadium",
+      "story": "Open ten checkouts and split the queue.",
+      "mapping": [
+        [
+          "Checkout",
+          "Partition"
+        ],
+        [
+          "Splitting queue",
+          "Sharding"
+        ],
+        [
+          "Counting all tills",
+          "Scatter-gather"
+        ]
+      ],
+      "breaks": "Customers pick the shortest queue; DynamoDB needs you to assign shards in code."
+    },
+    "mindmap": {
+      "center": "Hot Partitions",
+      "branches": [
+        {
+          "label": "Limits",
+          "children": [
+            "~1,000 WCU/partition",
+            "~3,000 RCU/partition"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Low cardinality",
+            "Viral keys",
+            "Time keys"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Write sharding",
+            "Calculated suffix",
+            "Caching (DAX)"
+          ]
+        },
+        {
+          "label": "Detect",
+          "children": [
+            "Contributor Insights"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sharded daily key",
+      "scenario": "Writes.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "10× write ceiling for the hot key."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import random\nshard = random.randint(0, 9)\ntable.put_item(Item={'PK': f'DAY#2026-10-18#{shard}', 'SK': event_id, ...})\n# reads: query shards 0-9 in parallel and merge"
+        }
+      ],
+      "outcome": "throttling eliminated."
+    },
+    "summary": {
+      "points": [
+        "Partitions have limits.",
+        "Avoid low-cardinality keys.",
+        "Shard hot keys."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a table throttle even with plenty of total capacity?",
+        "a": "One partition key can exceed its partition's throughput limit regardless of overall table capacity."
+      }
+    ]
+  },
+  "capacity-math-wcu-rcu": {
+    "core": "In provisioned mode, 1 WCU = one write/sec of up to 1 KB; 1 RCU = one strongly consistent read/sec of up to 4 KB (or two eventually consistent). Transactions cost double. On-demand bills per request and scales automatically, which is good for spiky or unknown traffic; provisioned with auto scaling is cheaper for steady load.",
+    "first_principles": {
+      "problem": "A team can't estimate DynamoDB cost or why item size doubled the bill.",
+      "truths": [
+        "Capacity rounds up by size.",
+        "Eventual reads cost half.",
+        "Transactions cost twice."
+      ],
+      "derivation": [
+        "WCU = writes/s × **ceil(size/1 KB)**.",
+        "RCU = reads/s × **ceil(size/4 KB)** (÷2 if eventual).",
+        "**×2** for transactional.",
+        "Choose **on-demand** vs **provisioned + auto scaling**.",
+        "**Shrink items** (short attribute names, compression)."
+      ]
+    },
+    "analogy": {
+      "title": "Postage priced by weight bands",
+      "story": "A 1.1 KB letter pays for two stamps.",
+      "mapping": [
+        [
+          "Weight band",
+          "1 KB / 4 KB unit"
+        ],
+        [
+          "Stamps",
+          "Capacity units"
+        ],
+        [
+          "Express post",
+          "Transactions ×2"
+        ]
+      ],
+      "breaks": "Post offices round to fixed bands; DynamoDB rounds per item per request."
+    },
+    "mindmap": {
+      "center": "Capacity Math",
+      "branches": [
+        {
+          "label": "WCU",
+          "children": [
+            "1 KB writes/s"
+          ]
+        },
+        {
+          "label": "RCU",
+          "children": [
+            "4 KB strong reads/s",
+            "Eventual = ½"
+          ]
+        },
+        {
+          "label": "Multipliers",
+          "children": [
+            "Transactions ×2"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "On-demand",
+            "Provisioned + auto scaling"
+          ]
+        },
+        {
+          "label": "Optimise",
+          "children": [
+            "Smaller items",
+            "Eventual reads"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing a table",
+      "scenario": "Maths.",
+      "flow": [
+        "500 writes/s of 2.5 KB → 500 × 3 = 1,500 WCU",
+        "2,000 eventual reads/s of 6 KB → 2,000 × 2 ÷ 2 = 2,000 RCU"
+      ],
+      "steps": [
+        {
+          "label": "Optimise",
+          "detail": "Trim item to 2 KB → 1,000 WCU."
+        }
+      ],
+      "code": [],
+      "outcome": "predictable capacity and cost."
+    },
+    "summary": {
+      "points": [
+        "Round up by size.",
+        "Eventual reads are cheaper.",
+        "Pick the right mode."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many WCUs does writing a 3.5 KB item once per second need?",
+        "a": "4 WCU (rounded up to 4 KB)."
+      }
+    ]
+  },
+  "dynamodb-streams-the-change-log": {
+    "core": "DynamoDB Streams captures item-level changes (insert, modify, remove) in order per item, retained for 24 hours, with optional old and new images. Lambda or Kinesis consumers react to changes: maintaining aggregates, replicating, sending notifications or feeding search and analytics, without touching the write path.",
+    "first_principles": {
+      "problem": "After every order write, the app also updates counters and search indexes inline, slowing requests and failing partially.",
+      "truths": [
+        "Changes can be captured as an ordered log.",
+        "Asynchronous processing decouples side effects.",
+        "Retries must be idempotent."
+      ],
+      "derivation": [
+        "Enable **stream view type** (NEW_AND_OLD_IMAGES).",
+        "Attach **Lambda event source mapping**.",
+        "Handle **batches**, **retries**, **bisect on error**.",
+        "Make processing **idempotent**.",
+        "Use **Kinesis Data Streams** for longer retention."
+      ]
+    },
+    "analogy": {
+      "title": "A newsroom wire feed",
+      "story": "Every change is broadcast; desks subscribe and react independently.",
+      "mapping": [
+        [
+          "Wire feed",
+          "Stream"
+        ],
+        [
+          "Desks",
+          "Consumers"
+        ],
+        [
+          "Story update",
+          "Item change"
+        ]
+      ],
+      "breaks": "News is consumed once; stream records may be delivered more than once on retry."
+    },
+    "mindmap": {
+      "center": "DynamoDB Streams",
+      "branches": [
+        {
+          "label": "Content",
+          "children": [
+            "Inserts",
+            "Updates",
+            "Deletes",
+            "Old/new images"
+          ]
+        },
+        {
+          "label": "Retention",
+          "children": [
+            "24 h"
+          ]
+        },
+        {
+          "label": "Consumers",
+          "children": [
+            "Lambda",
+            "KCL"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Aggregates",
+            "Search sync",
+            "Events",
+            "Replication"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Idempotent",
+            "Per-item order"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Updating a search index",
+      "scenario": "Lambda consumer.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Writes stay fast; search stays in sync."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def handler(event, _):\n    for r in event['Records']:\n        if r['eventName'] in ('INSERT', 'MODIFY'):\n            index_doc(r['dynamodb']['NewImage'])\n        elif r['eventName'] == 'REMOVE':\n            delete_doc(r['dynamodb']['Keys'])"
+        }
+      ],
+      "outcome": "decoupled side effects."
+    },
+    "summary": {
+      "points": [
+        "Ordered change log.",
+        "React asynchronously.",
+        "Be idempotent."
+      ]
+    },
+    "check": [
+      {
+        "q": "How long are DynamoDB Streams records retained?",
+        "a": "24 hours."
+      }
+    ]
+  },
+  "transactions-and-conditional-writes": {
+    "core": "Conditional writes apply a put, update or delete only if an expression holds (attribute_not_exists, version = :v), enabling optimistic locking and uniqueness. TransactWriteItems groups up to 100 actions across items and tables atomically (all or nothing) at twice the capacity cost.",
+    "first_principles": {
+      "problem": "Two requests both create the same username, or a transfer debits one account without crediting the other.",
+      "truths": [
+        "Concurrent writers can overwrite each other.",
+        "Conditions check state at write time.",
+        "Multi-item consistency needs atomicity."
+      ],
+      "derivation": [
+        "Use **attribute_not_exists** for uniqueness.",
+        "Use **version attributes** for optimistic locking.",
+        "Use **TransactWriteItems** for multi-item invariants.",
+        "Handle **ConditionalCheckFailed** and **TransactionCanceled**.",
+        "Use **idempotency tokens** for retries."
+      ]
+    },
+    "analogy": {
+      "title": "'Only sign if the document still says version 3'",
+      "story": "If someone changed it since you read it, start again.",
+      "mapping": [
+        [
+          "Version check",
+          "Condition expression"
+        ],
+        [
+          "Starting again",
+          "Retry with fresh read"
+        ],
+        [
+          "Signing both contracts together",
+          "Transaction"
+        ]
+      ],
+      "breaks": "Signatures are manual; conditional writes check in microseconds at the storage node."
+    },
+    "mindmap": {
+      "center": "Transactions & Conditions",
+      "branches": [
+        {
+          "label": "Conditional",
+          "children": [
+            "attribute_not_exists",
+            "Optimistic locking"
+          ]
+        },
+        {
+          "label": "Transactions",
+          "children": [
+            "Up to 100 items",
+            "All or nothing",
+            "2× cost"
+          ]
+        },
+        {
+          "label": "Errors",
+          "children": [
+            "ConditionalCheckFailed",
+            "TransactionCanceled"
+          ]
+        },
+        {
+          "label": "Retries",
+          "children": [
+            "Idempotency token"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Unique username",
+      "scenario": "Transaction.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Username reserved atomically with profile."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "client.transact_write_items(TransactItems=[\n  {'Put': {'TableName': 'app', 'Item': {'PK': {'S': 'USER#42'}, 'SK': {'S': 'PROFILE'}}, 'ConditionExpression': 'attribute_not_exists(PK)'}},\n  {'Put': {'TableName': 'app', 'Item': {'PK': {'S': 'USERNAME#ada'}, 'SK': {'S': 'USERNAME'}}, 'ConditionExpression': 'attribute_not_exists(PK)'}}\n])"
+        }
+      ],
+      "outcome": "correctness under concurrency."
+    },
+    "summary": {
+      "points": [
+        "Conditions prevent races.",
+        "Transactions for invariants.",
+        "2× capacity."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you enforce uniqueness on a non-key attribute in DynamoDB?",
+        "a": "Write a separate item keyed by that value with attribute_not_exists in the same transaction."
+      }
+    ]
+  }
+}

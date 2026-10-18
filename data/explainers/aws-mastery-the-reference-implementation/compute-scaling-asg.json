@@ -1,0 +1,527 @@
+{
+  "introduction-the-elasticity-engine": {
+    "core": "An Auto Scaling group maintains a fleet of EC2 instances between min and max sizes: it replaces unhealthy instances, balances across AZs and scales with policies (target tracking, step, scheduled, predictive). It's the core elasticity primitive behind EC2-based services, ECS capacity and EKS managed node groups.",
+    "first_principles": {
+      "problem": "A fleet sized for peak wastes money at night and still falls over during unexpected spikes.",
+      "truths": [
+        "Demand varies.",
+        "Instances fail.",
+        "Scaling decisions need metrics."
+      ],
+      "derivation": [
+        "Set **min/desired/max**.",
+        "Spread across **multiple AZ subnets**.",
+        "Use **ELB health checks**.",
+        "**Target tracking** on a key metric.",
+        "Add **scheduled/predictive** scaling for known patterns."
+      ]
+    },
+    "analogy": {
+      "title": "A thermostat for compute",
+      "story": "Set the target and it adds or removes heat to stay there.",
+      "mapping": [
+        [
+          "Thermostat",
+          "ASG policy"
+        ],
+        [
+          "Target temperature",
+          "Target metric"
+        ],
+        [
+          "Heaters",
+          "Instances"
+        ]
+      ],
+      "breaks": "Heaters warm up instantly; instances take minutes to boot."
+    },
+    "mindmap": {
+      "center": "Auto Scaling Groups",
+      "branches": [
+        {
+          "label": "Config",
+          "children": [
+            "Min/desired/max",
+            "Subnets",
+            "Launch template"
+          ]
+        },
+        {
+          "label": "Health",
+          "children": [
+            "EC2",
+            "ELB"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "Target tracking",
+            "Step",
+            "Scheduled",
+            "Predictive"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Lifecycle hooks",
+            "Warm pools",
+            "Instance refresh"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Target tracking policy",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fleet keeps CPU around 50%."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws autoscaling put-scaling-policy --auto-scaling-group-name web --policy-name cpu50 \\\n  --policy-type TargetTrackingScaling \\\n  --target-tracking-configuration '{\"PredefinedMetricSpecification\":{\"PredefinedMetricType\":\"ASGAverageCPUUtilization\"},\"TargetValue\":50}'"
+        }
+      ],
+      "outcome": "capacity follows demand."
+    },
+    "summary": {
+      "points": [
+        "Self-healing fleet.",
+        "Scale on metrics.",
+        "Spread across AZs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use ELB health checks on an ASG?",
+        "a": "They replace instances that are running but failing application health checks, not just EC2 status checks."
+      }
+    ]
+  },
+  "launch-templates-vs-launch-configurations": {
+    "core": "Launch templates are versioned specifications for instances (AMI, instance type, IAM profile, security groups, user data, block devices, metadata options) and support mixed instance types, Spot, and newer features. Launch configurations are legacy, immutable and unsupported for new instance types and features, so use launch templates.",
+    "first_principles": {
+      "problem": "A team still on launch configurations can't use mixed instances, IMDSv2 enforcement or new instance types.",
+      "truths": [
+        "Specs must be versioned.",
+        "Fleets benefit from multiple instance types.",
+        "Legacy features stop receiving updates."
+      ],
+      "derivation": [
+        "Create a **launch template** with versions.",
+        "Enforce **IMDSv2** (HttpTokens=required).",
+        "Reference **$Latest or a pinned version**.",
+        "Use **mixed instances policy** in ASGs.",
+        "Migrate off **launch configurations**."
+      ]
+    },
+    "analogy": {
+      "title": "A versioned recipe book versus a laminated card",
+      "story": "You can publish improved recipes as new versions; the card can't change.",
+      "mapping": [
+        [
+          "Recipe versions",
+          "Template versions"
+        ],
+        [
+          "Laminated card",
+          "Launch configuration"
+        ],
+        [
+          "Ingredient options",
+          "Mixed instance types"
+        ]
+      ],
+      "breaks": "Recipes don't break if old; launch configurations block new instance types and features."
+    },
+    "mindmap": {
+      "center": "Launch Templates",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "AMI",
+            "Type",
+            "SGs",
+            "IAM",
+            "User data",
+            "Metadata options"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Versions",
+            "Mixed instances",
+            "Spot"
+          ]
+        },
+        {
+          "label": "Legacy",
+          "children": [
+            "Launch configurations"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "IMDSv2 required"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Template with IMDSv2",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Versioned, secure instance spec."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 create-launch-template --launch-template-name web --launch-template-data '{\n  \"ImageId\": \"ami-0abc\", \"InstanceType\": \"m7g.large\",\n  \"IamInstanceProfile\": {\"Name\": \"web\"},\n  \"MetadataOptions\": {\"HttpTokens\": \"required\", \"HttpPutResponseHopLimit\": 1}\n}'"
+        }
+      ],
+      "outcome": "modern, flexible fleets."
+    },
+    "summary": {
+      "points": [
+        "Use launch templates.",
+        "Version them.",
+        "Enforce IMDSv2."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why migrate from launch configurations?",
+        "a": "They're legacy, immutable and don't support new instance types, mixed instances or newer features."
+      }
+    ]
+  },
+  "lifecycle-hooks-the-pause-button": {
+    "core": "Lifecycle hooks pause instances in Pending:Wait (launch) or Terminating:Wait (termination) so you can run custom actions: install software, register with systems, warm caches, drain connections or upload logs. A heartbeat timeout bounds the pause, and CompleteLifecycleAction continues or abandons.",
+    "first_principles": {
+      "problem": "Scale-in kills instances mid-job and loses their logs; new instances serve traffic before they're ready.",
+      "truths": [
+        "Instances need setup before serving.",
+        "Termination should be graceful.",
+        "Pauses must have timeouts."
+      ],
+      "derivation": [
+        "Add **launch hook** for bootstrap/validation.",
+        "Add **termination hook** for drain/log upload.",
+        "Trigger via **EventBridge → Lambda/SSM**.",
+        "Call **CompleteLifecycleAction**.",
+        "Set **heartbeat timeout** and default result."
+      ]
+    },
+    "analogy": {
+      "title": "A pit stop before entering and leaving the race",
+      "story": "Cars are checked before joining, and safely parked before leaving.",
+      "mapping": [
+        [
+          "Entry check",
+          "Launch hook"
+        ],
+        [
+          "Safe parking",
+          "Termination hook"
+        ],
+        [
+          "Pit time limit",
+          "Heartbeat timeout"
+        ]
+      ],
+      "breaks": "Pit stops are seconds; hooks can wait up to 2 hours (extendable with heartbeats)."
+    },
+    "mindmap": {
+      "center": "Lifecycle Hooks",
+      "branches": [
+        {
+          "label": "States",
+          "children": [
+            "Pending:Wait",
+            "Terminating:Wait"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Bootstrap",
+            "Register",
+            "Drain",
+            "Log upload"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "EventBridge",
+            "CompleteLifecycleAction",
+            "Heartbeat timeout"
+          ]
+        },
+        {
+          "label": "Defaults",
+          "children": [
+            "CONTINUE",
+            "ABANDON"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Graceful termination",
+      "scenario": "Flow.",
+      "flow": [
+        "Scale-in selects instance",
+        "Hook pauses in Terminating:Wait",
+        "SSM Run Command: stop worker, flush logs to S3",
+        "CompleteLifecycleAction CONTINUE → terminate"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No lost jobs or logs."
+        }
+      ],
+      "code": [],
+      "outcome": "graceful fleet changes."
+    },
+    "summary": {
+      "points": [
+        "Pause at launch/terminate.",
+        "Run custom actions.",
+        "Always complete or time out."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if no CompleteLifecycleAction is sent before the timeout?",
+        "a": "The ASG applies the hook's default result (CONTINUE or ABANDON)."
+      }
+    ]
+  },
+  "warm-pools-cheating-the-boot-time": {
+    "core": "Warm pools keep pre-initialised instances (stopped, hibernated or running) alongside an ASG. On scale-out, the ASG moves warm instances into service in seconds instead of launching and bootstrapping from scratch. Stopped instances cost only EBS storage, making fast scaling affordable for slow-booting apps.",
+    "first_principles": {
+      "problem": "An app takes 8 minutes to boot and warm up, so autoscaling lags behind traffic spikes.",
+      "truths": [
+        "Boot and init dominate scale-out time.",
+        "Stopped instances cost little.",
+        "Pre-initialised state can be reused."
+      ],
+      "derivation": [
+        "Create a **warm pool** (min size, max prepared).",
+        "Choose **state**: Stopped (cheap), Hibernated (memory preserved), Running (fastest).",
+        "Use **lifecycle hooks** to finish init before entering warm state.",
+        "Enable **reuse on scale-in**.",
+        "Combine with **predictive scaling**."
+      ]
+    },
+    "analogy": {
+      "title": "Pre-heated ovens on standby",
+      "story": "When a rush comes, you just switch them on instead of waiting for them to heat up.",
+      "mapping": [
+        [
+          "Pre-heated oven",
+          "Warm instance"
+        ],
+        [
+          "Switching on",
+          "Moving to InService"
+        ],
+        [
+          "Standby cost",
+          "EBS for stopped instances"
+        ]
+      ],
+      "breaks": "Ovens lose heat; stopped instances lose in-memory state unless hibernated."
+    },
+    "mindmap": {
+      "center": "Warm Pools",
+      "branches": [
+        {
+          "label": "States",
+          "children": [
+            "Stopped",
+            "Hibernated",
+            "Running"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Fast scale-out",
+            "Low cost (stopped)"
+          ]
+        },
+        {
+          "label": "Setup",
+          "children": [
+            "Pool size",
+            "Lifecycle hooks"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Reuse on scale-in"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create a warm pool",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Scale-out from 8 minutes to ~40 seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws autoscaling put-warm-pool --auto-scaling-group-name web \\\n  --pool-state Stopped --min-size 4 --instance-reuse-policy ReuseOnScaleIn=true"
+        }
+      ],
+      "outcome": "fast, affordable elasticity."
+    },
+    "summary": {
+      "points": [
+        "Pre-initialise instances.",
+        "Stopped = cheap.",
+        "Scale in seconds."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do you pay for instances in a Stopped warm pool?",
+        "a": "Mainly their EBS volumes (and any Elastic IPs), not compute."
+      }
+    ]
+  },
+  "putting-it-all-together-the-production-pattern": {
+    "core": "A production ASG combines a versioned launch template (golden AMI, IMDSv2), a mixed instances policy (On-Demand base + diversified Spot), multi-AZ subnets, ELB health checks, target tracking plus predictive scaling, lifecycle hooks for bootstrap and drain, warm pools for fast scale-out, and instance refresh with checkpoints for rolling AMI updates.",
+    "first_principles": {
+      "problem": "Teams use ASGs with defaults and get slow scaling, ungraceful terminations and risky AMI rollouts.",
+      "truths": [
+        "Each feature solves a specific problem.",
+        "Defaults aren't production-ready.",
+        "Rolling changes need guardrails."
+      ],
+      "derivation": [
+        "**Launch template** + golden AMI.",
+        "**Mixed instances** for cost and resilience.",
+        "**ELB health** + grace period.",
+        "**Target tracking + predictive**.",
+        "**Hooks + warm pool**.",
+        "**Instance refresh** with min healthy % and checkpoints."
+      ]
+    },
+    "analogy": {
+      "title": "A well-run airline fleet",
+      "story": "Standard aircraft specs, mixed leasing, pre-flight checks, standby planes and scheduled maintenance rotations.",
+      "mapping": [
+        [
+          "Aircraft specs",
+          "Launch template"
+        ],
+        [
+          "Standby planes",
+          "Warm pool"
+        ],
+        [
+          "Maintenance rotation",
+          "Instance refresh"
+        ]
+      ],
+      "breaks": "Aircraft are rotated over months; instance refresh can roll a fleet in an hour."
+    },
+    "mindmap": {
+      "center": "Production ASG",
+      "branches": [
+        {
+          "label": "Spec",
+          "children": [
+            "Launch template",
+            "Golden AMI",
+            "IMDSv2"
+          ]
+        },
+        {
+          "label": "Capacity",
+          "children": [
+            "Mixed instances",
+            "Spot"
+          ]
+        },
+        {
+          "label": "Health",
+          "children": [
+            "ELB checks",
+            "Grace period"
+          ]
+        },
+        {
+          "label": "Scaling",
+          "children": [
+            "Target tracking",
+            "Predictive",
+            "Warm pool"
+          ]
+        },
+        {
+          "label": "Changes",
+          "children": [
+            "Lifecycle hooks",
+            "Instance refresh"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rolling a new AMI",
+      "scenario": "Instance refresh.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Gradual rollout with automatic rollback."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws autoscaling start-instance-refresh --auto-scaling-group-name web \\\n  --preferences '{\"MinHealthyPercentage\":90,\"InstanceWarmup\":120,\"CheckpointPercentages\":[20,50,100],\"CheckpointDelay\":600,\"AutoRollback\":true}'"
+        }
+      ],
+      "outcome": "elastic, safe, cost-efficient fleets."
+    },
+    "summary": {
+      "points": [
+        "Combine the features.",
+        "Health and hooks.",
+        "Refresh safely."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does instance refresh do?",
+        "a": "Replaces instances in an ASG gradually (respecting minimum healthy percentage and checkpoints) to roll out a new launch template or AMI."
+      }
+    ]
+  }
+}

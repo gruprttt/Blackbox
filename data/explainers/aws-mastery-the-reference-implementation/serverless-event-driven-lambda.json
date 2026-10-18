@@ -1,0 +1,618 @@
+{
+  "introduction-firecracker-the-microvm": {
+    "core": "Lambda runs each function in a Firecracker microVM: a minimal KVM-based virtual machine that boots in ~125 ms with ~5 MB overhead. That gives VM-level isolation between tenants with container-like density and speed, which is how AWS packs thousands of functions per host safely.",
+    "first_principles": {
+      "problem": "Containers share a kernel (weaker isolation); full VMs are too slow and heavy for per-request scaling.",
+      "truths": [
+        "Multi-tenant code needs strong isolation.",
+        "Minimal device models boot fast.",
+        "Density lowers cost."
+      ],
+      "derivation": [
+        "**Strip** the VM to essentials (virtio net/block, no BIOS).",
+        "**Boot** in milliseconds.",
+        "**Isolate** with KVM plus jailer.",
+        "**Pack** thousands per host.",
+        "Also used by **Fargate**."
+      ]
+    },
+    "analogy": {
+      "title": "Pop-up shops in a shopping centre",
+      "story": "Each gets its own locked unit, set up in minutes, many per floor.",
+      "mapping": [
+        [
+          "Locked unit",
+          "MicroVM"
+        ],
+        [
+          "Set up in minutes",
+          "Fast boot"
+        ],
+        [
+          "Many per floor",
+          "Density"
+        ]
+      ],
+      "breaks": "Pop-up shops stay for weeks; microVMs live for minutes to hours."
+    },
+    "mindmap": {
+      "center": "Firecracker",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "MicroVM",
+            "KVM-based",
+            "Rust"
+          ]
+        },
+        {
+          "label": "Traits",
+          "children": [
+            "~125 ms boot",
+            "~5 MB overhead"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Hardware virtualisation",
+            "Jailer"
+          ]
+        },
+        {
+          "label": "Used by",
+          "children": [
+            "Lambda",
+            "Fargate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Isolation comparison",
+      "scenario": "Options.",
+      "flow": [
+        "Containers: shared kernel → weaker isolation",
+        "Full VMs: seconds to boot",
+        "Firecracker: VM isolation, ms boot"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Safe multi-tenancy at serverless speed."
+        }
+      ],
+      "code": [],
+      "outcome": "strong isolation without the weight."
+    },
+    "summary": {
+      "points": [
+        "MicroVM per sandbox.",
+        "Fast and light.",
+        "VM-grade isolation."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Lambda use microVMs instead of plain containers?",
+        "a": "MicroVMs give hardware-level isolation between tenants while still booting quickly and densely."
+      }
+    ]
+  },
+  "the-lambda-lifecycle-cold-starts": {
+    "core": "A Lambda execution environment goes through Init (download code, start runtime, run initialisation code outside the handler), Invoke (run the handler, possibly many times while warm) and Shutdown. A cold start happens when no warm environment is available, so Init adds latency; warm invokes reuse connections and caches.",
+    "first_principles": {
+      "problem": "p99 latency spikes to 3 seconds on the first requests after quiet periods.",
+      "truths": [
+        "New environments must initialise.",
+        "Warm environments are reused.",
+        "Init cost depends on package size and runtime."
+      ],
+      "derivation": [
+        "Put **reusable setup outside the handler** (clients, connections).",
+        "**Shrink packages** and lazy-load.",
+        "Prefer **fast runtimes** or SnapStart.",
+        "Use **provisioned concurrency** for latency-critical paths.",
+        "Measure **Init Duration** in logs."
+      ]
+    },
+    "analogy": {
+      "title": "Opening a restaurant kitchen",
+      "story": "The first order waits while ovens heat; later orders are fast while the kitchen stays open.",
+      "mapping": [
+        [
+          "Heating ovens",
+          "Init phase"
+        ],
+        [
+          "Later orders",
+          "Warm invokes"
+        ],
+        [
+          "Closing for the night",
+          "Environment shutdown"
+        ]
+      ],
+      "breaks": "Restaurants close on schedule; Lambda recycles environments unpredictably."
+    },
+    "mindmap": {
+      "center": "Lambda Lifecycle",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "Init",
+            "Invoke",
+            "Shutdown"
+          ]
+        },
+        {
+          "label": "Cold start",
+          "children": [
+            "Download",
+            "Runtime start",
+            "Init code"
+          ]
+        },
+        {
+          "label": "Mitigate",
+          "children": [
+            "Small packages",
+            "Init outside handler",
+            "SnapStart",
+            "Provisioned concurrency"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "Init Duration"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reusing a client",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Warm invokes skip client creation."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import boto3\nddb = boto3.resource('dynamodb').Table('orders')   # init once per environment\n\ndef handler(event, context):\n    return ddb.get_item(Key={'id': event['id']})['Item']"
+        }
+      ],
+      "outcome": "lower average and tail latency."
+    },
+    "summary": {
+      "points": [
+        "Init → Invoke → Shutdown.",
+        "Cold starts add latency.",
+        "Initialise outside the handler."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why place SDK clients outside the handler?",
+        "a": "They're created once during Init and reused across warm invocations."
+      }
+    ]
+  },
+  "snapstart-cheating-the-cold-start": {
+    "core": "SnapStart (Java, Python, .NET) runs Init once when you publish a version, snapshots the initialised microVM's memory and disk, and restores from that snapshot on cold start, cutting startup from seconds to sub-second. Code must handle uniqueness and connections restored from a snapshot (runtime hooks).",
+    "first_principles": {
+      "problem": "A Spring Boot Lambda takes 6 seconds to cold start.",
+      "truths": [
+        "Init work is mostly identical each time.",
+        "Restoring memory is faster than recomputing it.",
+        "Snapshots duplicate state such as random seeds."
+      ],
+      "derivation": [
+        "Enable **SnapStart** on published versions/aliases.",
+        "Do heavy work in **Init**.",
+        "Use **before-checkpoint/after-restore hooks**.",
+        "**Re-seed** randomness and refresh connections after restore.",
+        "Test **uniqueness assumptions**."
+      ]
+    },
+    "analogy": {
+      "title": "Resuming a saved game instead of replaying the intro",
+      "story": "You load straight to where everything is set up.",
+      "mapping": [
+        [
+          "Saved game",
+          "Snapshot"
+        ],
+        [
+          "Intro sequence",
+          "Init phase"
+        ],
+        [
+          "Loading save",
+          "Restore"
+        ]
+      ],
+      "breaks": "Saved games are single-player; one snapshot seeds many environments, so unique values must be regenerated."
+    },
+    "mindmap": {
+      "center": "SnapStart",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "Init at publish",
+            "Snapshot microVM",
+            "Restore on cold start"
+          ]
+        },
+        {
+          "label": "Runtimes",
+          "children": [
+            "Java",
+            "Python",
+            ".NET"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Uniqueness",
+            "Stale connections",
+            "Randomness"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Runtime hooks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Java function with SnapStart",
+      "scenario": "Result.",
+      "flow": [
+        "Before: cold start 6.2 s",
+        "Enable SnapStart, publish version",
+        "After: restore ~400 ms"
+      ],
+      "steps": [
+        {
+          "label": "Check",
+          "detail": "Regenerate UUID seeds in after-restore hook."
+        }
+      ],
+      "code": [],
+      "outcome": "near-warm cold starts."
+    },
+    "summary": {
+      "points": [
+        "Snapshot after Init.",
+        "Restore fast.",
+        "Handle uniqueness."
+      ]
+    },
+    "check": [
+      {
+        "q": "What risk does SnapStart introduce?",
+        "a": "State captured in the snapshot (random seeds, connections, unique IDs) is duplicated across restored environments."
+      }
+    ]
+  },
+  "concurrency-reserved-vs-provisioned": {
+    "core": "Concurrency is the number of in-flight invocations (≈ requests/s × duration). Accounts have a regional limit (default 1,000). Reserved concurrency guarantees and caps a function's share; provisioned concurrency keeps N environments pre-initialised to eliminate cold starts, at extra cost.",
+    "first_principles": {
+      "problem": "One runaway function consumes all account concurrency and throttles critical ones, while the checkout API suffers cold starts.",
+      "truths": [
+        "Concurrency = rate × duration.",
+        "Account limits are shared.",
+        "Pre-initialised environments avoid cold starts."
+      ],
+      "derivation": [
+        "**Estimate** concurrency.",
+        "**Reserve** for critical functions (and cap noisy ones).",
+        "**Provision** for latency-sensitive paths.",
+        "**Auto scale** provisioned concurrency on schedule/utilisation.",
+        "Request **limit increases** early."
+      ]
+    },
+    "analogy": {
+      "title": "Restaurant tables",
+      "story": "Reserved tables guarantee (and limit) a party's seats; provisioned tables are already set with food on them.",
+      "mapping": [
+        [
+          "Reserved tables",
+          "Reserved concurrency"
+        ],
+        [
+          "Pre-set tables",
+          "Provisioned concurrency"
+        ],
+        [
+          "Restaurant capacity",
+          "Account limit"
+        ]
+      ],
+      "breaks": "Restaurants can turn people away politely; throttled events may be retried or lost depending on the source."
+    },
+    "mindmap": {
+      "center": "Concurrency",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "Rate × duration"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Account (1,000 default)",
+            "Burst"
+          ]
+        },
+        {
+          "label": "Reserved",
+          "children": [
+            "Guarantee",
+            "Cap"
+          ]
+        },
+        {
+          "label": "Provisioned",
+          "children": [
+            "No cold starts",
+            "Extra cost",
+            "Auto scaling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Capacity planning",
+      "scenario": "Maths.",
+      "flow": [
+        "Checkout: 200 req/s × 0.3 s = 60 concurrent",
+        "Provisioned 80 for headroom",
+        "Image resizer: reserved max 100 to protect others"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Critical paths protected and fast."
+        }
+      ],
+      "code": [],
+      "outcome": "predictable function capacity."
+    },
+    "summary": {
+      "points": [
+        "Concurrency = rate × duration.",
+        "Reserve to guarantee/cap.",
+        "Provision to kill cold starts."
+      ]
+    },
+    "check": [
+      {
+        "q": "A function handles 50 req/s at 2 s each. What concurrency does it need?",
+        "a": "About 100 concurrent executions."
+      }
+    ]
+  },
+  "lambda-layers-sharing-code-and-dependencies": {
+    "core": "Layers are versioned zip archives (libraries, runtimes, shared code, extensions) mounted under /opt in a function's environment. Up to five per function, sharing dependencies across many functions and keeping deployment packages small. The 250 MB unzipped total limit still applies; container images allow up to 10 GB.",
+    "first_principles": {
+      "problem": "Twenty functions each bundle the same 40 MB dependency, slowing deploys and drifting versions.",
+      "truths": [
+        "Shared code should be versioned once.",
+        "Smaller function packages deploy faster.",
+        "Dependencies must match runtime and architecture."
+      ],
+      "derivation": [
+        "**Package** shared libs into a layer (python/ or nodejs/ path).",
+        "**Version** layers and pin per function.",
+        "Build for the right **architecture** (x86/arm64).",
+        "Use **extensions** for agents.",
+        "Consider **container images** for large deps."
+      ]
+    },
+    "analogy": {
+      "title": "A shared toolbox in a workshop",
+      "story": "Everyone uses the same tools from one shelf instead of carrying their own.",
+      "mapping": [
+        [
+          "Toolbox",
+          "Layer"
+        ],
+        [
+          "Shelf",
+          "/opt"
+        ],
+        [
+          "Tool version",
+          "Layer version"
+        ]
+      ],
+      "breaks": "Shared tools update for everyone; layers are pinned per function version, so upgrades are explicit."
+    },
+    "mindmap": {
+      "center": "Layers",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Zip mounted at /opt",
+            "Versioned"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Libraries",
+            "Shared code",
+            "Extensions",
+            "Custom runtimes"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "5 per function",
+            "250 MB unzipped"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "Container images 10 GB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Publish a Python layer",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Functions ship only their own code."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "pip install -r requirements.txt -t python/\nzip -r deps.zip python\naws lambda publish-layer-version --layer-name deps --zip-file fileb://deps.zip \\\n  --compatible-runtimes python3.12 --compatible-architectures arm64"
+        }
+      ],
+      "outcome": "smaller, consistent deployments."
+    },
+    "summary": {
+      "points": [
+        "Shared, versioned deps.",
+        "Mounted at /opt.",
+        "Mind size limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where are layer contents available inside the function?",
+        "a": "Under the /opt directory."
+      }
+    ]
+  },
+  "event-source-mappings-the-poller-fleet": {
+    "core": "For pull-based sources (SQS, Kinesis, DynamoDB Streams, Kafka, MQ), Lambda runs a managed poller fleet (event source mapping) that reads batches and invokes your function. You tune batch size, batching window, concurrency, parallelisation factor, filtering and failure handling (partial batch responses, bisect, DLQ/on-failure destinations).",
+    "first_principles": {
+      "problem": "One poison message in a Kinesis shard blocks processing for hours with endless retries.",
+      "truths": [
+        "Polling is handled by Lambda, not your code.",
+        "Ordered streams block on failures.",
+        "Batch size trades latency for efficiency."
+      ],
+      "derivation": [
+        "Tune **batch size and window**.",
+        "Enable **ReportBatchItemFailures**.",
+        "For streams: **bisect on error**, **max retry attempts**, **max record age**.",
+        "Send failures to an **on-failure destination**.",
+        "Use **event filtering** to skip irrelevant records."
+      ]
+    },
+    "analogy": {
+      "title": "A postal sorting crew that collects mail for you",
+      "story": "They fetch bundles from the mailbox and hand them over; you tell them what to do with damaged letters.",
+      "mapping": [
+        [
+          "Sorting crew",
+          "Poller fleet"
+        ],
+        [
+          "Bundles",
+          "Batches"
+        ],
+        [
+          "Damaged letters",
+          "Poison messages"
+        ]
+      ],
+      "breaks": "Postal crews skip bad letters automatically; you must configure failure handling or streams stall."
+    },
+    "mindmap": {
+      "center": "Event Source Mappings",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "SQS",
+            "Kinesis",
+            "DynamoDB Streams",
+            "Kafka",
+            "MQ"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Batch size",
+            "Window",
+            "Parallelisation",
+            "Max concurrency"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "Partial batch response",
+            "Bisect",
+            "Max retries/age",
+            "On-failure destination"
+          ]
+        },
+        {
+          "label": "Filtering",
+          "children": [
+            "Event patterns"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Partial batch failure",
+      "scenario": "SQS handler.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only failed messages retry."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def handler(event, _):\n    failures = []\n    for r in event['Records']:\n        try:\n            process(r)\n        except Exception:\n            failures.append({'itemIdentifier': r['messageId']})\n    return {'batchItemFailures': failures}"
+        }
+      ],
+      "outcome": "resilient batch processing."
+    },
+    "summary": {
+      "points": [
+        "Lambda polls for you.",
+        "Tune batches.",
+        "Handle partial failures."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does ReportBatchItemFailures enable?",
+        "a": "Returning only failed record IDs so successful records in the batch aren't reprocessed."
+      }
+    ]
+  }
+}

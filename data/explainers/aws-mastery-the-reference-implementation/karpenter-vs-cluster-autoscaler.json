@@ -1,0 +1,610 @@
+{
+  "introduction-the-pending-pod-problem": {
+    "core": "When Kubernetes can't schedule a pod because no node has enough free CPU, memory or the right features, the pod stays Pending. Node autoscalers watch for pending pods and add capacity, and remove under-used nodes later. How they choose and remove nodes decides speed, cost and stability.",
+    "first_principles": {
+      "problem": "Traffic spikes leave pods Pending for minutes while users see errors.",
+      "truths": [
+        "Pods request resources.",
+        "Nodes have fixed capacity.",
+        "Adding nodes takes time."
+      ],
+      "derivation": [
+        "Detect **unschedulable pods**.",
+        "Choose **node size and type**.",
+        "**Launch** quickly.",
+        "**Remove** idle capacity safely.",
+        "Respect **PDBs** and constraints."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant adding tables when guests queue",
+      "story": "How fast and how smartly you add tables decides wait times and wasted space.",
+      "mapping": [
+        [
+          "Waiting guests",
+          "Pending pods"
+        ],
+        [
+          "Tables",
+          "Nodes"
+        ],
+        [
+          "Clearing tables",
+          "Scale-down"
+        ]
+      ],
+      "breaks": "Restaurants can seat guests anywhere; pods have constraints (zones, GPUs, taints)."
+    },
+    "mindmap": {
+      "center": "Pending Pods",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "No node fits"
+          ]
+        },
+        {
+          "label": "Autoscalers",
+          "children": [
+            "Cluster Autoscaler",
+            "Karpenter"
+          ]
+        },
+        {
+          "label": "Goals",
+          "children": [
+            "Fast scale-up",
+            "Low cost",
+            "Safe scale-down"
+          ]
+        },
+        {
+          "label": "Constraints",
+          "children": [
+            "Requests",
+            "Affinity",
+            "Taints",
+            "Zones"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scale-up timeline",
+      "scenario": "Spike.",
+      "flow": [
+        "HPA adds 30 pods",
+        "12 pods Pending",
+        "Autoscaler launches nodes",
+        "Pods scheduled in ~60–90 s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Capacity follows demand."
+        }
+      ],
+      "code": [],
+      "outcome": "pending pods resolved."
+    },
+    "summary": {
+      "points": [
+        "Pending = no fit.",
+        "Autoscalers add nodes.",
+        "Speed and cost matter."
+      ]
+    },
+    "check": [
+      {
+        "q": "What triggers a node autoscaler to add capacity?",
+        "a": "Pods that are Pending because no existing node can satisfy their requests or constraints."
+      }
+    ]
+  },
+  "cluster-autoscaler-cas-the-asg-manager": {
+    "core": "Cluster Autoscaler works through node groups (Auto Scaling groups). It simulates whether adding a node from an existing group would schedule pending pods, then bumps that ASG's desired count, and scales down nodes whose pods can move elsewhere. It's limited to pre-defined instance types per group and is relatively slow.",
+    "first_principles": {
+      "problem": "A cluster needs a dozen node groups to cover different instance types, and scaling takes minutes.",
+      "truths": [
+        "ASGs define fixed instance templates.",
+        "Simulation picks a group, not an instance type.",
+        "Each group needs separate management."
+      ],
+      "derivation": [
+        "Create **node groups** per instance shape/zone.",
+        "CAS picks a group via **expanders** (least-waste, priority).",
+        "**Scale-down** after utilisation threshold and delay.",
+        "Use **one AZ per group** for zonal volumes.",
+        "Accept **slower, coarser** decisions."
+      ]
+    },
+    "analogy": {
+      "title": "Ordering from a fixed catalogue",
+      "story": "You can only buy the pre-packaged bundles, even if you need something slightly different.",
+      "mapping": [
+        [
+          "Catalogue bundles",
+          "Node groups"
+        ],
+        [
+          "Choosing a bundle",
+          "Expander"
+        ],
+        [
+          "Returns",
+          "Scale-down"
+        ]
+      ],
+      "breaks": "Catalogues ship quickly; ASG scale-up involves extra API hops."
+    },
+    "mindmap": {
+      "center": "Cluster Autoscaler",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Simulate",
+            "Bump ASG desired"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Node groups",
+            "Expanders"
+          ]
+        },
+        {
+          "label": "Scale-down",
+          "children": [
+            "Utilisation threshold",
+            "Delay"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Fixed types per group",
+            "Slower",
+            "Many groups"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Expander choice",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Picks the group with least idle resources."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- --expander=least-waste\n- --balance-similar-node-groups\n- --scale-down-utilization-threshold=0.5\n- --scale-down-unneeded-time=10m"
+        }
+      ],
+      "outcome": "ASG-driven autoscaling."
+    },
+    "summary": {
+      "points": [
+        "Works via ASGs.",
+        "Fixed instance types per group.",
+        "Simulates scheduling."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do clusters using CAS often have many node groups?",
+        "a": "Each ASG has fixed instance types, so different shapes, zones or purchase options need separate groups."
+      }
+    ]
+  },
+  "karpenter-just-in-time-provisioning": {
+    "core": "Karpenter watches pending pods and launches EC2 instances directly through the EC2 Fleet API, choosing the best-fit instance type from a broad set defined in NodePools (constraints like families, sizes, architecture, Spot/On-Demand, zones). No node groups are needed, and nodes typically join in under a minute.",
+    "first_principles": {
+      "problem": "CAS can only pick from preset groups and scales slowly.",
+      "truths": [
+        "Pods' combined requests define the ideal node.",
+        "EC2 offers hundreds of instance types.",
+        "Direct API calls are faster than ASG indirection."
+      ],
+      "derivation": [
+        "Define **NodePools** with requirements.",
+        "Define **EC2NodeClass** (AMI, subnets, SGs).",
+        "Karpenter **batches pending pods** and picks types.",
+        "Launch via **EC2 Fleet** (price-capacity-optimized for Spot).",
+        "Nodes **join directly**."
+      ]
+    },
+    "analogy": {
+      "title": "A tailor making a suit on demand",
+      "story": "Instead of picking off the rack, it cuts exactly what fits.",
+      "mapping": [
+        [
+          "Tailor",
+          "Karpenter"
+        ],
+        [
+          "Measurements",
+          "Pod requests"
+        ],
+        [
+          "Fabric options",
+          "Instance types"
+        ]
+      ],
+      "breaks": "Tailors take weeks; Karpenter takes seconds, but it still depends on EC2 capacity."
+    },
+    "mindmap": {
+      "center": "Karpenter",
+      "branches": [
+        {
+          "label": "Config",
+          "children": [
+            "NodePool",
+            "EC2NodeClass"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Watch pending pods",
+            "EC2 Fleet API"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Fast",
+            "Flexible types",
+            "No node groups"
+          ]
+        },
+        {
+          "label": "Purchasing",
+          "children": [
+            "Spot",
+            "On-Demand",
+            "Diversified"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A NodePool",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Best-fit, diversified nodes in under a minute."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: karpenter.sh/v1\nkind: NodePool\nmetadata: {name: general}\nspec:\n  template:\n    spec:\n      requirements:\n        - {key: karpenter.sh/capacity-type, operator: In, values: [spot, on-demand]}\n        - {key: kubernetes.io/arch, operator: In, values: [arm64, amd64]}\n        - {key: karpenter.k8s.aws/instance-category, operator: In, values: [c, m, r]}\n      nodeClassRef: {group: karpenter.k8s.aws, kind: EC2NodeClass, name: default}\n  limits: {cpu: 1000}"
+        }
+      ],
+      "outcome": "just-in-time capacity."
+    },
+    "summary": {
+      "points": [
+        "Direct EC2 provisioning.",
+        "Flexible requirements.",
+        "Fast."
+      ]
+    },
+    "check": [
+      {
+        "q": "What replaces node groups in Karpenter?",
+        "a": "NodePools (with EC2NodeClasses) defining constraints, from which Karpenter picks instance types."
+      }
+    ]
+  },
+  "bin-packing-the-game-of-tetris": {
+    "core": "Bin packing fits pods onto as few nodes as possible to minimise waste. Karpenter considers pending pods' combined requests and picks instance types that fit them tightly; consolidation later repacks running pods onto fewer or cheaper nodes. Accurate resource requests are essential, since bad requests make good packing impossible.",
+    "first_principles": {
+      "problem": "Nodes average 30% utilisation because pods request far more than they use.",
+      "truths": [
+        "Schedulers pack by requests, not usage.",
+        "Fragmentation wastes capacity.",
+        "Larger nodes pack better but increase blast radius."
+      ],
+      "derivation": [
+        "**Right-size requests** (VPA recommendations).",
+        "Let Karpenter **choose sizes** to fit batches.",
+        "Enable **consolidation**.",
+        "Balance **node size vs blast radius**.",
+        "Watch **daemonset overhead** per node."
+      ]
+    },
+    "analogy": {
+      "title": "Playing Tetris with pods",
+      "story": "Fitting pieces tightly clears lines and saves space; odd shapes leave holes.",
+      "mapping": [
+        [
+          "Pieces",
+          "Pods"
+        ],
+        [
+          "Rows",
+          "Nodes"
+        ],
+        [
+          "Holes",
+          "Wasted capacity"
+        ]
+      ],
+      "breaks": "Tetris pieces are fixed; pod requests can (and should) be tuned."
+    },
+    "mindmap": {
+      "center": "Bin Packing",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Pod requests",
+            "Instance types"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Few nodes",
+            "Little waste"
+          ]
+        },
+        {
+          "label": "Enablers",
+          "children": [
+            "Accurate requests",
+            "Flexible types",
+            "Consolidation"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Blast radius",
+            "Daemonset overhead"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing over-requests",
+      "scenario": "Effect.",
+      "flow": [
+        "Pods request 2 vCPU, use 0.3",
+        "VPA suggests 500m",
+        "Requests updated",
+        "Same workload on 40% fewer nodes"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Packing quality depends on honest requests."
+        }
+      ],
+      "code": [],
+      "outcome": "higher utilisation, lower cost."
+    },
+    "summary": {
+      "points": [
+        "Pack by requests.",
+        "Right-size requests.",
+        "Consolidate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do inflated pod requests hurt bin packing?",
+        "a": "The scheduler reserves requested capacity, so nodes look full while actually idle."
+      }
+    ]
+  },
+  "disruption-consolidation-cleaning-up": {
+    "core": "Karpenter's disruption controller removes or replaces nodes when they're empty, underutilised (consolidation into fewer or cheaper nodes), expired (max node lifetime for patching) or drifted from the NodePool/NodeClass spec. It respects PodDisruptionBudgets and disruption budgets to limit how many nodes churn at once.",
+    "first_principles": {
+      "problem": "Nodes launched for a spike linger at 10% usage for days, and old AMIs never get replaced.",
+      "truths": [
+        "Demand drops after spikes.",
+        "Long-lived nodes accumulate drift and vulnerabilities.",
+        "Churn must not break workloads."
+      ],
+      "derivation": [
+        "**consolidationPolicy**: WhenEmptyOrUnderutilized.",
+        "**expireAfter** for regular node rotation.",
+        "**Drift** replacement on AMI/config changes.",
+        "**PDBs** to protect apps.",
+        "**Disruption budgets** (e.g. 10% of nodes, schedules)."
+      ]
+    },
+    "analogy": {
+      "title": "A cleaning crew that merges half-empty storage rooms",
+      "story": "They move items into fewer rooms and close the empties, but never during business-critical hours.",
+      "mapping": [
+        [
+          "Merging rooms",
+          "Consolidation"
+        ],
+        [
+          "Closing empties",
+          "Removing nodes"
+        ],
+        [
+          "Business hours rule",
+          "Disruption budgets"
+        ]
+      ],
+      "breaks": "Moving boxes is harmless; evicting pods restarts them, so apps must tolerate it."
+    },
+    "mindmap": {
+      "center": "Disruption",
+      "branches": [
+        {
+          "label": "Reasons",
+          "children": [
+            "Empty",
+            "Underutilised",
+            "Expired",
+            "Drifted"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "PDBs",
+            "Disruption budgets",
+            "do-not-disrupt annotation"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Cost",
+            "Patching",
+            "Fresh nodes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Disruption settings",
+      "scenario": "NodePool.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cleanup outside business hours; nodes rotated monthly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "disruption:\n  consolidationPolicy: WhenEmptyOrUnderutilized\n  consolidateAfter: 5m\n  budgets:\n    - nodes: \"10%\"\n    - nodes: \"0\"\n      schedule: \"0 9 * * mon-fri\"\n      duration: 8h\ntemplate:\n  spec:\n    expireAfter: 720h"
+        }
+      ],
+      "outcome": "lean, patched clusters."
+    },
+    "summary": {
+      "points": [
+        "Consolidate idle capacity.",
+        "Expire and replace drift.",
+        "Budget disruption."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Karpenter 'drift' mean?",
+        "a": "A node no longer matches its NodePool/EC2NodeClass spec (e.g. new AMI), so it's replaced."
+      }
+    ]
+  },
+  "head-to-head-comparison-when-to-use-each": {
+    "core": "Karpenter is faster, more flexible (any instance type, no node groups), packs and consolidates better and simplifies Spot diversification; it's the default choice on EKS today. Cluster Autoscaler is cloud-agnostic, mature, and fits environments that must stay on ASGs or managed node groups with fixed shapes. Some clusters run both during migration.",
+    "first_principles": {
+      "problem": "A team must choose an autoscaler for a new EKS platform.",
+      "truths": [
+        "Flexibility reduces cost.",
+        "Speed matters for spikes.",
+        "Portability matters for multi-cloud."
+      ],
+      "derivation": [
+        "**Karpenter** for EKS, varied workloads, Spot, cost focus.",
+        "**CAS** for multi-cloud parity or strict ASG requirements.",
+        "**Migrate** gradually (taints, separate pools).",
+        "Run Karpenter controller on **Fargate or a small fixed node group**."
+      ]
+    },
+    "analogy": {
+      "title": "A ride-hailing app versus a fixed bus timetable",
+      "story": "Ride-hailing sends the right car when needed; buses are predictable but rigid.",
+      "mapping": [
+        [
+          "Ride-hailing",
+          "Karpenter"
+        ],
+        [
+          "Bus timetable",
+          "Cluster Autoscaler + ASGs"
+        ]
+      ],
+      "breaks": "Buses work everywhere; Karpenter's AWS provider is the most mature, others less so."
+    },
+    "mindmap": {
+      "center": "Comparison",
+      "branches": [
+        {
+          "label": "Karpenter",
+          "children": [
+            "Fast",
+            "Any instance",
+            "Consolidation",
+            "No node groups"
+          ]
+        },
+        {
+          "label": "CAS",
+          "children": [
+            "Cloud-agnostic",
+            "ASG-based",
+            "Mature"
+          ]
+        },
+        {
+          "label": "Decide",
+          "children": [
+            "Platform",
+            "Workload variety",
+            "Spot",
+            "Portability"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "Side-by-side"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Migration plan",
+      "scenario": "CAS → Karpenter.",
+      "flow": [
+        "Install Karpenter on a small managed node group",
+        "Create NodePools mirroring workloads",
+        "Cordon CAS node groups gradually",
+        "Remove CAS"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster scaling, ~20–30% lower compute cost typical."
+        }
+      ],
+      "code": [],
+      "outcome": "the right autoscaler for the platform."
+    },
+    "summary": {
+      "points": [
+        "Karpenter for EKS.",
+        "CAS for portability.",
+        "Migrate gradually."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should the Karpenter controller run?",
+        "a": "On capacity it doesn't manage itself, such as Fargate or a small fixed managed node group."
+      }
+    ]
+  }
+}

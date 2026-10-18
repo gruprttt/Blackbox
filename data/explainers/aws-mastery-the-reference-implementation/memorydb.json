@@ -1,0 +1,606 @@
+{
+  "introduction-when-cache-becomes-database": {
+    "core": "MemoryDB is a Redis/Valkey-compatible, durable in-memory database: every write is committed to a Multi-AZ transaction log before acknowledgement, so data survives node failures. It offers microsecond reads and single-digit-ms writes, letting you use Redis as a primary database rather than a cache.",
+    "first_principles": {
+      "problem": "Teams use Redis as their primary store for sessions, carts or leaderboards, and lose data on failover with async replication.",
+      "truths": [
+        "Async replication can lose recent writes.",
+        "Some workloads need both speed and durability.",
+        "Durable logs make memory stores safe."
+      ],
+      "derivation": [
+        "Use **MemoryDB** when Redis data is the **source of truth**.",
+        "Get **Multi-AZ durability** per write.",
+        "Keep **Redis APIs and data structures**.",
+        "Accept **slightly higher write latency**.",
+        "Use **ElastiCache** when data is re-creatable."
+      ]
+    },
+    "analogy": {
+      "title": "A whiteboard with an automatic notary",
+      "story": "You still write quickly on the board, but every line is notarised in a ledger before you move on.",
+      "mapping": [
+        [
+          "Whiteboard",
+          "In-memory data"
+        ],
+        [
+          "Notary ledger",
+          "Transaction log"
+        ],
+        [
+          "Moving on",
+          "Write acknowledgement"
+        ]
+      ],
+      "breaks": "Notaries are slow; the log adds only a few milliseconds."
+    },
+    "mindmap": {
+      "center": "MemoryDB",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Durable Redis/Valkey",
+            "Primary database"
+          ]
+        },
+        {
+          "label": "Durability",
+          "children": [
+            "Multi-AZ transaction log"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "µs reads",
+            "ms writes"
+          ]
+        },
+        {
+          "label": "vs ElastiCache",
+          "children": [
+            "Source of truth vs cache"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shopping cart store",
+      "scenario": "Choice.",
+      "flow": [
+        "Carts must not vanish on failover",
+        "ElastiCache async replicas could lose last writes",
+        "MemoryDB acknowledges after durable commit"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Redis speed with database durability."
+        }
+      ],
+      "code": [],
+      "outcome": "Redis as a trustworthy primary store."
+    },
+    "summary": {
+      "points": [
+        "Durable in-memory DB.",
+        "Redis-compatible.",
+        "For source-of-truth data."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes MemoryDB durable?",
+        "a": "Writes are committed to a distributed Multi-AZ transaction log before being acknowledged."
+      }
+    ]
+  },
+  "durability-architecture-the-transaction-log": {
+    "core": "MemoryDB's primary applies writes in memory and synchronously appends them to a distributed transaction log replicated across multiple AZs. Only after the log confirms does the client get an OK. Replicas consume the log to stay current, and recovery replays the log, so no acknowledged write is lost.",
+    "first_principles": {
+      "problem": "Redis AOF/RDB on a single node can lose data if the node and disk fail together.",
+      "truths": [
+        "A log replicated across AZs survives node and AZ loss.",
+        "Acknowledging after commit guarantees durability.",
+        "Replicas can rebuild from the log."
+      ],
+      "derivation": [
+        "**Write** → primary memory + **log append**.",
+        "**Ack** after multi-AZ commit.",
+        "**Replicas** tail the log.",
+        "**Snapshots** compact recovery time.",
+        "**Consistency**: strong on primary, eventual on replicas."
+      ]
+    },
+    "analogy": {
+      "title": "A ship's logbook copied to three shore stations in real time",
+      "story": "Even if the ship sinks, every recorded entry exists ashore.",
+      "mapping": [
+        [
+          "Logbook entry",
+          "Write record"
+        ],
+        [
+          "Shore stations",
+          "AZ log replicas"
+        ],
+        [
+          "Sinking ship",
+          "Node failure"
+        ]
+      ],
+      "breaks": "Radio copies can be garbled; the log uses consensus to guarantee identical copies."
+    },
+    "mindmap": {
+      "center": "Transaction Log",
+      "branches": [
+        {
+          "label": "Write path",
+          "children": [
+            "Apply in memory",
+            "Append to log",
+            "Multi-AZ commit",
+            "Ack"
+          ]
+        },
+        {
+          "label": "Replicas",
+          "children": [
+            "Tail the log"
+          ]
+        },
+        {
+          "label": "Recovery",
+          "children": [
+            "Snapshots + log replay"
+          ]
+        },
+        {
+          "label": "Consistency",
+          "children": [
+            "Strong primary reads",
+            "Eventual replica reads"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Write timeline",
+      "scenario": "Latency.",
+      "flow": [
+        "SET cart:42 ... → applied in memory",
+        "Log append replicated across AZs (~2–5 ms)",
+        "OK returned",
+        "Replicas apply shortly after"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Durable writes at low latency."
+        }
+      ],
+      "code": [],
+      "outcome": "zero loss of acknowledged writes."
+    },
+    "summary": {
+      "points": [
+        "Log before ack.",
+        "Multi-AZ replication.",
+        "Replay to recover."
+      ]
+    },
+    "check": [
+      {
+        "q": "Are reads from MemoryDB replicas strongly consistent?",
+        "a": "No; replica reads are eventually consistent, while primary reads are strongly consistent."
+      }
+    ]
+  },
+  "memorydb-vs-elasticache-the-decision-matrix": {
+    "core": "Choose ElastiCache for caching where data can be rebuilt: lowest write latency, cheaper and with data tiering options. Choose MemoryDB when Redis holds primary data that must survive failures: durable writes, strong consistency on the primary and simplified architecture (no separate database). Cost and write latency are higher with MemoryDB.",
+    "first_principles": {
+      "problem": "A team runs ElastiCache plus a database just to make session data durable, adding sync complexity.",
+      "truths": [
+        "Caches are rebuildable by definition.",
+        "Durability costs latency and money.",
+        "Fewer data stores mean simpler systems."
+      ],
+      "derivation": [
+        "**Rebuildable?** → ElastiCache.",
+        "**Source of truth?** → MemoryDB.",
+        "**Write latency critical (µs)?** → ElastiCache.",
+        "**Replace cache + DB pair?** → MemoryDB.",
+        "**Compare cost** at your size."
+      ]
+    },
+    "analogy": {
+      "title": "Sticky notes versus a bound notebook",
+      "story": "Sticky notes are quick and disposable; the notebook keeps records safe.",
+      "mapping": [
+        [
+          "Sticky notes",
+          "ElastiCache"
+        ],
+        [
+          "Bound notebook",
+          "MemoryDB"
+        ]
+      ],
+      "breaks": "Both tools write at almost the same speed; the difference is what survives failure."
+    },
+    "mindmap": {
+      "center": "Decision Matrix",
+      "branches": [
+        {
+          "label": "ElastiCache",
+          "children": [
+            "Cache",
+            "Rebuildable",
+            "Lowest latency",
+            "Cheaper"
+          ]
+        },
+        {
+          "label": "MemoryDB",
+          "children": [
+            "Primary DB",
+            "Durable",
+            "Strong consistency",
+            "Higher write latency"
+          ]
+        },
+        {
+          "label": "Questions",
+          "children": [
+            "Rebuildable?",
+            "Latency?",
+            "Simplify stack?"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three workloads",
+      "scenario": "Choices.",
+      "flow": [
+        "Product page cache → ElastiCache",
+        "Game leaderboards as source of truth → MemoryDB",
+        "Rate-limit counters → ElastiCache"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Ask: what happens if this data disappears?"
+        }
+      ],
+      "code": [],
+      "outcome": "right store per data type."
+    },
+    "summary": {
+      "points": [
+        "Cache vs database.",
+        "Durability costs a little.",
+        "Simplify where possible."
+      ]
+    },
+    "check": [
+      {
+        "q": "What key question decides MemoryDB vs ElastiCache?",
+        "a": "Whether the data is the source of truth that must survive failures, or re-creatable cache data."
+      }
+    ]
+  },
+  "cluster-architecture-sharding-and-replication": {
+    "core": "MemoryDB clusters use Redis Cluster semantics: data split across up to 500 shards by hash slot, each shard with one primary and up to five replicas spread across AZs. Scale out by adding shards (online resharding), scale reads with replicas and scale up by changing node types.",
+    "first_principles": {
+      "problem": "One shard can't hold or write the whole dataset fast enough.",
+      "truths": [
+        "Hash slots distribute keys.",
+        "Replicas add read capacity and failover targets.",
+        "Shards add write capacity."
+      ],
+      "derivation": [
+        "Choose **shard count** for memory and write throughput.",
+        "Add **replicas** (≥1) for HA and reads.",
+        "Spread across **AZs**.",
+        "Use **cluster-aware clients** and hash tags.",
+        "**Reshard online** as data grows."
+      ]
+    },
+    "analogy": {
+      "title": "Branch libraries each with backup copies",
+      "story": "Books are split among branches by title, and each branch keeps duplicate copies in nearby annexes.",
+      "mapping": [
+        [
+          "Branches",
+          "Shards"
+        ],
+        [
+          "Annexes",
+          "Replicas"
+        ],
+        [
+          "Title ranges",
+          "Hash slots"
+        ]
+      ],
+      "breaks": "Libraries lend physical books; replicas serve copies of the same data simultaneously."
+    },
+    "mindmap": {
+      "center": "MemoryDB Cluster",
+      "branches": [
+        {
+          "label": "Shards",
+          "children": [
+            "Hash slots",
+            "Up to 500"
+          ]
+        },
+        {
+          "label": "Replicas",
+          "children": [
+            "Up to 5 per shard",
+            "Multi-AZ"
+          ]
+        },
+        {
+          "label": "Scaling",
+          "children": [
+            "Out (shards)",
+            "Up (node type)",
+            "Reads (replicas)"
+          ]
+        },
+        {
+          "label": "Clients",
+          "children": [
+            "Cluster-aware",
+            "Hash tags"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing",
+      "scenario": "Rough plan.",
+      "flow": [
+        "Dataset 400 GB, writes 200k/s",
+        "r7g.2xlarge ~50 GB usable → 10 shards",
+        "1 replica each across AZs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Memory and writes spread evenly."
+        }
+      ],
+      "code": [],
+      "outcome": "horizontally scaled durable store."
+    },
+    "summary": {
+      "points": [
+        "Shards for writes and memory.",
+        "Replicas for HA.",
+        "Reshard online."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you increase MemoryDB write throughput?",
+        "a": "Add shards so writes are spread across more primaries."
+      }
+    ]
+  },
+  "snapshots-restore-and-disaster-recovery": {
+    "core": "MemoryDB takes automatic daily snapshots (retained up to 35 days) and manual snapshots, stored in S3 and copyable across regions or exportable. Restoring creates a new cluster. The transaction log already covers node and AZ failures; snapshots cover operator errors, corruption and regional DR. Multi-Region clusters add active-active replication.",
+    "first_principles": {
+      "problem": "A bad deploy flushes keys and the team has no point to restore from.",
+      "truths": [
+        "Durability doesn't protect against bad writes.",
+        "Snapshots give recovery points.",
+        "Regional DR needs copies elsewhere."
+      ],
+      "derivation": [
+        "Enable **automatic snapshots** with retention.",
+        "Take **manual snapshots** before risky changes.",
+        "**Copy** snapshots to another region.",
+        "**Restore** into a new cluster and repoint apps.",
+        "Consider **Multi-Region** for active-active."
+      ]
+    },
+    "analogy": {
+      "title": "Daily photos of the whiteboard",
+      "story": "Even if someone wipes it, you can redraw yesterday's state.",
+      "mapping": [
+        [
+          "Photo",
+          "Snapshot"
+        ],
+        [
+          "Wiped board",
+          "Accidental flush"
+        ],
+        [
+          "Redrawing",
+          "Restore"
+        ]
+      ],
+      "breaks": "Photos are instant; restores create a new cluster, taking minutes."
+    },
+    "mindmap": {
+      "center": "Snapshots & DR",
+      "branches": [
+        {
+          "label": "Snapshots",
+          "children": [
+            "Automatic daily",
+            "Manual",
+            "Up to 35 days"
+          ]
+        },
+        {
+          "label": "Copies",
+          "children": [
+            "Cross-region",
+            "Export to S3"
+          ]
+        },
+        {
+          "label": "Restore",
+          "children": [
+            "New cluster"
+          ]
+        },
+        {
+          "label": "Coverage",
+          "children": [
+            "Operator error",
+            "Corruption",
+            "Region loss"
+          ]
+        },
+        {
+          "label": "Multi-Region",
+          "children": [
+            "Active-active"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pre-deploy snapshot",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Recovery point before every risky change."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws memorydb create-snapshot --cluster-name prod --snapshot-name pre-release-2026-10-18\naws memorydb copy-snapshot --source-snapshot-name pre-release-2026-10-18 --target-snapshot-name dr-copy --target-bucket dr-bucket"
+        }
+      ],
+      "outcome": "protection beyond node durability."
+    },
+    "summary": {
+      "points": [
+        "Durability ≠ backup.",
+        "Snapshot before risk.",
+        "Copy for DR."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why take snapshots if MemoryDB is already durable?",
+        "a": "Durability protects acknowledged writes from failures, not from bad writes, deletions or regional disasters."
+      }
+    ]
+  },
+  "failover-mechanics-what-actually-happens-when-a-node-dies": {
+    "core": "When a primary fails, MemoryDB detects it, picks a replica that's fully caught up with the transaction log, promotes it, and updates cluster topology. Because the log holds every acknowledged write, no committed data is lost. Clients see brief errors (MOVED or connection resets) and reconnect via the cluster endpoint, typically within seconds.",
+    "first_principles": {
+      "problem": "Teams fear failover loses data or requires manual action.",
+      "truths": [
+        "The log is authoritative.",
+        "A replica can catch up from the log before promotion.",
+        "Clients need retry logic."
+      ],
+      "derivation": [
+        "**Detect** primary failure.",
+        "**Select** replica and replay remaining log.",
+        "**Promote** and update topology.",
+        "**Replace** the failed node.",
+        "Clients **retry with backoff** and refresh topology."
+      ]
+    },
+    "analogy": {
+      "title": "A relay team with a written race log",
+      "story": "If the runner falls, the next one reads the log and continues exactly where they stopped.",
+      "mapping": [
+        [
+          "Fallen runner",
+          "Failed primary"
+        ],
+        [
+          "Race log",
+          "Transaction log"
+        ],
+        [
+          "Next runner",
+          "Promoted replica"
+        ]
+      ],
+      "breaks": "Relay handoffs take a moment; clients must tolerate a few seconds of errors."
+    },
+    "mindmap": {
+      "center": "Failover",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Detect",
+            "Catch up from log",
+            "Promote",
+            "Update topology",
+            "Replace node"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "No acknowledged write lost"
+          ]
+        },
+        {
+          "label": "Client",
+          "children": [
+            "Retries",
+            "Topology refresh"
+          ]
+        },
+        {
+          "label": "Duration",
+          "children": [
+            "Seconds"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Failover drill",
+      "scenario": "Test.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Observe",
+          "detail": "Client errors for ~5–10 s, then normal; no key loss."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws memorydb failover-shard --cluster-name prod --shard-name 0001"
+        }
+      ],
+      "outcome": "failover proven safe."
+    },
+    "summary": {
+      "points": [
+        "Log-based promotion.",
+        "No acknowledged write lost.",
+        "Clients retry."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't MemoryDB lose acknowledged writes on failover?",
+        "a": "The promoted replica first catches up from the durable transaction log containing every acknowledged write."
+      }
+    ]
+  }
+}

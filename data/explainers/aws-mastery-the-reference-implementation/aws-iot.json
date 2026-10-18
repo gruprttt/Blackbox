@@ -1,0 +1,432 @@
+{
+  "iot-core-the-message-broker": {
+    "core": "IoT Core is a managed MQTT (and HTTPS/WebSocket) broker for millions of devices. Each device authenticates with an X.509 certificate (mutual TLS) registered as a 'thing', is authorised by IoT policies scoped to topics, and publishes or subscribes to hierarchical topics. QoS 0/1 and persistent sessions handle unreliable networks.",
+    "first_principles": {
+      "problem": "A fleet of 100,000 sensors needs secure, scalable messaging over flaky cellular links.",
+      "truths": [
+        "Devices are constrained and intermittently connected.",
+        "MQTT is lightweight pub/sub.",
+        "Per-device identity limits blast radius."
+      ],
+      "derivation": [
+        "Provision **certificates per device** (fleet provisioning).",
+        "Write **IoT policies** with ${iot:Connection.Thing.ThingName}.",
+        "Design **topic hierarchy** (fleet/site/device/telemetry).",
+        "Use **QoS 1** for important messages.",
+        "Monitor with **Device Defender**."
+      ]
+    },
+    "analogy": {
+      "title": "A post office for devices",
+      "story": "Every device has its own ID card and can only post to and collect from its own mailboxes.",
+      "mapping": [
+        [
+          "ID card",
+          "X.509 certificate"
+        ],
+        [
+          "Mailboxes",
+          "Topics"
+        ],
+        [
+          "Post office rules",
+          "IoT policies"
+        ]
+      ],
+      "breaks": "Post offices deliver once; MQTT QoS 1 may redeliver, so handle duplicates."
+    },
+    "mindmap": {
+      "center": "IoT Core",
+      "branches": [
+        {
+          "label": "Protocols",
+          "children": [
+            "MQTT",
+            "HTTPS",
+            "WebSockets"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "X.509",
+            "Things",
+            "Fleet provisioning"
+          ]
+        },
+        {
+          "label": "Authz",
+          "children": [
+            "IoT policies",
+            "Policy variables"
+          ]
+        },
+        {
+          "label": "Messaging",
+          "children": [
+            "Topics",
+            "QoS 0/1",
+            "Persistent sessions"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Device Defender"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Per-device policy",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A stolen device can only publish its own telemetry."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Action\": [\"iot:Publish\"],\n  \"Resource\": \"arn:aws:iot:eu-west-1:123:topic/fleet/${iot:Connection.Thing.ThingName}/telemetry\"\n}"
+        }
+      ],
+      "outcome": "secure messaging at fleet scale."
+    },
+    "summary": {
+      "points": [
+        "MQTT broker.",
+        "Cert per device.",
+        "Topic-scoped policies."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do IoT devices authenticate to IoT Core?",
+        "a": "Typically with X.509 client certificates over mutual TLS."
+      }
+    ]
+  },
+  "device-shadows-talking-to-ghosts": {
+    "core": "A device shadow is a JSON document in the cloud holding a device's reported state (what it says) and desired state (what apps want). Apps update desired state even while the device is offline; when it reconnects, it receives the delta, applies it and reports back. Named shadows let one device have several state documents.",
+    "first_principles": {
+      "problem": "A mobile app can't change a thermostat's setting because the device is temporarily offline.",
+      "truths": [
+        "Devices disconnect often.",
+        "Apps need a consistent view of state.",
+        "Differences drive actions."
+      ],
+      "derivation": [
+        "Apps write **desired** state.",
+        "Devices write **reported** state.",
+        "Devices subscribe to **delta** topic.",
+        "Use **version** numbers for concurrency.",
+        "Use **named shadows** for separate concerns."
+      ]
+    },
+    "analogy": {
+      "title": "A note left on the fridge for someone who's out",
+      "story": "When they get home, they read it, do it and write back 'done'.",
+      "mapping": [
+        [
+          "Note",
+          "Desired state"
+        ],
+        [
+          "'Done' reply",
+          "Reported state"
+        ],
+        [
+          "Noticing the note",
+          "Delta message"
+        ]
+      ],
+      "breaks": "Notes can be ignored; shadows keep sending the delta until reported matches desired."
+    },
+    "mindmap": {
+      "center": "Device Shadows",
+      "branches": [
+        {
+          "label": "Sections",
+          "children": [
+            "desired",
+            "reported",
+            "delta"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "App sets desired",
+            "Device gets delta",
+            "Device reports"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Versioning",
+            "Named shadows",
+            "Classic shadow"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Offline-tolerant control"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Thermostat shadow",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Delta {targetTemp: 21} delivered on reconnect."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"state\": {\n    \"desired\":  {\"targetTemp\": 21},\n    \"reported\": {\"targetTemp\": 19, \"currentTemp\": 18.5}\n  },\n  \"version\": 42\n}"
+        }
+      ],
+      "outcome": "reliable control of intermittent devices."
+    },
+    "summary": {
+      "points": [
+        "Desired vs reported.",
+        "Delta drives action.",
+        "Works offline."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the shadow 'delta' contain?",
+        "a": "The differences between desired and reported state that the device should act on."
+      }
+    ]
+  },
+  "iot-greengrass-lambda-at-the-edge": {
+    "core": "IoT Greengrass is an edge runtime that runs components (Lambda functions, containers, ML inference, protocol adapters) on local gateways or devices, processes data locally, works offline, syncs with IoT Core when connected and is deployed and updated from the cloud. It reduces latency, bandwidth and dependence on connectivity.",
+    "first_principles": {
+      "problem": "Streaming raw high-frequency sensor data to the cloud is costly, and decisions need sub-second response even offline.",
+      "truths": [
+        "Edge processing reduces bandwidth.",
+        "Local decisions avoid round trips.",
+        "Remote fleets need managed updates."
+      ],
+      "derivation": [
+        "Install **Greengrass nucleus** on gateways.",
+        "Deploy **components** (Lambda, Docker, ML models).",
+        "**Filter/aggregate** locally; send summaries.",
+        "Use **stream manager** for buffered uploads.",
+        "Roll out **deployments** to thing groups."
+      ]
+    },
+    "analogy": {
+      "title": "A local branch manager with authority",
+      "story": "Makes day-to-day decisions on site and sends headquarters a summary each evening.",
+      "mapping": [
+        [
+          "Branch manager",
+          "Greengrass core"
+        ],
+        [
+          "Daily decisions",
+          "Local processing"
+        ],
+        [
+          "Evening summary",
+          "Aggregated upload"
+        ]
+      ],
+      "breaks": "Managers improvise; components only do what was deployed to them."
+    },
+    "mindmap": {
+      "center": "Greengrass",
+      "branches": [
+        {
+          "label": "Runtime",
+          "children": [
+            "Nucleus",
+            "Components"
+          ]
+        },
+        {
+          "label": "Components",
+          "children": [
+            "Lambda",
+            "Containers",
+            "ML inference",
+            "Connectors"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Offline",
+            "Low latency",
+            "Less bandwidth"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Cloud deployments",
+            "Thing groups",
+            "Stream manager"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Vibration anomaly detection",
+      "scenario": "Edge flow.",
+      "flow": [
+        "Sensor at 10 kHz → gateway",
+        "Greengrass ML component flags anomalies locally",
+        "Stops machine in 50 ms",
+        "Only anomaly summaries to cloud"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "99% less data sent; instant safety response."
+        }
+      ],
+      "code": [],
+      "outcome": "smart, resilient edge processing."
+    },
+    "summary": {
+      "points": [
+        "Run code at the edge.",
+        "Work offline.",
+        "Manage from the cloud."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why process IoT data with Greengrass instead of in the cloud?",
+        "a": "To reduce latency and bandwidth, and keep working when connectivity is lost."
+      }
+    ]
+  },
+  "iot-rules-engine-routing-data-to-aws-services": {
+    "core": "The IoT Rules Engine evaluates SQL-like statements on MQTT messages as they arrive (SELECT temp, deviceId FROM 'fleet/+/telemetry' WHERE temp > 80) and routes matching data to actions: Lambda, DynamoDB, S3, Kinesis, Firehose, SQS, SNS, Timestream, IoT Events and more, with error actions for failed deliveries.",
+    "first_principles": {
+      "problem": "A Lambda subscribes to all telemetry just to filter and forward a tiny fraction.",
+      "truths": [
+        "Most messages need simple routing.",
+        "Filtering early saves cost.",
+        "Integrations replace glue code."
+      ],
+      "derivation": [
+        "Write **rule SQL** with topic filters and WHERE clauses.",
+        "Transform with **functions** (timestamp(), topic(n)).",
+        "Choose **actions** per destination.",
+        "Add **error actions**.",
+        "Use **Basic Ingest** ($aws/rules/) to cut messaging cost."
+      ]
+    },
+    "analogy": {
+      "title": "A mail sorting machine with rules",
+      "story": "Letters matching certain criteria are routed to specific bins automatically.",
+      "mapping": [
+        [
+          "Sorting criteria",
+          "Rule SQL"
+        ],
+        [
+          "Bins",
+          "Actions/destinations"
+        ],
+        [
+          "Reject bin",
+          "Error action"
+        ]
+      ],
+      "breaks": "Sorting machines handle letters once; rules can send one message to several destinations."
+    },
+    "mindmap": {
+      "center": "Rules Engine",
+      "branches": [
+        {
+          "label": "SQL",
+          "children": [
+            "SELECT",
+            "FROM topic filter",
+            "WHERE"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "timestamp",
+            "topic",
+            "clientid"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Lambda",
+            "DynamoDB",
+            "S3",
+            "Kinesis/Firehose",
+            "Timestream",
+            "SNS/SQS"
+          ]
+        },
+        {
+          "label": "Reliability",
+          "children": [
+            "Error actions"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Basic Ingest"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Over-temperature alert",
+      "scenario": "Rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Actions",
+          "detail": "SNS alert + DynamoDB write; error action to S3."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT topic(2) AS deviceId, temp, timestamp() AS ts\nFROM 'fleet/+/telemetry'\nWHERE temp > 80"
+        }
+      ],
+      "outcome": "serverless IoT data routing."
+    },
+    "summary": {
+      "points": [
+        "SQL on messages.",
+        "Route to services.",
+        "Error actions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Basic Ingest do?",
+        "a": "Sends messages directly to rules via $aws/rules/ topics without broker publish costs."
+      }
+    ]
+  }
+}

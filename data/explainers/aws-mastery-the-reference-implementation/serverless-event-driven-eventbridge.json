@@ -1,0 +1,851 @@
+{
+  "introduction-the-nervous-system-of-aws": {
+    "core": "EventBridge is a serverless event bus: producers publish JSON events describing what happened, rules match events by pattern, and matching events go to targets (Lambda, SQS, Step Functions, APIs, other buses). Producers don't know consumers, so systems can be loosely coupled and extended without changing the sender.",
+    "first_principles": {
+      "problem": "The order service calls billing, shipping and email directly, and adding a new consumer means redeploying it.",
+      "truths": [
+        "Direct calls couple services.",
+        "Events describe facts, not commands.",
+        "New consumers should subscribe without producer changes."
+      ],
+      "derivation": [
+        "**Publish** domain events (OrderPlaced).",
+        "**Route** with rules.",
+        "**Deliver** to many targets.",
+        "**Archive and replay** events.",
+        "**Govern** with schemas."
+      ]
+    },
+    "analogy": {
+      "title": "The body's nervous system",
+      "story": "Sensors send signals; the brain routes them to whichever muscles need to react.",
+      "mapping": [
+        [
+          "Signals",
+          "Events"
+        ],
+        [
+          "Brain routing",
+          "Rules"
+        ],
+        [
+          "Muscles",
+          "Targets"
+        ]
+      ],
+      "breaks": "Nerves are hard-wired; EventBridge routes are reconfigured by adding rules."
+    },
+    "mindmap": {
+      "center": "EventBridge",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "Buses",
+            "Events",
+            "Rules",
+            "Targets"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Decoupling",
+            "Fan-out",
+            "Extensibility"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Archive/replay",
+            "Schema registry",
+            "Pipes",
+            "Scheduler"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "AWS services",
+            "Custom",
+            "SaaS partners"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decoupled order flow",
+      "scenario": "Event-driven.",
+      "flow": [
+        "Order service publishes OrderPlaced",
+        "Rule → billing Lambda",
+        "Rule → shipping SQS",
+        "New loyalty service adds its own rule"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No change to the order service."
+        }
+      ],
+      "code": [],
+      "outcome": "loosely coupled architecture."
+    },
+    "summary": {
+      "points": [
+        "Publish facts.",
+        "Route by rules.",
+        "Add consumers freely."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does EventBridge decouple producers from consumers?",
+        "a": "Producers publish to a bus without knowing who consumes; rules route events to targets independently."
+      }
+    ]
+  },
+  "event-buses-default-custom-and-partner": {
+    "core": "The default bus receives AWS service events (EC2 state changes, S3 notifications, CloudTrail API calls). Custom buses carry your application's events, scoped by domain or team with their own resource policies. Partner buses receive events from SaaS providers (Zendesk, Datadog, Auth0). Buses can forward events across accounts and regions.",
+    "first_principles": {
+      "problem": "All teams publish to the default bus, making permissions and rule management chaotic.",
+      "truths": [
+        "Different sources need separation.",
+        "Resource policies control who publishes.",
+        "Central buses aggregate events from many accounts."
+      ],
+      "derivation": [
+        "**Default bus** for AWS events.",
+        "**Custom bus per domain** for app events.",
+        "**Partner bus** for SaaS.",
+        "**Cross-account** via resource policies.",
+        "Central **event hub** account pattern."
+      ]
+    },
+    "analogy": {
+      "title": "Separate radio channels",
+      "story": "Emergency services, airport and taxis each use their own channel.",
+      "mapping": [
+        [
+          "Channels",
+          "Buses"
+        ],
+        [
+          "Who may transmit",
+          "Resource policy"
+        ],
+        [
+          "Relay station",
+          "Cross-account forwarding"
+        ]
+      ],
+      "breaks": "Radio channels broadcast to anyone listening; buses only deliver to matching rules."
+    },
+    "mindmap": {
+      "center": "Event Buses",
+      "branches": [
+        {
+          "label": "Default",
+          "children": [
+            "AWS service events"
+          ]
+        },
+        {
+          "label": "Custom",
+          "children": [
+            "App domains",
+            "Resource policy"
+          ]
+        },
+        {
+          "label": "Partner",
+          "children": [
+            "SaaS events"
+          ]
+        },
+        {
+          "label": "Topology",
+          "children": [
+            "Cross-account",
+            "Cross-region",
+            "Central hub"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create a domain bus",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Orders domain isolated with clear publish rights."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws events create-event-bus --name orders\naws events put-permission --event-bus-name orders --action events:PutEvents \\\n  --principal 111122223333 --statement-id allow-orders-account"
+        }
+      ],
+      "outcome": "organised event topology."
+    },
+    "summary": {
+      "points": [
+        "Default for AWS events.",
+        "Custom per domain.",
+        "Partner for SaaS."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where do AWS service events like EC2 state changes arrive?",
+        "a": "On the default event bus."
+      }
+    ]
+  },
+  "events-the-json-payload": {
+    "core": "Every event has an envelope (version, id, source, detail-type, account, time, region, resources) and a detail object holding the domain payload, up to 256 KB. Good events are past-tense facts with stable fields, include enough context for consumers, and are versioned.",
+    "first_principles": {
+      "problem": "Events carry only an ID, so every consumer calls back to the producer and overloads it.",
+      "truths": [
+        "Consumers need context to act.",
+        "Envelopes enable generic routing.",
+        "Payload changes can break consumers."
+      ],
+      "derivation": [
+        "Use **source** (com.company.orders) and **detail-type** (OrderPlaced).",
+        "Put domain data in **detail**.",
+        "Choose **thin vs fat** events deliberately.",
+        "Add **version** fields.",
+        "Keep under **256 KB** (claim-check large data in S3)."
+      ]
+    },
+    "analogy": {
+      "title": "A standard shipping label plus the parcel contents",
+      "story": "The label lets sorters route it; the contents serve the recipient.",
+      "mapping": [
+        [
+          "Label",
+          "Envelope"
+        ],
+        [
+          "Contents",
+          "detail"
+        ],
+        [
+          "Weight limit",
+          "256 KB"
+        ]
+      ],
+      "breaks": "Parcels are opened once; events are read by many consumers who all depend on its shape."
+    },
+    "mindmap": {
+      "center": "Event Payload",
+      "branches": [
+        {
+          "label": "Envelope",
+          "children": [
+            "source",
+            "detail-type",
+            "time",
+            "id",
+            "account"
+          ]
+        },
+        {
+          "label": "detail",
+          "children": [
+            "Domain data",
+            "Version"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Past tense",
+            "Thin vs fat",
+            "Stable fields"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "256 KB",
+            "Claim check"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An OrderPlaced event",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Consumers act without callbacks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"source\": \"com.shop.orders\",\n  \"detail-type\": \"OrderPlaced\",\n  \"detail\": {\"version\": 1, \"orderId\": \"o-981\", \"customerId\": \"c-42\", \"total\": 129.90, \"currency\": \"EUR\"}\n}"
+        }
+      ],
+      "outcome": "useful, evolvable events."
+    },
+    "summary": {
+      "points": [
+        "Envelope + detail.",
+        "Past-tense facts.",
+        "Version payloads."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the maximum EventBridge event size?",
+        "a": "256 KB."
+      }
+    ]
+  },
+  "rules-the-routing-logic": {
+    "core": "Rules match events with JSON patterns on any field: exact values, prefix/suffix, numeric ranges, anything-but, exists and wildcard. Each rule can route to up to five targets and can transform input. Schedule-based rules (and EventBridge Scheduler) trigger targets on cron/rate expressions.",
+    "first_principles": {
+      "problem": "A billing Lambda receives every order event and filters in code, wasting invocations.",
+      "truths": [
+        "Filtering at the bus is cheaper than in code.",
+        "Patterns match structure, not just strings.",
+        "Targets often need reshaped input."
+      ],
+      "derivation": [
+        "Match **source and detail-type**.",
+        "Filter on **detail fields** (numeric, prefix, anything-but).",
+        "Use **input transformers**.",
+        "Route to **multiple targets**.",
+        "Use **Scheduler** for timed jobs."
+      ]
+    },
+    "analogy": {
+      "title": "Email filters",
+      "story": "'If from the bank and subject contains invoice, move to Finance folder.'",
+      "mapping": [
+        [
+          "Filter condition",
+          "Event pattern"
+        ],
+        [
+          "Folder",
+          "Target"
+        ],
+        [
+          "Rewrite subject",
+          "Input transformer"
+        ]
+      ],
+      "breaks": "Email filters act on one inbox; rules deliver one event to many targets at once."
+    },
+    "mindmap": {
+      "center": "Rules",
+      "branches": [
+        {
+          "label": "Matching",
+          "children": [
+            "Exact",
+            "Prefix",
+            "Numeric",
+            "anything-but",
+            "exists"
+          ]
+        },
+        {
+          "label": "Delivery",
+          "children": [
+            "Up to 5 targets",
+            "Input transformer"
+          ]
+        },
+        {
+          "label": "Schedules",
+          "children": [
+            "cron",
+            "rate",
+            "Scheduler"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "TestEventPattern"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "High-value order rule",
+      "scenario": "Pattern.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fraud check runs only on big orders."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"source\": [\"com.shop.orders\"],\n  \"detail-type\": [\"OrderPlaced\"],\n  \"detail\": {\"total\": [{\"numeric\": [\">=\", 1000]}], \"currency\": [\"EUR\", \"USD\"]}\n}"
+        }
+      ],
+      "outcome": "precise, cheap routing."
+    },
+    "summary": {
+      "points": [
+        "Pattern-match events.",
+        "Filter at the bus.",
+        "Transform input."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why filter with rule patterns instead of in the target?",
+        "a": "It avoids invoking targets for irrelevant events, cutting cost and complexity."
+      }
+    ]
+  },
+  "targets-and-delivery-guarantees": {
+    "core": "EventBridge delivers at least once to targets, retrying with backoff for up to 24 hours (configurable retry count and max event age). Failed events can go to a dead-letter SQS queue. Order isn't guaranteed and duplicates can happen, so consumers must be idempotent and must not rely on ordering.",
+    "first_principles": {
+      "problem": "A target outage silently drops events, and duplicates double-charge customers.",
+      "truths": [
+        "Networks and targets fail.",
+        "Retries create duplicates.",
+        "Distributed delivery isn't ordered."
+      ],
+      "derivation": [
+        "Configure **retry policy** and **max age**.",
+        "Attach a **DLQ** to each target.",
+        "Make consumers **idempotent** (event id).",
+        "Don't assume **ordering**; use sequence fields.",
+        "Buffer through **SQS** for heavy consumers."
+      ]
+    },
+    "analogy": {
+      "title": "A courier who keeps redelivering until someone signs",
+      "story": "You might get the parcel twice if the first signature was lost.",
+      "mapping": [
+        [
+          "Redelivery",
+          "Retries"
+        ],
+        [
+          "Second parcel",
+          "Duplicate event"
+        ],
+        [
+          "Depot holding area",
+          "DLQ"
+        ]
+      ],
+      "breaks": "Couriers deliver in sequence; events can arrive out of order."
+    },
+    "mindmap": {
+      "center": "Delivery",
+      "branches": [
+        {
+          "label": "Guarantee",
+          "children": [
+            "At least once"
+          ]
+        },
+        {
+          "label": "Retries",
+          "children": [
+            "Up to 24 h",
+            "Backoff",
+            "Max age"
+          ]
+        },
+        {
+          "label": "Failure",
+          "children": [
+            "DLQ per target"
+          ]
+        },
+        {
+          "label": "Consumer duties",
+          "children": [
+            "Idempotency",
+            "No ordering assumption"
+          ]
+        },
+        {
+          "label": "Buffering",
+          "children": [
+            "SQS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Idempotent consumer",
+      "scenario": "Dedup by event id.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Duplicates ignored safely."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def handler(event, _):\n    try:\n        table.put_item(Item={'pk': event['id']}, ConditionExpression='attribute_not_exists(pk)')\n    except ddb.exceptions.ConditionalCheckFailedException:\n        return  # already processed\n    charge(event['detail'])"
+        }
+      ],
+      "outcome": "reliable processing despite retries."
+    },
+    "summary": {
+      "points": [
+        "At least once.",
+        "DLQs for failures.",
+        "Idempotent consumers."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does EventBridge guarantee event ordering?",
+        "a": "No; events may arrive out of order and more than once."
+      }
+    ]
+  },
+  "schema-registry-the-contract-between-teams": {
+    "core": "The EventBridge Schema Registry stores event schemas (OpenAPI/JSONSchema), can discover them automatically from bus traffic, and generates code bindings. Schemas act as contracts between producing and consuming teams, enabling validation, documentation and safe evolution through versions.",
+    "first_principles": {
+      "problem": "A producer renames a field and three consumer teams break in production.",
+      "truths": [
+        "Events are APIs between teams.",
+        "Implicit contracts break silently.",
+        "Typed bindings catch errors early."
+      ],
+      "derivation": [
+        "Enable **schema discovery**.",
+        "**Version** schemas; make additive changes.",
+        "Generate **code bindings**.",
+        "**Validate** in CI.",
+        "Communicate **breaking changes** with a new detail-type or version."
+      ]
+    },
+    "analogy": {
+      "title": "A published API specification",
+      "story": "Teams build against the documented contract, not guesswork.",
+      "mapping": [
+        [
+          "API spec",
+          "Schema"
+        ],
+        [
+          "Version number",
+          "Schema version"
+        ],
+        [
+          "Client SDK",
+          "Code bindings"
+        ]
+      ],
+      "breaks": "API specs are often enforced by gateways; EventBridge doesn't reject non-conforming events by default."
+    },
+    "mindmap": {
+      "center": "Schema Registry",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Discovery",
+            "Manual",
+            "AWS events"
+          ]
+        },
+        {
+          "label": "Formats",
+          "children": [
+            "OpenAPI",
+            "JSONSchema"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Contracts",
+            "Bindings",
+            "Docs"
+          ]
+        },
+        {
+          "label": "Evolution",
+          "children": [
+            "Additive changes",
+            "Versions"
+          ]
+        },
+        {
+          "label": "Gap",
+          "children": [
+            "No enforcement by default"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe evolution",
+      "scenario": "OrderPlaced v1 → v2.",
+      "flow": [
+        "Add optional field 'channel' (non-breaking)",
+        "Schema version 2 discovered",
+        "Consumers regenerate bindings when ready"
+      ],
+      "steps": [
+        {
+          "label": "Rule",
+          "detail": "Renames and removals = new major version."
+        }
+      ],
+      "code": [],
+      "outcome": "events evolve without breakage."
+    },
+    "summary": {
+      "points": [
+        "Events are contracts.",
+        "Version schemas.",
+        "Additive changes only."
+      ]
+    },
+    "check": [
+      {
+        "q": "What kind of schema change is safe for existing consumers?",
+        "a": "Adding optional fields; renaming or removing fields is breaking."
+      }
+    ]
+  },
+  "eventbridge-pipes-point-to-point-enrichment": {
+    "core": "EventBridge Pipes connect one source (SQS, Kinesis, DynamoDB Streams, Kafka, MQ) to one target with optional filtering, enrichment (Lambda, Step Functions, API Gateway, API destinations) and transformation, replacing glue Lambda functions with managed configuration.",
+    "first_principles": {
+      "problem": "Dozens of tiny Lambdas exist only to read a stream, call an API for extra data and forward results.",
+      "truths": [
+        "Glue code is maintenance burden.",
+        "Point-to-point flows are common.",
+        "Filtering early saves cost."
+      ],
+      "derivation": [
+        "Pick **source**.",
+        "Add **filter** pattern.",
+        "Add **enrichment** step.",
+        "**Transform** input.",
+        "Pick **target** (bus, SQS, Step Functions, API)."
+      ]
+    },
+    "analogy": {
+      "title": "A plumbing pipe with a filter and a water softener built in",
+      "story": "Water flows from one tank to another, cleaned along the way.",
+      "mapping": [
+        [
+          "Pipe",
+          "Pipe"
+        ],
+        [
+          "Filter",
+          "Event filter"
+        ],
+        [
+          "Softener",
+          "Enrichment"
+        ]
+      ],
+      "breaks": "Pipes carry water continuously; EventBridge Pipes process records in batches."
+    },
+    "mindmap": {
+      "center": "Pipes",
+      "branches": [
+        {
+          "label": "Stages",
+          "children": [
+            "Source",
+            "Filter",
+            "Enrich",
+            "Transform",
+            "Target"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "SQS",
+            "Kinesis",
+            "DDB Streams",
+            "Kafka"
+          ]
+        },
+        {
+          "label": "Enrichment",
+          "children": [
+            "Lambda",
+            "Step Functions",
+            "API"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Less glue code"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stream to bus with enrichment",
+      "scenario": "Flow.",
+      "flow": [
+        "DynamoDB Stream (orders)",
+        "Filter: eventName = INSERT",
+        "Enrich: Lambda adds customer tier",
+        "Target: orders event bus"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No custom poller code."
+        }
+      ],
+      "code": [],
+      "outcome": "managed point-to-point integration."
+    },
+    "summary": {
+      "points": [
+        "One source → one target.",
+        "Filter, enrich, transform.",
+        "Replace glue code."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do Pipes differ from bus rules?",
+        "a": "Pipes connect one source to one target point-to-point with enrichment; rules fan out events from a bus to many targets."
+      }
+    ]
+  },
+  "architectural-patterns-and-production-considerations": {
+    "core": "Production event-driven systems need: a clear bus topology (per-domain buses, central hub), idempotent consumers, DLQs and alarms, archive and replay for recovery, quotas awareness (PutEvents TPS, invocation rates), observability (event IDs in logs, tracing), and governance over schemas and ownership.",
+    "first_principles": {
+      "problem": "An event-driven system becomes an untraceable web where nobody knows which consumer failed.",
+      "truths": [
+        "Async systems hide failures.",
+        "Replay enables recovery.",
+        "Quotas exist even for serverless."
+      ],
+      "derivation": [
+        "**Correlation IDs** in every event.",
+        "**DLQ + alarms** for every target.",
+        "**Archive** important buses; **replay** after fixes.",
+        "**Monitor** FailedInvocations, ThrottledRules.",
+        "**Document** event catalog and owners."
+      ]
+    },
+    "analogy": {
+      "title": "Air traffic management for messages",
+      "story": "Flight plans, radar, holding patterns and incident replay keep busy skies safe.",
+      "mapping": [
+        [
+          "Flight plans",
+          "Schemas"
+        ],
+        [
+          "Radar",
+          "Observability"
+        ],
+        [
+          "Holding patterns",
+          "Retries/DLQs"
+        ],
+        [
+          "Flight recorder",
+          "Archive"
+        ]
+      ],
+      "breaks": "Planes are tracked individually by default; events need explicit correlation to trace."
+    },
+    "mindmap": {
+      "center": "Production EventBridge",
+      "branches": [
+        {
+          "label": "Topology",
+          "children": [
+            "Domain buses",
+            "Central hub"
+          ]
+        },
+        {
+          "label": "Reliability",
+          "children": [
+            "Idempotency",
+            "DLQs",
+            "Replay"
+          ]
+        },
+        {
+          "label": "Observability",
+          "children": [
+            "Correlation IDs",
+            "Metrics",
+            "Tracing"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "PutEvents quotas"
+          ]
+        },
+        {
+          "label": "Governance",
+          "children": [
+            "Catalog",
+            "Owners"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Recovering from a consumer bug",
+      "scenario": "Replay.",
+      "flow": [
+        "Bug in loyalty consumer for 3 hours",
+        "Fix deployed",
+        "Replay archive for that window to loyalty rule",
+        "Idempotency prevents double effects elsewhere"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Lost processing recovered."
+        }
+      ],
+      "code": [],
+      "outcome": "operable event-driven systems."
+    },
+    "summary": {
+      "points": [
+        "Trace everything.",
+        "DLQs and alarms.",
+        "Archive and replay."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes replaying archived events safe?",
+        "a": "Idempotent consumers, so reprocessed events don't cause duplicate side effects."
+      }
+    ]
+  }
+}

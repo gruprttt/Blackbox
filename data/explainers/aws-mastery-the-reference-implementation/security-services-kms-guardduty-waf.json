@@ -1,0 +1,638 @@
+{
+  "introduction-security-in-depth": {
+    "core": "Defence in depth layers independent controls so no single failure exposes you: identity (IAM), network (security groups, WAF, Shield), data (KMS encryption, Macie discovery) and detection (GuardDuty, Security Hub). Each layer assumes the others might fail.",
+    "first_principles": {
+      "problem": "A single misconfigured security group exposes a database because nothing else stood in the way.",
+      "truths": [
+        "Every control eventually fails.",
+        "Attackers chain small weaknesses.",
+        "Detection catches what prevention misses."
+      ],
+      "derivation": [
+        "**Prevent** at identity, network and application layers.",
+        "**Encrypt** data with KMS.",
+        "**Discover** sensitive data (Macie).",
+        "**Detect** threats (GuardDuty).",
+        "**Aggregate** findings (Security Hub) and respond."
+      ]
+    },
+    "analogy": {
+      "title": "A castle's defences",
+      "story": "Moat, walls, gatehouse, guards and a locked keep. Breaching one doesn't give you the crown.",
+      "mapping": [
+        [
+          "Moat and walls",
+          "Network controls"
+        ],
+        [
+          "Gatehouse",
+          "IAM"
+        ],
+        [
+          "Locked keep",
+          "Encryption"
+        ],
+        [
+          "Watchtowers",
+          "GuardDuty"
+        ]
+      ],
+      "breaks": "Castles face one direction of attack; cloud attacks come from insiders and supply chains too."
+    },
+    "mindmap": {
+      "center": "Defence in Depth",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "IAM",
+            "SCPs"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "SGs",
+            "WAF",
+            "Shield"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "KMS",
+            "Macie"
+          ]
+        },
+        {
+          "label": "Detection",
+          "children": [
+            "GuardDuty",
+            "Security Hub",
+            "Detective"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "EventBridge automation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Layered protection of a database",
+      "scenario": "Controls.",
+      "flow": [
+        "Private subnet + SG from app only",
+        "IAM auth + least privilege",
+        "KMS encryption at rest",
+        "GuardDuty alerts on unusual access"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One mistake isn't a breach."
+        }
+      ],
+      "code": [],
+      "outcome": "resilient security posture."
+    },
+    "summary": {
+      "points": [
+        "Layer controls.",
+        "Assume failure.",
+        "Detect and respond."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add detection when you already have prevention?",
+        "a": "Prevention eventually fails; detection catches attacks that slip through so you can respond."
+      }
+    ]
+  },
+  "kms-the-core-of-encryption": {
+    "core": "KMS manages keys in HSMs and never exports key material. Services use envelope encryption: KMS generates a data key, the service encrypts data with it, and stores the data key encrypted under your KMS key. Key policies (plus IAM and grants) control who can use keys, and CloudTrail logs every use.",
+    "first_principles": {
+      "problem": "Encryption keys stored alongside data in config files are stolen with the data.",
+      "truths": [
+        "Keys must be protected separately from data.",
+        "Encrypting large data directly with a remote key is slow.",
+        "Key use should be auditable."
+      ],
+      "derivation": [
+        "Use **customer managed keys** for control.",
+        "**Envelope encryption**: data keys encrypt data.",
+        "**Key policy** is the primary access control.",
+        "Enable **automatic rotation**.",
+        "**Audit** with CloudTrail; use **encryption context**."
+      ]
+    },
+    "analogy": {
+      "title": "A master key in a bank vault that locks the small keys",
+      "story": "You carry small keys around; the master that locks them never leaves the vault.",
+      "mapping": [
+        [
+          "Vault master key",
+          "KMS key"
+        ],
+        [
+          "Small keys",
+          "Data keys"
+        ],
+        [
+          "Locked small key",
+          "Encrypted data key"
+        ]
+      ],
+      "breaks": "Bank masters can be copied by locksmiths; KMS key material never leaves the HSMs."
+    },
+    "mindmap": {
+      "center": "KMS",
+      "branches": [
+        {
+          "label": "Keys",
+          "children": [
+            "AWS managed",
+            "Customer managed",
+            "Imported"
+          ]
+        },
+        {
+          "label": "Envelope",
+          "children": [
+            "Data key",
+            "Encrypted data key"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "Key policy",
+            "IAM",
+            "Grants"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Rotation",
+            "CloudTrail",
+            "Encryption context"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Envelope encryption",
+      "scenario": "Flow.",
+      "flow": [
+        "GenerateDataKey → plaintext + encrypted key",
+        "Encrypt file locally with plaintext key, discard it",
+        "Store encrypted key with the file",
+        "Decrypt: KMS Decrypt(encrypted key) → plaintext key"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Data keys usable only via KMS permission."
+        }
+      ],
+      "code": [],
+      "outcome": "keys separated from data, all use logged."
+    },
+    "summary": {
+      "points": [
+        "Keys never leave KMS.",
+        "Envelope encryption.",
+        "Key policies control use."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use envelope encryption instead of encrypting data directly with KMS?",
+        "a": "KMS Encrypt has a 4 KB limit and network latency; data keys encrypt bulk data locally while KMS protects the data key."
+      }
+    ]
+  },
+  "kms-multi-region-keys": {
+    "core": "Multi-Region keys are sets of KMS keys in different regions sharing the same key ID and key material, so data encrypted in one region can be decrypted in another without a cross-region call or re-encryption. Each replica has its own key policy. They suit global tables, DR and client-side encryption across regions.",
+    "first_principles": {
+      "problem": "Encrypted data replicated to a DR region can't be decrypted without calling the source region's KMS, which might be down.",
+      "truths": [
+        "Regional keys are isolated.",
+        "DR needs local decryption.",
+        "Shared material weakens regional isolation."
+      ],
+      "derivation": [
+        "Create a **primary multi-Region key**.",
+        "**Replicate** to target regions.",
+        "Set **per-replica key policies**.",
+        "Use for **DynamoDB global tables, S3 replication, client-side encryption**.",
+        "Avoid where **strict regional isolation** is required."
+      ]
+    },
+    "analogy": {
+      "title": "Identical master keys kept in branch vaults in two cities",
+      "story": "Either branch can open boxes locked in the other.",
+      "mapping": [
+        [
+          "Identical keys",
+          "Shared key material"
+        ],
+        [
+          "Branch vaults",
+          "Regional KMS"
+        ],
+        [
+          "Locked boxes",
+          "Ciphertext"
+        ]
+      ],
+      "breaks": "Physical key copies drift; multi-Region keys sync rotation automatically."
+    },
+    "mindmap": {
+      "center": "Multi-Region Keys",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Same ID",
+            "Same material",
+            "Many regions"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "DR",
+            "Global tables",
+            "Client-side encryption"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "Per-replica policy"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Less regional isolation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Replicate a key",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "DR region decrypts locally."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws kms create-key --multi-region --description app-data\naws kms replicate-key --key-id mrk-1234abcd --replica-region eu-west-1"
+        }
+      ],
+      "outcome": "cross-region encryption without dependency."
+    },
+    "summary": {
+      "points": [
+        "Same key, many regions.",
+        "Local decryption.",
+        "Weigh isolation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What prefix do multi-Region key IDs have?",
+        "a": "mrk-."
+      }
+    ]
+  },
+  "guardduty-the-intelligent-watchdog": {
+    "core": "GuardDuty continuously analyses CloudTrail management and data events, VPC Flow Logs, DNS logs and optional sources (EKS audit logs, runtime monitoring, S3, RDS login activity, Lambda network) using threat intelligence and ML to flag compromised credentials, crypto-mining, reconnaissance and data exfiltration. No agents are needed for the core sources.",
+    "first_principles": {
+      "problem": "Stolen credentials mine cryptocurrency for days before anyone notices the bill.",
+      "truths": [
+        "Attack patterns appear in logs.",
+        "Humans can't read every log line.",
+        "Threat intel identifies known-bad infrastructure."
+      ],
+      "derivation": [
+        "Enable **org-wide** via delegated admin.",
+        "Turn on **protection plans** (S3, EKS, runtime, RDS).",
+        "Route findings via **EventBridge** to response.",
+        "**Suppress** known benign findings carefully.",
+        "Aggregate in **Security Hub**."
+      ]
+    },
+    "analogy": {
+      "title": "A guard dog that knows every burglar's scent",
+      "story": "It patrols constantly and barks at unusual behaviour.",
+      "mapping": [
+        [
+          "Patrol",
+          "Continuous log analysis"
+        ],
+        [
+          "Burglar's scent",
+          "Threat intelligence"
+        ],
+        [
+          "Barking",
+          "Findings"
+        ]
+      ],
+      "breaks": "Dogs sleep; GuardDuty runs continuously but may still miss novel attacks."
+    },
+    "mindmap": {
+      "center": "GuardDuty",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "CloudTrail",
+            "Flow Logs",
+            "DNS",
+            "EKS",
+            "Runtime",
+            "S3",
+            "RDS"
+          ]
+        },
+        {
+          "label": "Detects",
+          "children": [
+            "Credential misuse",
+            "Crypto-mining",
+            "Recon",
+            "Exfiltration"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Org-wide",
+            "EventBridge",
+            "Security Hub"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Suppression rules"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Automated response",
+      "scenario": "EventBridge rule.",
+      "flow": [
+        "Finding: UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration",
+        "EventBridge → Lambda",
+        "Revoke role sessions, isolate instance SG",
+        "Page on-call"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Containment in seconds."
+        }
+      ],
+      "code": [],
+      "outcome": "threats detected and contained fast."
+    },
+    "summary": {
+      "points": [
+        "Analyses existing logs.",
+        "Org-wide.",
+        "Automate response."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does GuardDuty need agents to analyse VPC Flow Logs and DNS logs?",
+        "a": "No; it reads those independently without agents (agents are only for runtime monitoring)."
+      }
+    ]
+  },
+  "waf-vs-shield-the-shield-and-the-sword": {
+    "core": "AWS WAF inspects HTTP(S) requests at CloudFront, ALB, API Gateway and AppSync, blocking SQL injection, XSS, bad bots and abusive IPs with managed and custom rules and rate limits (layer 7). Shield Standard protects all customers from common layer 3/4 DDoS automatically. Shield Advanced adds enhanced detection, the DDoS response team and cost protection.",
+    "first_principles": {
+      "problem": "A login endpoint is hammered by credential stuffing while a volumetric DDoS targets the site.",
+      "truths": [
+        "Application attacks look like valid HTTP.",
+        "Volumetric attacks need edge-scale absorption.",
+        "Rate limits stop brute force."
+      ],
+      "derivation": [
+        "Attach **WAF web ACL** to CloudFront/ALB.",
+        "Use **AWS Managed Rules** (core, SQLi, known bad inputs, bot control).",
+        "Add **rate-based rules** for login paths.",
+        "Rely on **Shield Standard** for L3/4.",
+        "Use **Shield Advanced** for critical apps."
+      ]
+    },
+    "analogy": {
+      "title": "A club bouncer versus flood barriers",
+      "story": "The bouncer checks each guest's behaviour; the barriers hold back the flood.",
+      "mapping": [
+        [
+          "Bouncer",
+          "WAF"
+        ],
+        [
+          "Flood barriers",
+          "Shield"
+        ],
+        [
+          "Guest list rules",
+          "WAF rules"
+        ]
+      ],
+      "breaks": "Bouncers judge intent; WAF rules match patterns and can produce false positives."
+    },
+    "mindmap": {
+      "center": "WAF & Shield",
+      "branches": [
+        {
+          "label": "WAF",
+          "children": [
+            "Layer 7",
+            "Managed rules",
+            "Rate limits",
+            "Bot control"
+          ]
+        },
+        {
+          "label": "Shield Standard",
+          "children": [
+            "L3/4",
+            "Free",
+            "Automatic"
+          ]
+        },
+        {
+          "label": "Shield Advanced",
+          "children": [
+            "DRT",
+            "Cost protection",
+            "Advanced detection"
+          ]
+        },
+        {
+          "label": "Attach to",
+          "children": [
+            "CloudFront",
+            "ALB",
+            "API Gateway"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rate-limit login",
+      "scenario": "WAF rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "IPs over 100 login requests/5 min blocked."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Name\": \"login-rate\",\n  \"Priority\": 1,\n  \"Action\": {\"Block\": {}},\n  \"Statement\": {\"RateBasedStatement\": {\"Limit\": 100, \"AggregateKeyType\": \"IP\",\n    \"ScopeDownStatement\": {\"ByteMatchStatement\": {\"SearchString\": \"/login\", \"FieldToMatch\": {\"UriPath\": {}}, \"PositionalConstraint\": \"STARTS_WITH\", \"TextTransformations\": [{\"Priority\": 0, \"Type\": \"NONE\"}]}}}},\n  \"VisibilityConfig\": {\"SampledRequestsEnabled\": true, \"CloudWatchMetricsEnabled\": true, \"MetricName\": \"loginRate\"}\n}"
+        }
+      ],
+      "outcome": "application and network attacks handled."
+    },
+    "summary": {
+      "points": [
+        "WAF for L7.",
+        "Shield for DDoS.",
+        "Rate-limit sensitive paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which layer does Shield Standard protect?",
+        "a": "Network and transport layers (L3/L4) against common DDoS attacks."
+      }
+    ]
+  },
+  "macie-finding-the-needle-in-the-haystack": {
+    "core": "Macie inventories S3 buckets (encryption, public access, sharing) and uses managed and custom data identifiers plus ML to discover sensitive data like PII, credentials and financial data in objects. Automated discovery samples continuously; findings flow to Security Hub and EventBridge.",
+    "first_principles": {
+      "problem": "Nobody knows which of 4,000 buckets contain customer passport scans.",
+      "truths": [
+        "Sensitive data spreads unnoticed.",
+        "Compliance requires knowing where PII lives.",
+        "Manual review doesn't scale."
+      ],
+      "derivation": [
+        "Enable **org-wide**.",
+        "Turn on **automated sensitive data discovery**.",
+        "Add **custom identifiers** (employee IDs).",
+        "Review **bucket posture** (public, unencrypted).",
+        "**Remediate** via EventBridge."
+      ]
+    },
+    "analogy": {
+      "title": "A metal detector sweeping a beach",
+      "story": "It finds the valuable or dangerous items buried in tons of sand.",
+      "mapping": [
+        [
+          "Beach",
+          "S3 data"
+        ],
+        [
+          "Metal detector",
+          "Macie"
+        ],
+        [
+          "Buried items",
+          "Sensitive data"
+        ]
+      ],
+      "breaks": "Metal detectors find metal only; Macie needs identifiers for each data type you care about."
+    },
+    "mindmap": {
+      "center": "Macie",
+      "branches": [
+        {
+          "label": "Inventory",
+          "children": [
+            "Bucket posture",
+            "Public",
+            "Encryption"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "Managed identifiers",
+            "Custom identifiers",
+            "ML"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Automated discovery",
+            "Jobs"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Findings",
+            "Security Hub",
+            "EventBridge"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "PII found in logs",
+      "scenario": "Finding.",
+      "flow": [
+        "Macie: SensitiveData:S3Object/Personal in app-logs bucket",
+        "Logs contain email + card numbers",
+        "Fix logging redaction",
+        "Lifecycle-delete affected objects"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exposure closed before an audit or breach."
+        }
+      ],
+      "code": [],
+      "outcome": "sensitive data mapped and protected."
+    },
+    "summary": {
+      "points": [
+        "Find sensitive data.",
+        "Check bucket posture.",
+        "Automate response."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Macie analyse?",
+        "a": "S3 bucket configurations and object contents for sensitive data like PII."
+      }
+    ]
+  }
+}

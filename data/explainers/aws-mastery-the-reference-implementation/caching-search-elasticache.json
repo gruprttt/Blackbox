@@ -1,0 +1,621 @@
+{
+  "introduction-the-millisecond-imperative": {
+    "core": "In-memory caches return data in sub-millisecond time versus several milliseconds or more for databases, absorbing repeated reads, cutting database load and cost, and storing ephemeral data (sessions, rate limits, leaderboards). ElastiCache runs managed Redis OSS, Valkey and Memcached.",
+    "first_principles": {
+      "problem": "A product page makes 40 database queries and the database melts during a sale.",
+      "truths": [
+        "RAM is ~1,000× faster than disk.",
+        "Reads are often repetitive.",
+        "Databases are expensive to scale."
+      ],
+      "derivation": [
+        "**Cache-aside**: read cache, on miss read DB and populate.",
+        "Set **TTLs**.",
+        "Store **sessions, counters, leaderboards**.",
+        "Size by **working set**.",
+        "Plan **invalidation**."
+      ]
+    },
+    "analogy": {
+      "title": "A chef's mise en place",
+      "story": "Pre-chopped ingredients within reach, instead of going to the pantry for every dish.",
+      "mapping": [
+        [
+          "Prep station",
+          "Cache"
+        ],
+        [
+          "Pantry",
+          "Database"
+        ],
+        [
+          "Fetching from pantry",
+          "Cache miss"
+        ]
+      ],
+      "breaks": "Prepped ingredients spoil visibly; stale cache data looks perfectly fine."
+    },
+    "mindmap": {
+      "center": "Caching",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Sub-ms latency",
+            "DB offload"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "Valkey/Redis OSS",
+            "Memcached"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Cache-aside",
+            "Write-through"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Sessions",
+            "Leaderboards",
+            "Rate limits"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Staleness",
+            "Stampedes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cache-aside",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "95% of reads served from memory."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def get_product(pid):\n    v = r.get(f'product:{pid}')\n    if v: return json.loads(v)\n    p = db.fetch_product(pid)\n    r.setex(f'product:{pid}', 300, json.dumps(p))\n    return p"
+        }
+      ],
+      "outcome": "fast pages, calm database."
+    },
+    "summary": {
+      "points": [
+        "Memory is fast.",
+        "Cache-aside.",
+        "TTLs and invalidation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens on a cache miss in cache-aside?",
+        "a": "The app reads from the database, then writes the value into the cache for next time."
+      }
+    ]
+  },
+  "memcached-vs-redis-the-first-choice": {
+    "core": "Memcached is a simple, multithreaded key-value cache with no persistence, replication or rich types, which makes it good for plain object caching that scales vertically. Redis/Valkey adds data structures (hashes, sorted sets, streams), replication, Multi-AZ failover, persistence options, pub/sub, Lua and cluster mode. It's the default for most use cases.",
+    "first_principles": {
+      "problem": "A team picks Memcached and later needs leaderboards and failover.",
+      "truths": [
+        "Simple caches need little.",
+        "Rich structures enable new use cases.",
+        "HA requires replication."
+      ],
+      "derivation": [
+        "**Memcached**: simple, multithreaded, no HA.",
+        "**Redis/Valkey**: data types, replication, failover, backups.",
+        "Default to **Valkey/Redis**.",
+        "Pick Memcached only for **pure, disposable caching**."
+      ]
+    },
+    "analogy": {
+      "title": "A notepad versus a whiteboard with filing trays",
+      "story": "The notepad is quick; the whiteboard organises, sorts and has a backup photo.",
+      "mapping": [
+        [
+          "Notepad",
+          "Memcached"
+        ],
+        [
+          "Organised whiteboard",
+          "Redis/Valkey"
+        ],
+        [
+          "Backup photo",
+          "Snapshots/replicas"
+        ]
+      ],
+      "breaks": "Notepads last; Memcached loses everything on node failure."
+    },
+    "mindmap": {
+      "center": "Memcached vs Redis",
+      "branches": [
+        {
+          "label": "Memcached",
+          "children": [
+            "Multithreaded",
+            "Strings only",
+            "No replication"
+          ]
+        },
+        {
+          "label": "Redis/Valkey",
+          "children": [
+            "Data structures",
+            "Replication",
+            "Multi-AZ",
+            "Backups",
+            "Pub/sub",
+            "Cluster mode"
+          ]
+        },
+        {
+          "label": "Default",
+          "children": [
+            "Valkey/Redis"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Leaderboard",
+      "scenario": "Sorted set.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Real-time top-10 in O(log n)."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "r.zincrby('leaderboard', 10, 'player:42')\ntop = r.zrevrange('leaderboard', 0, 9, withscores=True)"
+        }
+      ],
+      "outcome": "right engine chosen."
+    },
+    "summary": {
+      "points": [
+        "Memcached for simplicity.",
+        "Redis/Valkey for features and HA.",
+        "Default to Redis/Valkey."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which engine supports replication and automatic failover?",
+        "a": "Redis OSS / Valkey (not Memcached)."
+      }
+    ]
+  },
+  "redis-cluster-mode-disabled-vs-enabled": {
+    "core": "Cluster mode disabled has one shard (a primary plus up to 5 replicas): simple, with all keys on one node, and scales reads only. Cluster mode enabled splits the keyspace into 16,384 hash slots across up to 500 shards, scaling writes and memory horizontally, but multi-key operations must stay in one slot (use hash tags).",
+    "first_principles": {
+      "problem": "A single Redis primary runs out of memory and write capacity.",
+      "truths": [
+        "One node has finite memory and CPU.",
+        "Hash slots distribute keys.",
+        "Cross-slot operations can't be atomic."
+      ],
+      "derivation": [
+        "**Disabled** for small datasets and read scaling.",
+        "**Enabled** for large datasets and write scaling.",
+        "Use **{hash tags}** to co-locate related keys.",
+        "Use **cluster-aware clients**.",
+        "**Online resharding** to scale."
+      ]
+    },
+    "analogy": {
+      "title": "One big filing cabinet versus a room of cabinets",
+      "story": "With many cabinets you store more and more people can file at once, but related files must share a cabinet.",
+      "mapping": [
+        [
+          "One cabinet",
+          "Single shard"
+        ],
+        [
+          "Room of cabinets",
+          "Shards"
+        ],
+        [
+          "Drawer labels",
+          "Hash slots"
+        ],
+        [
+          "Same cabinet rule",
+          "Hash tags"
+        ]
+      ],
+      "breaks": "Cabinets can be searched together by hand; cross-slot commands fail outright."
+    },
+    "mindmap": {
+      "center": "Cluster Mode",
+      "branches": [
+        {
+          "label": "Disabled",
+          "children": [
+            "1 shard",
+            "Read replicas",
+            "Simple"
+          ]
+        },
+        {
+          "label": "Enabled",
+          "children": [
+            "16,384 slots",
+            "Many shards",
+            "Write scaling"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Hash tags",
+            "Cluster-aware client"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Online resharding"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hash tags",
+      "scenario": "Co-locate keys.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Atomic multi-key ops per user."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "SET {user:42}:profile ...\nSET {user:42}:cart ...\n# both hash on 'user:42' → same slot → MULTI/EXEC works"
+        }
+      ],
+      "outcome": "horizontal scale without breaking transactions."
+    },
+    "summary": {
+      "points": [
+        "Disabled: simple.",
+        "Enabled: scales writes.",
+        "Hash tags for multi-key."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many hash slots does Redis Cluster use?",
+        "a": "16,384."
+      }
+    ]
+  },
+  "global-datastore-going-multi-region": {
+    "core": "Global Datastore replicates a Redis/Valkey cluster from a primary region to up to two secondary regions with typically sub-second lag. Secondaries serve local low-latency reads and can be promoted during a regional outage. Writes go to the primary region only.",
+    "first_principles": {
+      "problem": "Users in Asia see 200 ms cache reads from a US cluster, and a US outage means a cold cache.",
+      "truths": [
+        "Cross-region latency is high.",
+        "Async replication gives local reads.",
+        "Single-writer avoids conflicts."
+      ],
+      "derivation": [
+        "Create **Global Datastore** from a primary cluster.",
+        "Add **secondary regions**.",
+        "Route **reads locally**, **writes to primary**.",
+        "**Promote** secondary for DR.",
+        "Monitor **replication lag**."
+      ]
+    },
+    "analogy": {
+      "title": "A franchise menu printed centrally and sent to branches abroad",
+      "story": "Branches read their local copy; changes only come from head office.",
+      "mapping": [
+        [
+          "Head office",
+          "Primary region"
+        ],
+        [
+          "Branch copies",
+          "Secondary clusters"
+        ],
+        [
+          "Relocating head office",
+          "Promotion"
+        ]
+      ],
+      "breaks": "Menus change rarely; cache data changes constantly, so lag matters."
+    },
+    "mindmap": {
+      "center": "Global Datastore",
+      "branches": [
+        {
+          "label": "Topology",
+          "children": [
+            "1 primary",
+            "Up to 2 secondaries"
+          ]
+        },
+        {
+          "label": "Replication",
+          "children": [
+            "Async",
+            "Sub-second"
+          ]
+        },
+        {
+          "label": "Reads",
+          "children": [
+            "Local"
+          ]
+        },
+        {
+          "label": "Writes",
+          "children": [
+            "Primary only"
+          ]
+        },
+        {
+          "label": "DR",
+          "children": [
+            "Promote secondary"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Global session store",
+      "scenario": "Design.",
+      "flow": [
+        "Primary us-east-1, secondaries eu-west-1, ap-southeast-1",
+        "Reads local everywhere (~1 ms)",
+        "Writes forwarded by app to us-east-1",
+        "Outage → promote eu-west-1"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fast reads globally, warm DR cache."
+        }
+      ],
+      "code": [],
+      "outcome": "multi-region caching."
+    },
+    "summary": {
+      "points": [
+        "Async cross-region.",
+        "Local reads.",
+        "Promote for DR."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can secondary regions in Global Datastore accept writes?",
+        "a": "No; writes go to the primary region, while secondaries serve reads until promoted."
+      }
+    ]
+  },
+  "cache-eviction-policies-and-ttl-strategy": {
+    "core": "When memory fills, Redis evicts keys per maxmemory-policy: allkeys-lru/lfu (any key), volatile-lru/lfu/ttl (only keys with TTLs) or noeviction (writes fail). TTLs bound staleness and memory. Add jitter to TTLs to avoid synchronised expiry and stampedes.",
+    "first_principles": {
+      "problem": "Memory fills and writes start failing with OOM errors, or thousands of keys expire at once and hammer the database.",
+      "truths": [
+        "Memory is finite.",
+        "Some keys are hotter than others.",
+        "Simultaneous expiry creates load spikes."
+      ],
+      "derivation": [
+        "Choose **allkeys-lfu/lru** for pure caches.",
+        "Choose **volatile-*** when mixing persistent and cache keys.",
+        "Set **TTLs** per data freshness need.",
+        "Add **random jitter** to TTLs.",
+        "Monitor **evictions** and **memory**."
+      ]
+    },
+    "analogy": {
+      "title": "Clearing out a fridge",
+      "story": "When full, toss the food you use least; label everything with a use-by date, staggered so you don't restock everything on one day.",
+      "mapping": [
+        [
+          "Least-used food",
+          "LFU/LRU eviction"
+        ],
+        [
+          "Use-by date",
+          "TTL"
+        ],
+        [
+          "Staggered dates",
+          "TTL jitter"
+        ]
+      ],
+      "breaks": "Fridges hold food you'll eventually need; cache entries can always be recomputed."
+    },
+    "mindmap": {
+      "center": "Eviction & TTL",
+      "branches": [
+        {
+          "label": "Policies",
+          "children": [
+            "allkeys-lru/lfu",
+            "volatile-lru/lfu/ttl",
+            "noeviction"
+          ]
+        },
+        {
+          "label": "TTL",
+          "children": [
+            "Freshness",
+            "Memory bound",
+            "Jitter"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "Evictions",
+            "Memory",
+            "Hit rate"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Stampede",
+            "OOM writes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "TTL with jitter",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Expiries spread over 5 minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import random\nttl = 3600 + random.randint(0, 300)\nr.setex(key, ttl, value)"
+        }
+      ],
+      "outcome": "stable memory and DB load."
+    },
+    "summary": {
+      "points": [
+        "Pick an eviction policy.",
+        "TTLs everywhere.",
+        "Jitter expiries."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens with maxmemory-policy noeviction when memory is full?",
+        "a": "Write commands that need memory return errors instead of evicting keys."
+      }
+    ]
+  },
+  "cache-invalidation-patterns": {
+    "core": "Keeping cache and database consistent uses patterns: TTL-based expiry (eventual), delete-on-write (invalidate after updating the DB), write-through (update cache with DB), event-driven invalidation from change streams (CDC), and versioned keys. Guard against stampedes with locks or request coalescing and stale-while-revalidate.",
+    "first_principles": {
+      "problem": "Users see stale prices after updates, and an expired hot key triggers 5,000 simultaneous DB queries.",
+      "truths": [
+        "Two stores can't be updated atomically.",
+        "Deleting is safer than updating the cache.",
+        "Hot key expiry causes stampedes."
+      ],
+      "derivation": [
+        "**Update DB, then delete cache key**.",
+        "Use **CDC/Streams** to invalidate reliably.",
+        "**Versioned keys** (product:42:v7).",
+        "**Single-flight lock** on misses.",
+        "**Stale-while-revalidate** for hot keys."
+      ]
+    },
+    "analogy": {
+      "title": "Updating a shop's price tags",
+      "story": "Change the master price list first, then remove old tags; staff fetch new tags when they notice one missing.",
+      "mapping": [
+        [
+          "Master price list",
+          "Database"
+        ],
+        [
+          "Removing old tags",
+          "Cache delete"
+        ],
+        [
+          "Fetching new tags",
+          "Repopulate on miss"
+        ]
+      ],
+      "breaks": "Shop staff coordinate naturally; concurrent requests can race, re-caching old values."
+    },
+    "mindmap": {
+      "center": "Invalidation",
+      "branches": [
+        {
+          "label": "Patterns",
+          "children": [
+            "TTL",
+            "Delete on write",
+            "Write-through",
+            "CDC events",
+            "Versioned keys"
+          ]
+        },
+        {
+          "label": "Stampede",
+          "children": [
+            "Locks",
+            "Coalescing",
+            "Stale-while-revalidate"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Race conditions",
+            "Updating cache before DB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stampede protection",
+      "scenario": "Lock on miss.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One DB query per expiry, not thousands."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def get(key):\n    v = r.get(key)\n    if v: return v\n    if r.set(f'lock:{key}', 1, nx=True, ex=10):\n        v = db_load(key); r.setex(key, 300, v); r.delete(f'lock:{key}')\n        return v\n    time.sleep(0.05)\n    return r.get(key) or db_load(key)"
+        }
+      ],
+      "outcome": "fresh data, protected database."
+    },
+    "summary": {
+      "points": [
+        "DB first, then delete.",
+        "Events for reliability.",
+        "Prevent stampedes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why delete the cache key instead of updating it after a DB write?",
+        "a": "Deleting avoids races where an older value overwrites a newer one; the next read repopulates from the DB."
+      }
+    ]
+  }
+}

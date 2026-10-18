@@ -1,0 +1,739 @@
+{
+  "introduction-beyond-simple-buckets": {
+    "core": "S3 is a regional object store with 11 nines of durability, effectively unlimited scale and a rich feature set: storage classes, lifecycle rules, versioning, replication, Object Lock, event notifications, access points and in-place querying. It underpins data lakes, backups, static sites and ML datasets.",
+    "first_principles": {
+      "problem": "Teams use S3 as a dumb file bucket and miss cost, security and data-management features.",
+      "truths": [
+        "Objects are stored redundantly across AZs.",
+        "Access patterns vary over an object's life.",
+        "Buckets are often the target of data leaks."
+      ],
+      "derivation": [
+        "**Block Public Access** by default.",
+        "**Versioning** for recovery.",
+        "**Storage classes + lifecycle** for cost.",
+        "**Replication** for DR/compliance.",
+        "**Events** for automation."
+      ]
+    },
+    "analogy": {
+      "title": "A self-managing warehouse",
+      "story": "It moves old boxes to cheaper back rooms, keeps copies, locks critical records and notifies you when deliveries arrive.",
+      "mapping": [
+        [
+          "Back rooms",
+          "Colder storage classes"
+        ],
+        [
+          "Copies",
+          "Replication/versioning"
+        ],
+        [
+          "Delivery notice",
+          "Event notifications"
+        ]
+      ],
+      "breaks": "Warehouses have physical limits; S3 scales without capacity planning."
+    },
+    "mindmap": {
+      "center": "S3",
+      "branches": [
+        {
+          "label": "Core",
+          "children": [
+            "Objects",
+            "Buckets",
+            "11 nines"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Classes",
+            "Lifecycle",
+            "Intelligent-Tiering"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "Versioning",
+            "Object Lock",
+            "Replication"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Block Public Access",
+            "Policies",
+            "KMS"
+          ]
+        },
+        {
+          "label": "Integration",
+          "children": [
+            "Events",
+            "Athena"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Secure bucket baseline",
+      "scenario": "Settings.",
+      "flow": [
+        "Block Public Access on",
+        "Default SSE-KMS encryption",
+        "Versioning enabled",
+        "Lifecycle to cheaper classes after 30 days"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Safe, cost-aware by default."
+        }
+      ],
+      "code": [],
+      "outcome": "S3 used as a platform, not a folder."
+    },
+    "summary": {
+      "points": [
+        "Durable and scalable.",
+        "Rich features.",
+        "Secure by default."
+      ]
+    },
+    "check": [
+      {
+        "q": "What durability does S3 Standard target?",
+        "a": "99.999999999% (11 nines) of objects per year."
+      }
+    ]
+  },
+  "strong-consistency-the-read-after-write-guarantee": {
+    "core": "Since December 2020, S3 provides strong read-after-write consistency for all PUTs, DELETEs and LIST operations at no extra cost: after a successful write, any subsequent read or list returns the latest version. This removed a class of data-pipeline bugs caused by eventual consistency.",
+    "first_principles": {
+      "problem": "A Spark job lists a prefix right after writing and misses newly written files (pre-2020 behaviour).",
+      "truths": [
+        "Distributed systems often trade consistency for performance.",
+        "Pipelines read immediately after writing.",
+        "S3 now guarantees strong consistency."
+      ],
+      "derivation": [
+        "Rely on **read-after-write** for new and overwritten objects.",
+        "**LIST** reflects writes immediately.",
+        "Drop **workarounds** (EMRFS consistent view, S3Guard).",
+        "Remember: concurrent writers still need **coordination** (last writer wins)."
+      ]
+    },
+    "analogy": {
+      "title": "A shared notice board that updates instantly",
+      "story": "Once you pin a notice, everyone who looks sees it.",
+      "mapping": [
+        [
+          "Pinned notice",
+          "Written object"
+        ],
+        [
+          "Anyone looking",
+          "Readers"
+        ],
+        [
+          "Two people pinning",
+          "Concurrent writers"
+        ]
+      ],
+      "breaks": "Two people pinning at once see a clear order; S3 resolves concurrent writes as last-writer-wins, without locking."
+    },
+    "mindmap": {
+      "center": "S3 Consistency",
+      "branches": [
+        {
+          "label": "Guarantee",
+          "children": [
+            "Strong read-after-write",
+            "Consistent LIST"
+          ]
+        },
+        {
+          "label": "Since",
+          "children": [
+            "Dec 2020"
+          ]
+        },
+        {
+          "label": "Removed",
+          "children": [
+            "S3Guard",
+            "EMRFS consistent view"
+          ]
+        },
+        {
+          "label": "Still needed",
+          "children": [
+            "Coordination for concurrent writers",
+            "Conditional writes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pipeline write then read",
+      "scenario": "Now safe.",
+      "flow": [
+        "Job writes part-0001.parquet",
+        "Next step lists prefix",
+        "File appears immediately"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No retries or consistency layers needed."
+        }
+      ],
+      "code": [],
+      "outcome": "simpler, correct pipelines."
+    },
+    "summary": {
+      "points": [
+        "Strong consistency now.",
+        "LIST is consistent.",
+        "Concurrent writes: last wins."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does strong consistency make concurrent writers safe?",
+        "a": "No: S3 applies last-writer-wins; use conditional writes or locking for coordination."
+      }
+    ]
+  },
+  "storage-classes-the-hierarchy-of-cost-vs-speed": {
+    "core": "S3 classes trade storage price against retrieval cost and latency: Standard (hot), Intelligent-Tiering (automatic), Standard-IA and One Zone-IA (infrequent, retrieval fee), Glacier Instant Retrieval (ms access, archive price), Glacier Flexible Retrieval (minutes–hours) and Glacier Deep Archive (cheapest, ~12 hours). Minimum durations and object sizes apply.",
+    "first_principles": {
+      "problem": "Petabytes of rarely read logs sit in Standard, costing far more than needed.",
+      "truths": [
+        "Most data cools over time.",
+        "Cheaper storage has retrieval costs and minimums.",
+        "Access patterns can be unknown."
+      ],
+      "derivation": [
+        "**Standard** for frequent access.",
+        "**Intelligent-Tiering** for unknown patterns.",
+        "**IA** for monthly access.",
+        "**Glacier IR** for quarterly with ms access.",
+        "**Deep Archive** for compliance retention.",
+        "Mind **minimum duration** and **128 KB minimum** billing."
+      ]
+    },
+    "analogy": {
+      "title": "Storing belongings",
+      "story": "Your desk, a cupboard, the loft and an off-site storage unit, each cheaper and slower to reach.",
+      "mapping": [
+        [
+          "Desk",
+          "Standard"
+        ],
+        [
+          "Cupboard",
+          "IA"
+        ],
+        [
+          "Loft",
+          "Glacier IR/Flexible"
+        ],
+        [
+          "Storage unit",
+          "Deep Archive"
+        ]
+      ],
+      "breaks": "Your loft doesn't charge per retrieval; Glacier classes do."
+    },
+    "mindmap": {
+      "center": "Storage Classes",
+      "branches": [
+        {
+          "label": "Hot",
+          "children": [
+            "Standard"
+          ]
+        },
+        {
+          "label": "Auto",
+          "children": [
+            "Intelligent-Tiering"
+          ]
+        },
+        {
+          "label": "Infrequent",
+          "children": [
+            "Standard-IA",
+            "One Zone-IA"
+          ]
+        },
+        {
+          "label": "Archive",
+          "children": [
+            "Glacier IR",
+            "Glacier Flexible",
+            "Deep Archive"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Retrieval fees",
+            "Min duration",
+            "Min size"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cost per TB-month (approx.)",
+      "scenario": "us-east-1.",
+      "flow": [
+        "Standard ≈ $23",
+        "Standard-IA ≈ $12.5",
+        "Glacier IR ≈ $4",
+        "Deep Archive ≈ $1"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Moving cold logs to Deep Archive cuts storage ~95%."
+        }
+      ],
+      "code": [],
+      "outcome": "storage priced to access pattern."
+    },
+    "summary": {
+      "points": [
+        "Colder = cheaper storage.",
+        "But retrieval costs.",
+        "Intelligent-Tiering when unsure."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is Intelligent-Tiering the best choice?",
+        "a": "When access patterns are unknown or changing, since it moves objects between tiers automatically."
+      }
+    ]
+  },
+  "lifecycle-policies-automating-the-flow": {
+    "core": "Lifecycle rules automatically transition objects between storage classes and expire them after set ages, filtered by prefix, tags or size. They also clean up noncurrent versions and incomplete multipart uploads, which otherwise silently accumulate cost.",
+    "first_principles": {
+      "problem": "Old log versions and abandoned multipart uploads quietly double the bill.",
+      "truths": [
+        "Data value decays with age.",
+        "Manual cleanup doesn't happen.",
+        "Versioning keeps every overwrite."
+      ],
+      "derivation": [
+        "**Transition** by age (e.g. IA at 30d, Glacier at 90d).",
+        "**Expire** current objects at retention end.",
+        "**Expire noncurrent versions** after N days.",
+        "**Abort incomplete multipart uploads** after 7 days.",
+        "**Filter** by prefix/tag."
+      ]
+    },
+    "analogy": {
+      "title": "An automatic filing clerk",
+      "story": "Moves files to archive after a month and shreds them after seven years, without being asked.",
+      "mapping": [
+        [
+          "Moving to archive",
+          "Transition"
+        ],
+        [
+          "Shredding",
+          "Expiration"
+        ],
+        [
+          "Clerk",
+          "Lifecycle rule"
+        ]
+      ],
+      "breaks": "Clerks notice exceptions; lifecycle rules apply blindly, so test filters carefully."
+    },
+    "mindmap": {
+      "center": "Lifecycle",
+      "branches": [
+        {
+          "label": "Actions",
+          "children": [
+            "Transition",
+            "Expire"
+          ]
+        },
+        {
+          "label": "Versions",
+          "children": [
+            "Noncurrent expiration"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "Incomplete multipart uploads"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "Prefix",
+            "Tags",
+            "Size"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Min durations",
+            "Transition costs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Log lifecycle rule",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Seven-year retention at a fraction of the cost."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\"Rules\": [{\n  \"ID\": \"logs\", \"Status\": \"Enabled\", \"Filter\": {\"Prefix\": \"logs/\"},\n  \"Transitions\": [{\"Days\": 30, \"StorageClass\": \"STANDARD_IA\"}, {\"Days\": 90, \"StorageClass\": \"DEEP_ARCHIVE\"}],\n  \"Expiration\": {\"Days\": 2555},\n  \"NoncurrentVersionExpiration\": {\"NoncurrentDays\": 30},\n  \"AbortIncompleteMultipartUpload\": {\"DaysAfterInitiation\": 7}\n}]}"
+        }
+      ],
+      "outcome": "hands-off cost control."
+    },
+    "summary": {
+      "points": [
+        "Automate transitions.",
+        "Expire versions.",
+        "Abort stale uploads."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add AbortIncompleteMultipartUpload?",
+        "a": "Failed multipart uploads leave invisible parts that are billed until removed."
+      }
+    ]
+  },
+  "object-lock-worm-compliance-security": {
+    "core": "Object Lock makes object versions write-once-read-many for a retention period. Governance mode lets specially permitted users override it; Compliance mode can't be shortened or removed by anyone, including root. Legal holds lock indefinitely. It protects backups from ransomware and meets regulations like SEC 17a-4.",
+    "first_principles": {
+      "problem": "Attackers with admin credentials delete backups before encrypting production.",
+      "truths": [
+        "Admins can normally delete anything.",
+        "Regulations require immutable records.",
+        "Immutability must hold even against privileged users."
+      ],
+      "derivation": [
+        "Enable **Object Lock** (requires versioning; set at bucket creation or later).",
+        "Choose **Compliance** for true immutability.",
+        "Use **Governance** for testing or overridable retention.",
+        "Set **default retention**.",
+        "Use **legal hold** for litigation."
+      ]
+    },
+    "analogy": {
+      "title": "A time-locked bank vault",
+      "story": "Once set, not even the bank manager can open it before the timer expires.",
+      "mapping": [
+        [
+          "Time lock",
+          "Compliance retention"
+        ],
+        [
+          "Manager override",
+          "Governance mode bypass"
+        ],
+        [
+          "Court order hold",
+          "Legal hold"
+        ]
+      ],
+      "breaks": "Vault timers can be drilled; Compliance mode can't be bypassed short of closing the AWS account."
+    },
+    "mindmap": {
+      "center": "Object Lock",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "Governance",
+            "Compliance"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Legal hold",
+            "Default retention"
+          ]
+        },
+        {
+          "label": "Requires",
+          "children": [
+            "Versioning"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Ransomware protection",
+            "SEC 17a-4",
+            "Audit logs"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Compliance can't be undone"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Default compliance retention",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Backups survive a full credential compromise for 35 days."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws s3api put-object-lock-configuration --bucket backups-prod \\\n  --object-lock-configuration '{\"ObjectLockEnabled\":\"Enabled\",\"Rule\":{\"DefaultRetention\":{\"Mode\":\"COMPLIANCE\",\"Days\":35}}}'"
+        }
+      ],
+      "outcome": "immutable backups."
+    },
+    "summary": {
+      "points": [
+        "WORM storage.",
+        "Compliance = unbreakable.",
+        "Protects against insiders and ransomware."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between Governance and Compliance mode?",
+        "a": "Governance can be bypassed by users with special permission; Compliance cannot be shortened or removed by anyone."
+      }
+    ]
+  },
+  "s3-select-vs-athena-querying-data-in-place": {
+    "core": "Athena runs serverless SQL (Trino/Presto) over data in S3 using a Glue catalog, billed per TB scanned, and supports joins, aggregations and partitions. S3 Select filtered a single object with simple SQL but is no longer offered to new customers. Use columnar formats (Parquet), partitioning and compression to cut scanned bytes and cost.",
+    "first_principles": {
+      "problem": "Analysts download gigabytes of logs to filter a few rows locally.",
+      "truths": [
+        "Moving data is slow and costly.",
+        "Querying in place avoids ETL.",
+        "Cost scales with bytes scanned."
+      ],
+      "derivation": [
+        "Use **Athena** for SQL across many objects.",
+        "Store as **Parquet/ORC** with compression.",
+        "**Partition** by date or tenant.",
+        "Define tables in **Glue Data Catalog**.",
+        "Use **CTAS** to convert raw data."
+      ]
+    },
+    "analogy": {
+      "title": "Asking a librarian to find passages versus borrowing every book",
+      "story": "The librarian reads in place and brings back only the lines you need.",
+      "mapping": [
+        [
+          "Librarian",
+          "Athena"
+        ],
+        [
+          "Books",
+          "S3 objects"
+        ],
+        [
+          "Index cards",
+          "Partitions/columnar metadata"
+        ]
+      ],
+      "breaks": "Librarians are free; Athena bills by bytes read."
+    },
+    "mindmap": {
+      "center": "Query in Place",
+      "branches": [
+        {
+          "label": "Athena",
+          "children": [
+            "Serverless SQL",
+            "Glue catalog",
+            "Per TB scanned"
+          ]
+        },
+        {
+          "label": "S3 Select",
+          "children": [
+            "Single object",
+            "Legacy"
+          ]
+        },
+        {
+          "label": "Optimise",
+          "children": [
+            "Parquet",
+            "Partitions",
+            "Compression",
+            "CTAS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Query partitioned Parquet",
+      "scenario": "Athena.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Scans one day's partition: MBs, not TBs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT status, count(*)\nFROM alb_logs\nWHERE day = '2026-10-17' AND status >= 500\nGROUP BY status;"
+        }
+      ],
+      "outcome": "fast, cheap ad-hoc analysis."
+    },
+    "summary": {
+      "points": [
+        "Query where data lives.",
+        "Columnar + partitions.",
+        "Pay per byte scanned."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does converting CSV to Parquet reduce Athena cost?",
+        "a": "Parquet is columnar and compressed, so queries read only needed columns and far fewer bytes."
+      }
+    ]
+  },
+  "presigned-urls-the-temporary-guest-pass": {
+    "core": "A presigned URL embeds a signature from credentials that can access an object, letting anyone holding the URL GET or PUT that specific object until it expires, without AWS credentials or a public bucket. It enables direct browser uploads and secure downloads that bypass your servers.",
+    "first_principles": {
+      "problem": "Users upload large videos through the API servers, overloading them, or the bucket is made public for downloads.",
+      "truths": [
+        "Signatures prove authorisation.",
+        "Expiry limits misuse.",
+        "Direct-to-S3 transfer offloads servers."
+      ],
+      "derivation": [
+        "Backend **generates** a URL for a specific key and method.",
+        "Set a **short expiry**.",
+        "Client **uploads/downloads directly**.",
+        "Restrict with **content-type/size** (presigned POST).",
+        "URL validity is capped by the **signer's credential lifetime**."
+      ]
+    },
+    "analogy": {
+      "title": "A single-use guest pass to one room",
+      "story": "Valid for one door, one purpose, until it expires.",
+      "mapping": [
+        [
+          "Guest pass",
+          "Presigned URL"
+        ],
+        [
+          "One room",
+          "One object key"
+        ],
+        [
+          "Expiry time",
+          "X-Amz-Expires"
+        ]
+      ],
+      "breaks": "Guest passes are single-use; presigned URLs can be reused until expiry."
+    },
+    "mindmap": {
+      "center": "Presigned URLs",
+      "branches": [
+        {
+          "label": "Use",
+          "children": [
+            "Direct uploads",
+            "Private downloads"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Key",
+            "Method",
+            "Expiry",
+            "POST conditions"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No public bucket",
+            "Server offload"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Signer credential lifetime",
+            "Reusable until expiry"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Generate an upload URL",
+      "scenario": "boto3.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Browser uploads straight to S3 for 15 minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import boto3\ns3 = boto3.client('s3')\nurl = s3.generate_presigned_url('put_object',\n    Params={'Bucket': 'uploads', 'Key': f'users/{uid}/video.mp4', 'ContentType': 'video/mp4'},\n    ExpiresIn=900)"
+        }
+      ],
+      "outcome": "secure direct transfers."
+    },
+    "summary": {
+      "points": [
+        "Temporary signed access.",
+        "One object, one method.",
+        "Short expiry."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a presigned URL stop working before its expiry?",
+        "a": "If it was signed with temporary credentials that expire first, the URL becomes invalid then."
+      }
+    ]
+  }
+}

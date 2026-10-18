@@ -1,0 +1,534 @@
+{
+  "introduction-user-pools-vs-identity-pools": {
+    "core": "Cognito has two parts. User pools are a user directory and OIDC identity provider: sign-up, sign-in, MFA and federation with social or SAML IdPs, issuing JWTs (ID, access, refresh). Identity pools exchange identities (including user pool tokens) for temporary AWS credentials so apps can call AWS services directly.",
+    "first_principles": {
+      "problem": "Teams confuse the two and try to use identity pools for app login or user pool tokens to call S3.",
+      "truths": [
+        "Authentication proves who a user is.",
+        "AWS API access needs IAM credentials.",
+        "JWTs suit your own APIs."
+      ],
+      "derivation": [
+        "**User pool** for authenticating users to your app/APIs.",
+        "**Identity pool** for AWS credentials.",
+        "Often **both**: user pool login → identity pool credentials.",
+        "Protect APIs with **JWT authorizers**."
+      ]
+    },
+    "analogy": {
+      "title": "A passport office versus a currency exchange",
+      "story": "The passport proves identity; the exchange swaps it for local money (AWS credentials) to spend.",
+      "mapping": [
+        [
+          "Passport",
+          "User pool JWT"
+        ],
+        [
+          "Currency exchange",
+          "Identity pool"
+        ],
+        [
+          "Local money",
+          "Temporary AWS credentials"
+        ]
+      ],
+      "breaks": "Currency exchanges don't limit what you buy; IAM roles strictly limit what credentials can do."
+    },
+    "mindmap": {
+      "center": "Cognito",
+      "branches": [
+        {
+          "label": "User pools",
+          "children": [
+            "Directory",
+            "OIDC",
+            "JWTs",
+            "MFA",
+            "Federation"
+          ]
+        },
+        {
+          "label": "Identity pools",
+          "children": [
+            "AWS credentials",
+            "IAM roles",
+            "Guest access"
+          ]
+        },
+        {
+          "label": "Together",
+          "children": [
+            "Login → credentials"
+          ]
+        },
+        {
+          "label": "APIs",
+          "children": [
+            "JWT authorizers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mobile photo app",
+      "scenario": "Both pools.",
+      "flow": [
+        "User signs in via user pool → JWTs",
+        "App calls API Gateway with access token",
+        "Identity pool swaps ID token for S3 credentials",
+        "App uploads directly to S3"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Login and AWS access, each with the right tool."
+        }
+      ],
+      "code": [],
+      "outcome": "clear identity architecture."
+    },
+    "summary": {
+      "points": [
+        "User pools authenticate.",
+        "Identity pools authorise AWS access.",
+        "Often combined."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Cognito component issues JWTs?",
+        "a": "User pools."
+      }
+    ]
+  },
+  "the-authentication-flow-oidc-jwts": {
+    "core": "User pools implement OAuth 2.0/OIDC: after authentication the app receives an ID token (who the user is), an access token (scopes/groups for APIs) and a refresh token (to get new tokens). Tokens are signed JWTs verifiable with the pool's public JWKS. Use authorization code flow with PKCE for apps.",
+    "first_principles": {
+      "problem": "An API trusts tokens without verifying signatures or audiences, letting forged tokens in.",
+      "truths": [
+        "JWTs are signed, not encrypted.",
+        "Verification needs issuer, audience, expiry and signature.",
+        "Refresh tokens are long-lived secrets."
+      ],
+      "derivation": [
+        "Use **authorization code + PKCE**.",
+        "Verify **signature (JWKS), iss, aud/client_id, exp, token_use**.",
+        "Use **access tokens** for APIs, **ID tokens** for profile.",
+        "Store **refresh tokens** securely.",
+        "Set **short access token lifetimes**."
+      ]
+    },
+    "analogy": {
+      "title": "A signed letter of introduction",
+      "story": "Anyone can read it, but only the signer's seal proves it's genuine and still valid.",
+      "mapping": [
+        [
+          "Seal",
+          "Signature"
+        ],
+        [
+          "Letter contents",
+          "Claims"
+        ],
+        [
+          "Expiry date",
+          "exp claim"
+        ]
+      ],
+      "breaks": "Seals can't be refreshed; refresh tokens mint new letters without re-authenticating."
+    },
+    "mindmap": {
+      "center": "OIDC & JWTs",
+      "branches": [
+        {
+          "label": "Tokens",
+          "children": [
+            "ID",
+            "Access",
+            "Refresh"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Authorization code + PKCE"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Signature/JWKS",
+            "iss",
+            "aud",
+            "exp",
+            "token_use"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Short lifetimes",
+            "Secure refresh storage"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verify a token",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Forged or expired tokens rejected."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import jwt\njwks = jwt.PyJWKClient(f'https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/jwks.json')\nkey = jwks.get_signing_key_from_jwt(token).key\nclaims = jwt.decode(token, key, algorithms=['RS256'], issuer=f'https://cognito-idp.{region}.amazonaws.com/{pool_id}', options={'verify_aud': False})\nassert claims['token_use'] == 'access' and claims['client_id'] == CLIENT_ID"
+        }
+      ],
+      "outcome": "trustworthy authentication."
+    },
+    "summary": {
+      "points": [
+        "Three tokens.",
+        "Verify every claim.",
+        "Code flow with PKCE."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which token should APIs use for authorisation?",
+        "a": "The access token."
+      }
+    ]
+  },
+  "the-hosted-ui-authentication-out-of-the-box": {
+    "core": "Cognito's managed login (hosted UI) provides ready-made sign-up, sign-in, MFA, password reset and social/SAML federation pages on a Cognito or custom domain, implementing OAuth flows correctly. You customise branding and redirect URLs, avoiding building and securing auth screens yourself.",
+    "first_principles": {
+      "problem": "A team spends weeks building login, MFA and password reset screens and gets security details wrong.",
+      "truths": [
+        "Auth UIs are security-sensitive.",
+        "OAuth flows are easy to misimplement.",
+        "Branding needs are usually modest."
+      ],
+      "derivation": [
+        "Enable **managed login** with a **custom domain** (ACM cert).",
+        "Configure **app client** callback/logout URLs.",
+        "Add **social/SAML IdPs**.",
+        "**Brand** with the style editor.",
+        "Use a **custom UI** only if required."
+      ]
+    },
+    "analogy": {
+      "title": "Using a bank's official card reader instead of building your own",
+      "story": "Secure, standard and maintained by the experts.",
+      "mapping": [
+        [
+          "Card reader",
+          "Managed login"
+        ],
+        [
+          "Bank",
+          "Cognito"
+        ],
+        [
+          "Your shop",
+          "Your app"
+        ]
+      ],
+      "breaks": "Card readers look identical; hosted UI branding is customisable within limits."
+    },
+    "mindmap": {
+      "center": "Hosted UI",
+      "branches": [
+        {
+          "label": "Features",
+          "children": [
+            "Sign-up/in",
+            "MFA",
+            "Reset",
+            "Federation"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Domain",
+            "Callback URLs",
+            "Scopes"
+          ]
+        },
+        {
+          "label": "Branding",
+          "children": [
+            "Style editor",
+            "Custom domain"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "Custom UI via SDK"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Login redirect",
+      "scenario": "URL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Full login flow without custom screens."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "https://auth.example.com/oauth2/authorize?client_id=abc123&response_type=code&scope=openid+email&redirect_uri=https://app.example.com/callback&code_challenge=...&code_challenge_method=S256"
+        }
+      ],
+      "outcome": "secure auth in hours, not weeks."
+    },
+    "summary": {
+      "points": [
+        "Managed login pages.",
+        "Correct OAuth.",
+        "Brand and federate."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must you configure on the app client for the hosted UI?",
+        "a": "Allowed callback (redirect) and sign-out URLs, OAuth flows and scopes."
+      }
+    ]
+  },
+  "user-pool-configuration-the-key-settings": {
+    "core": "Key user pool settings: sign-in identifiers (username, email, phone), required attributes (mostly immutable after creation), password policy, MFA (TOTP, SMS, passkeys/WebAuthn), account recovery, advanced security (risk-based adaptive auth, compromised credential detection), app clients (with or without secrets, token lifetimes, auth flows) and email/SMS delivery via SES/SNS.",
+    "first_principles": {
+      "problem": "A pool is created with username sign-in and an immutable required attribute, and must be recreated to change it.",
+      "truths": [
+        "Some settings can't change after creation.",
+        "MFA dramatically reduces account takeover.",
+        "Public clients can't keep secrets."
+      ],
+      "derivation": [
+        "Decide **sign-in identifiers** up front.",
+        "Keep **required attributes minimal**.",
+        "Enable **MFA** (TOTP/passkeys) and **threat protection**.",
+        "Use **app clients without secrets** for SPAs/mobile.",
+        "Send email via **SES** for volume."
+      ]
+    },
+    "analogy": {
+      "title": "Setting up a building's access system before tenants move in",
+      "story": "Some choices, like the badge format, are hard to change later.",
+      "mapping": [
+        [
+          "Badge format",
+          "Sign-in identifiers"
+        ],
+        [
+          "Tenant details",
+          "Attributes"
+        ],
+        [
+          "Two-factor locks",
+          "MFA"
+        ]
+      ],
+      "breaks": "Buildings can rebadge over a weekend; user pools may need migrating users to a new pool."
+    },
+    "mindmap": {
+      "center": "User Pool Settings",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "Sign-in identifiers",
+            "Attributes"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Password policy",
+            "MFA",
+            "Threat protection"
+          ]
+        },
+        {
+          "label": "Clients",
+          "children": [
+            "Public/confidential",
+            "Token lifetimes",
+            "Auth flows"
+          ]
+        },
+        {
+          "label": "Messaging",
+          "children": [
+            "SES",
+            "SNS"
+          ]
+        },
+        {
+          "label": "Immutable",
+          "children": [
+            "Identifiers",
+            "Required attrs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pool decisions",
+      "scenario": "Checklist.",
+      "flow": [
+        "Sign in with email (case-insensitive)",
+        "Required: email only; custom attrs optional",
+        "MFA: TOTP + passkeys",
+        "SPA client without secret, access token 15 min"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No forced pool recreation later."
+        }
+      ],
+      "code": [],
+      "outcome": "a well-configured identity store."
+    },
+    "summary": {
+      "points": [
+        "Decide immutables first.",
+        "Enable MFA.",
+        "Right client types."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shouldn't a single-page app's Cognito client have a secret?",
+        "a": "Browser code can't keep secrets confidential, so the client must be public (using PKCE)."
+      }
+    ]
+  },
+  "triggers-the-logic-hooks-lambda": {
+    "core": "Lambda triggers customise the auth lifecycle: pre sign-up (validate or auto-confirm), post confirmation (create a profile record), pre authentication (block users), pre token generation (add claims, groups or scopes), custom message, user migration (lazy-migrate from a legacy system) and custom auth challenges. Triggers run synchronously, so keep them fast and reliable.",
+    "first_principles": {
+      "problem": "Users from a legacy database must move to Cognito without forcing password resets.",
+      "truths": [
+        "Auth flows need business logic.",
+        "Synchronous hooks add latency and failure risk.",
+        "Legacy migration is common."
+      ],
+      "derivation": [
+        "**Pre sign-up** for validation/domain allow-lists.",
+        "**Post confirmation** to create app records.",
+        "**Pre token generation** to enrich tokens.",
+        "**User migration** to lazily import users.",
+        "Keep triggers **fast, idempotent and monitored**."
+      ]
+    },
+    "analogy": {
+      "title": "Checkpoints along an airport journey",
+      "story": "Extra checks or services can happen at check-in, security or boarding.",
+      "mapping": [
+        [
+          "Check-in",
+          "Pre sign-up"
+        ],
+        [
+          "Security",
+          "Pre authentication"
+        ],
+        [
+          "Boarding pass printing",
+          "Pre token generation"
+        ]
+      ],
+      "breaks": "Airport checkpoints have staff on standby; slow triggers time out and fail sign-ins."
+    },
+    "mindmap": {
+      "center": "Cognito Triggers",
+      "branches": [
+        {
+          "label": "Sign-up",
+          "children": [
+            "Pre sign-up",
+            "Post confirmation"
+          ]
+        },
+        {
+          "label": "Sign-in",
+          "children": [
+            "Pre authentication",
+            "Post authentication"
+          ]
+        },
+        {
+          "label": "Tokens",
+          "children": [
+            "Pre token generation"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "User migration"
+          ]
+        },
+        {
+          "label": "Custom",
+          "children": [
+            "Custom auth challenges",
+            "Custom message"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Fast",
+            "Idempotent"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lazy user migration",
+      "scenario": "Trigger.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Users migrate on first login, keeping passwords."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def handler(event, _):\n    if event['triggerSource'] == 'UserMigration_Authentication':\n        user = legacy_check(event['userName'], event['request']['password'])\n        if user:\n            event['response']['userAttributes'] = {'email': user.email, 'email_verified': 'true'}\n            event['response']['finalUserStatus'] = 'CONFIRMED'\n            event['response']['messageAction'] = 'SUPPRESS'\n            return event\n    raise Exception('Bad credentials')"
+        }
+      ],
+      "outcome": "customised, smooth auth flows."
+    },
+    "summary": {
+      "points": [
+        "Hooks for each stage.",
+        "Enrich tokens.",
+        "Migrate lazily."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which trigger adds custom claims to tokens?",
+        "a": "The pre token generation trigger."
+      }
+    ]
+  }
+}

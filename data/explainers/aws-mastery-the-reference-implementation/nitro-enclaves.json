@@ -1,0 +1,418 @@
+{
+  "introduction-the-root-user-problem": {
+    "core": "Even with strong IAM, anyone with root on an EC2 instance (or malware running as root) can read process memory, keys and decrypted data. Nitro Enclaves create isolated compute environments on the instance with no persistent storage, no interactive access and no external networking, so highly sensitive processing is protected even from the instance's own administrators.",
+    "first_principles": {
+      "problem": "A payment service decrypts card data in memory on an instance that several admins can SSH into.",
+      "truths": [
+        "Root can inspect any process.",
+        "Insider and malware threats exist.",
+        "Minimising the trusted computing base reduces risk."
+      ],
+      "derivation": [
+        "Move **sensitive processing** into an enclave.",
+        "Communicate only via **vsock** with the parent.",
+        "Use **attestation** to prove enclave identity.",
+        "Bind **KMS decrypt** to attestation measurements.",
+        "Keep enclave code **small and audited**."
+      ]
+    },
+    "analogy": {
+      "title": "A sealed vault room inside a bank branch",
+      "story": "Even the branch manager can't enter; documents go in and out through a slot.",
+      "mapping": [
+        [
+          "Bank branch",
+          "EC2 instance"
+        ],
+        [
+          "Sealed vault room",
+          "Enclave"
+        ],
+        [
+          "Slot",
+          "vsock channel"
+        ]
+      ],
+      "breaks": "Vault rooms have doors for emergencies; enclaves have no interactive access at all."
+    },
+    "mindmap": {
+      "center": "Root User Problem",
+      "branches": [
+        {
+          "label": "Threats",
+          "children": [
+            "Root admins",
+            "Malware",
+            "Insiders"
+          ]
+        },
+        {
+          "label": "Enclave",
+          "children": [
+            "Isolated",
+            "No storage",
+            "No network",
+            "No SSH"
+          ]
+        },
+        {
+          "label": "Channel",
+          "children": [
+            "vsock"
+          ]
+        },
+        {
+          "label": "Trust",
+          "children": [
+            "Attestation",
+            "KMS conditions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Card decryption",
+      "scenario": "Before/after.",
+      "flow": [
+        "Before: decrypt in app process on host",
+        "After: ciphertext → enclave via vsock",
+        "Enclave decrypts with KMS (attested), tokenises",
+        "Host never sees plaintext"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Root on the host can't read card numbers."
+        }
+      ],
+      "code": [],
+      "outcome": "protection from privileged users."
+    },
+    "summary": {
+      "points": [
+        "Root sees everything.",
+        "Enclaves isolate.",
+        "vsock only."
+      ]
+    },
+    "check": [
+      {
+        "q": "What access does a Nitro Enclave allow the parent instance's root user?",
+        "a": "None to its memory or processes; communication is only via the vsock channel."
+      }
+    ]
+  },
+  "architecture-the-isolated-sibling": {
+    "core": "An enclave is a separate VM carved out of the parent instance's vCPUs and memory by the Nitro Hypervisor. It runs a signed enclave image file (EIF) built from a Docker image, has its own kernel, no disk, no network interfaces and no console, and talks only to its parent over a local vsock socket.",
+    "first_principles": {
+      "problem": "Engineers expect an enclave to be a container and try to give it network access or volumes.",
+      "truths": [
+        "Hypervisor isolation is stronger than containers.",
+        "Removing interfaces removes attack paths.",
+        "Images must be measurable."
+      ],
+      "derivation": [
+        "Build an **EIF** with nitro-cli from a Docker image.",
+        "Launch with **nitro-cli run-enclave**.",
+        "Communicate via **vsock** (CID + port).",
+        "Proxy needed external calls through the **parent** (e.g. vsock-proxy to KMS).",
+        "Debug only in **debug mode** (attestation differs)."
+      ]
+    },
+    "analogy": {
+      "title": "A sibling living in a soundproof room next door",
+      "story": "Same house, separate walls, and you talk only through a small hatch.",
+      "mapping": [
+        [
+          "House",
+          "Parent instance"
+        ],
+        [
+          "Soundproof room",
+          "Enclave VM"
+        ],
+        [
+          "Hatch",
+          "vsock"
+        ]
+      ],
+      "breaks": "Siblings can leave the room; enclaves can't reach anything except via the parent."
+    },
+    "mindmap": {
+      "center": "Enclave Architecture",
+      "branches": [
+        {
+          "label": "Isolation",
+          "children": [
+            "Separate VM",
+            "Nitro Hypervisor"
+          ]
+        },
+        {
+          "label": "Image",
+          "children": [
+            "EIF from Docker",
+            "Measurements (PCRs)"
+          ]
+        },
+        {
+          "label": "Interfaces",
+          "children": [
+            "vsock only"
+          ]
+        },
+        {
+          "label": "Missing",
+          "children": [
+            "Disk",
+            "Network",
+            "Console"
+          ]
+        },
+        {
+          "label": "External",
+          "children": [
+            "Parent proxies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Build and run",
+      "scenario": "nitro-cli.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Output",
+          "detail": "Build prints PCR0/1/2 measurements used for attestation."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nitro-cli build-enclave --docker-uri signer:latest --output-file signer.eif\nnitro-cli run-enclave --eif-path signer.eif --cpu-count 2 --memory 2048 --enclave-cid 16"
+        }
+      ],
+      "outcome": "a running isolated enclave."
+    },
+    "summary": {
+      "points": [
+        "Separate VM.",
+        "EIF image.",
+        "vsock to parent."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does an enclave reach KMS if it has no network?",
+        "a": "Through a proxy on the parent instance (e.g. vsock-proxy) forwarding traffic over vsock."
+      }
+    ]
+  },
+  "cryptographic-attestation-the-id-badge": {
+    "core": "The Nitro Hypervisor produces a signed attestation document containing the enclave's measurements (PCRs: hashes of the image, kernel, application and IAM role), plus a public key. KMS key policies can require specific PCR values (kms:RecipientAttestation:ImageSha384), so only the exact, unmodified enclave can decrypt, and the response is encrypted to the enclave's key.",
+    "first_principles": {
+      "problem": "How does KMS know it's talking to the genuine enclave code and not a modified copy on the parent?",
+      "truths": [
+        "Hashes identify exact code.",
+        "Hardware-signed documents can't be forged by the host.",
+        "Policies can check measurements."
+      ],
+      "derivation": [
+        "Record **PCR values** at build time.",
+        "Enclave requests an **attestation document**.",
+        "Call KMS **Decrypt with Recipient** (attestation attached).",
+        "Key policy **conditions on PCRs**.",
+        "KMS returns data **encrypted to the enclave's public key**."
+      ]
+    },
+    "analogy": {
+      "title": "A tamper-proof ID badge issued by the building itself",
+      "story": "Security checks the badge's hologram, not what the person claims.",
+      "mapping": [
+        [
+          "Hologram",
+          "Hypervisor signature"
+        ],
+        [
+          "Badge details",
+          "PCR measurements"
+        ],
+        [
+          "Security desk",
+          "KMS key policy"
+        ]
+      ],
+      "breaks": "Badges can be lost; attestation documents are generated fresh per request."
+    },
+    "mindmap": {
+      "center": "Attestation",
+      "branches": [
+        {
+          "label": "Document",
+          "children": [
+            "PCRs",
+            "Public key",
+            "Signed by Nitro"
+          ]
+        },
+        {
+          "label": "PCRs",
+          "children": [
+            "Image",
+            "Kernel",
+            "App",
+            "IAM role",
+            "Signing cert"
+          ]
+        },
+        {
+          "label": "KMS",
+          "children": [
+            "Recipient parameter",
+            "PCR conditions",
+            "Encrypted response"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Only exact code decrypts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "KMS key policy condition",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Modified images can't decrypt."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Principal\": {\"AWS\": \"arn:aws:iam::123:role/enclave-parent\"},\n  \"Action\": \"kms:Decrypt\",\n  \"Resource\": \"*\",\n  \"Condition\": {\"StringEqualsIgnoreCase\": {\"kms:RecipientAttestation:ImageSha384\": \"<PCR0 value>\"}}\n}"
+        }
+      ],
+      "outcome": "cryptographically proven code identity."
+    },
+    "summary": {
+      "points": [
+        "Measurements identify code.",
+        "Hardware-signed.",
+        "KMS enforces PCRs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does PCR0 represent in a Nitro Enclave attestation?",
+        "a": "A hash of the enclave image file (EIF)."
+      }
+    ]
+  },
+  "resource-allocation-stealing-from-the-parent": {
+    "core": "Enclaves take dedicated vCPUs (full cores) and memory away from the parent instance, configured in the allocator service (/etc/nitro_enclaves/allocator.yaml) before launch. The parent keeps the rest. Size enclaves for their workload, and choose instance types with enough cores (at least 4 vCPUs on most families) to leave capacity for the parent.",
+    "first_principles": {
+      "problem": "Launching an enclave fails, or the parent app slows dramatically after allocating resources.",
+      "truths": [
+        "Resources are partitioned, not shared.",
+        "Allocation happens before launch.",
+        "Cores are allocated in whole units."
+      ],
+      "derivation": [
+        "Enable **enclave support** on the instance.",
+        "Configure **allocator** (cpu_count, memory_mib).",
+        "Restart **allocator service**.",
+        "Leave **headroom** for the parent.",
+        "Monitor **both** workloads."
+      ]
+    },
+    "analogy": {
+      "title": "Partitioning an office floor with a permanent wall",
+      "story": "The secure room gets its desks; everyone else works in the remaining space.",
+      "mapping": [
+        [
+          "Wall",
+          "Allocation"
+        ],
+        [
+          "Secure room desks",
+          "Enclave vCPUs/memory"
+        ],
+        [
+          "Remaining space",
+          "Parent resources"
+        ]
+      ],
+      "breaks": "Office walls are permanent; you can reallocate when no enclave runs."
+    },
+    "mindmap": {
+      "center": "Resource Allocation",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Dedicated vCPUs",
+            "Dedicated memory"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "allocator.yaml",
+            "Allocator service"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Enclave-enabled instance",
+            "Enough vCPUs"
+          ]
+        },
+        {
+          "label": "Planning",
+          "children": [
+            "Parent headroom",
+            "Monitoring"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Allocator config",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "On an 8-vCPU/32 GiB instance, parent keeps 6 vCPUs and 28 GiB."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# /etc/nitro_enclaves/allocator.yaml\nmemory_mib: 4096\ncpu_count: 2"
+        }
+      ],
+      "outcome": "correctly sized enclave and parent."
+    },
+    "summary": {
+      "points": [
+        "Resources are carved out.",
+        "Configure before launch.",
+        "Leave headroom."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do enclaves share CPU with the parent instance?",
+        "a": "No; they receive dedicated vCPUs (and memory) removed from the parent."
+      }
+    ]
+  }
+}
