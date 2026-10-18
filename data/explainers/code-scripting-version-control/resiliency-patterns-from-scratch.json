@@ -1,0 +1,402 @@
+{
+  "introduction-hope-is-not-a-strategy": {
+    "core": "In distributed systems some dependency is always failing. Resilient code assumes that and contains it: retry wisely, stop calling dead services and isolate resources.",
+    "first_principles": {
+      "problem": "A delivery app with four dependencies fails completely whenever any one of them hiccups.",
+      "truths": [
+        "The probability that something fails rises with the number of dependencies.",
+        "Failures cascade without containment.",
+        "Partial service beats total outage."
+      ],
+      "derivation": [
+        "Expect **transient failures** and retry with backoff and jitter.",
+        "Expect **sustained outages** and use a circuit breaker.",
+        "Expect **resource exhaustion** and use bulkheads.",
+        "Combine them with **timeouts** everywhere."
+      ]
+    },
+    "analogy": {
+      "title": "Defensive driving",
+      "story": "Assume other drivers will make mistakes, and leave space and escape routes.",
+      "mapping": [
+        [
+          "Other drivers",
+          "Dependencies"
+        ],
+        [
+          "Following distance",
+          "Timeouts and backoff"
+        ],
+        [
+          "Escape route",
+          "Fallbacks"
+        ]
+      ],
+      "breaks": "Resilience patterns add complexity and need tests, including chaos testing."
+    },
+    "mindmap": {
+      "center": "Resilience",
+      "branches": [
+        {
+          "label": "Assume",
+          "children": [
+            "Things fail"
+          ]
+        },
+        {
+          "label": "Transient",
+          "children": [
+            "Backoff + jitter"
+          ]
+        },
+        {
+          "label": "Sustained",
+          "children": [
+            "Circuit breaker"
+          ]
+        },
+        {
+          "label": "Exhaustion",
+          "children": [
+            "Bulkhead"
+          ]
+        },
+        {
+          "label": "Always",
+          "children": [
+            "Timeouts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Four 99.9% dependencies",
+      "scenario": "The compound effect.",
+      "flow": [
+        "0.999⁴ ≈ 99.6%",
+        "~35 hours/year something is down",
+        "Patterns contain each failure"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Reliability has to be designed in; it doesn't emerge on its own."
+        }
+      ],
+      "code": [],
+      "outcome": "failures are local, not total."
+    },
+    "summary": {
+      "points": [
+        "Failure is normal.",
+        "Contain it.",
+        "Design for it."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do more dependencies lower overall availability?",
+        "a": "Availabilities multiply, so each extra dependency adds another chance of failure."
+      }
+    ]
+  },
+  "pattern-1-exponential-backoff-with-jitter": {
+    "core": "Retry failed calls after exponentially growing delays (1s, 2s, 4s…) plus random jitter, so clients spread out instead of stampeding a recovering service.",
+    "first_principles": {
+      "problem": "1,000 clients fail together and all retry at exactly the same moment, knocking the database over again: a thundering herd.",
+      "truths": [
+        "Transient failures often clear in seconds.",
+        "Synchronised retries cause load spikes.",
+        "Randomness breaks synchronisation."
+      ],
+      "derivation": [
+        "Delay = **base × 2^attempt**.",
+        "Add **jitter**: random(0, delay) ('full jitter').",
+        "**Cap** the delay and the number of attempts.",
+        "Retry only **idempotent** operations and retryable errors."
+      ]
+    },
+    "analogy": {
+      "title": "A crowd leaving through one door",
+      "story": "If everyone surges at once, nobody gets out. Staggered exits flow smoothly.",
+      "mapping": [
+        [
+          "Door",
+          "Recovering service"
+        ],
+        [
+          "Surge",
+          "Synchronised retries"
+        ],
+        [
+          "Staggering",
+          "Jitter"
+        ]
+      ],
+      "breaks": "Retries amplify load during real outages, so pair them with a circuit breaker and retry budgets."
+    },
+    "mindmap": {
+      "center": "Backoff + Jitter",
+      "branches": [
+        {
+          "label": "Backoff",
+          "children": [
+            "2^n growth",
+            "Cap"
+          ]
+        },
+        {
+          "label": "Jitter",
+          "children": [
+            "Randomise",
+            "De-sync"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Max attempts",
+            "Idempotent only"
+          ]
+        },
+        {
+          "label": "Prevents",
+          "children": [
+            "Thundering herd"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A retry loop with full jitter",
+      "scenario": "From scratch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Retries spread smoothly over time, so the service recovers."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "for attempt in range(5):\n    try: return call()\n    except Transient:\n        time.sleep(random.uniform(0, min(30, 2 ** attempt)))\nraise GiveUp()"
+        }
+      ],
+      "outcome": "transient failures are absorbed without a stampede."
+    },
+    "summary": {
+      "points": [
+        "Grow delays exponentially.",
+        "Add jitter.",
+        "Cap and limit."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add jitter to backoff?",
+        "a": "It de-synchronises clients so their retries don't arrive at the same instant."
+      }
+    ]
+  },
+  "pattern-2-the-circuit-breaker": {
+    "core": "A circuit breaker tracks failures to a dependency. After a threshold it 'opens' and fails fast without calling, then after a cooldown lets a test call through (half-open) to see whether the dependency has recovered.",
+    "first_principles": {
+      "problem": "Retrying a service that's been down for 5 minutes wastes threads, adds latency and piles load onto it while it tries to recover.",
+      "truths": [
+        "Sustained outages make retries pointless.",
+        "Failing fast frees resources.",
+        "You need a way to detect recovery."
+      ],
+      "derivation": [
+        "**Closed**: calls flow and failures are counted.",
+        "**Open**: fail immediately, perhaps with a fallback.",
+        "**Half-open**: after a timeout, allow a probe.",
+        "Probe succeeds → close; fails → open again."
+      ]
+    },
+    "analogy": {
+      "title": "A household circuit breaker",
+      "story": "When the wiring overloads, it trips to prevent a fire. You reset it once the fault is fixed.",
+      "mapping": [
+        [
+          "Trip",
+          "Open state"
+        ],
+        [
+          "Reset test",
+          "Half-open probe"
+        ],
+        [
+          "Normal flow",
+          "Closed"
+        ]
+      ],
+      "breaks": "Choosing thresholds is hard: too sensitive flaps, too lax doesn't protect."
+    },
+    "mindmap": {
+      "center": "Circuit Breaker",
+      "branches": [
+        {
+          "label": "States",
+          "children": [
+            "Closed",
+            "Open",
+            "Half-open"
+          ]
+        },
+        {
+          "label": "Triggers",
+          "children": [
+            "Failure rate",
+            "Timeouts"
+          ]
+        },
+        {
+          "label": "Open",
+          "children": [
+            "Fail fast",
+            "Fallback"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Threshold",
+            "Cooldown"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A recommendations service outage",
+      "scenario": "Graceful degradation.",
+      "flow": [
+        "50% failures → OPEN",
+        "Show 'popular items' fallback",
+        "After 30s → HALF-OPEN probe",
+        "Success → CLOSED"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Pages load fast with fallback content instead of timing out."
+        }
+      ],
+      "code": [],
+      "outcome": "outages degrade gracefully and recovery is detected automatically."
+    },
+    "summary": {
+      "points": [
+        "Count failures.",
+        "Fail fast when open.",
+        "Probe to recover."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens in the half-open state?",
+        "a": "A limited number of trial calls go through to test whether the dependency has recovered."
+      }
+    ]
+  },
+  "pattern-3-the-bulkhead": {
+    "core": "A bulkhead partitions resources (thread pools, connection pools, concurrency limits) per dependency or tenant, so one slow dependency can't exhaust everything and sink the whole service.",
+    "first_principles": {
+      "problem": "One slow downstream API ties up all 200 worker threads, and every other endpoint, healthy ones included, stops responding.",
+      "truths": [
+        "Resources are finite and shared by default.",
+        "Slow calls hold resources longer.",
+        "Isolation contains damage."
+      ],
+      "derivation": [
+        "Give each dependency its **own pool or semaphore**.",
+        "**Cap concurrency** per partition.",
+        "When a partition is full, **reject fast** instead of queuing forever.",
+        "Size partitions to **criticality**."
+      ]
+    },
+    "analogy": {
+      "title": "Watertight compartments in a ship",
+      "story": "If one compartment floods, the doors hold and the ship stays afloat.",
+      "mapping": [
+        [
+          "Compartment",
+          "Resource pool"
+        ],
+        [
+          "Flood",
+          "Slow dependency"
+        ],
+        [
+          "Watertight door",
+          "Concurrency limit"
+        ]
+      ],
+      "breaks": "Too many small partitions waste capacity, so balance isolation against utilisation."
+    },
+    "mindmap": {
+      "center": "Bulkhead",
+      "branches": [
+        {
+          "label": "Partition",
+          "children": [
+            "Thread pools",
+            "Semaphores",
+            "Conn pools"
+          ]
+        },
+        {
+          "label": "Per",
+          "children": [
+            "Dependency",
+            "Tenant"
+          ]
+        },
+        {
+          "label": "When full",
+          "children": [
+            "Reject fast"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Utilisation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Separate pools for payments and reviews",
+      "scenario": "A slow reviews service.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reviews hang, but checkout keeps working."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "pay_sem = asyncio.Semaphore(50)\nrev_sem = asyncio.Semaphore(10)\nasync def get_reviews():\n    if rev_sem.locked(): return []   # degrade\n    async with rev_sem: return await reviews_api()"
+        }
+      ],
+      "outcome": "one failure can't consume every resource."
+    },
+    "summary": {
+      "points": [
+        "Partition resources.",
+        "Cap per dependency.",
+        "Reject when full."
+      ]
+    },
+    "check": [
+      {
+        "q": "What failure does a bulkhead prevent?",
+        "a": "One slow dependency exhausting shared resources and taking down unrelated functionality."
+      }
+    ]
+  }
+}

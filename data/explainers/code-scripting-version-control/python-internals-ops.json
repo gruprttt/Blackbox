@@ -1,0 +1,607 @@
+{
+  "introduction-why-internals-matter-for-ops": {
+    "core": "Long-running daemons and platforms expose Python's internals: the GIL limits CPU parallelism, context managers guarantee cleanup, decorators add cross-cutting behaviour, metaclasses build frameworks and type hints catch bugs early.",
+    "first_principles": {
+      "problem": "A script that 'works' becomes a daemon that leaks file descriptors, doesn't scale across cores and breaks on refactors.",
+      "truths": [
+        "Scale reveals hidden behaviour.",
+        "The runtime has specific concurrency rules.",
+        "Large codebases need machine-checked contracts."
+      ],
+      "derivation": [
+        "Understand the **GIL** before choosing threads or processes.",
+        "Use **with** for resources.",
+        "Use **decorators** for retries and timing.",
+        "Add **type hints + mypy** at scale."
+      ]
+    },
+    "analogy": {
+      "title": "Driving vs. knowing your car",
+      "story": "Anyone can drive to the shop; a long-haul trucker needs to know engine limits, fuel and maintenance.",
+      "mapping": [
+        [
+          "Short trip",
+          "Script"
+        ],
+        [
+          "Long haul",
+          "Daemon/platform"
+        ],
+        [
+          "Engine limits",
+          "GIL"
+        ]
+      ],
+      "breaks": "You don't need internals for quick scripts, only for long-lived or scaled code."
+    },
+    "mindmap": {
+      "center": "Python Internals",
+      "branches": [
+        {
+          "label": "Concurrency",
+          "children": [
+            "GIL"
+          ]
+        },
+        {
+          "label": "Resources",
+          "children": [
+            "Context managers"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Decorators"
+          ]
+        },
+        {
+          "label": "Frameworks",
+          "children": [
+            "Metaclasses"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Type hints",
+            "mypy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A metrics daemon",
+      "scenario": "Where internals show up.",
+      "flow": [
+        "Threads don't speed up CPU parsing (GIL)",
+        "Sockets leak (no with)",
+        "Retry logic copy-pasted (no decorator)",
+        "Refactor breaks (no types)"
+      ],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Each internal concept addresses one failure."
+        }
+      ],
+      "code": [],
+      "outcome": "Python code that holds up in production."
+    },
+    "summary": {
+      "points": [
+        "Scripts vs systems.",
+        "Know the runtime.",
+        "Use the language's tools."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do internals matter more for daemons than scripts?",
+        "a": "Long-lived processes expose leaks, concurrency limits and maintenance problems that short scripts never hit."
+      }
+    ]
+  },
+  "the-gil-global-interpreter-lock": {
+    "core": "CPython's GIL lets only one thread execute Python bytecode at a time. Threads help with I/O-bound work (the GIL is released while waiting) but not with CPU-bound work, which needs multiprocessing.",
+    "first_principles": {
+      "problem": "Adding threads to a CPU-heavy log parser doesn't make it faster, and can make it slower.",
+      "truths": [
+        "The GIL protects CPython's internal memory management.",
+        "Blocking I/O releases the GIL.",
+        "Separate processes each have their own GIL."
+      ],
+      "derivation": [
+        "**I/O-bound** → threads or asyncio work well.",
+        "**CPU-bound** → **multiprocessing** or C extensions.",
+        "Measure before choosing.",
+        "Python 3.13+ offers an experimental free-threaded build."
+      ]
+    },
+    "analogy": {
+      "title": "Many chefs, one knife",
+      "story": "Hiring more chefs doesn't speed up chopping if there's only one knife. Chefs waiting for the oven don't need the knife, though.",
+      "mapping": [
+        [
+          "Knife",
+          "GIL"
+        ],
+        [
+          "Chopping",
+          "CPU work"
+        ],
+        [
+          "Waiting for the oven",
+          "I/O wait"
+        ],
+        [
+          "Separate kitchens",
+          "Processes"
+        ]
+      ],
+      "breaks": "Native extensions like numpy release the GIL, so some CPU work does run in parallel."
+    },
+    "mindmap": {
+      "center": "GIL",
+      "branches": [
+        {
+          "label": "Rule",
+          "children": [
+            "One thread runs bytecode"
+          ]
+        },
+        {
+          "label": "I/O-bound",
+          "children": [
+            "Threads OK",
+            "asyncio"
+          ]
+        },
+        {
+          "label": "CPU-bound",
+          "children": [
+            "multiprocessing",
+            "C extensions"
+          ]
+        },
+        {
+          "label": "Future",
+          "children": [
+            "Free-threaded 3.13"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two workloads",
+      "scenario": "Threads vs processes.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Each workload uses the right concurrency model."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "# I/O: 100 HTTP calls → ThreadPoolExecutor: fast\n# CPU: hash 1M files → ProcessPoolExecutor: uses all cores\nwith ProcessPoolExecutor() as ex:\n    ex.map(sha256_file, paths)"
+        }
+      ],
+      "outcome": "concurrency choices that actually speed things up."
+    },
+    "summary": {
+      "points": [
+        "One bytecode thread.",
+        "Threads for I/O.",
+        "Processes for CPU."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do threads still help for HTTP calls?",
+        "a": "The GIL is released while waiting on network I/O, so other threads can run."
+      }
+    ]
+  },
+  "context-managers-the-with-statement": {
+    "core": "A context manager pairs setup with guaranteed teardown. `with` calls `__enter__` and then `__exit__`, even if an exception occurs, so files, locks and connections are always released.",
+    "first_principles": {
+      "problem": "An exception between open() and close() leaks a file descriptor, and in a daemon these accumulate until it crashes.",
+      "truths": [
+        "Exceptions skip any code after them.",
+        "Resources must always be released.",
+        "Setup and teardown belong together."
+      ],
+      "derivation": [
+        "Use **with open(...)** for files.",
+        "Use **with lock:** for locks.",
+        "Write your own with **@contextmanager** (yield between setup and teardown).",
+        "**__exit__** runs on every exit path."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel key card",
+      "story": "The card activates at check-in and deactivates at check-out, however you leave.",
+      "mapping": [
+        [
+          "Check-in",
+          "__enter__"
+        ],
+        [
+          "Check-out",
+          "__exit__"
+        ],
+        [
+          "Leaving unexpectedly",
+          "Exception"
+        ]
+      ],
+      "breaks": "Context managers only clean up what they manage. Resources acquired outside them are on you."
+    },
+    "mindmap": {
+      "center": "Context Managers",
+      "branches": [
+        {
+          "label": "Protocol",
+          "children": [
+            "__enter__",
+            "__exit__"
+          ]
+        },
+        {
+          "label": "Builtins",
+          "children": [
+            "open",
+            "Lock",
+            "ThreadPool"
+          ]
+        },
+        {
+          "label": "Custom",
+          "children": [
+            "@contextmanager"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "Cleanup on error"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A temporary maintenance mode",
+      "scenario": "A custom context manager.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Guarantee",
+          "detail": "The host is re-enabled even if the upgrade fails."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "@contextmanager\ndef maintenance(lb, host):\n    lb.drain(host)\n    try: yield\n    finally: lb.enable(host)\n\nwith maintenance(lb, \"web1\"): upgrade(\"web1\")"
+        }
+      ],
+      "outcome": "resources can't leak."
+    },
+    "summary": {
+      "points": [
+        "Setup and teardown paired.",
+        "Cleanup on exceptions.",
+        "@contextmanager for custom ones."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why put teardown in `finally` inside a @contextmanager?",
+        "a": "So it runs even when the body raises an exception."
+      }
+    ]
+  },
+  "decorators-wrapping-behavior": {
+    "core": "A decorator is a function that takes a function and returns a wrapped version, adding behaviour such as retries, timing, logging or auth without changing the original code.",
+    "first_principles": {
+      "problem": "Retry and timing logic copied into 30 functions drifts and clutters the business logic.",
+      "truths": [
+        "Functions are objects you can pass and return.",
+        "Cross-cutting concerns repeat everywhere.",
+        "Wrapping keeps concerns separate."
+      ],
+      "derivation": [
+        "Write **def deco(fn): def wrapper(*a, **kw): ... return wrapper**.",
+        "Apply it with **@deco**.",
+        "Preserve metadata with **functools.wraps**.",
+        "Use **decorator factories** for parameters (@retry(3))."
+      ]
+    },
+    "analogy": {
+      "title": "A phone case",
+      "story": "The phone works the same, but the case adds protection and a kickstand without opening the phone.",
+      "mapping": [
+        [
+          "Phone",
+          "Function"
+        ],
+        [
+          "Case",
+          "Decorator"
+        ],
+        [
+          "Kickstand",
+          "Added behaviour"
+        ]
+      ],
+      "breaks": "Stacking many decorators makes tracebacks and behaviour harder to follow."
+    },
+    "mindmap": {
+      "center": "Decorators",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Wrap function",
+            "Return wrapper"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Retry",
+            "Timing",
+            "Auth",
+            "Cache"
+          ]
+        },
+        {
+          "label": "Best practice",
+          "children": [
+            "functools.wraps"
+          ]
+        },
+        {
+          "label": "Params",
+          "children": [
+            "Factory"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A retry decorator",
+      "scenario": "Applied to flaky calls.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One definition gives every function consistent retries."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def retry(n):\n    def deco(fn):\n        @wraps(fn)\n        def w(*a, **k):\n            for i in range(n):\n                try: return fn(*a, **k)\n                except IOError: time.sleep(2**i)\n            return fn(*a, **k)\n        return w\n    return deco\n\n@retry(3)\ndef fetch(): ..."
+        }
+      ],
+      "outcome": "cross-cutting behaviour in one place."
+    },
+    "summary": {
+      "points": [
+        "Functions wrap functions.",
+        "@ syntax.",
+        "Use wraps."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use functools.wraps?",
+        "a": "To keep the original function's name, docstring and signature on the wrapper."
+      }
+    ]
+  },
+  "metaclasses-the-framework-builder": {
+    "core": "Classes are objects too, and their type is a metaclass (by default `type`). A custom metaclass runs code when a class is defined, so frameworks use them for registration, validation and auto-wiring.",
+    "first_principles": {
+      "problem": "A plugin system needs every subclass registered and validated automatically, without users remembering to do it.",
+      "truths": [
+        "Defining a class executes code.",
+        "That process can be customised.",
+        "Frameworks need hooks at definition time."
+      ],
+      "derivation": [
+        "`class Meta(type): def __new__(...)` **intercepts class creation**.",
+        "**Register** or **validate** classes as they're defined.",
+        "Prefer the simpler **__init_subclass__** when you can.",
+        "Keep metaclasses for **framework code**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory that builds factories",
+      "story": "A metaclass is the machine that makes the moulds (classes) that make the products (instances).",
+      "mapping": [
+        [
+          "Mould machine",
+          "Metaclass"
+        ],
+        [
+          "Moulds",
+          "Classes"
+        ],
+        [
+          "Products",
+          "Instances"
+        ]
+      ],
+      "breaks": "Metaclasses are rarely needed in application code. Decorators or __init_subclass__ usually suffice."
+    },
+    "mindmap": {
+      "center": "Metaclasses",
+      "branches": [
+        {
+          "label": "Concept",
+          "children": [
+            "Class of a class",
+            "type"
+          ]
+        },
+        {
+          "label": "Hook",
+          "children": [
+            "__new__",
+            "Definition time"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Registries",
+            "ORMs",
+            "Validation"
+          ]
+        },
+        {
+          "label": "Simpler",
+          "children": [
+            "__init_subclass__"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An auto-registering check plugin",
+      "scenario": "Using __init_subclass__.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New checks register themselves just by being defined."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class Check:\n    registry = {}\n    def __init_subclass__(cls, **kw):\n        super().__init_subclass__(**kw)\n        Check.registry[cls.__name__] = cls\n\nclass DiskCheck(Check): ...\n# Check.registry == {'DiskCheck': DiskCheck}"
+        }
+      ],
+      "outcome": "frameworks enforce structure automatically."
+    },
+    "summary": {
+      "points": [
+        "Classes are objects.",
+        "Metaclass = class factory.",
+        "Prefer __init_subclass__."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the default metaclass in Python?",
+        "a": "type."
+      }
+    ]
+  },
+  "type-hinting-and-static-analysis-with-mypy": {
+    "core": "Type hints declare what functions expect and return, and mypy checks them without running the code. At scale they catch the None-vs-str and wrong-argument bugs before production.",
+    "first_principles": {
+      "problem": "Dynamic typing hides bugs until a rare runtime path receives None instead of a string.",
+      "truths": [
+        "Python ignores hints at runtime.",
+        "Static analysis can check them anyway.",
+        "Types also serve as documentation."
+      ],
+      "derivation": [
+        "Annotate **functions**: `def f(host: str, port: int = 22) -> bool`.",
+        "Use **Optional, list[str], dict[str, int]**, TypedDict and Protocol.",
+        "Run **mypy in CI**.",
+        "Adopt **gradually**, starting with core modules."
+      ]
+    },
+    "analogy": {
+      "title": "Labels on electrical sockets",
+      "story": "You can still plug the wrong voltage in, but a checker reads the labels and warns you before you switch on.",
+      "mapping": [
+        [
+          "Socket labels",
+          "Type hints"
+        ],
+        [
+          "Checker",
+          "mypy"
+        ],
+        [
+          "Switching on",
+          "Running the code"
+        ]
+      ],
+      "breaks": "Hints don't enforce anything at runtime. Use pydantic for validating input."
+    },
+    "mindmap": {
+      "center": "Type Hints",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "param: T",
+            "-> T"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Optional",
+            "Generics",
+            "Protocol"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "mypy",
+            "pyright"
+          ]
+        },
+        {
+          "label": "Adopt",
+          "children": [
+            "Gradual",
+            "CI gate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Catching a None bug",
+      "scenario": "Before deploy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Handle the None case before connecting."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def get_ip(host: str) -> str | None: ...\nip = get_ip(\"web1\")\nconnect(ip)  # mypy: Argument 1 has incompatible type \"str | None\"; expected \"str\""
+        }
+      ],
+      "outcome": "a whole class of runtime crashes caught in CI."
+    },
+    "summary": {
+      "points": [
+        "Annotate interfaces.",
+        "mypy in CI.",
+        "Adopt gradually."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do type hints affect runtime behaviour?",
+        "a": "No. They are checked statically by tools like mypy."
+      }
+    ]
+  }
+}

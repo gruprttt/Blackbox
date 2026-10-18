@@ -1,0 +1,588 @@
+{
+  "introduction-beyond-basic-matching": {
+    "core": "Production regex has to handle context-dependent matches (lookarounds), stay fast on hostile input (atomic groups, possessive quantifiers) and stay maintainable (named groups, non-capturing groups).",
+    "first_principles": {
+      "problem": "Simple patterns match too much or too little on messy logs, and one bad pattern can freeze a service (ReDoS).",
+      "truths": [
+        "Real text is irregular.",
+        "Backtracking engines can take exponential time.",
+        "Regexes are read far more than they're written."
+      ],
+      "derivation": [
+        "Match on **context** with lookarounds.",
+        "Prevent **catastrophic backtracking**.",
+        "Name groups for **readability**.",
+        "Avoid **unneeded captures**."
+      ]
+    },
+    "analogy": {
+      "title": "A precise search tool vs. Find/Replace",
+      "story": "Find/Replace finds the text; a precision tool finds it only in the right context, quickly and safely.",
+      "mapping": [
+        [
+          "Find/Replace",
+          "Basic regex"
+        ],
+        [
+          "Context rules",
+          "Lookarounds"
+        ],
+        [
+          "Safety cut-off",
+          "Atomic groups"
+        ]
+      ],
+      "breaks": "Some problems (nested structures like HTML) still need a real parser."
+    },
+    "mindmap": {
+      "center": "Advanced Regex",
+      "branches": [
+        {
+          "label": "Context",
+          "children": [
+            "Lookahead",
+            "Lookbehind"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Atomic",
+            "Possessive",
+            "ReDoS"
+          ]
+        },
+        {
+          "label": "Readability",
+          "children": [
+            "Named groups",
+            "Non-capturing",
+            "Verbose mode"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parsing a messy log",
+      "scenario": "Basic vs advanced.",
+      "flow": [
+        "Basic: captures wrong field",
+        "Lookbehind: value after 'user='",
+        "Named group: m['user']"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Correct, readable extraction."
+        }
+      ],
+      "code": [],
+      "outcome": "regex that works on real data."
+    },
+    "summary": {
+      "points": [
+        "Context matters.",
+        "Watch backtracking.",
+        "Write readable regex."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is ReDoS?",
+        "a": "Regular-expression denial of service: inputs that trigger catastrophic backtracking and consume CPU."
+      }
+    ]
+  },
+  "lookaheads-peeking-into-the-future": {
+    "core": "A lookahead checks what follows the current position without consuming it: `(?=...)` requires it and `(?!...)` forbids it. It's ideal for 'match X only if followed by Y' and for password rules.",
+    "first_principles": {
+      "problem": "You want 'timeout' only when followed by 'error', without including 'error' in the match.",
+      "truths": [
+        "Some conditions depend on what comes next.",
+        "Zero-width checks don't consume text.",
+        "Several lookaheads can test independent conditions."
+      ],
+      "derivation": [
+        "`X(?=Y)`: X **followed by** Y.",
+        "`X(?!Y)`: X **not followed by** Y.",
+        "Stack them at the start for **AND conditions**.",
+        "The match contains **only X**."
+      ]
+    },
+    "analogy": {
+      "title": "Peeking at the next word before highlighting",
+      "story": "You read ahead to check, then highlight only the current word.",
+      "mapping": [
+        [
+          "Peek",
+          "Lookahead"
+        ],
+        [
+          "Highlight",
+          "Match"
+        ],
+        [
+          "Not moving the cursor",
+          "Zero-width"
+        ]
+      ],
+      "breaks": "Overusing lookaheads makes patterns hard to read. Sometimes two passes are clearer."
+    },
+    "mindmap": {
+      "center": "Lookahead",
+      "branches": [
+        {
+          "label": "Positive",
+          "children": [
+            "(?=...)"
+          ]
+        },
+        {
+          "label": "Negative",
+          "children": [
+            "(?!...)"
+          ]
+        },
+        {
+          "label": "Property",
+          "children": [
+            "Zero-width"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Followed-by",
+            "Password rules",
+            "Exclusions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Password policy in one regex",
+      "scenario": "At least one digit and one uppercase, 12+ characters.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Also",
+          "detail": "`\\d+(?=ms)` extracts '250' from '250ms'."
+        }
+      ],
+      "code": [
+        {
+          "lang": "regex",
+          "text": "^(?=.*\\d)(?=.*[A-Z]).{12,}$"
+        }
+      ],
+      "outcome": "contextual conditions without consuming text."
+    },
+    "summary": {
+      "points": [
+        "Peek forward.",
+        "Zero-width.",
+        "Stack for AND."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does `foo(?!bar)` match?",
+        "a": "'foo' when it is not immediately followed by 'bar'."
+      }
+    ]
+  },
+  "lookbehinds-checking-the-past": {
+    "core": "A lookbehind checks what precedes the current position: `(?<=...)` requires and `(?<!...)` forbids. It's perfect for extracting values after a label, like the number after 'latency='.",
+    "first_principles": {
+      "problem": "You want the number after 'latency=' without capturing the label, and you need to avoid matching '$' amounts in one specific context.",
+      "truths": [
+        "Values often follow labels.",
+        "Zero-width checks keep matches clean.",
+        "Many engines require fixed-length lookbehinds."
+      ],
+      "derivation": [
+        "`(?<=latency=)\\d+`: the number **preceded by** the label.",
+        "`(?<!\\$)\\b\\d+`: numbers **not preceded** by $.",
+        "Stays **zero-width**.",
+        "Check the **engine**: Python's re requires fixed-width lookbehind."
+      ]
+    },
+    "analogy": {
+      "title": "Glancing back at the sign before reading the price",
+      "story": "You confirm the sign says 'Price:' and then read only the number.",
+      "mapping": [
+        [
+          "Sign",
+          "Preceding context"
+        ],
+        [
+          "Number",
+          "Match"
+        ],
+        [
+          "Glance back",
+          "Lookbehind"
+        ]
+      ],
+      "breaks": "Variable-length lookbehinds aren't supported in many engines (Python re, older JS)."
+    },
+    "mindmap": {
+      "center": "Lookbehind",
+      "branches": [
+        {
+          "label": "Positive",
+          "children": [
+            "(?<=...)"
+          ]
+        },
+        {
+          "label": "Negative",
+          "children": [
+            "(?<!...)"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Label=value",
+            "Exclusions"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "Fixed width (Python re)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Extracting latency from logs",
+      "scenario": "Clean values.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No post-processing to strip the label."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "re.findall(r\"(?<=latency=)\\d+\", \"req=1 latency=250 code=200\")  # ['250']"
+        }
+      ],
+      "outcome": "clean value extraction."
+    },
+    "summary": {
+      "points": [
+        "Check behind.",
+        "Zero-width.",
+        "Mind engine limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might `(?<=a+)b` fail in Python's re?",
+        "a": "Python's re only supports fixed-width lookbehind patterns."
+      }
+    ]
+  },
+  "atomic-grouping-stopping-catastrophic-backtracking": {
+    "core": "Nested quantifiers like `(a+)+` can make backtracking engines try exponentially many paths on near-miss input. Atomic groups `(?>...)` and possessive quantifiers `a++` refuse to backtrack into what they matched.",
+    "first_principles": {
+      "problem": "A validation regex on user input hangs the CPU at 100% on a 30-character string, which is a ReDoS outage.",
+      "truths": [
+        "Backtracking engines retry alternatives on failure.",
+        "Ambiguous nested quantifiers multiply the alternatives.",
+        "Committing to a match removes the retries."
+      ],
+      "derivation": [
+        "Avoid **ambiguous nesting** (`(a+)+`, `(.*)*`).",
+        "Use **atomic groups** `(?>...)` to commit.",
+        "Use **possessive** `a++` where supported.",
+        "Or use a **linear-time engine** (RE2, Rust regex)."
+      ]
+    },
+    "analogy": {
+      "title": "A maze runner who never revisits a corridor",
+      "story": "A naive runner retries every combination of turns; the atomic runner commits to each corridor and fails fast.",
+      "mapping": [
+        [
+          "Naive runner",
+          "Backtracking"
+        ],
+        [
+          "Committing",
+          "Atomic group"
+        ],
+        [
+          "Maze with many paths",
+          "Nested quantifiers"
+        ]
+      ],
+      "breaks": "Atomic groups change what can match, so they're only safe when backtracking wasn't needed for correctness."
+    },
+    "mindmap": {
+      "center": "Backtracking",
+      "branches": [
+        {
+          "label": "Danger",
+          "children": [
+            "(a+)+",
+            "(.*)*",
+            "ReDoS"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "(?>...) atomic",
+            "a++ possessive",
+            "Unambiguous patterns"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "RE2",
+            "Rust regex linear"
+          ]
+        },
+        {
+          "label": "Python",
+          "children": [
+            "re 3.11+ supports (?>)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A pathological pattern",
+      "scenario": "Before and after.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Policy",
+          "detail": "Run untrusted patterns or input through RE2."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "Bad:   ^(\\w+\\s?)+$     on 'aaaaaaaaaaaaaaaaaaaaaaaa!'  → seconds/minutes\nGood:  ^(?>\\w+\\s?)+$   → fails instantly"
+        }
+      ],
+      "outcome": "regexes that can't be weaponised."
+    },
+    "summary": {
+      "points": [
+        "Nested quantifiers are dangerous.",
+        "Commit with atomic groups.",
+        "Linear engines for untrusted input."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do nested quantifiers cause catastrophic backtracking?",
+        "a": "On failure, the engine tries exponentially many ways to split the input between the inner and outer quantifiers."
+      }
+    ]
+  },
+  "named-capture-groups-making-matches-readable": {
+    "core": "Named groups `(?P<name>...)` (Python) or `(?<name>...)` label each capture, so code reads `m['status']` instead of `m.group(4)`, and adding a group doesn't shift every index.",
+    "first_principles": {
+      "problem": "Six months later nobody knows what group(3) means, and inserting a new group breaks every index.",
+      "truths": [
+        "Positional indexes are fragile.",
+        "Names document intent.",
+        "Patterns evolve."
+      ],
+      "derivation": [
+        "Define **(?P<status>\\d{3})**.",
+        "Access with **m['status']** or groupdict().",
+        "Use **verbose mode** (re.X) with comments.",
+        "Named backreference: **(?P=name)**."
+      ]
+    },
+    "analogy": {
+      "title": "Labelled jars vs. numbered jars",
+      "story": "'Jar 3' tells you nothing; 'Sugar' tells you everything, even after you rearrange the shelf.",
+      "mapping": [
+        [
+          "Numbered jars",
+          "group(3)"
+        ],
+        [
+          "Labelled jars",
+          "m['status']"
+        ],
+        [
+          "Rearranging",
+          "Adding groups"
+        ]
+      ],
+      "breaks": "Syntax differs between engines (Python's ?P<> vs PCRE/JS ?<>)."
+    },
+    "mindmap": {
+      "center": "Named Groups",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "(?P<n>...) Python",
+            "(?<n>...) PCRE/JS"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "m['n']",
+            "groupdict()"
+          ]
+        },
+        {
+          "label": "Readability",
+          "children": [
+            "re.X verbose"
+          ]
+        },
+        {
+          "label": "Backref",
+          "children": [
+            "(?P=n)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parsing an access log line",
+      "scenario": "Readable extraction.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The pattern documents itself."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "LOG = re.compile(r\"\"\"\n  (?P<ip>\\S+)\\s.*?\\s\n  \"(?P<method>[A-Z]+)\\s(?P<path>\\S+)[^\"]*\"\\s\n  (?P<status>\\d{3})\n\"\"\", re.X)\nm = LOG.search(line); print(m[\"path\"], m[\"status\"])"
+        }
+      ],
+      "outcome": "regex that stays readable for years."
+    },
+    "summary": {
+      "points": [
+        "Name every capture.",
+        "Use verbose mode.",
+        "Robust to change."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are named groups more robust than numbered ones?",
+        "a": "Adding or reordering groups doesn't change the names your code uses."
+      }
+    ]
+  },
+  "non-capturing-groups-grouping-without-the-overhead": {
+    "core": "Use `(?:...)` when you need parentheses only for grouping (alternation, quantifiers). It avoids capture overhead and keeps group numbering focused on the data you want.",
+    "first_principles": {
+      "problem": "`(http|https)://(www\\.)?(\\S+)` puts the domain in group 3, plus two captures nobody uses.",
+      "truths": [
+        "Parentheses capture by default.",
+        "Captures cost memory and shift indexes.",
+        "Grouping and capturing are separate needs."
+      ],
+      "derivation": [
+        "Use **(?:...)** for grouping only.",
+        "Capture only the **data you need**.",
+        "Combine with **named groups** for the important parts.",
+        "Fewer captures mean **simpler code**."
+      ]
+    },
+    "analogy": {
+      "title": "Brackets in maths vs. labelled answers",
+      "story": "Brackets organise the calculation; you only write down the answers you need.",
+      "mapping": [
+        [
+          "Brackets",
+          "(?:...)"
+        ],
+        [
+          "Written answers",
+          "Captures"
+        ],
+        [
+          "Clean worksheet",
+          "Simple group numbering"
+        ]
+      ],
+      "breaks": "The performance gain is usually small. The main win is clarity."
+    },
+    "mindmap": {
+      "center": "Non-Capturing",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "(?:...)"
+          ]
+        },
+        {
+          "label": "Use for",
+          "children": [
+            "Alternation",
+            "Quantifiers"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Clarity",
+            "Less overhead"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "Named groups"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "URL host extraction",
+      "scenario": "Before and after.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One meaningful capture."
+        }
+      ],
+      "code": [
+        {
+          "lang": "regex",
+          "text": "Before: (http|https)://(www\\.)?([^/]+)      → host in group 3\nAfter:  (?:https?)://(?:www\\.)?(?P<host>[^/]+) → m['host']"
+        }
+      ],
+      "outcome": "clean, focused matches."
+    },
+    "summary": {
+      "points": [
+        "Group without capturing.",
+        "Capture only what you need.",
+        "Clarity first."
+      ]
+    },
+    "check": [
+      {
+        "q": "When should you use (?:...)?",
+        "a": "When you need grouping for alternation or quantifiers but don't need the matched text."
+      }
+    ]
+  }
+}

@@ -1,0 +1,1271 @@
+{
+  "introduction-moving-beyond-the-basics": {
+    "core": "Bash's power is in combining small single-purpose tools into an automated production line. Mastery means doing that safely and predictably.",
+    "first_principles": {
+      "problem": "Knowing individual commands isn't enough. Untrusted scripts fail silently, leave messes behind and break on odd inputs.",
+      "truths": [
+        "Unix tools each do one job well.",
+        "Bash wires them together.",
+        "Bash's defaults are permissive and unsafe."
+      ],
+      "derivation": [
+        "Learn **streams and pipes**.",
+        "Use **exit codes** for decisions.",
+        "Add **strict mode and traps** for safety.",
+        "Use **expansions and arrays** instead of external tools."
+      ]
+    },
+    "analogy": {
+      "title": "A workshop production line",
+      "story": "Each hand tool does one job; the production line chains them so they build something complex automatically.",
+      "mapping": [
+        [
+          "Hand tools",
+          "grep, sort, awk"
+        ],
+        [
+          "Production line",
+          "Bash script"
+        ],
+        [
+          "Safety guards",
+          "set -euo pipefail, trap"
+        ]
+      ],
+      "breaks": "Past a few hundred lines, or once real data structures are involved, a real programming language is better."
+    },
+    "mindmap": {
+      "center": "Bash Mastery",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Pipes",
+            "Redirection"
+          ]
+        },
+        {
+          "label": "Logic",
+          "children": [
+            "Exit codes",
+            "&& / ||"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Strict mode",
+            "trap"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Expansion",
+            "Arrays"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "set -x"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A backup script",
+      "scenario": "It grows from 3 lines to a robust tool over this topic.",
+      "flow": [
+        "tar + upload",
+        "+ exit checks",
+        "+ strict mode",
+        "+ cleanup trap",
+        "+ arrays of paths"
+      ],
+      "steps": [
+        {
+          "label": "Goal",
+          "detail": "A script you can trust to run unattended."
+        }
+      ],
+      "code": [],
+      "outcome": "scripts become dependable automation."
+    },
+    "summary": {
+      "points": [
+        "Compose tools.",
+        "Check results.",
+        "Make it safe."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is Bash's core strength?",
+        "a": "Wiring small single-purpose Unix tools together into automated pipelines."
+      }
+    ]
+  },
+  "the-power-of-the-pipe": {
+    "core": "A pipe connects one program's stdout to the next program's stdin, so data streams through small tools with no temporary files.",
+    "first_principles": {
+      "problem": "Without pipes you would write intermediate files between every step, which is slow, cluttered and wasteful.",
+      "truths": [
+        "Programs read stdin and write stdout.",
+        "Small tools are reusable.",
+        "Streaming avoids storing intermediate results."
+      ],
+      "derivation": [
+        "Write tools that do **one thing**.",
+        "Connect them with **|**.",
+        "Data **flows through** with no temp files.",
+        "The stages run **concurrently**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory assembly line",
+      "story": "Stamp, drill, paint: each station hands the part straight to the next and nothing piles up in between.",
+      "mapping": [
+        [
+          "Station",
+          "Command"
+        ],
+        [
+          "Conveyor",
+          "Pipe"
+        ],
+        [
+          "Part",
+          "Line of text"
+        ]
+      ],
+      "breaks": "Only stdout goes through the pipe. stderr bypasses it unless you redirect it."
+    },
+    "mindmap": {
+      "center": "Pipe |",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "stdout → stdin"
+          ]
+        },
+        {
+          "label": "Philosophy",
+          "children": [
+            "Do one thing"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No temp files",
+            "Concurrent"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "stderr bypasses"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Top 5 IPs in an access log",
+      "scenario": "A classic pipeline.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Stages",
+          "detail": "Extract → sort → count → rank → top 5."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cut -d' ' -f1 access.log | sort | uniq -c | sort -rn | head -5"
+        }
+      ],
+      "outcome": "a one-liner answers the question."
+    },
+    "summary": {
+      "points": [
+        "stdout → stdin.",
+        "Small tools compose.",
+        "No temp files."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does a pipe carry error messages?",
+        "a": "No, only stdout. stderr goes straight to the terminal unless redirected."
+      }
+    ]
+  },
+  "redirection-basics-and-2": {
+    "core": "Every process has three streams: stdin (0), stdout (1) and stderr (2). Redirection sends them to files: `>` overwrites, `>>` appends and `2>` captures errors.",
+    "first_principles": {
+      "problem": "Output and errors mix on the terminal, and logs are lost when the session closes.",
+      "truths": [
+        "File descriptors 0, 1 and 2 exist for every process.",
+        "By default they all point at the terminal.",
+        "Separate streams let you treat errors differently."
+      ],
+      "derivation": [
+        "`> file` sends **stdout, overwriting**.",
+        "`>> file` **appends**.",
+        "`2> file` sends **stderr**.",
+        "`< file` feeds **stdin**."
+      ]
+    },
+    "analogy": {
+      "title": "Three pipes coming out of a machine",
+      "story": "Product, waste and intake each have their own pipe, and you can route each one to a different bucket.",
+      "mapping": [
+        [
+          "Product pipe",
+          "stdout (1)"
+        ],
+        [
+          "Waste pipe",
+          "stderr (2)"
+        ],
+        [
+          "Intake",
+          "stdin (0)"
+        ]
+      ],
+      "breaks": "`>` truncates without asking, so one typo can wipe a file."
+    },
+    "mindmap": {
+      "center": "Redirection",
+      "branches": [
+        {
+          "label": "Streams",
+          "children": [
+            "0 stdin",
+            "1 stdout",
+            "2 stderr"
+          ]
+        },
+        {
+          "label": "Operators",
+          "children": [
+            "> overwrite",
+            ">> append",
+            "2> errors",
+            "< input"
+          ]
+        },
+        {
+          "label": "Danger",
+          "children": [
+            "> truncates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Separating results from errors",
+      "scenario": "Keep good output and errors in different files.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "found.txt is clean and the permission-denied noise is in errors.txt."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "find / -name '*.conf' > found.txt 2> errors.txt"
+        }
+      ],
+      "outcome": "streams go exactly where you want."
+    },
+    "summary": {
+      "points": [
+        "0/1/2.",
+        "> vs >>.",
+        "2> for errors."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between > and >>?",
+        "a": "> overwrites the file; >> appends to it."
+      }
+    ]
+  },
+  "advanced-redirection-21-and-here-docs": {
+    "core": "`2>&1` points stderr at wherever stdout currently goes, so both end up in one log. Here-docs feed multi-line text into a command's stdin inline.",
+    "first_principles": {
+      "problem": "Cron jobs lose their errors because only stdout is logged, and embedding multi-line config with many echo calls is messy.",
+      "truths": [
+        "Redirections are processed left to right.",
+        "`2>&1` copies fd 1's current target.",
+        "Commands accept input on stdin."
+      ],
+      "derivation": [
+        "Write `cmd > log 2>&1`: **order matters**.",
+        "`2>&1 > log` sends errors to the terminal, which is wrong.",
+        "Use `<<EOF` for **inline input**.",
+        "Use `<<'EOF'` to stop variable expansion."
+      ]
+    },
+    "analogy": {
+      "title": "Merging two hoses into one bucket",
+      "story": "First aim the main hose at the bucket, then clip the second hose onto the first.",
+      "mapping": [
+        [
+          "Aim the main hose",
+          "> log"
+        ],
+        [
+          "Clip on",
+          "2>&1"
+        ],
+        [
+          "Note slipped under the door",
+          "Here-doc"
+        ]
+      ],
+      "breaks": "If you clip the second hose on first and then move the main one, the second still points at the old place."
+    },
+    "mindmap": {
+      "center": "Advanced Redir",
+      "branches": [
+        {
+          "label": "2>&1",
+          "children": [
+            "Merge streams",
+            "Order matters"
+          ]
+        },
+        {
+          "label": "Here-doc",
+          "children": [
+            "<<EOF",
+            "<<'EOF' literal",
+            "<<- strip tabs"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Cron logs",
+            "Config files"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cron job logging plus a generated config",
+      "scenario": "Both techniques together.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every error lands in the log, and the config is written in one block."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "./backup.sh >> /var/log/backup.log 2>&1\ncat > app.conf <<EOF\nhost=$HOST\nport=8080\nEOF"
+        }
+      ],
+      "outcome": "complete logs and clean inline input."
+    },
+    "summary": {
+      "points": [
+        "> log 2>&1 (in that order).",
+        "Here-docs for multi-line input.",
+        "Quote EOF to keep the text literal."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does `2>&1 > log` not log errors?",
+        "a": "2>&1 copies stdout's target (the terminal) before stdout is moved to the log."
+      }
+    ]
+  },
+  "exit-codes-did-it-work": {
+    "core": "Every command leaves an integer exit status: 0 means success and 1–255 means failure. Scripts make decisions by checking `$?`.",
+    "first_principles": {
+      "problem": "A script carries on after a failed download and deploys an empty file, because nothing checked whether the step worked.",
+      "truths": [
+        "Exit status is the universal success signal.",
+        "`$?` is overwritten by the next command.",
+        "Different codes can mean different failures."
+      ],
+      "derivation": [
+        "**0 = success**, non-zero = failure.",
+        "Check `$?` **immediately**, or test the command directly with `if cmd; then`.",
+        "Return **meaningful codes** from your own scripts with `exit N`."
+      ]
+    },
+    "analogy": {
+      "title": "A report card",
+      "story": "Each command hands back a grade. Zero means passed and anything else says what went wrong.",
+      "mapping": [
+        [
+          "Grade",
+          "Exit code"
+        ],
+        [
+          "Pass",
+          "0"
+        ],
+        [
+          "Fail reasons",
+          "1–255"
+        ]
+      ],
+      "breaks": "Some tools use non-zero codes for non-errors. For example, grep returns 1 when there's no match."
+    },
+    "mindmap": {
+      "center": "Exit Codes",
+      "branches": [
+        {
+          "label": "Meaning",
+          "children": [
+            "0 success",
+            "1-255 failure"
+          ]
+        },
+        {
+          "label": "Read",
+          "children": [
+            "$?",
+            "if cmd"
+          ]
+        },
+        {
+          "label": "Write",
+          "children": [
+            "exit N"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "grep 1 = no match",
+            "$? overwritten"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Abort if the download fails",
+      "scenario": "Test the command itself.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "The deploy never runs on a missing artifact."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "if ! curl -fsS -o app.tar.gz \"$URL\"; then\n  echo \"download failed\" >&2; exit 2\nfi"
+        }
+      ],
+      "outcome": "every step's outcome is checked."
+    },
+    "summary": {
+      "points": [
+        "0 = success.",
+        "Check immediately.",
+        "Return meaningful codes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why read $? right away?",
+        "a": "The next command overwrites it."
+      }
+    ]
+  },
+  "conditional-execution-and": {
+    "core": "`a && b` runs b only if a succeeded; `a || b` runs b only if a failed. They give you one-line logic based on exit codes.",
+    "first_principles": {
+      "problem": "Writing a full if/then/fi for every 'do this, else complain' is verbose.",
+      "truths": [
+        "Every command returns an exit code.",
+        "&& and || short-circuit.",
+        "Concise isn't always clearer."
+      ],
+      "derivation": [
+        "Use `cmd && next` to **continue on success**.",
+        "Use `cmd || fallback` to **handle failure**.",
+        "`a && b || c` is **not** if/else: c also runs if b fails."
+      ]
+    },
+    "analogy": {
+      "title": "Domino rules",
+      "story": "&&: knock over the next domino only if this one fell. ||: knock it over only if this one stayed standing.",
+      "mapping": [
+        [
+          "Fell",
+          "Success (0)"
+        ],
+        [
+          "Stayed standing",
+          "Failure"
+        ],
+        [
+          "Next domino",
+          "Next command"
+        ]
+      ],
+      "breaks": "Chaining both is a trap. Use a real if/else when the logic matters."
+    },
+    "mindmap": {
+      "center": "&& and ||",
+      "branches": [
+        {
+          "label": "&&",
+          "children": [
+            "Run on success"
+          ]
+        },
+        {
+          "label": "||",
+          "children": [
+            "Run on failure"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "mkdir -p d && cd d",
+            "cmd || exit 1"
+          ]
+        },
+        {
+          "label": "Trap",
+          "children": [
+            "a && b || c ≠ if/else"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Build-then-deploy guard",
+      "scenario": "Deploy only if the tests pass; otherwise alert.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Caveat",
+          "detail": "notify also fires if the deploy itself fails, which may be what you want, but be deliberate about it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "make test && make deploy || notify \"pipeline failed\""
+        }
+      ],
+      "outcome": "compact, correct conditional chains."
+    },
+    "summary": {
+      "points": [
+        "&& on success.",
+        "|| on failure.",
+        "Beware a && b || c."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is `a && b || c` the same as if a then b else c?",
+        "a": "No. c also runs when b fails."
+      }
+    ]
+  },
+  "writing-robust-scripts-set-e-set-u-and-pipefail": {
+    "core": "`set -euo pipefail` makes Bash fail fast: it exits on errors (-e), on unset variables (-u), and when any stage of a pipe fails (pipefail).",
+    "first_principles": {
+      "problem": "By default Bash runs every line even after failures. `rm -rf \"$DIR/\"` with an empty DIR becomes `rm -rf /`.",
+      "truths": [
+        "Bash's defaults favour carrying on over being safe.",
+        "Unset variables expand silently to empty.",
+        "A pipeline's status is only its last command's."
+      ],
+      "derivation": [
+        "`set -e`: **exit on error**.",
+        "`set -u`: **unset variable = error**.",
+        "`set -o pipefail`: **any pipe stage failing** fails the pipeline.",
+        "Put all three at the top of every script."
+      ]
+    },
+    "analogy": {
+      "title": "A circuit breaker",
+      "story": "Instead of letting a short circuit burn the house down, the breaker trips the moment something goes wrong.",
+      "mapping": [
+        [
+          "Short circuit",
+          "Failed command"
+        ],
+        [
+          "Breaker trip",
+          "Script exits"
+        ],
+        [
+          "Burnt house",
+          "Deleted data or a bad deploy"
+        ]
+      ],
+      "breaks": "`-e` has exceptions (inside if conditions and && chains), so it's a safety net, not a guarantee."
+    },
+    "mindmap": {
+      "center": "Strict Mode",
+      "branches": [
+        {
+          "label": "-e",
+          "children": [
+            "Exit on error"
+          ]
+        },
+        {
+          "label": "-u",
+          "children": [
+            "Unset = error"
+          ]
+        },
+        {
+          "label": "pipefail",
+          "children": [
+            "Any stage fails"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "if/&& exceptions",
+            "Use ${VAR:-} defaults"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The empty-variable rm",
+      "scenario": "With and without -u.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "The script stops with an error instead of wiping the root directory."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "#!/usr/bin/env bash\nset -euo pipefail\nrm -rf \"${BUILD_DIR}/\"  # aborts: BUILD_DIR unbound"
+        }
+      ],
+      "outcome": "failures stop the script instead of cascading."
+    },
+    "summary": {
+      "points": [
+        "-e exit on error.",
+        "-u catch unset vars.",
+        "pipefail catch pipe errors."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is pipefail needed?",
+        "a": "Without it, `false | true` succeeds because only the last command's status counts."
+      }
+    ]
+  },
+  "signal-trapping-cleaning-up-your-mess": {
+    "core": "`trap` registers cleanup code that runs when the script exits or is interrupted, so temp files and locks never get left behind.",
+    "first_principles": {
+      "problem": "Ctrl+C halfway through leaves gigabytes of temp files and a stale lock, because the cleanup at the end never ran.",
+      "truths": [
+        "Scripts can be interrupted at any point.",
+        "Cleanup at the end of a script is skipped on early exit.",
+        "Signals can be caught."
+      ],
+      "derivation": [
+        "Write a **cleanup function**.",
+        "`trap cleanup EXIT` runs it on **any exit**.",
+        "Also trap **INT and TERM** if you need specific behaviour.",
+        "Create temp files with **mktemp**."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel's checkout process",
+      "story": "However a guest leaves, early or late, housekeeping always resets the room.",
+      "mapping": [
+        [
+          "Guest leaving",
+          "Script exit"
+        ],
+        [
+          "Housekeeping",
+          "trap handler"
+        ],
+        [
+          "Room",
+          "Temp files and locks"
+        ]
+      ],
+      "breaks": "SIGKILL (kill -9) can't be trapped, so nothing runs."
+    },
+    "mindmap": {
+      "center": "trap",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "EXIT",
+            "INT (Ctrl+C)",
+            "TERM"
+          ]
+        },
+        {
+          "label": "Handler",
+          "children": [
+            "cleanup()"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Temp dirs",
+            "Locks",
+            "Restore state"
+          ]
+        },
+        {
+          "label": "Can't trap",
+          "children": [
+            "SIGKILL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Temp workspace that always disappears",
+      "scenario": "mktemp plus a trap on EXIT.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No orphaned files, however the script ends."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "TMP=$(mktemp -d)\ntrap 'rm -rf \"$TMP\"' EXIT\ncurl -o \"$TMP/big.iso\" \"$URL\"\n# ... Ctrl+C here still cleans up"
+        }
+      ],
+      "outcome": "scripts leave the system as they found it."
+    },
+    "summary": {
+      "points": [
+        "trap on EXIT.",
+        "Use mktemp.",
+        "SIGKILL can't be caught."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why trap EXIT rather than just putting cleanup at the end?",
+        "a": "EXIT fires on every exit path, including errors and interrupts."
+      }
+    ]
+  },
+  "parameter-expansion-basics": {
+    "core": "`${var...}` expansions transform or validate a variable as you use it: defaults, required checks and lengths, with no external tools.",
+    "first_principles": {
+      "problem": "Scripts crash or misbehave when an optional variable is unset, and checking every one with if-blocks clutters the code.",
+      "truths": [
+        "Variables are often optional.",
+        "Required inputs should fail loudly.",
+        "A built-in is faster than spawning a process."
+      ],
+      "derivation": [
+        "`${VAR:-default}`: **use a default**.",
+        "`${VAR:=default}`: **assign the default**.",
+        "`${VAR:?msg}`: **fail if unset**.",
+        "`${#VAR}`: **length**."
+      ]
+    },
+    "analogy": {
+      "title": "A form with prefilled and required fields",
+      "story": "Some fields come prefilled, and others won't submit until you fill them in.",
+      "mapping": [
+        [
+          "Prefilled field",
+          ":-"
+        ],
+        [
+          "Required field",
+          ":?"
+        ],
+        [
+          "Character count",
+          "#"
+        ]
+      ],
+      "breaks": "Without the colon (e.g. `-`) an empty-but-set variable doesn't trigger the default."
+    },
+    "mindmap": {
+      "center": "${ } Basics",
+      "branches": [
+        {
+          "label": "Defaults",
+          "children": [
+            ":- use",
+            ":= assign"
+          ]
+        },
+        {
+          "label": "Validate",
+          "children": [
+            ":? error"
+          ]
+        },
+        {
+          "label": "Info",
+          "children": [
+            "# length"
+          ]
+        },
+        {
+          "label": "Nuance",
+          "children": [
+            "colon = empty too"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Configurable deploy script",
+      "scenario": "Defaults plus required inputs.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "ENV falls back to staging, and a missing token stops the script immediately with a clear message."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ENV=${ENV:-staging}\nTOKEN=${API_TOKEN:?API_TOKEN must be set}"
+        }
+      ],
+      "outcome": "input handling in one line each."
+    },
+    "summary": {
+      "points": [
+        ":- default.",
+        ":? required.",
+        "# length."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does ${X:?msg} do?",
+        "a": "Exits the script with msg if X is unset or empty."
+      }
+    ]
+  },
+  "advanced-parameter-expansion-string-manipulation": {
+    "core": "Bash can cut strings natively: `#`/`##` strip a prefix, `%`/`%%` strip a suffix, and `/` replaces text. That's faster than calling sed or awk.",
+    "first_principles": {
+      "problem": "Calling `basename`, `cut` or `sed` in a loop over thousands of files spawns thousands of processes.",
+      "truths": [
+        "Each external command is a new process.",
+        "Most path and string edits are prefix or suffix cuts.",
+        "Built-ins are portable within Bash."
+      ],
+      "derivation": [
+        "`${p##*/}` → **filename** (strip the longest prefix).",
+        "`${f%.*}` → **remove the extension** (shortest suffix).",
+        "`${s/old/new}` → **replace the first match**; `//` replaces all.",
+        "`${s:off:len}` → **substring**."
+      ]
+    },
+    "analogy": {
+      "title": "Trimming with scissors",
+      "story": "Snip from the front (#) or the back (%). A double snip (## or %%) cuts as much as possible.",
+      "mapping": [
+        [
+          "Front snip",
+          "# / ##"
+        ],
+        [
+          "Back snip",
+          "% / %%"
+        ],
+        [
+          "Patch",
+          "/ replace"
+        ]
+      ],
+      "breaks": "Patterns here are globs, not regexes."
+    },
+    "mindmap": {
+      "center": "String Ops",
+      "branches": [
+        {
+          "label": "Prefix",
+          "children": [
+            "# shortest",
+            "## longest"
+          ]
+        },
+        {
+          "label": "Suffix",
+          "children": [
+            "% shortest",
+            "%% longest"
+          ]
+        },
+        {
+          "label": "Replace",
+          "children": [
+            "/ first",
+            "// all"
+          ]
+        },
+        {
+          "label": "Substr",
+          "children": [
+            "${s:o:l}"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rename backup files",
+      "scenario": "Turn db-2024-01-05.sql.gz into its date.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No subprocesses, so it's instant even across 10k files."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "f=/backups/db-2024-01-05.sql.gz\nname=${f##*/}      # db-2024-01-05.sql.gz\ndate=${name#db-}; date=${date%%.*}  # 2024-01-05"
+        }
+      ],
+      "outcome": "fast, dependency-free string parsing."
+    },
+    "summary": {
+      "points": [
+        "# front, % back.",
+        "Doubled = greedy.",
+        "/ to replace."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you get a file's extension-less name?",
+        "a": "${f%.*} removes the shortest suffix matching .*."
+      }
+    ]
+  },
+  "arrays-working-with-lists": {
+    "core": "Indexed arrays hold lists safely. `\"${arr[@]}\"` expands to every element as a separate word, even when elements contain spaces.",
+    "first_principles": {
+      "problem": "Storing a list in a space-separated string breaks as soon as a filename contains a space.",
+      "truths": [
+        "Word splitting breaks on whitespace.",
+        "Lists of things are common.",
+        "Quoting preserves boundaries."
+      ],
+      "derivation": [
+        "Declare with `arr=(a \"b c\" d)`.",
+        "Iterate with **\"${arr[@]}\"** (always quoted).",
+        "Length is `${#arr[@]}`; append with `arr+=(x)`.",
+        "Build command arguments in arrays."
+      ]
+    },
+    "analogy": {
+      "title": "Labelled egg carton slots",
+      "story": "Each item sits in its own slot, so a large egg never spills into its neighbour.",
+      "mapping": [
+        [
+          "Slot",
+          "Element"
+        ],
+        [
+          "Slot number",
+          "Index"
+        ],
+        [
+          "Spilled egg",
+          "Word-splitting bug"
+        ]
+      ],
+      "breaks": "Bash arrays are one-dimensional. For nested data, use another language."
+    },
+    "mindmap": {
+      "center": "Arrays",
+      "branches": [
+        {
+          "label": "Create",
+          "children": [
+            "arr=(...)",
+            "+= append"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "${arr[0]}",
+            "\"${arr[@]}\""
+          ]
+        },
+        {
+          "label": "Info",
+          "children": [
+            "${#arr[@]}"
+          ]
+        },
+        {
+          "label": "Why",
+          "children": [
+            "Spaces safe",
+            "Args lists"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe argument building",
+      "scenario": "Optional flags collected into an array.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each argument stays intact, so there are no quoting bugs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "args=(--region \"$REGION\")\n[[ $DRY ]] && args+=(--dry-run)\naws ec2 describe-instances \"${args[@]}\""
+        }
+      ],
+      "outcome": "lists and arguments survive spaces."
+    },
+    "summary": {
+      "points": [
+        "Use arrays for lists.",
+        "Always \"${arr[@]}\".",
+        "+= to append."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why quote \"${arr[@]}\"?",
+        "a": "So each element expands to exactly one argument, even if it contains spaces."
+      }
+    ]
+  },
+  "associative-arrays-dictionaries-in-bash": {
+    "core": "Bash 4+ supports key→value maps through `declare -A`. Use them for lookups like 'environment → hostname' without long case statements.",
+    "first_principles": {
+      "problem": "Mapping names to values with if/elif chains or parallel arrays is clumsy and error-prone.",
+      "truths": [
+        "Lookup by name is a common need.",
+        "Bash only treats a variable as a map if you declare it with -A.",
+        "macOS ships Bash 3 by default."
+      ],
+      "derivation": [
+        "**`declare -A map`** first (mandatory).",
+        "Set with `map[key]=value`.",
+        "Read with `${map[key]}`.",
+        "Iterate over keys with `\"${!map[@]}\"`."
+      ]
+    },
+    "analogy": {
+      "title": "A phone book",
+      "story": "Look up a name and get the number directly, with no scanning down a list.",
+      "mapping": [
+        [
+          "Name",
+          "Key"
+        ],
+        [
+          "Number",
+          "Value"
+        ],
+        [
+          "Index tabs",
+          "${!map[@]}"
+        ]
+      ],
+      "breaks": "Key order is not guaranteed, and macOS's default Bash 3 doesn't support associative arrays."
+    },
+    "mindmap": {
+      "center": "Assoc Arrays",
+      "branches": [
+        {
+          "label": "Declare",
+          "children": [
+            "declare -A"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "map[k]=v",
+            "${map[k]}"
+          ]
+        },
+        {
+          "label": "Iterate",
+          "children": [
+            "${!map[@]} keys"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "Bash 4+",
+            "No order"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Environment → endpoint",
+      "scenario": "Choose the API host by environment.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Adding an environment is one entry, not another branch."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "declare -A host=([dev]=dev.api [prod]=api.example.com)\ncurl \"https://${host[$ENV]}/health\""
+        }
+      ],
+      "outcome": "clean lookup tables inside Bash."
+    },
+    "summary": {
+      "points": [
+        "declare -A first.",
+        "${map[k]} to read.",
+        "${!map[@]} for keys."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if you forget declare -A?",
+        "a": "Bash treats it as an indexed array, so string keys evaluate to index 0 and overwrite each other."
+      }
+    ]
+  },
+  "debugging-the-x-ray-vision-set-x-and-beyond": {
+    "core": "`set -x` prints every command after expansion and before it runs, so you see exactly what Bash executes. ShellCheck finds bugs before you run anything.",
+    "first_principles": {
+      "problem": "Scattering echo statements around is slow and still doesn't show how variables actually expanded.",
+      "truths": [
+        "Bugs often come from how expansion behaves.",
+        "Seeing the expanded command reveals them.",
+        "Static analysis catches common mistakes."
+      ],
+      "derivation": [
+        "Run `bash -x script` or **`set -x` / `set +x`** around the suspect region.",
+        "Set **PS4** to add line numbers.",
+        "Use `bash -n` for a **syntax check**.",
+        "Run **ShellCheck** on every script."
+      ]
+    },
+    "analogy": {
+      "title": "An X-ray",
+      "story": "You see the bones (the actual commands), not just the skin (the source code).",
+      "mapping": [
+        [
+          "X-ray",
+          "set -x"
+        ],
+        [
+          "Bones",
+          "Expanded commands"
+        ],
+        [
+          "Doctor's checklist",
+          "ShellCheck"
+        ]
+      ],
+      "breaks": "set -x can print secrets into logs, so turn it off around sensitive commands."
+    },
+    "mindmap": {
+      "center": "Debugging",
+      "branches": [
+        {
+          "label": "Trace",
+          "children": [
+            "set -x",
+            "PS4 line nos"
+          ]
+        },
+        {
+          "label": "Static",
+          "children": [
+            "bash -n",
+            "ShellCheck"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Secrets in logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Why does the glob not match?",
+      "scenario": "Tracing shows the quotes.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "The trace shows SRC was empty, so the command became cp /*.log."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "export PS4='+ ${BASH_SOURCE}:${LINENO}: '\nset -x\ncp \"$SRC\"/*.log /backup\nset +x"
+        }
+      ],
+      "outcome": "you can see bugs instead of guessing at them."
+    },
+    "summary": {
+      "points": [
+        "set -x to trace.",
+        "PS4 for context.",
+        "ShellCheck always."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does set -x show that echo can't easily show?",
+        "a": "Each command with its variables and globs already expanded, exactly as executed."
+      }
+    ]
+  }
+}

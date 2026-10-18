@@ -1,0 +1,490 @@
+{
+  "introduction-the-run-button-for-infrastructure": {
+    "core": "A Makefile gives every project the same short entry points (`make test`, `make deploy`) wrapping the long, fragile commands only one person remembers. It's the project's run button.",
+    "first_principles": {
+      "problem": "Deploying requires a 120-character terraform command with the right var-file that lives only in someone's shell history.",
+      "truths": [
+        "Long commands get forgotten or mistyped.",
+        "Make is installed almost everywhere.",
+        "Consistent entry points help humans and CI alike."
+      ],
+      "derivation": [
+        "Wrap commands in **named targets**.",
+        "Use the **same targets locally and in CI**.",
+        "Make them **self-documenting** (help).",
+        "Keep the logic in scripts; Make **orchestrates**."
+      ]
+    },
+    "analogy": {
+      "title": "A TV remote's labelled buttons",
+      "story": "You press 'Netflix' instead of typing the input sequence every time.",
+      "mapping": [
+        [
+          "Buttons",
+          "Targets"
+        ],
+        [
+          "Input sequence",
+          "Long commands"
+        ],
+        [
+          "Remote",
+          "Makefile"
+        ]
+      ],
+      "breaks": "Make isn't a full programming language, so complex logic belongs in scripts."
+    },
+    "mindmap": {
+      "center": "Makefile",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Forgotten commands"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Named targets"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Consistency",
+            "CI parity",
+            "Docs"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Orchestrate, don't program"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A new teammate's first deploy",
+      "scenario": "With a Makefile.",
+      "flow": [
+        "make help",
+        "make plan ENV=staging",
+        "make apply ENV=staging"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No tribal knowledge needed."
+        }
+      ],
+      "code": [],
+      "outcome": "a universal interface for every project."
+    },
+    "summary": {
+      "points": [
+        "Short entry points.",
+        "Same in CI.",
+        "Self-documenting."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main benefit of a Makefile in DevOps repos?",
+        "a": "Consistent, discoverable entry points for complex commands, shared by humans and CI."
+      }
+    ]
+  },
+  "anatomy-of-a-makefile": {
+    "core": "A Makefile is a set of rules: `target: prerequisites` followed by TAB-indented recipe lines. Variables (`VAR ?= default`) and automatic variables reduce repetition.",
+    "first_principles": {
+      "problem": "Make's syntax trips people up: spaces instead of tabs fail with a cryptic 'missing separator'.",
+      "truths": [
+        "Make was built for file dependencies.",
+        "Recipes must start with a tab character.",
+        "Each recipe line runs in a separate shell."
+      ],
+      "derivation": [
+        "Write **target: deps** and then **<TAB>recipe**.",
+        "Use **VAR ?= default** and **$(VAR)** to use it.",
+        "Each line is a **new shell**: chain with && or use .ONESHELL.",
+        "Prefix with **@** to hide the command echo."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe card",
+      "story": "Dish name (target), what you must prepare first (prerequisites), and the numbered steps (recipe).",
+      "mapping": [
+        [
+          "Dish",
+          "Target"
+        ],
+        [
+          "Prep items",
+          "Prerequisites"
+        ],
+        [
+          "Steps",
+          "Recipe lines"
+        ]
+      ],
+      "breaks": "`cd dir` on one line doesn't affect the next line, because each line is a separate shell."
+    },
+    "mindmap": {
+      "center": "Makefile Anatomy",
+      "branches": [
+        {
+          "label": "Rule",
+          "children": [
+            "target:",
+            "prerequisites",
+            "TAB recipe"
+          ]
+        },
+        {
+          "label": "Variables",
+          "children": [
+            "?=",
+            ":=",
+            "$(VAR)"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Tabs",
+            "Line = new shell"
+          ]
+        },
+        {
+          "label": "Silence",
+          "children": [
+            "@"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A small Makefile",
+      "scenario": "Build and test.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Run",
+          "detail": "`make test` builds first because of the prerequisite."
+        }
+      ],
+      "code": [
+        {
+          "lang": "makefile",
+          "text": "IMAGE ?= myapp\nTAG   ?= dev\n\nbuild:\n\tdocker build -t $(IMAGE):$(TAG) .\n\ntest: build\n\tdocker run --rm $(IMAGE):$(TAG) pytest"
+        }
+      ],
+      "outcome": "you can read and write Makefiles confidently."
+    },
+    "summary": {
+      "points": [
+        "target: deps.",
+        "TAB recipes.",
+        "Each line is a shell."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does `cd build` on one recipe line not affect the next line?",
+        "a": "Each recipe line runs in its own shell process."
+      }
+    ]
+  },
+  "the-phony-declaration": {
+    "core": "Make assumes targets are files. If a file named `test` exists and is up to date, `make test` does nothing. Declaring `.PHONY: test` tells Make the target is an action that always runs.",
+    "first_principles": {
+      "problem": "Someone creates a `test/` directory and `make test` silently stops running the tests.",
+      "truths": [
+        "Make skips targets whose file is newer than its deps.",
+        "DevOps targets are actions, not files.",
+        "Name collisions are easy."
+      ],
+      "derivation": [
+        "List action targets under **.PHONY**.",
+        "Phony targets **always run**.",
+        "Keep **file targets** for real artifacts (for caching).",
+        "Declare them near the top or next to each target."
+      ]
+    },
+    "analogy": {
+      "title": "A 'do it anyway' sticker",
+      "story": "Normally the robot skips a job if the output already exists. The sticker says this job is an action, not a product, so always do it.",
+      "mapping": [
+        [
+          "Robot",
+          "Make"
+        ],
+        [
+          "Existing output",
+          "File named like the target"
+        ],
+        [
+          "Sticker",
+          ".PHONY"
+        ]
+      ],
+      "breaks": "Making everything phony loses Make's incremental-build benefits for real files."
+    },
+    "mindmap": {
+      "center": ".PHONY",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "File named 'test'",
+            "'up to date'"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            ".PHONY: test"
+          ]
+        },
+        {
+          "label": "Use for",
+          "children": [
+            "Actions"
+          ]
+        },
+        {
+          "label": "Keep files for",
+          "children": [
+            "Real artifacts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The silent skip",
+      "scenario": "Before and after.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "`make test` always runs, whether or not a test/ directory exists."
+        }
+      ],
+      "code": [
+        {
+          "lang": "makefile",
+          "text": ".PHONY: test lint deploy\n\ntest:\n\tpytest"
+        }
+      ],
+      "outcome": "action targets behave reliably."
+    },
+    "summary": {
+      "points": [
+        "Targets are files by default.",
+        ".PHONY for actions.",
+        "Always runs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to `make clean` if a file named clean exists and clean isn't phony?",
+        "a": "Make reports it as up to date and doesn't run the recipe."
+      }
+    ]
+  },
+  "environment-injection-and-cicd-integration": {
+    "core": "Make variables come from the Makefile, environment variables or the command line, in increasing precedence. With `?=` defaults the same Makefile serves laptops and CI pipelines.",
+    "first_principles": {
+      "problem": "Hard-coded values make the Makefile unusable across environments and in pipelines.",
+      "truths": [
+        "CI injects values through the environment.",
+        "Humans pass overrides on the command line.",
+        "Defaults should be safe."
+      ],
+      "derivation": [
+        "Use **VAR ?= default** for overridable defaults.",
+        "Environment variables override `?=` defaults.",
+        "`make deploy ENV=prod` **overrides both**.",
+        "**Validate** required variables before running."
+      ]
+    },
+    "analogy": {
+      "title": "A form with defaults, preferences and explicit choices",
+      "story": "Defaults are pre-filled, your saved preferences replace them, and what you type now wins.",
+      "mapping": [
+        [
+          "Pre-filled",
+          "?= default"
+        ],
+        [
+          "Saved preference",
+          "Env var"
+        ],
+        [
+          "Typed now",
+          "Command-line arg"
+        ]
+      ],
+      "breaks": "`=` vs `:=` vs `?=` behave differently. `?=` only sets the value if it isn't already set."
+    },
+    "mindmap": {
+      "center": "Make Variables",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Makefile",
+            "Env",
+            "CLI"
+          ]
+        },
+        {
+          "label": "Precedence",
+          "children": [
+            "CLI > env > ?="
+          ]
+        },
+        {
+          "label": "Operators",
+          "children": [
+            "?=",
+            ":=",
+            "="
+          ]
+        },
+        {
+          "label": "Guard",
+          "children": [
+            "$(error ...)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One Makefile, laptop and CI",
+      "scenario": "Same targets.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Identical logic everywhere, with only the inputs changing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "makefile",
+          "text": "ENV ?= dev\nTAG ?= $(shell git rev-parse --short HEAD)\n\ndeploy:\n\t@test -n \"$(ENV)\" || (echo \"ENV required\"; exit 1)\n\thelm upgrade app ./chart -f values-$(ENV).yaml --set image.tag=$(TAG)\n\n# CI: make deploy ENV=prod TAG=$GITHUB_SHA"
+        }
+      ],
+      "outcome": "CI parity without duplicated scripts."
+    },
+    "summary": {
+      "points": [
+        "?= defaults.",
+        "CLI overrides.",
+        "Validate inputs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which wins: an env var or `make VAR=x`?",
+        "a": "The command-line assignment `make VAR=x`."
+      }
+    ]
+  },
+  "makefile-patterns-for-real-projects": {
+    "core": "Proven patterns include a self-documenting `help` target that parses `## comments`, `.DEFAULT_GOAL := help`, guard targets for required variables, `include` for shared fragments and `$(MAKE) -C` for subprojects.",
+    "first_principles": {
+      "problem": "Team Makefiles grow into undocumented, copy-pasted tangles.",
+      "truths": [
+        "Docs next to code stay current.",
+        "Shared logic should be included once.",
+        "Safe defaults prevent accidents."
+      ],
+      "derivation": [
+        "Annotate targets with **## description** and generate **help** from them.",
+        "Set **.DEFAULT_GOAL := help**.",
+        "Add **guard-%** targets for required variables.",
+        "Use **include common.mk** to share."
+      ]
+    },
+    "analogy": {
+      "title": "A building directory in the lobby",
+      "story": "The directory lists every office automatically from the door plaques, so it's never out of date.",
+      "mapping": [
+        [
+          "Door plaques",
+          "## comments"
+        ],
+        [
+          "Lobby directory",
+          "make help"
+        ],
+        [
+          "Building standard",
+          "include common.mk"
+        ]
+      ],
+      "breaks": "Clever Make tricks can get unreadable, so prefer clarity."
+    },
+    "mindmap": {
+      "center": "Make Patterns",
+      "branches": [
+        {
+          "label": "Docs",
+          "children": [
+            "## comments",
+            "help target"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "DEFAULT_GOAL=help",
+            "guard-%"
+          ]
+        },
+        {
+          "label": "Reuse",
+          "children": [
+            "include",
+            "$(MAKE) -C"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The self-documenting help target",
+      "scenario": "A classic snippet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Running bare `make` lists every target with its description."
+        }
+      ],
+      "code": [
+        {
+          "lang": "makefile",
+          "text": ".DEFAULT_GOAL := help\n.PHONY: help\nhelp: ## Show this help\n\t@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=\":.*?## \"}{printf \"  %-12s %s\\n\", $$1, $$2}'\n\nplan: ## Terraform plan for ENV\n\tterraform plan -var-file=$(ENV).tfvars"
+        }
+      ],
+      "outcome": "Makefiles that document and protect themselves."
+    },
+    "summary": {
+      "points": [
+        "help from comments.",
+        "Safe default goal.",
+        "Guard and include."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why set .DEFAULT_GOAL := help?",
+        "a": "So running bare `make` shows the help instead of accidentally running the first real target."
+      }
+    ]
+  }
+}

@@ -1,0 +1,688 @@
+{
+  "introduction-breaking-the-safety-glass": {
+    "core": "Go is safe and simple by design, but it offers escape hatches (reflection, unsafe and cgo) for the rare cases that need runtime type inspection, raw memory or C libraries. Each one trades away safety or simplicity.",
+    "first_principles": {
+      "problem": "Engineers reach for escape hatches too early and lose the guarantees that made Go attractive.",
+      "truths": [
+        "Safety rules prevent whole classes of bugs.",
+        "Some problems genuinely need lower-level access.",
+        "Every escape hatch has a cost."
+      ],
+      "derivation": [
+        "**reflection**: work with types unknown at compile time.",
+        "**unsafe**: reinterpret memory.",
+        "**cgo**: call C.",
+        "Use them **only when there's no safe alternative**, and isolate them."
+      ]
+    },
+    "analogy": {
+      "title": "Breaking the glass on a fire alarm",
+      "story": "It's there for emergencies; pulling it routinely causes chaos.",
+      "mapping": [
+        [
+          "Fire alarm glass",
+          "Escape hatch"
+        ],
+        [
+          "Emergency",
+          "Genuine need"
+        ],
+        [
+          "False alarms",
+          "Unnecessary use"
+        ]
+      ],
+      "breaks": "Libraries you depend on may use them internally. That's acceptable when it's well tested."
+    },
+    "mindmap": {
+      "center": "Escape Hatches",
+      "branches": [
+        {
+          "label": "reflect",
+          "children": [
+            "Runtime types"
+          ]
+        },
+        {
+          "label": "unsafe",
+          "children": [
+            "Raw memory"
+          ]
+        },
+        {
+          "label": "cgo",
+          "children": [
+            "Call C"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Last resort",
+            "Isolate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three real needs",
+      "scenario": "When each is justified.",
+      "flow": [
+        "Generic JSON encoder → reflect",
+        "Zero-copy byte↔string → unsafe",
+        "Must use libsqlite → cgo"
+      ],
+      "steps": [
+        {
+          "label": "Principle",
+          "detail": "Use one only when the safe path truly can't do the job."
+        }
+      ],
+      "code": [],
+      "outcome": "escape hatches are used deliberately."
+    },
+    "summary": {
+      "points": [
+        "Safety by default.",
+        "Hatches for edge cases.",
+        "Each has a cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name Go's three main escape hatches.",
+        "a": "reflection (reflect), unsafe pointers (unsafe) and cgo."
+      }
+    ]
+  },
+  "reflection-inspecting-the-unknown": {
+    "core": "The reflect package inspects and manipulates values whose types are only known at runtime (reflect.TypeOf and ValueOf). It powers encoding/json, ORMs and struct-tag-driven configuration.",
+    "first_principles": {
+      "problem": "A config loader must fill any struct from environment variables based on its field tags, without knowing the struct type in advance.",
+      "truths": [
+        "Interfaces carry type information at runtime.",
+        "Generic tools must handle arbitrary structs.",
+        "Struct tags are metadata readable at runtime."
+      ],
+      "derivation": [
+        "**reflect.TypeOf(x)** gives fields, tags and kinds.",
+        "**reflect.ValueOf(&x).Elem()** gives settable values.",
+        "Iterate over **NumField()** and read **Tag.Get(\"env\")**.",
+        "Check **Kind()** before setting."
+      ]
+    },
+    "analogy": {
+      "title": "An X-ray of a sealed box",
+      "story": "You can't open the box at compile time, but at runtime you can see what's inside and act on it.",
+      "mapping": [
+        [
+          "Sealed box",
+          "interface{} value"
+        ],
+        [
+          "X-ray",
+          "reflect"
+        ],
+        [
+          "Labels inside",
+          "Struct tags"
+        ]
+      ],
+      "breaks": "You lose compile-time checks, so mistakes become runtime panics."
+    },
+    "mindmap": {
+      "center": "Reflection",
+      "branches": [
+        {
+          "label": "Read",
+          "children": [
+            "TypeOf",
+            "Fields",
+            "Tags"
+          ]
+        },
+        {
+          "label": "Write",
+          "children": [
+            "ValueOf(&x).Elem()",
+            "Set"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "encoding/json",
+            "ORMs",
+            "Config loaders"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Runtime panics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An env-tag config loader",
+      "scenario": "A sketch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any struct can be configured from its tags."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "v := reflect.ValueOf(&cfg).Elem()\nt := v.Type()\nfor i := 0; i < t.NumField(); i++ {\n    if k := t.Field(i).Tag.Get(\"env\"); k != \"\" {\n        v.Field(i).SetString(os.Getenv(k))\n    }\n}"
+        }
+      ],
+      "outcome": "generic tools work on arbitrary types."
+    },
+    "summary": {
+      "points": [
+        "Inspect at runtime.",
+        "Tags as metadata.",
+        "Panics replace compile errors."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you use ValueOf(&x).Elem() to set fields?",
+        "a": "Only an addressable value (through a pointer) is settable."
+      }
+    ]
+  },
+  "the-cost-of-reflection": {
+    "core": "Reflection is slow (it allocates and does dynamic lookups), unsafe at compile time (panics at runtime) and hard to read. Prefer generics, interfaces or code generation, and confine reflection to boundaries.",
+    "first_principles": {
+      "problem": "A hot path using reflection allocates heavily, and a typo in a field name panics in production.",
+      "truths": [
+        "Static code lets the compiler optimise.",
+        "Runtime type checks cost CPU and allocations.",
+        "Readability is maintainability."
+      ],
+      "derivation": [
+        "**Benchmark** before using reflection on hot paths.",
+        "Prefer **generics** (Go 1.18+) for type-agnostic code.",
+        "Use **interfaces** for behaviour.",
+        "Use **codegen** (easyjson, sqlc) for speed with safety."
+      ]
+    },
+    "analogy": {
+      "title": "Asking for directions at every turn",
+      "story": "Flexible, but much slower than knowing the route in advance.",
+      "mapping": [
+        [
+          "Asking directions",
+          "Runtime reflection"
+        ],
+        [
+          "Known route",
+          "Static types"
+        ],
+        [
+          "Printed map",
+          "Code generation"
+        ]
+      ],
+      "breaks": "At configuration or startup time, reflection's cost usually doesn't matter."
+    },
+    "mindmap": {
+      "center": "Reflection Costs",
+      "branches": [
+        {
+          "label": "Perf",
+          "children": [
+            "Allocations",
+            "Dynamic lookup"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Runtime panics"
+          ]
+        },
+        {
+          "label": "Readability",
+          "children": [
+            "Opaque"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Generics",
+            "Interfaces",
+            "Codegen"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "JSON in a high-throughput API",
+      "scenario": "Reflection vs codegen.",
+      "flow": [
+        "encoding/json (reflect): baseline",
+        "Generated marshallers: 2-5x faster",
+        "Same safety, fewer allocations"
+      ],
+      "steps": [
+        {
+          "label": "Decision",
+          "detail": "Use codegen on the hot path and reflection elsewhere."
+        }
+      ],
+      "code": [],
+      "outcome": "reflection is used only where it's cheap enough."
+    },
+    "summary": {
+      "points": [
+        "Slow.",
+        "Panics at runtime.",
+        "Prefer generics or codegen."
+      ]
+    },
+    "check": [
+      {
+        "q": "What Go feature often replaces reflection for type-agnostic code?",
+        "a": "Generics (type parameters)."
+      }
+    ]
+  },
+  "unsafe-pointers-here-be-dragons": {
+    "core": "unsafe.Pointer bypasses Go's type system to reinterpret memory, for example for zero-copy conversions or syscall structures. Misuse corrupts memory, and it can break across Go versions.",
+    "first_principles": {
+      "problem": "Converting a large []byte to string copies it, which is expensive in a tight parsing loop.",
+      "truths": [
+        "Type safety forbids reinterpreting bits.",
+        "Copies cost time and memory.",
+        "The GC and the compiler assume type rules hold."
+      ],
+      "derivation": [
+        "Use **unsafe.Pointer** as a bridge between pointer types.",
+        "Prefer the stdlib helpers **unsafe.String / unsafe.Slice** (Go 1.20+).",
+        "Never **mutate** memory shared through such a conversion.",
+        "**Isolate, test and document** every use."
+      ]
+    },
+    "analogy": {
+      "title": "Removing the guard from a power tool",
+      "story": "You can make cuts the guard prevents, but one slip costs a finger.",
+      "mapping": [
+        [
+          "Guard",
+          "Type system"
+        ],
+        [
+          "Special cut",
+          "Zero-copy conversion"
+        ],
+        [
+          "Slip",
+          "Memory corruption"
+        ]
+      ],
+      "breaks": "It's not portable between architectures or guaranteed across Go releases."
+    },
+    "mindmap": {
+      "center": "unsafe",
+      "branches": [
+        {
+          "label": "Power",
+          "children": [
+            "Reinterpret memory",
+            "Zero-copy"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Don't mutate shared",
+            "Pointer rules"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Corruption",
+            "Portability"
+          ]
+        },
+        {
+          "label": "Prefer",
+          "children": [
+            "unsafe.String/Slice"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Zero-copy byte → string",
+      "scenario": "Go 1.20+.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Caveat",
+          "detail": "If b changes, the 'immutable' string changes too, which is undefined behaviour."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "s := unsafe.String(unsafe.SliceData(b), len(b))\n// b must not be modified afterwards!"
+        }
+      ],
+      "outcome": "you get performance at an explicit risk."
+    },
+    "summary": {
+      "points": [
+        "Bypasses types.",
+        "Zero-copy tricks.",
+        "Dangerous, so isolate it."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the danger after a zero-copy []byte→string conversion?",
+        "a": "Mutating the byte slice silently changes the supposedly immutable string."
+      }
+    ]
+  },
+  "cgo-the-bridge-to-c": {
+    "core": "cgo lets Go call C functions through `import \"C\"` and a preamble. It's essential when the only implementation is a C library (SQLite, ImageMagick, CUDA).",
+    "first_principles": {
+      "problem": "A required capability exists only in a C library, with no pure-Go alternative.",
+      "truths": [
+        "Decades of C libraries exist.",
+        "Go and C have different memory models.",
+        "Crossing the boundary has a cost."
+      ],
+      "derivation": [
+        "Write a **C preamble** in a comment above `import \"C\"`.",
+        "Call **C.func()**, converting types (C.CString).",
+        "**Free** C memory manually (C.free).",
+        "Never let C **keep Go pointers**."
+      ]
+    },
+    "analogy": {
+      "title": "An interpreter at a border crossing",
+      "story": "Goods can cross, but each crossing needs paperwork, and the rules differ on each side.",
+      "mapping": [
+        [
+          "Border",
+          "Go/C boundary"
+        ],
+        [
+          "Paperwork",
+          "Type conversion"
+        ],
+        [
+          "Different laws",
+          "GC vs manual memory"
+        ]
+      ],
+      "breaks": "Each call costs tens of nanoseconds, so chatty calls across the boundary are slow."
+    },
+    "mindmap": {
+      "center": "cgo",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "import \"C\"",
+            "Preamble"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "C.CString",
+            "C.int"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "C.free",
+            "No Go ptrs in C"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "SQLite",
+            "CUDA",
+            "OpenSSL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Calling a C function",
+      "scenario": "Minimal.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Note",
+          "detail": "Every C allocation needs an explicit free."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "/*\n#include <stdlib.h>\n#include <string.h>\n*/\nimport \"C\"\nimport \"unsafe\"\n\ncs := C.CString(\"hello\")\ndefer C.free(unsafe.Pointer(cs))\nn := C.strlen(cs)"
+        }
+      ],
+      "outcome": "access to the C ecosystem from Go."
+    },
+    "summary": {
+      "points": [
+        "import \"C\".",
+        "Convert types.",
+        "Free C memory."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you call C.free on C.CString results?",
+        "a": "The memory is allocated by C, outside the Go GC, so it would leak."
+      }
+    ]
+  },
+  "the-hidden-costs-of-cgo": {
+    "core": "cgo breaks Go's superpowers: no easy cross-compilation, no fully static binaries by default, slower builds, per-call overhead, and crashes in C that take down the whole process.",
+    "first_principles": {
+      "problem": "A team adds one cgo dependency and suddenly CI can't cross-compile, images need libc, and a segfault kills the service.",
+      "truths": [
+        "Cross-compiling C needs a C toolchain for each target.",
+        "C code is outside Go's safety.",
+        "Boundary calls aren't free."
+      ],
+      "derivation": [
+        "Cross-compiling needs **C cross-toolchains** (or zig cc).",
+        "Binaries **link libc dynamically** by default.",
+        "Watch out for **slow builds** and per-call overhead.",
+        "Prefer **pure-Go alternatives** (modernc sqlite) where they exist."
+      ]
+    },
+    "analogy": {
+      "title": "Adding a petrol engine to an electric car",
+      "story": "It extends the range, but now you need fuel, oil changes and exhaust, and the car is no longer simple.",
+      "mapping": [
+        [
+          "Electric simplicity",
+          "Pure Go"
+        ],
+        [
+          "Petrol engine",
+          "C code"
+        ],
+        [
+          "Oil changes",
+          "Toolchain/libc upkeep"
+        ]
+      ],
+      "breaks": "Sometimes the C library is unavoidable. Then contain it in one package."
+    },
+    "mindmap": {
+      "center": "cgo Costs",
+      "branches": [
+        {
+          "label": "Build",
+          "children": [
+            "Cross-compile pain",
+            "Slow"
+          ]
+        },
+        {
+          "label": "Deploy",
+          "children": [
+            "libc dependency"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "Call overhead",
+            "C crashes"
+          ]
+        },
+        {
+          "label": "Mitigate",
+          "children": [
+            "Pure-Go alt",
+            "Isolate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing an SQLite driver",
+      "scenario": "cgo vs pure Go.",
+      "flow": [
+        "mattn/go-sqlite3 (cgo): fast, needs gcc",
+        "modernc.org/sqlite (pure Go): static, cross-compiles",
+        "Choose pure Go for CLI tools"
+      ],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Keeps CGO_ENABLED=0 and single-binary distribution."
+        }
+      ],
+      "code": [],
+      "outcome": "cgo is used only when the trade-offs are worth it."
+    },
+    "summary": {
+      "points": [
+        "Breaks easy cross-compiling.",
+        "Adds libc dependency.",
+        "C crashes kill Go."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does cgo complicate cross-compilation?",
+        "a": "You need a C compiler and libraries for every target platform."
+      }
+    ]
+  },
+  "go-workspaces-the-monorepo-fix": {
+    "core": "A go.work file lists several local modules so they build against each other's working copies. That replaces fragile `replace` directives when you develop across modules in a monorepo.",
+    "first_principles": {
+      "problem": "Changing a shared auth module and the service that uses it means temporary `replace` lines that get committed by accident.",
+      "truths": [
+        "Each module resolves its dependencies independently.",
+        "Local development needs local versions.",
+        "Committed replace directives break other builds."
+      ],
+      "derivation": [
+        "Run **`go work init ./pkg/auth ./services/api`**.",
+        "Builds use the **local module directories**.",
+        "**go.work** stays local, so usually don't commit it.",
+        "Release normally with version tags."
+      ]
+    },
+    "analogy": {
+      "title": "A shared workbench",
+      "story": "Instead of mailing parts between workshops, you put all the projects on one bench while you're building.",
+      "mapping": [
+        [
+          "Bench",
+          "go.work"
+        ],
+        [
+          "Projects",
+          "Modules"
+        ],
+        [
+          "Mailing parts",
+          "Publishing versions"
+        ]
+      ],
+      "breaks": "CI should usually build without go.work, so released versions are what actually get tested."
+    },
+    "mindmap": {
+      "center": "Go Workspaces",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Multi-module dev",
+            "replace hacks"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "go.work",
+            "go work use"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Don't commit (usually)",
+            "Tag releases"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Editing auth and api together",
+      "scenario": "One workspace.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No replace directives, and changes are visible instantly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "go work init ./pkg/auth ./services/api\ngo build ./services/api   # uses local ./pkg/auth"
+        }
+      ],
+      "outcome": "smooth multi-module development."
+    },
+    "summary": {
+      "points": [
+        "go.work links modules.",
+        "Replaces replace.",
+        "Keep it local."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do Go workspaces replace in multi-module development?",
+        "a": "Temporary replace directives in go.mod."
+      }
+    ]
+  }
+}

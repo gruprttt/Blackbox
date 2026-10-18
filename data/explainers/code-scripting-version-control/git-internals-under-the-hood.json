@@ -1,0 +1,809 @@
+{
+  "introduction-demystifying-the-magic": {
+    "core": "Git is a content-addressed database of snapshots, plus movable name tags pointing into it. Once you understand that model, no Git state is scary.",
+    "first_principles": {
+      "problem": "Developers memorise commands and panic at a detached HEAD or a messy merge because they don't know what Git actually did.",
+      "truths": [
+        "Every Git command manipulates objects or pointers.",
+        "Nothing committed is easily lost.",
+        "Understanding the model beats memorising commands."
+      ],
+      "derivation": [
+        "Learn the **object model** (blob, tree, commit).",
+        "Learn **refs** (branches are pointers).",
+        "Then merges, rebase, bisect and reflog follow naturally."
+      ]
+    },
+    "analogy": {
+      "title": "Learning how an engine works",
+      "story": "A driver who knows the engine can diagnose the strange noise instead of being stranded.",
+      "mapping": [
+        [
+          "Engine parts",
+          "Objects and refs"
+        ],
+        [
+          "Strange noise",
+          "Detached HEAD"
+        ],
+        [
+          "Diagnosis",
+          "Reading the graph"
+        ]
+      ],
+      "breaks": "You don't need every byte-level detail, just the model."
+    },
+    "mindmap": {
+      "center": "Git Internals",
+      "branches": [
+        {
+          "label": "Objects",
+          "children": [
+            "Blob",
+            "Tree",
+            "Commit",
+            "Tag"
+          ]
+        },
+        {
+          "label": "Refs",
+          "children": [
+            "Branches",
+            "HEAD"
+          ]
+        },
+        {
+          "label": "Operations",
+          "children": [
+            "Merge",
+            "Rebase"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Reflog",
+            "Bisect"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detached HEAD panic",
+      "scenario": "Seen through the model.",
+      "flow": [
+        "HEAD points at a commit, not a branch",
+        "New commits have no branch name",
+        "Fix: git switch -c rescue"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Nothing is broken; a pointer is simply not attached to a branch."
+        }
+      ],
+      "code": [],
+      "outcome": "Git errors turn into readable states."
+    },
+    "summary": {
+      "points": [
+        "Snapshots in a database.",
+        "Branches are pointers.",
+        "The model explains everything."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a detached HEAD in model terms?",
+        "a": "HEAD pointing directly at a commit instead of at a branch ref."
+      }
+    ]
+  },
+  "the-object-model-gits-key-value-database": {
+    "core": "Git stores four object types (blob, tree, commit, tag) in `.git/objects`, each addressed by the hash of its content. Identical content is stored only once.",
+    "first_principles": {
+      "problem": "Without a model, it's mysterious how Git deduplicates files, detects corruption, or knows what changed.",
+      "truths": [
+        "The same content always produces the same hash.",
+        "Content-addressing makes data tamper-evident.",
+        "Directories can be represented as lists of names → hashes."
+      ],
+      "derivation": [
+        "**Blob** = file content (no name).",
+        "**Tree** = a directory listing of names → blob or tree hashes.",
+        "**Commit** = a tree plus parent(s), author and message.",
+        "**Tag** = an annotated pointer to an object."
+      ]
+    },
+    "analogy": {
+      "title": "A library catalogue by fingerprint",
+      "story": "Every book is shelved by the fingerprint of its text, so two identical copies share a single shelf slot.",
+      "mapping": [
+        [
+          "Book text",
+          "Blob"
+        ],
+        [
+          "Shelf index card",
+          "Tree"
+        ],
+        [
+          "Dated catalogue entry",
+          "Commit"
+        ],
+        [
+          "Fingerprint",
+          "SHA hash"
+        ]
+      ],
+      "breaks": "Git also compresses objects into packfiles with deltas, so storage isn't literally one file per object."
+    },
+    "mindmap": {
+      "center": "Object Model",
+      "branches": [
+        {
+          "label": "blob",
+          "children": [
+            "Content only"
+          ]
+        },
+        {
+          "label": "tree",
+          "children": [
+            "Names → hashes"
+          ]
+        },
+        {
+          "label": "commit",
+          "children": [
+            "Tree + parents",
+            "Metadata"
+          ]
+        },
+        {
+          "label": "tag",
+          "children": [
+            "Annotated ptr"
+          ]
+        },
+        {
+          "label": "Key",
+          "children": [
+            "SHA = content hash",
+            "Dedup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect an object",
+      "scenario": "Look at the raw database.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Renaming a file adds no new blob, only a new tree entry."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "git cat-file -t HEAD        # commit\ngit cat-file -p HEAD^{tree} # tree listing\ngit hash-object README.md   # blob hash"
+        }
+      ],
+      "outcome": "you can reason about how Git stores data."
+    },
+    "summary": {
+      "points": [
+        "Four object types.",
+        "Hash = identity.",
+        "Dedup is automatic."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't a blob store the filename?",
+        "a": "Names belong to trees, so identical content is stored once regardless of name."
+      }
+    ]
+  },
+  "the-commit-object-snapshots-not-diffs": {
+    "core": "A commit records a complete snapshot (a root tree) and links to its parent(s). Diffs are computed on demand by comparing snapshots.",
+    "first_principles": {
+      "problem": "Thinking of commits as diffs makes checkout, revert and cherry-pick confusing.",
+      "truths": [
+        "Unchanged files reuse the existing blob hashes.",
+        "Parent links form a DAG.",
+        "Any two snapshots can be compared."
+      ],
+      "derivation": [
+        "Each commit points to a **full tree**.",
+        "Unchanged parts **reuse objects**, so it stays cheap.",
+        "**Parent pointers** chain history.",
+        "A diff = **compare two trees**."
+      ]
+    },
+    "analogy": {
+      "title": "Photographs, not edit notes",
+      "story": "Each commit is a photo of the whole room. To see what moved, you compare two photos.",
+      "mapping": [
+        [
+          "Photo",
+          "Commit snapshot"
+        ],
+        [
+          "Photo album order",
+          "Parent chain"
+        ],
+        [
+          "Spot-the-difference",
+          "git diff"
+        ]
+      ],
+      "breaks": "The photos share unchanged pixels (objects), so the album doesn't grow by full copies."
+    },
+    "mindmap": {
+      "center": "Commit Object",
+      "branches": [
+        {
+          "label": "Contains",
+          "children": [
+            "Tree",
+            "Parents",
+            "Author",
+            "Message"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Snapshot",
+            "Not diff"
+          ]
+        },
+        {
+          "label": "Cheap",
+          "children": [
+            "Reuse blobs"
+          ]
+        },
+        {
+          "label": "History",
+          "children": [
+            "DAG"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Checking out an old commit",
+      "scenario": "It's fast because the snapshot is already complete.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Checkout writes that tree to disk; there are no diffs to replay."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "git cat-file -p HEAD\n# tree 9c1f...\n# parent a3b4...\n# author ..."
+        }
+      ],
+      "outcome": "history operations make intuitive sense."
+    },
+    "summary": {
+      "points": [
+        "Commit = snapshot.",
+        "Shared objects keep it cheap.",
+        "Diffs are derived."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does Git store diffs in commits?",
+        "a": "No. A commit points to a full tree; diffs are computed by comparing trees."
+      }
+    ]
+  },
+  "refs-heads-tags-and-remotes": {
+    "core": "A ref is a file containing a commit hash. Branches move as you commit, tags stay fixed, remote-tracking refs mirror the server, and HEAD points to your current branch.",
+    "first_principles": {
+      "problem": "Without knowing that branches are just pointers, creating, deleting and resetting them feels dangerous.",
+      "truths": [
+        "Hashes are unreadable to humans.",
+        "A pointer is cheap to create and move.",
+        "Commits stay in the database even when no ref names them."
+      ],
+      "derivation": [
+        "**refs/heads/*** = local branches (move on commit).",
+        "**refs/tags/*** = fixed marks.",
+        "**refs/remotes/*** = last known server state.",
+        "**HEAD** = which ref you're on."
+      ]
+    },
+    "analogy": {
+      "title": "Bookmarks in a book",
+      "story": "A branch is a bookmark that moves as you read, a tag is a sticky note that stays put, and HEAD is your finger.",
+      "mapping": [
+        [
+          "Moving bookmark",
+          "Branch"
+        ],
+        [
+          "Sticky note",
+          "Tag"
+        ],
+        [
+          "Finger",
+          "HEAD"
+        ],
+        [
+          "Friend's bookmark",
+          "origin/main"
+        ]
+      ],
+      "breaks": "Deleting a bookmark doesn't tear out pages, but unreferenced commits are eventually garbage-collected."
+    },
+    "mindmap": {
+      "center": "Refs",
+      "branches": [
+        {
+          "label": "heads",
+          "children": [
+            "Branches",
+            "Move"
+          ]
+        },
+        {
+          "label": "tags",
+          "children": [
+            "Fixed"
+          ]
+        },
+        {
+          "label": "remotes",
+          "children": [
+            "origin/*",
+            "Updated on fetch"
+          ]
+        },
+        {
+          "label": "HEAD",
+          "children": [
+            "Current ref"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A branch is a 41-byte file",
+      "scenario": "Look at it directly.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Creating a branch writes one file, which is why it's instant."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat .git/HEAD              # ref: refs/heads/main\ncat .git/refs/heads/main   # c3f4a1b2..."
+        }
+      ],
+      "outcome": "branch operations stop feeling risky."
+    },
+    "summary": {
+      "points": [
+        "Refs are pointers.",
+        "Branches move, tags don't.",
+        "HEAD = where you are."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is creating a branch so cheap in Git?",
+        "a": "It's just a small file holding a commit hash."
+      }
+    ]
+  },
+  "merging-strategies": {
+    "core": "If the target hasn't moved, a merge just fast-forwards the pointer. If both sides diverged, Git does a three-way merge from their common ancestor and records a merge commit with two parents.",
+    "first_principles": {
+      "problem": "Teams are surprised by merge commits, or by their absence, and don't understand where conflicts come from.",
+      "truths": [
+        "The relationship between the histories decides the strategy.",
+        "A common ancestor is the reference point for a three-way merge.",
+        "Conflicts arise when both sides changed the same lines."
+      ],
+      "derivation": [
+        "Target is an **ancestor** of the feature → **fast-forward** (move the pointer).",
+        "**Diverged** → **three-way merge** (base, ours, theirs).",
+        "Same lines changed → **conflict** you resolve.",
+        "`--no-ff` forces a merge commit to keep the record."
+      ]
+    },
+    "analogy": {
+      "title": "Merging two edited copies of a document",
+      "story": "Compare each copy against the original: take each side's unique edits, and ask a human where both edited the same sentence.",
+      "mapping": [
+        [
+          "Original",
+          "Merge base"
+        ],
+        [
+          "Two copies",
+          "ours / theirs"
+        ],
+        [
+          "Same sentence edited",
+          "Conflict"
+        ]
+      ],
+      "breaks": "Git merges line by line, so it doesn't understand meaning and can't spot semantic conflicts."
+    },
+    "mindmap": {
+      "center": "Merging",
+      "branches": [
+        {
+          "label": "Fast-forward",
+          "children": [
+            "Pointer moves",
+            "No new commit"
+          ]
+        },
+        {
+          "label": "Three-way",
+          "children": [
+            "Merge base",
+            "Merge commit"
+          ]
+        },
+        {
+          "label": "Conflicts",
+          "children": [
+            "Same lines"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "--no-ff",
+            "squash"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two scenarios",
+      "scenario": "main unchanged vs main moved on.",
+      "flow": [
+        "main unchanged → FF",
+        "main got commits → 3-way",
+        "Same line edited → conflict markers",
+        "Resolve, add, commit"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "The merge base is what makes automatic merging possible."
+        }
+      ],
+      "code": [],
+      "outcome": "you can predict how a merge will turn out."
+    },
+    "summary": {
+      "points": [
+        "FF = move the pointer.",
+        "3-way uses the base.",
+        "Conflicts = overlapping edits."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is a fast-forward possible?",
+        "a": "When the target branch has no commits that aren't already in the source."
+      }
+    ]
+  },
+  "interactive-rebase-cleaning-up-history": {
+    "core": "`git rebase -i` replays your local commits so you can squash, reword, reorder or drop them before sharing. Never rewrite commits other people already have.",
+    "first_principles": {
+      "problem": "'wip', 'fix typo' and 'oops' commits clutter the permanent history that everyone reads later.",
+      "truths": [
+        "Rebase creates new commits with new hashes.",
+        "Rewriting shared history breaks collaborators.",
+        "Clean history helps review and bisect."
+      ],
+      "derivation": [
+        "Run `git rebase -i HEAD~N` on **unpushed** work.",
+        "Use **pick / squash / fixup / reword / drop**.",
+        "Use `--autosquash` with fixup! commits.",
+        "Only **force-with-lease** on your own branch."
+      ]
+    },
+    "analogy": {
+      "title": "Editing a draft before publishing",
+      "story": "Combine scattered notes into clear chapters before the book goes to print, never after.",
+      "mapping": [
+        [
+          "Draft notes",
+          "WIP commits"
+        ],
+        [
+          "Editing",
+          "rebase -i"
+        ],
+        [
+          "Printed book",
+          "Shared main"
+        ]
+      ],
+      "breaks": "Once something is published (pushed and pulled by others), rewriting it causes real damage."
+    },
+    "mindmap": {
+      "center": "Interactive Rebase",
+      "branches": [
+        {
+          "label": "Actions",
+          "children": [
+            "pick",
+            "squash/fixup",
+            "reword",
+            "drop"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Local only"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "--autosquash",
+            "force-with-lease"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Readable log"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Five messy commits into two",
+      "scenario": "Squash before opening the PR.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Two meaningful commits, ready for review."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "pick a1 Add retry logic\nfixup b2 fix typo\nfixup c3 wip\npick d4 Add tests\nfixup e5 lint"
+        }
+      ],
+      "outcome": "history tells a clear story."
+    },
+    "summary": {
+      "points": [
+        "Clean up before sharing.",
+        "Rebase = new hashes.",
+        "Never rewrite shared history."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not rebase a branch others have pulled?",
+        "a": "It replaces commits they have with new ones, causing duplicates and conflicts."
+      }
+    ]
+  },
+  "git-bisect-the-binary-search-debugger": {
+    "core": "`git bisect` binary-searches history between a good commit and a bad one, so it finds the commit that introduced a bug in about log₂(N) steps.",
+    "first_principles": {
+      "problem": "A bug appeared somewhere in 400 commits, and testing them one by one would take hours.",
+      "truths": [
+        "The bug is either present or absent at each commit.",
+        "Binary search halves the range each step.",
+        "Tests can be automated."
+      ],
+      "derivation": [
+        "Mark one commit **good** and one **bad**.",
+        "Git checks out the **midpoint**; you test it.",
+        "Repeat: **~9 steps for 400 commits**.",
+        "Use **`git bisect run ./test.sh`** to fully automate it."
+      ]
+    },
+    "analogy": {
+      "title": "Guess the number, higher or lower",
+      "story": "Guessing 1–400 by halving takes at most 9 tries.",
+      "mapping": [
+        [
+          "Number",
+          "Culprit commit"
+        ],
+        [
+          "Higher/lower",
+          "Good/bad"
+        ],
+        [
+          "Halving",
+          "Bisect step"
+        ]
+      ],
+      "breaks": "It needs a reliable test. Flaky tests send the search the wrong way."
+    },
+    "mindmap": {
+      "center": "git bisect",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "good",
+            "bad"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Midpoint",
+            "Halve"
+          ]
+        },
+        {
+          "label": "Automate",
+          "children": [
+            "bisect run"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "log2(N)"
+          ]
+        },
+        {
+          "label": "Pitfall",
+          "children": [
+            "Flaky tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find the slow-login commit",
+      "scenario": "Automated with a test script.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Git names the first bad commit in about 9 runs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "git bisect start BAD_SHA GOOD_SHA\ngit bisect run ./scripts/login_under_200ms.sh\ngit bisect reset"
+        }
+      ],
+      "outcome": "regressions are found in minutes."
+    },
+    "summary": {
+      "points": [
+        "Good + bad bounds.",
+        "Binary search.",
+        "Automate with run."
+      ]
+    },
+    "check": [
+      {
+        "q": "About how many steps does bisect need for 1,000 commits?",
+        "a": "About 10, because log₂(1000) ≈ 10."
+      }
+    ]
+  },
+  "the-safety-net-git-reflog": {
+    "core": "The reflog records every position HEAD and your branches have pointed to, so commits 'lost' to a reset, rebase or amend can be recovered.",
+    "first_principles": {
+      "problem": "After a bad `reset --hard` or rebase, the commits vanish from git log and people assume the work is gone.",
+      "truths": [
+        "Destructive commands move pointers; they don't delete objects immediately.",
+        "Git logs every pointer move locally.",
+        "Unreferenced objects survive until garbage collection."
+      ],
+      "derivation": [
+        "Run **`git reflog`** to see past HEAD positions.",
+        "Find the hash from **before the mistake**.",
+        "Run **`git reset --hard <hash>`** or `git branch rescue <hash>`.",
+        "Act within the expiry window (90 days by default)."
+      ]
+    },
+    "analogy": {
+      "title": "A browser's history",
+      "story": "Even after you navigate away, the history lets you go back to the page you came from.",
+      "mapping": [
+        [
+          "History list",
+          "Reflog"
+        ],
+        [
+          "Previous page",
+          "Pre-reset commit"
+        ],
+        [
+          "Clearing history",
+          "gc / expiry"
+        ]
+      ],
+      "breaks": "The reflog is local only. It can't recover work that was never committed, or work that exists only on someone else's machine."
+    },
+    "mindmap": {
+      "center": "Reflog",
+      "branches": [
+        {
+          "label": "Records",
+          "children": [
+            "HEAD moves",
+            "Branch moves"
+          ]
+        },
+        {
+          "label": "Recover",
+          "children": [
+            "reset",
+            "branch rescue"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Local",
+            "Expiry",
+            "Uncommitted lost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Undoing a botched rebase",
+      "scenario": "Go back to how it was before.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "The branch is back exactly as it was before the rebase."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "git reflog\n# e4f5 HEAD@{0}: rebase finished\n# 9a8b HEAD@{5}: commit: add feature\ngit reset --hard HEAD@{5}"
+        }
+      ],
+      "outcome": "committed work is almost never truly lost."
+    },
+    "summary": {
+      "points": [
+        "Reflog logs pointer moves.",
+        "Recover via its hash.",
+        "Local and time-limited."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can reflog recover changes you never committed?",
+        "a": "No. It only tracks commits that pointers referenced."
+      }
+    ]
+  }
+}

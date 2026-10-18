@@ -1,0 +1,697 @@
+{
+  "introduction-why-rust-for-ops": {
+    "core": "Rust gives C-level speed and memory safety with no garbage collector. That suits infrastructure where latency, footprint and security bugs really matter: proxies, agents, runtimes.",
+    "first_principles": {
+      "problem": "Ops tooling went Bash → Python → Go, but some components (data planes, eBPF agents, edge proxies) need tighter control than Go's GC allows.",
+      "truths": [
+        "Most security vulnerabilities in C/C++ are memory bugs.",
+        "GC pauses add tail latency.",
+        "Small footprints matter at scale."
+      ],
+      "derivation": [
+        "Get **safety at compile time** rather than at runtime.",
+        "With **no GC**, latency is predictable.",
+        "**Zero-cost abstractions** give high-level code low-level speed.",
+        "Use it where those properties pay off."
+      ]
+    },
+    "analogy": {
+      "title": "A race car with an automatic safety inspector",
+      "story": "It's as fast as an unsafe car, but an inspector refuses to let you drive off with loose bolts.",
+      "mapping": [
+        [
+          "Race car",
+          "C-level performance"
+        ],
+        [
+          "Inspector",
+          "Compiler/borrow checker"
+        ],
+        [
+          "Loose bolts",
+          "Memory bugs"
+        ]
+      ],
+      "breaks": "The inspector is strict, so the learning curve is steep and compiling is slower."
+    },
+    "mindmap": {
+      "center": "Why Rust",
+      "branches": [
+        {
+          "label": "Safety",
+          "children": [
+            "No use-after-free",
+            "No data races"
+          ]
+        },
+        {
+          "label": "Speed",
+          "children": [
+            "No GC",
+            "Zero-cost"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Proxies",
+            "Agents",
+            "Runtimes"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Learning curve"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A sidecar proxy at 100k req/s",
+      "scenario": "Go vs Rust.",
+      "flow": [
+        "Go: GC pauses add p99 spikes",
+        "Rust: steady latency, less memory",
+        "Choose Rust for the hot data path"
+      ],
+      "steps": [
+        {
+          "label": "Examples",
+          "detail": "Linkerd2-proxy, Firecracker and parts of AWS's infrastructure use Rust."
+        }
+      ],
+      "code": [],
+      "outcome": "Rust is used where performance and safety are critical."
+    },
+    "summary": {
+      "points": [
+        "Safe without GC.",
+        "Fast and lean.",
+        "Steep but rewarding."
+      ]
+    },
+    "check": [
+      {
+        "q": "What gap does Rust fill compared with Go?",
+        "a": "Memory safety with no garbage collector, giving predictable latency and a small footprint."
+      }
+    ]
+  },
+  "the-core-promise-memory-safety-without-gc": {
+    "core": "Manual memory management (C) is fast but unsafe, and garbage collection is safe but adds pauses. Rust decides at compile time when each value is freed, giving safety with no runtime cost.",
+    "first_principles": {
+      "problem": "Programs must free memory they no longer need. Getting it wrong causes crashes and security holes; automating it at runtime costs performance.",
+      "truths": [
+        "Every allocation must be freed exactly once.",
+        "Use-after-free and double-free are exploitable.",
+        "A GC runs at runtime and pauses work."
+      ],
+      "derivation": [
+        "C: the programmer frees, **fast but error-prone**.",
+        "Java/Go: the GC frees, **safe but with pauses**.",
+        "Rust: the **compiler proves** where to free, so it's **safe and fast**."
+      ]
+    },
+    "analogy": {
+      "title": "Three ways to tidy a library",
+      "story": "Readers reshelve books themselves (they forget), a janitor sweeps periodically (closes the library while sweeping), or every book has a return date enforced at checkout.",
+      "mapping": [
+        [
+          "Readers reshelving",
+          "Manual free"
+        ],
+        [
+          "Janitor sweeps",
+          "GC"
+        ],
+        [
+          "Enforced return date",
+          "Ownership"
+        ]
+      ],
+      "breaks": "Rust also has escape hatches (`unsafe`, Rc), and safety is only guaranteed outside them."
+    },
+    "mindmap": {
+      "center": "Memory Models",
+      "branches": [
+        {
+          "label": "Manual (C)",
+          "children": [
+            "Fast",
+            "Unsafe"
+          ]
+        },
+        {
+          "label": "GC (Go/Java)",
+          "children": [
+            "Safe",
+            "Pauses"
+          ]
+        },
+        {
+          "label": "Ownership (Rust)",
+          "children": [
+            "Safe",
+            "No GC",
+            "Compile-time"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Use-after-free",
+      "scenario": "C compiles it; Rust rejects it.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A whole class of bugs never reaches production."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rust",
+          "text": "let s = String::from(\"cfg\");\nlet t = s;          // ownership moves to t\nprintln!(\"{}\", s);  // compile error: s was moved"
+        }
+      ],
+      "outcome": "you get memory safety with no runtime overhead."
+    },
+    "summary": {
+      "points": [
+        "Manual = unsafe.",
+        "GC = pauses.",
+        "Ownership = both safe and fast."
+      ]
+    },
+    "check": [
+      {
+        "q": "When does Rust decide to free memory?",
+        "a": "At compile time, when the owner goes out of scope."
+      }
+    ]
+  },
+  "the-borrow-checker-the-compilers-bouncer": {
+    "core": "Each value has exactly one owner, and it's dropped when the owner goes out of scope. You can lend it as many read-only borrows OR exactly one mutable borrow. The borrow checker enforces this at compile time.",
+    "first_principles": {
+      "problem": "Concurrent readers and writers on shared data cause data races and dangling pointers.",
+      "truths": [
+        "One owner makes freeing unambiguous.",
+        "Reading while someone writes is unsafe.",
+        "References must not outlive their data."
+      ],
+      "derivation": [
+        "**One owner**; assignment **moves** it.",
+        "**&T**: many readers at once.",
+        "**&mut T**: one writer, no readers.",
+        "**Lifetimes**: a borrow can't outlive the owner."
+      ]
+    },
+    "analogy": {
+      "title": "A nightclub bouncer and a library book",
+      "story": "Many people can read a reference copy together, but only one person at a time can check out the copy to write in it.",
+      "mapping": [
+        [
+          "Reference copy",
+          "&T shared"
+        ],
+        [
+          "Checked-out copy",
+          "&mut T"
+        ],
+        [
+          "Bouncer",
+          "Borrow checker"
+        ]
+      ],
+      "breaks": "The rules sometimes reject valid programs, so you restructure or use Rc or RefCell."
+    },
+    "mindmap": {
+      "center": "Borrow Checker",
+      "branches": [
+        {
+          "label": "Ownership",
+          "children": [
+            "One owner",
+            "Move",
+            "Drop"
+          ]
+        },
+        {
+          "label": "Borrowing",
+          "children": [
+            "Many &T",
+            "One &mut T"
+          ]
+        },
+        {
+          "label": "Lifetimes",
+          "children": [
+            "No dangling"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "No data races"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mutating while iterating",
+      "scenario": "Rust catches it.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "In other languages this is a runtime bug; here it's a compile error."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rust",
+          "text": "let mut v = vec![1, 2];\nfor x in &v { v.push(*x); }  // error: cannot borrow v mutably while borrowed"
+        }
+      ],
+      "outcome": "data races are impossible in safe code."
+    },
+    "summary": {
+      "points": [
+        "One owner.",
+        "Readers XOR one writer.",
+        "No dangling references."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can you hold a &mut and a & to the same value at once?",
+        "a": "No. Either many shared borrows or one mutable borrow."
+      }
+    ]
+  },
+  "asyncawait-and-tokio-concurrency-for-ops": {
+    "core": "Async Rust lets one thread juggle thousands of I/O waits. `async fn` returns a future, `.await` yields while waiting, and the Tokio runtime schedules the futures across threads.",
+    "first_principles": {
+      "problem": "Infra tools mostly wait on the network, and a thread per connection wastes memory at scale.",
+      "truths": [
+        "I/O dominates infrastructure work.",
+        "Waiting needn't block a thread.",
+        "Rust needs a runtime library to drive futures."
+      ],
+      "derivation": [
+        "Mark functions **async**; they return **futures**.",
+        "**.await** suspends without blocking the thread.",
+        "**Tokio** provides the executor, timers and networking.",
+        "Use **join!/spawn** for concurrency."
+      ]
+    },
+    "analogy": {
+      "title": "A waiter serving many tables",
+      "story": "The waiter takes an order and moves on while the kitchen cooks, rather than standing at one table until its food arrives.",
+      "mapping": [
+        [
+          "Waiter",
+          "Thread"
+        ],
+        [
+          "Tables",
+          "Futures"
+        ],
+        [
+          "Kitchen cooking",
+          "I/O in progress"
+        ],
+        [
+          "Restaurant manager",
+          "Tokio"
+        ]
+      ],
+      "breaks": "CPU-heavy work blocks the waiter, so move it to spawn_blocking."
+    },
+    "mindmap": {
+      "center": "Async Rust",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "async fn",
+            ".await"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "Tokio",
+            "Executor"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "spawn",
+            "join!"
+          ]
+        },
+        {
+          "label": "Pitfall",
+          "children": [
+            "Blocking calls",
+            "spawn_blocking"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Concurrent health checks",
+      "scenario": "Tokio and reqwest.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hundreds of checks run on a few threads."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rust",
+          "text": "#[tokio::main]\nasync fn main() {\n    let futs = hosts.iter().map(|h| reqwest::get(format!(\"http://{h}/health\")));\n    let results = futures::future::join_all(futs).await;\n}"
+        }
+      ],
+      "outcome": "high-concurrency I/O with a tiny footprint."
+    },
+    "summary": {
+      "points": [
+        "Futures + await.",
+        "Tokio drives them.",
+        "Don't block the runtime."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shouldn't you call blocking code inside async tasks?",
+        "a": "It stalls the runtime thread, starving every other task scheduled on it."
+      }
+    ]
+  },
+  "compilation-targets-the-power-of-static-linking": {
+    "core": "Compiling for the `x86_64-unknown-linux-musl` target links everything, libc included, into one static binary that runs on any Linux, whatever its glibc version.",
+    "first_principles": {
+      "problem": "A binary built on a new distro fails on an older server with 'GLIBC_2.34 not found'.",
+      "truths": [
+        "Dynamic linking depends on the host's libraries.",
+        "glibc versions differ across distros.",
+        "musl can be statically linked."
+      ],
+      "derivation": [
+        "`rustup target add x86_64-unknown-linux-musl`.",
+        "`cargo build --release --target ...musl`.",
+        "**One file**, no shared-library dependencies.",
+        "Ship it **FROM scratch**."
+      ]
+    },
+    "analogy": {
+      "title": "Packing your own power adapter",
+      "story": "Wherever you travel, your device works, because you aren't relying on the hotel's sockets.",
+      "mapping": [
+        [
+          "Hotel sockets",
+          "Host glibc"
+        ],
+        [
+          "Own adapter",
+          "Static musl libc"
+        ],
+        [
+          "Device",
+          "Binary"
+        ]
+      ],
+      "breaks": "musl's allocator can be slower, and some crates need system C libraries."
+    },
+    "mindmap": {
+      "center": "Static Rust",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "glibc mismatch"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "musl target"
+          ]
+        },
+        {
+          "label": "Build",
+          "children": [
+            "cargo --target"
+          ]
+        },
+        {
+          "label": "Ship",
+          "children": [
+            "scratch image"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Allocator perf"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An agent for a mixed fleet",
+      "scenario": "CentOS 7 to Ubuntu 24.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "The same binary runs on every host."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cargo build --release --target x86_64-unknown-linux-musl\nldd target/x86_64-unknown-linux-musl/release/agent  # not a dynamic executable"
+        }
+      ],
+      "outcome": "truly portable binaries."
+    },
+    "summary": {
+      "points": [
+        "Dynamic depends on the host.",
+        "musl gives a static binary.",
+        "Runs anywhere."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a glibc-linked binary fail on old servers?",
+        "a": "It requires a newer glibc version than the server has installed."
+      }
+    ]
+  },
+  "rust-vs-go-for-infrastructure": {
+    "core": "Go optimises for team speed and simplicity, Rust for runtime performance and correctness. Pick Go for most control-plane tools and Rust for hot data paths and safety-critical low-level work.",
+    "first_principles": {
+      "problem": "Teams argue about languages by taste rather than by the properties a component needs.",
+      "truths": [
+        "Developer time and machine time both cost money.",
+        "Ecosystem fit matters (Kubernetes is Go).",
+        "Latency-sensitive paths punish GC pauses."
+      ],
+      "derivation": [
+        "**Go**: fast to learn, great ecosystem, GC is fine for most cases.",
+        "**Rust**: no GC, maximum control, steeper learning curve.",
+        "Ask about **latency, footprint, team skills and ecosystem**.",
+        "Mixing is fine: a Go control plane with a Rust data plane."
+      ]
+    },
+    "analogy": {
+      "title": "A minivan vs. a sports car",
+      "story": "The minivan carries the whole team easily; the sports car wins on the racetrack but needs a trained driver.",
+      "mapping": [
+        [
+          "Minivan",
+          "Go"
+        ],
+        [
+          "Sports car",
+          "Rust"
+        ],
+        [
+          "Racetrack",
+          "Hot data path"
+        ]
+      ],
+      "breaks": "Both are excellent. The 'wrong' choice is usually fine, while fighting your ecosystem isn't."
+    },
+    "mindmap": {
+      "center": "Rust vs Go",
+      "branches": [
+        {
+          "label": "Go",
+          "children": [
+            "Simple",
+            "Fast to ship",
+            "K8s ecosystem",
+            "GC"
+          ]
+        },
+        {
+          "label": "Rust",
+          "children": [
+            "No GC",
+            "Max perf",
+            "Safety",
+            "Learning curve"
+          ]
+        },
+        {
+          "label": "Decide",
+          "children": [
+            "Latency",
+            "Team",
+            "Ecosystem"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Building a service mesh",
+      "scenario": "Splitting the languages.",
+      "flow": [
+        "Control plane (config, APIs) → Go",
+        "Data plane proxy (every packet) → Rust"
+      ],
+      "steps": [
+        {
+          "label": "Real world",
+          "detail": "Linkerd follows exactly this split."
+        }
+      ],
+      "code": [],
+      "outcome": "each component gets the language that suits it."
+    },
+    "summary": {
+      "points": [
+        "Go = productivity.",
+        "Rust = performance and safety.",
+        "Decide per component."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is Rust the better choice than Go?",
+        "a": "For latency-critical, memory-constrained or safety-critical components such as data-plane proxies."
+      }
+    ]
+  },
+  "the-ecosystem-cargo-and-key-crates-for-ops": {
+    "core": "Cargo is Rust's single build tool and package manager. Ops staples include tokio (async), reqwest (HTTP), serde (serialisation), clap (CLI parsing), tracing (logs) and anyhow/thiserror (errors).",
+    "first_principles": {
+      "problem": "C and C++ build ecosystems are fragmented and painful, while Rust standardises everything on one tool.",
+      "truths": [
+        "One build tool lowers friction.",
+        "Crates are versioned and locked.",
+        "Mature crates exist for common ops needs."
+      ],
+      "derivation": [
+        "**cargo new / build / test / run**.",
+        "Declare deps in **Cargo.toml**; **Cargo.lock** pins them.",
+        "Learn the **core crates**.",
+        "Use **clippy** and **rustfmt** for quality."
+      ]
+    },
+    "analogy": {
+      "title": "An all-in-one kitchen appliance",
+      "story": "One machine handles shopping (deps), cooking (build), tasting (test) and plating (release).",
+      "mapping": [
+        [
+          "Appliance",
+          "cargo"
+        ],
+        [
+          "Recipe",
+          "Cargo.toml"
+        ],
+        [
+          "Exact ingredients",
+          "Cargo.lock"
+        ]
+      ],
+      "breaks": "Dependency trees can get large, so audit them with cargo-audit or cargo-deny."
+    },
+    "mindmap": {
+      "center": "Cargo & Crates",
+      "branches": [
+        {
+          "label": "Cargo",
+          "children": [
+            "build",
+            "test",
+            "Cargo.lock"
+          ]
+        },
+        {
+          "label": "Crates",
+          "children": [
+            "tokio",
+            "reqwest",
+            "serde",
+            "clap"
+          ]
+        },
+        {
+          "label": "Quality",
+          "children": [
+            "clippy",
+            "rustfmt"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "cargo-audit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A CLI skeleton",
+      "scenario": "Using clap and serde.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Build",
+          "detail": "`cargo build --release` produces an optimised binary."
+        }
+      ],
+      "code": [
+        {
+          "lang": "toml",
+          "text": "[dependencies]\nclap = { version = \"4\", features = [\"derive\"] }\nserde = { version = \"1\", features = [\"derive\"] }\nserde_json = \"1\"\ntokio = { version = \"1\", features = [\"full\"] }"
+        }
+      ],
+      "outcome": "a productive, standardised toolchain."
+    },
+    "summary": {
+      "points": [
+        "One tool: cargo.",
+        "Lock files pin deps.",
+        "Know the core crates."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the role of Cargo.lock?",
+        "a": "It pins exact dependency versions for reproducible builds."
+      }
+    ]
+  }
+}

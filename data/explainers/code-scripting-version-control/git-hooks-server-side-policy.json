@@ -1,0 +1,599 @@
+{
+  "introduction-why-client-side-hooks-arent-enough": {
+    "core": "Client-side hooks are optional: they aren't cloned by default and can be skipped with --no-verify. Server-side hooks run on the central repository and can't be bypassed, so policy is enforced there.",
+    "first_principles": {
+      "problem": "Secrets and force-pushes reach main because someone never installed the pre-commit hook or skipped it.",
+      "truths": [
+        "Clients control their own environment.",
+        "The server is the single point every push passes through.",
+        "Policy must be unavoidable to be reliable."
+      ],
+      "derivation": [
+        "Use **client hooks** for fast feedback.",
+        "Use **server hooks / platform rules** for enforcement.",
+        "Enforce **secrets, branch, size and message** policies on the server.",
+        "Keep both layers aligned."
+      ]
+    },
+    "analogy": {
+      "title": "A sign in the parking lot vs. a bouncer at the door",
+      "story": "Anyone can ignore the sign; nobody gets past the bouncer.",
+      "mapping": [
+        [
+          "Parking lot sign",
+          "Client-side hook"
+        ],
+        [
+          "Bouncer",
+          "Server-side hook"
+        ],
+        [
+          "Dress code",
+          "Repo policy"
+        ]
+      ],
+      "breaks": "Server hooks give feedback late (at push time), so keep client hooks for the fast loop."
+    },
+    "mindmap": {
+      "center": "Server vs Client Hooks",
+      "branches": [
+        {
+          "label": "Client",
+          "children": [
+            "Optional",
+            "--no-verify",
+            "Fast feedback"
+          ]
+        },
+        {
+          "label": "Server",
+          "children": [
+            "Mandatory",
+            "Central"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "Secrets",
+            "Force-push",
+            "File size",
+            "Messages"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A leaked AWS key",
+      "scenario": "Why the server must check.",
+      "flow": [
+        "Dev skips pre-commit",
+        "Push reaches server",
+        "pre-receive scans → rejects",
+        "Key never lands in history"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Enforcement belongs where it can't be skipped."
+        }
+      ],
+      "code": [],
+      "outcome": "policy is guaranteed, not hoped for."
+    },
+    "summary": {
+      "points": [
+        "Client = advice.",
+        "Server = law.",
+        "Use both."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't client-side hooks enforce policy?",
+        "a": "They aren't distributed automatically and can be bypassed with --no-verify."
+      }
+    ]
+  },
+  "the-three-server-side-hooks-and-when-they-fire": {
+    "core": "A push runs three server hooks in sequence: pre-receive (once, sees all refs, can reject everything), update (once per ref, can reject that ref) and post-receive (after success, can't reject, runs automation).",
+    "first_principles": {
+      "problem": "Putting logic in the wrong hook means it either can't block bad pushes or runs too late.",
+      "truths": [
+        "A push updates possibly many refs.",
+        "Rejection must happen before refs move.",
+        "Side effects should run only after success."
+      ],
+      "derivation": [
+        "**pre-receive**: global gate (all or nothing).",
+        "**update**: per-branch policy.",
+        "**post-receive**: notifications, CI triggers, mirroring.",
+        "All receive **old-sha new-sha refname** data."
+      ]
+    },
+    "analogy": {
+      "title": "Airport security stages",
+      "story": "The main screening (pre-receive), gate-specific checks (update) and baggage tracking after boarding (post-receive).",
+      "mapping": [
+        [
+          "Main screening",
+          "pre-receive"
+        ],
+        [
+          "Gate check",
+          "update"
+        ],
+        [
+          "Tracking after boarding",
+          "post-receive"
+        ]
+      ],
+      "breaks": "Long-running hooks delay every push, so keep them fast."
+    },
+    "mindmap": {
+      "center": "Server Hooks",
+      "branches": [
+        {
+          "label": "pre-receive",
+          "children": [
+            "Once",
+            "All refs",
+            "Can reject"
+          ]
+        },
+        {
+          "label": "update",
+          "children": [
+            "Per ref",
+            "Can reject ref"
+          ]
+        },
+        {
+          "label": "post-receive",
+          "children": [
+            "After success",
+            "Automation"
+          ]
+        },
+        {
+          "label": "Input",
+          "children": [
+            "old new ref"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A push of two branches",
+      "scenario": "Hook sequence.",
+      "flow": [
+        "pre-receive(all refs) → pass",
+        "update(main) → pass",
+        "update(feature) → pass",
+        "refs updated",
+        "post-receive → trigger CI"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Any non-zero exit before the update stops the push."
+        }
+      ],
+      "code": [],
+      "outcome": "logic goes in the right stage."
+    },
+    "summary": {
+      "points": [
+        "pre-receive gates all.",
+        "update per ref.",
+        "post-receive reacts."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which server hook can't reject a push?",
+        "a": "post-receive."
+      }
+    ]
+  },
+  "the-pre-receive-hook-the-main-gate": {
+    "core": "pre-receive reads `old new ref` lines on stdin for every ref in the push. A non-zero exit rejects the whole push atomically, and its stderr messages are shown to the pusher.",
+    "first_principles": {
+      "problem": "You need one place to scan every new commit for secrets, oversized files or bad messages before anything lands.",
+      "truths": [
+        "New objects are quarantined until the hook passes.",
+        "One rejection blocks every ref in the push.",
+        "The pusher sees the hook's output."
+      ],
+      "derivation": [
+        "Read **stdin lines**: old_sha new_sha refname.",
+        "List the new commits with **git rev-list old..new**.",
+        "**Inspect** diffs, files and messages.",
+        "**Exit 1** with a clear message to reject."
+      ]
+    },
+    "analogy": {
+      "title": "A customs inspection of a whole shipment",
+      "story": "If one crate has contraband, the entire shipment is turned back.",
+      "mapping": [
+        [
+          "Shipment",
+          "Push"
+        ],
+        [
+          "Crates",
+          "Commits"
+        ],
+        [
+          "Turned back",
+          "Rejected atomically"
+        ]
+      ],
+      "breaks": "Handle new branches (old = 000…) and deletions (new = 000…) explicitly."
+    },
+    "mindmap": {
+      "center": "pre-receive",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "stdin: old new ref"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "rev-list",
+            "diff",
+            "messages"
+          ]
+        },
+        {
+          "label": "Reject",
+          "children": [
+            "exit 1",
+            "stderr message"
+          ]
+        },
+        {
+          "label": "Edge cases",
+          "children": [
+            "New branch 000",
+            "Deletion"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Blocking AWS keys",
+      "scenario": "A minimal hook.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The push fails with a clear reason, and nothing lands."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "#!/usr/bin/env bash\nzero=0000000000000000000000000000000000000000\nwhile read old new ref; do\n  [ \"$new\" = \"$zero\" ] && continue\n  range=$([ \"$old\" = \"$zero\" ] && echo \"$new\" || echo \"$old..$new\")\n  if git log -p \"$range\" | grep -qE 'AKIA[0-9A-Z]{16}'; then\n    echo \"Rejected: AWS access key found in $ref\" >&2; exit 1\n  fi\ndone"
+        }
+      ],
+      "outcome": "one airtight gate for all pushes."
+    },
+    "summary": {
+      "points": [
+        "Reads all refs.",
+        "Atomic rejection.",
+        "Clear messages."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does pre-receive receive on stdin?",
+        "a": "One line per ref: old SHA, new SHA and ref name."
+      }
+    ]
+  },
+  "the-update-hook-per-branch-policy": {
+    "core": "The update hook runs once per ref with arguments (refname, old, new), so you can apply different rules per branch: block force-pushes to main, restrict release/* to certain users, and so on. Only that ref is rejected.",
+    "first_principles": {
+      "problem": "Policy differs by branch: feature branches can be rewritten, main must never be.",
+      "truths": [
+        "Branches carry different risk.",
+        "Per-ref decisions allow partial acceptance.",
+        "A non-fast-forward means history rewriting."
+      ],
+      "derivation": [
+        "Receive **args**: refname old new.",
+        "Detect a **force-push**: `git merge-base --is-ancestor old new` fails.",
+        "Match **branch patterns** (refs/heads/main, release/*).",
+        "**Exit non-zero** to reject just this ref."
+      ]
+    },
+    "analogy": {
+      "title": "Different locks on different doors",
+      "story": "The staff room has a code lock, the vault a biometric one, and the lobby is open.",
+      "mapping": [
+        [
+          "Doors",
+          "Branches"
+        ],
+        [
+          "Locks",
+          "Per-branch rules"
+        ],
+        [
+          "Vault",
+          "main"
+        ]
+      ],
+      "breaks": "Per-ref hooks run more often, so keep them fast for pushes with many refs."
+    },
+    "mindmap": {
+      "center": "update Hook",
+      "branches": [
+        {
+          "label": "Args",
+          "children": [
+            "ref",
+            "old",
+            "new"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "No force-push main",
+            "Restricted release/*"
+          ]
+        },
+        {
+          "label": "Detect FF",
+          "children": [
+            "merge-base --is-ancestor"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Rejects one ref"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Blocking force-push to main",
+      "scenario": "Hook snippet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Feature branches can still be force-pushed, but main can't."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ref=$1 old=$2 new=$3\nif [ \"$ref\" = refs/heads/main ] && ! git merge-base --is-ancestor \"$old\" \"$new\"; then\n  echo \"Force-push to main is not allowed\" >&2; exit 1\nfi"
+        }
+      ],
+      "outcome": "policy tailored per branch."
+    },
+    "summary": {
+      "points": [
+        "Per ref.",
+        "Branch-specific rules.",
+        "Partial rejection."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can a hook detect a force-push?",
+        "a": "The old SHA isn't an ancestor of the new SHA (merge-base --is-ancestor fails)."
+      }
+    ]
+  },
+  "the-post-receive-hook-triggering-automation": {
+    "core": "post-receive runs after refs are updated. It can't reject anything, but it's the place for side effects: triggering CI and deploys, sending notifications, mirroring and updating caches.",
+    "first_principles": {
+      "problem": "Automation should run only for pushes that actually succeeded.",
+      "truths": [
+        "Once refs are updated the change is final.",
+        "Side effects shouldn't block the pusher.",
+        "Failures here don't undo the push."
+      ],
+      "derivation": [
+        "Read the same **old new ref** stdin.",
+        "**Trigger** CI or deploy webhooks for matching branches.",
+        "Run slow work **asynchronously** (enqueue rather than block).",
+        "**Log** failures; don't fail silently."
+      ]
+    },
+    "analogy": {
+      "title": "The announcement after a vote passes",
+      "story": "Once the vote is final, the clerk notifies everyone and starts the follow-up work.",
+      "mapping": [
+        [
+          "Vote passed",
+          "Refs updated"
+        ],
+        [
+          "Announcement",
+          "Notification"
+        ],
+        [
+          "Follow-up work",
+          "CI/deploy"
+        ]
+      ],
+      "breaks": "Errors in post-receive can't roll back the push, so make the automation robust."
+    },
+    "mindmap": {
+      "center": "post-receive",
+      "branches": [
+        {
+          "label": "Timing",
+          "children": [
+            "After refs update"
+          ]
+        },
+        {
+          "label": "Can't",
+          "children": [
+            "Reject"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "CI trigger",
+            "Deploy",
+            "Notify",
+            "Mirror"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Async",
+            "Log failures"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deploy on push to main",
+      "scenario": "Classic self-hosted pattern.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every successful push to main deploys automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "while read old new ref; do\n  if [ \"$ref\" = refs/heads/main ]; then\n    curl -fsS -X POST \"$DEPLOY_HOOK\" -d \"sha=$new\" &\n  fi\ndone"
+        }
+      ],
+      "outcome": "automation reacts to final changes."
+    },
+    "summary": {
+      "points": [
+        "After success.",
+        "Side effects only.",
+        "Run asynchronously."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't post-receive reject a push?",
+        "a": "It runs after the refs are already updated, so the push is final."
+      }
+    ]
+  },
+  "modern-platforms-push-rules-and-branch-protection": {
+    "core": "On GitHub, GitLab and Bitbucket Cloud you can't install raw hooks. The same enforcement comes from branch protection and rulesets, push rules, secret scanning push protection, required status checks and webhooks.",
+    "first_principles": {
+      "problem": "Cloud-hosted repositories have no accessible hooks/ directory, so policy needs another mechanism.",
+      "truths": [
+        "Hosted platforms abstract away the server.",
+        "Platforms expose policy as configuration.",
+        "Webhooks replace post-receive."
+      ],
+      "derivation": [
+        "**Branch protection / rulesets**: no force-push, require PR reviews.",
+        "**Required status checks**: CI must pass.",
+        "**Push protection**: block secrets.",
+        "**Push rules** (GitLab): commit message regex, file size.",
+        "**Webhooks / Actions** for post-receive automation."
+      ]
+    },
+    "analogy": {
+      "title": "A managed building with a security desk",
+      "story": "You can't rewire the locks yourself, but the security company enforces your access rules.",
+      "mapping": [
+        [
+          "Security desk",
+          "Platform policy"
+        ],
+        [
+          "Your access rules",
+          "Rulesets"
+        ],
+        [
+          "Doorbell notifications",
+          "Webhooks"
+        ]
+      ],
+      "breaks": "Platform rules are less flexible than arbitrary scripts, so custom checks move into required CI jobs."
+    },
+    "mindmap": {
+      "center": "Platform Policies",
+      "branches": [
+        {
+          "label": "GitHub",
+          "children": [
+            "Rulesets",
+            "Branch protection",
+            "Push protection"
+          ]
+        },
+        {
+          "label": "GitLab",
+          "children": [
+            "Push rules",
+            "Protected branches"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "Required status"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Webhooks",
+            "Actions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Protecting main on GitHub",
+      "scenario": "Rule set.",
+      "flow": [
+        "Require PR + 1 approval",
+        "Require status checks: test, lint",
+        "Block force pushes + deletion",
+        "Secret scanning push protection on"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The same guarantees as server hooks, with no server access."
+        }
+      ],
+      "code": [],
+      "outcome": "policy enforced on hosted platforms."
+    },
+    "summary": {
+      "points": [
+        "Rulesets = gates.",
+        "Required checks.",
+        "Webhooks = post-receive."
+      ]
+    },
+    "check": [
+      {
+        "q": "What replaces post-receive hooks on GitHub?",
+        "a": "Webhooks and GitHub Actions triggered by push events."
+      }
+    ]
+  }
+}

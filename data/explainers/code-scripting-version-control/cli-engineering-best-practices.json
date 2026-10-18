@@ -1,0 +1,908 @@
+{
+  "introduction-moving-from-scripts-to-tools": {
+    "core": "A script is written for its author; a tool is written for other people. It needs predictable arguments, help text, clean output, correct exit codes and safe behaviour.",
+    "first_principles": {
+      "problem": "Personal scripts handed to a team confuse users, break pipelines and occasionally destroy things.",
+      "truths": [
+        "Other users don't know your assumptions.",
+        "Tools get composed into pipelines.",
+        "Conventions reduce learning cost."
+      ],
+      "derivation": [
+        "Parse arguments with a **library**.",
+        "Provide **--help**.",
+        "Separate **human and machine output**.",
+        "Use **exit codes** and **signal handling**.",
+        "Guard **destructive actions**."
+      ]
+    },
+    "analogy": {
+      "title": "A sticky note vs. a printed manual",
+      "story": "A sticky note is for you, right now. A manual has structure, instructions and warnings for strangers.",
+      "mapping": [
+        [
+          "Sticky note",
+          "Script"
+        ],
+        [
+          "Manual",
+          "Tool"
+        ],
+        [
+          "Warnings",
+          "Confirmation prompts"
+        ]
+      ],
+      "breaks": "Not every one-off needs tool-grade polish, but anything shared does."
+    },
+    "mindmap": {
+      "center": "Script → Tool",
+      "branches": [
+        {
+          "label": "Interface",
+          "children": [
+            "Arg parsing",
+            "--help"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Human",
+            "Machine"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Exit codes",
+            "Signals"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Confirm",
+            "--yes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "deploy.sh becomes deployctl",
+      "scenario": "The upgrade path.",
+      "flow": [
+        "Hard-coded args",
+        "→ argparse + help",
+        "→ --json output",
+        "→ exit codes",
+        "→ confirm prompts"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Teammates and CI can rely on it."
+        }
+      ],
+      "code": [],
+      "outcome": "scripts become trustworthy shared tools."
+    },
+    "summary": {
+      "points": [
+        "Write for strangers.",
+        "Follow conventions.",
+        "Be safe."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key difference between a script and a tool?",
+        "a": "A tool is designed for other users and programs, with a predictable interface and behaviour."
+      }
+    ]
+  },
+  "the-anatomy-of-a-command-line": {
+    "core": "A command line is a sentence: the program, subcommands (verbs), options (adverbs that change behaviour) and positional arguments (objects). Good tools follow that grammar.",
+    "first_principles": {
+      "problem": "Tools with ad-hoc argument orders and meanings force users to memorise quirks.",
+      "truths": [
+        "The shell splits the line into words for the program.",
+        "Users carry over expectations from git and kubectl.",
+        "Consistent grammar is learnable."
+      ],
+      "derivation": [
+        "**Command** → **subcommand** (verb) → **options** → **arguments** (nouns).",
+        "Options can be **flags** (booleans) or take **values**.",
+        "Group related actions as **subcommands**."
+      ]
+    },
+    "analogy": {
+      "title": "Grammar of a sentence",
+      "story": "'kubectl get pods -n prod': subject, verb, object, and a modifier saying where.",
+      "mapping": [
+        [
+          "Verb",
+          "Subcommand"
+        ],
+        [
+          "Object",
+          "Positional arg"
+        ],
+        [
+          "Modifier",
+          "Option"
+        ]
+      ],
+      "breaks": "Quoting and globbing are applied by the shell before your program sees anything."
+    },
+    "mindmap": {
+      "center": "CLI Anatomy",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "Program",
+            "Subcommand",
+            "Options",
+            "Args"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Flags",
+            "Valued"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "git",
+            "kubectl"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dissecting a command",
+      "scenario": "One real line.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Design",
+          "detail": "A tool of your own: `mytool deploy SERVICE --env prod`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "git  commit  -m \"fix\"  --amend\n#prog verb   opt+value  flag"
+        }
+      ],
+      "outcome": "interfaces are intuitive."
+    },
+    "summary": {
+      "points": [
+        "Verbs = subcommands.",
+        "Nouns = arguments.",
+        "Modifiers = options."
+      ]
+    },
+    "check": [
+      {
+        "q": "In `kubectl get pods -n prod`, what is `-n prod`?",
+        "a": "An option with a value (namespace) that modifies the command."
+      }
+    ]
+  },
+  "the-standards-flags-conventions-and-the-double-dash": {
+    "core": "Follow the Unix conventions: short `-v` and long `--verbose` flags, bundling (`-la`), `--help` and `--version`, and `--` to end option parsing.",
+    "first_principles": {
+      "problem": "A tool that uses `-help` or can't handle a filename starting with a dash surprises and frustrates users.",
+      "truths": [
+        "Users apply habits learned elsewhere.",
+        "Filenames can begin with -.",
+        "Standard flags are expected."
+      ],
+      "derivation": [
+        "Offer **short and long** forms.",
+        "Always support **--help, --version**.",
+        "Honour **--** so everything after it is positional.",
+        "Use a parsing library that does this for you."
+      ]
+    },
+    "analogy": {
+      "title": "Standard road signs",
+      "story": "Drivers instantly understand a stop sign. A custom-shaped sign causes accidents.",
+      "mapping": [
+        [
+          "Standard signs",
+          "-h/--help, -v"
+        ],
+        [
+          "End of road works",
+          "--"
+        ],
+        [
+          "Custom signs",
+          "Quirky flags"
+        ]
+      ],
+      "breaks": "Some ecosystems (Go's flag package, Java) differ, but consistency within your tool still matters most."
+    },
+    "mindmap": {
+      "center": "CLI Conventions",
+      "branches": [
+        {
+          "label": "Forms",
+          "children": [
+            "-v",
+            "--verbose"
+          ]
+        },
+        {
+          "label": "Bundling",
+          "children": [
+            "-la"
+          ]
+        },
+        {
+          "label": "Standard",
+          "children": [
+            "--help",
+            "--version"
+          ]
+        },
+        {
+          "label": "--",
+          "children": [
+            "End of options"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deleting a file called -rf",
+      "scenario": "The double dash saves you.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Without --, rm reads -rf as options."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "rm -- -rf   # removes the file named '-rf'"
+        }
+      ],
+      "outcome": "the tool behaves the way users expect."
+    },
+    "summary": {
+      "points": [
+        "Short + long flags.",
+        "--help/--version.",
+        "-- ends options."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does `--` mean on a command line?",
+        "a": "End of options: everything after it is treated as positional arguments."
+      }
+    ]
+  },
+  "configuration-precedence-the-hierarchy-of-truth": {
+    "core": "Settings come from several layers. The common order is flags > environment variables > project config > user config > system config > defaults. The most specific source wins.",
+    "first_principles": {
+      "problem": "Users can't tell which setting is in effect when a tool reads config from many places inconsistently.",
+      "truths": [
+        "Different contexts set config differently.",
+        "More specific intent should override general defaults.",
+        "Predictable precedence makes behaviour explainable."
+      ],
+      "derivation": [
+        "**Defaults** at the bottom.",
+        "Then **config files** (system → user → project).",
+        "Then **env vars** (good for CI and containers).",
+        "**CLI flags** on top."
+      ]
+    },
+    "analogy": {
+      "title": "Dress code layers",
+      "story": "The company has a default, your team overrides it, and today's meeting overrides both.",
+      "mapping": [
+        [
+          "Company default",
+          "Built-in default"
+        ],
+        [
+          "Team rule",
+          "Config file"
+        ],
+        [
+          "Today's meeting",
+          "CLI flag"
+        ]
+      ],
+      "breaks": "Secrets shouldn't go in flags, because they show up in process lists and shell history."
+    },
+    "mindmap": {
+      "center": "Config Precedence",
+      "branches": [
+        {
+          "label": "Top",
+          "children": [
+            "CLI flags"
+          ]
+        },
+        {
+          "label": "Then",
+          "children": [
+            "Env vars"
+          ]
+        },
+        {
+          "label": "Files",
+          "children": [
+            "Project",
+            "User",
+            "System"
+          ]
+        },
+        {
+          "label": "Bottom",
+          "children": [
+            "Defaults"
+          ]
+        },
+        {
+          "label": "Tip",
+          "children": [
+            "Show effective config"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Region resolution",
+      "scenario": "How the AWS CLI picks a region.",
+      "flow": [
+        "--region flag?",
+        "else AWS_REGION env?",
+        "else ~/.aws/config profile",
+        "else error"
+      ],
+      "steps": [
+        {
+          "label": "UX",
+          "detail": "Offer `mytool config show` to print the effective values and their sources."
+        }
+      ],
+      "code": [],
+      "outcome": "behaviour is predictable and explainable."
+    },
+    "summary": {
+      "points": [
+        "Specific beats general.",
+        "Flags > env > files > defaults.",
+        "Show effective config."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do env vars typically override config files?",
+        "a": "They are set closer to the specific run (CI, container), so they carry more specific intent."
+      }
+    ]
+  },
+  "output-formatting-humans-vs-machines": {
+    "core": "Humans want readable tables and colour; programs want stable structured data. Provide both: pretty by default on a TTY, and `--output json` for scripts. Send data to stdout and messages to stderr.",
+    "first_principles": {
+      "problem": "Scripts that parse human-formatted output break whenever a column is added or colours get mixed in.",
+      "truths": [
+        "Two audiences have conflicting needs.",
+        "A program can detect whether stdout is a terminal.",
+        "Mixing logs into stdout corrupts pipelines."
+      ],
+      "derivation": [
+        "Use a **table or colour on a TTY**.",
+        "Provide **--output json/yaml** for machines.",
+        "Send **data to stdout** and **logs and progress to stderr**.",
+        "Respect **NO_COLOR**."
+      ]
+    },
+    "analogy": {
+      "title": "A menu vs. an order ticket",
+      "story": "Customers read a styled menu; the kitchen needs a terse, standardised ticket.",
+      "mapping": [
+        [
+          "Menu",
+          "Pretty output"
+        ],
+        [
+          "Kitchen ticket",
+          "JSON"
+        ],
+        [
+          "Waiter chatter",
+          "stderr"
+        ]
+      ],
+      "breaks": "JSON output becomes an API, so changing it breaks users. Version it carefully."
+    },
+    "mindmap": {
+      "center": "Output",
+      "branches": [
+        {
+          "label": "Humans",
+          "children": [
+            "Tables",
+            "Color",
+            "TTY detect"
+          ]
+        },
+        {
+          "label": "Machines",
+          "children": [
+            "--json",
+            "Stable schema"
+          ]
+        },
+        {
+          "label": "Streams",
+          "children": [
+            "Data → stdout",
+            "Logs → stderr"
+          ]
+        },
+        {
+          "label": "Respect",
+          "children": [
+            "NO_COLOR"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Listing services",
+      "scenario": "The same data shown both ways.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Humans and scripts each get what they need."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "svc list                 # pretty table\nsvc list -o json | jq '.[] | select(.healthy==false) | .name'"
+        }
+      ],
+      "outcome": "output is usable by both."
+    },
+    "summary": {
+      "points": [
+        "Pretty for TTY.",
+        "JSON for machines.",
+        "stdout vs stderr."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should progress messages go?",
+        "a": "To stderr, so they don't pollute data piped from stdout."
+      }
+    ]
+  },
+  "interactive-safety-and-the-yes-flag": {
+    "core": "Destructive actions should require confirmation when run interactively, with a `--yes` or `--force` flag for automation. If there's no TTY and no --yes, refuse rather than guess.",
+    "first_principles": {
+      "problem": "One mistyped command destroys a production database, or the confirmation prompt hangs a CI job forever.",
+      "truths": [
+        "Humans make typos.",
+        "Automation can't answer prompts.",
+        "Irreversible actions deserve friction."
+      ],
+      "derivation": [
+        "Prompt for confirmation on **destructive operations**, ideally by retyping the resource name.",
+        "Skip the prompt with **--yes** in CI.",
+        "With **no TTY and no --yes**, fail.",
+        "Offer **--dry-run**."
+      ]
+    },
+    "analogy": {
+      "title": "A two-key missile launch",
+      "story": "Something irreversible takes deliberate double confirmation, not one accidental press.",
+      "mapping": [
+        [
+          "Second key",
+          "Typing the resource name"
+        ],
+        [
+          "Pre-authorised order",
+          "--yes"
+        ],
+        [
+          "Drill mode",
+          "--dry-run"
+        ]
+      ],
+      "breaks": "If prompts appear too often, people learn to type 'y' without reading. Keep them for truly destructive actions."
+    },
+    "mindmap": {
+      "center": "Interactive Safety",
+      "branches": [
+        {
+          "label": "Prompt",
+          "children": [
+            "Destructive only",
+            "Type name"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "--yes",
+            "--force"
+          ]
+        },
+        {
+          "label": "No TTY",
+          "children": [
+            "Refuse"
+          ]
+        },
+        {
+          "label": "Preview",
+          "children": [
+            "--dry-run"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dropping a database",
+      "scenario": "Interactive vs CI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Behaviour",
+          "detail": "In CI without --yes it exits 2 with a message, and never hangs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "$ dbctl drop orders-prod\nThis will permanently destroy 'orders-prod'. Type the name to confirm: _\n\n$ dbctl drop orders-prod --yes   # CI"
+        }
+      ],
+      "outcome": "humans are protected and automation still works."
+    },
+    "summary": {
+      "points": [
+        "Confirm destructive actions.",
+        "--yes for scripts.",
+        "Never hang without a TTY."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should a tool do if a prompt is needed but there's no TTY?",
+        "a": "Fail with a clear error telling the user to pass --yes, rather than hang or proceed."
+      }
+    ]
+  },
+  "exit-code-hygiene": {
+    "core": "Exit 0 only when the tool truly succeeded, and use distinct non-zero codes for distinct failure types. Callers and CI depend on them.",
+    "first_principles": {
+      "problem": "A tool prints 'ERROR' but exits 0, so the pipeline carries on and deploys something broken.",
+      "truths": [
+        "Exit codes are the machine-readable result.",
+        "Scripts branch on codes, not on text.",
+        "Codes above 128 mean the process died from a signal."
+      ],
+      "derivation": [
+        "**0 = success**, nothing else.",
+        "**1** = general error; **2** = usage error.",
+        "Define **specific codes** for meaningful states.",
+        "**Document** them."
+      ]
+    },
+    "analogy": {
+      "title": "Traffic lights for scripts",
+      "story": "Green (0) means go. Distinct reds tell the caller why it stopped.",
+      "mapping": [
+        [
+          "Green",
+          "0"
+        ],
+        [
+          "Red: wrong usage",
+          "2"
+        ],
+        [
+          "Red: not found",
+          "Custom code"
+        ]
+      ],
+      "breaks": "Exit codes are a single byte (0–255), so keep the meanings simple."
+    },
+    "mindmap": {
+      "center": "Exit Codes",
+      "branches": [
+        {
+          "label": "0",
+          "children": [
+            "Success only"
+          ]
+        },
+        {
+          "label": "Common",
+          "children": [
+            "1 error",
+            "2 usage"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "128+N"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Document",
+            "Never mask"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A health-check CLI",
+      "scenario": "Codes for different outcomes.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Use",
+          "detail": "Monitoring can tell 'down' (3) apart from 'checker broke' (1)."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "sys.exit(0 if healthy else 3)  # 3 = unhealthy, 1 = couldn't check"
+        }
+      ],
+      "outcome": "automation reacts correctly."
+    },
+    "summary": {
+      "points": [
+        "0 only on success.",
+        "Distinct codes.",
+        "Document them."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does exit code 130 usually mean?",
+        "a": "Terminated by SIGINT (128 + 2), for example Ctrl+C."
+      }
+    ]
+  },
+  "signal-handling-graceful-shutdowns": {
+    "core": "Catch SIGINT and SIGTERM to stop cleanly: finish or roll back the current step, release locks and exit with the right code. SIGKILL can't be caught.",
+    "first_principles": {
+      "problem": "A Ctrl+C or a Kubernetes pod stop leaves half-written files and stale locks behind.",
+      "truths": [
+        "Processes are asked to stop with signals.",
+        "SIGTERM is the polite request; SIGKILL follows after a grace period.",
+        "Partial work can corrupt state."
+      ],
+      "derivation": [
+        "Register **handlers** for SIGINT and SIGTERM.",
+        "Set a **stop flag** and finish the current unit of work.",
+        "**Clean up**: temp files, locks, connections.",
+        "Exit within the **grace period**."
+      ]
+    },
+    "analogy": {
+      "title": "Closing time at a shop",
+      "story": "When the bell rings (SIGTERM), serve the current customer, lock the till and leave. You don't vanish mid-sale.",
+      "mapping": [
+        [
+          "Closing bell",
+          "SIGTERM"
+        ],
+        [
+          "Current customer",
+          "Current task"
+        ],
+        [
+          "Locking the till",
+          "Cleanup"
+        ],
+        [
+          "Police eviction",
+          "SIGKILL"
+        ]
+      ],
+      "breaks": "If cleanup takes longer than the grace period, SIGKILL interrupts it anyway."
+    },
+    "mindmap": {
+      "center": "Signals",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "SIGINT (Ctrl+C)",
+            "SIGTERM",
+            "SIGKILL"
+          ]
+        },
+        {
+          "label": "Handle",
+          "children": [
+            "Set flag",
+            "Finish unit"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "Locks",
+            "Temp files"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "Grace period"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A batch uploader",
+      "scenario": "Stops between files, never in the middle of one.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No half-uploaded files, and the lock is always released."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "stop = False\nsignal.signal(signal.SIGTERM, lambda *_: globals().update(stop=True))\nfor f in files:\n    if stop: break\n    upload(f)\nrelease_lock()"
+        }
+      ],
+      "outcome": "interruptions are safe."
+    },
+    "summary": {
+      "points": [
+        "Catch INT and TERM.",
+        "Finish the unit, then clean up.",
+        "KILL can't be caught."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why handle SIGTERM in containerised tools?",
+        "a": "Orchestrators send SIGTERM to stop pods, and you get a short grace period to shut down cleanly."
+      }
+    ]
+  },
+  "putting-it-all-together-the-cli-engineering-checklist": {
+    "core": "A production CLI passes a checklist: library-parsed arguments, help, layered config, human and machine output, safety prompts, honest exit codes and graceful signal handling.",
+    "first_principles": {
+      "problem": "Individual practices are easy to forget, and a checklist makes quality repeatable.",
+      "truths": [
+        "Quality comes from consistency.",
+        "Checklists catch omissions.",
+        "Each item protects either a user or a pipeline."
+      ],
+      "derivation": [
+        "**Interface**: parser, --help, conventions.",
+        "**Config**: precedence.",
+        "**Output**: TTY vs JSON, stdout vs stderr.",
+        "**Safety**: confirm, --yes, dry-run.",
+        "**Behaviour**: exit codes, signals."
+      ]
+    },
+    "analogy": {
+      "title": "A pilot's pre-flight checklist",
+      "story": "Experienced pilots still run the list, because skipping one item can be fatal.",
+      "mapping": [
+        [
+          "Pre-flight list",
+          "CLI checklist"
+        ],
+        [
+          "Each check",
+          "Practice"
+        ],
+        [
+          "Safe flight",
+          "Reliable tool"
+        ]
+      ],
+      "breaks": "The checklist is a minimum. Real users will still find edge cases."
+    },
+    "mindmap": {
+      "center": "CLI Checklist",
+      "branches": [
+        {
+          "label": "Interface",
+          "children": [
+            "Parser",
+            "Help"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Precedence"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "JSON",
+            "stderr"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Confirm",
+            "dry-run"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Exit codes",
+            "Signals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reviewing a teammate's tool",
+      "scenario": "Go down the list.",
+      "flow": [
+        "argparse ✓",
+        "--json ✗ (add)",
+        "exit 0 on error ✗ (fix)",
+        "SIGTERM ✗ (add)",
+        "Ship"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Three gaps found before users found them."
+        }
+      ],
+      "code": [],
+      "outcome": "every tool ships at the same quality bar."
+    },
+    "summary": {
+      "points": [
+        "Use the checklist.",
+        "Interface, output, safety, behaviour.",
+        "Run it every time."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name three checklist items for a production CLI.",
+        "a": "For example: a parsing library with --help, JSON output to stdout with logs on stderr, and correct exit codes."
+      }
+    ]
+  }
+}

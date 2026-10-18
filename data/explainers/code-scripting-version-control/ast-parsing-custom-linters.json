@@ -1,0 +1,499 @@
+{
+  "introduction-why-regex-isnt-enough": {
+    "core": "Regex sees text, so it can't tell code from comments or strings, or know what a name refers to. Linters that parse code into a syntax tree understand structure and give precise, reliable rules.",
+    "first_principles": {
+      "problem": "A regex for `eval(` flags comments and strings and misses `e = eval; e(x)`, with false positives and negatives everywhere.",
+      "truths": [
+        "Code has grammar and structure.",
+        "Text patterns ignore context.",
+        "Parsers already exist for every language."
+      ],
+      "derivation": [
+        "**Parse** the source into an AST.",
+        "**Match node types** (Call, Import, Attribute).",
+        "Report with **exact locations**.",
+        "Integrate into **standard linters and CI**."
+      ]
+    },
+    "analogy": {
+      "title": "Auditing logs for a word vs. understanding events",
+      "story": "Searching for 'unauthorized' finds comments and jokes; parsing access events finds the actual violations.",
+      "mapping": [
+        [
+          "Word search",
+          "Regex"
+        ],
+        [
+          "Parsed events",
+          "AST nodes"
+        ],
+        [
+          "Real violations",
+          "Precise lint findings"
+        ]
+      ],
+      "breaks": "An AST shows syntax, not runtime behaviour. Dynamic tricks can still evade it."
+    },
+    "mindmap": {
+      "center": "Beyond Regex",
+      "branches": [
+        {
+          "label": "Regex",
+          "children": [
+            "Text",
+            "False positives",
+            "Misses"
+          ]
+        },
+        {
+          "label": "AST",
+          "children": [
+            "Structure",
+            "Node types",
+            "Precise"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Custom rules",
+            "CI gates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Banning print() in a library",
+      "scenario": "Regex vs AST.",
+      "flow": [
+        "Regex: flags '# print debug' comment",
+        "AST: only real Call(func=Name('print'))"
+      ],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Zero false positives."
+        }
+      ],
+      "code": [],
+      "outcome": "rules that understand code."
+    },
+    "summary": {
+      "points": [
+        "Regex sees text.",
+        "ASTs see structure.",
+        "Precision matters."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does regex produce false positives for code rules?",
+        "a": "It matches text inside comments and strings, without understanding code structure."
+      }
+    ]
+  },
+  "the-abstract-syntax-tree-ast": {
+    "core": "Parsing turns source text into a tree of typed nodes (Module → FunctionDef → Call → Name). Python's `ast` module exposes it, and a NodeVisitor walks it to find patterns.",
+    "first_principles": {
+      "problem": "To analyse code reliably you need its structure, not its characters.",
+      "truths": [
+        "Parsers turn text into trees.",
+        "Each construct has a node type with fields.",
+        "Visiting a tree is systematic."
+      ],
+      "derivation": [
+        "Run **ast.parse(src)** to get a tree.",
+        "Inspect with **ast.dump(tree, indent=2)**.",
+        "Subclass **ast.NodeVisitor** and define visit_Call and friends.",
+        "Read **lineno / col_offset** for reporting."
+      ]
+    },
+    "analogy": {
+      "title": "Sentence diagramming",
+      "story": "Breaking a sentence into subject, verb and object shows its structure, whatever the punctuation.",
+      "mapping": [
+        [
+          "Sentence",
+          "Source code"
+        ],
+        [
+          "Diagram",
+          "AST"
+        ],
+        [
+          "Parts of speech",
+          "Node types"
+        ]
+      ],
+      "breaks": "The AST drops comments and formatting. For those you need a CST (libcst)."
+    },
+    "mindmap": {
+      "center": "AST",
+      "branches": [
+        {
+          "label": "Parse",
+          "children": [
+            "ast.parse"
+          ]
+        },
+        {
+          "label": "Nodes",
+          "children": [
+            "Module",
+            "FunctionDef",
+            "Call",
+            "Name"
+          ]
+        },
+        {
+          "label": "Walk",
+          "children": [
+            "NodeVisitor",
+            "ast.walk"
+          ]
+        },
+        {
+          "label": "Report",
+          "children": [
+            "lineno",
+            "col_offset"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding eval() calls",
+      "scenario": "A minimal visitor.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only real eval calls are reported, with line numbers."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class EvalFinder(ast.NodeVisitor):\n    def visit_Call(self, node):\n        if isinstance(node.func, ast.Name) and node.func.id == \"eval\":\n            print(f\"line {node.lineno}: eval() is forbidden\")\n        self.generic_visit(node)\n\nEvalFinder().visit(ast.parse(open(\"app.py\").read()))"
+        }
+      ],
+      "outcome": "code becomes queryable data."
+    },
+    "summary": {
+      "points": [
+        "Text becomes a tree.",
+        "Typed nodes.",
+        "Visitors walk them."
+      ]
+    },
+    "check": [
+      {
+        "q": "What Python class helps you walk an AST with per-node-type methods?",
+        "a": "ast.NodeVisitor."
+      }
+    ]
+  },
+  "writing-a-pylint-plugin": {
+    "core": "Packaging an AST rule as a Pylint checker plugin gives you standard message IDs, consistent output, disable comments and editor integration, instead of a one-off script.",
+    "first_principles": {
+      "problem": "Standalone scripts have custom output, no suppression mechanism and no IDE integration.",
+      "truths": [
+        "Teams already run linters.",
+        "Standard formats integrate with tools.",
+        "Suppression is needed for justified exceptions."
+      ],
+      "derivation": [
+        "Subclass **BaseChecker**.",
+        "Declare **msgs** with an ID and symbol (W9001, no-eval).",
+        "Implement **visit_call(node)** with astroid nodes.",
+        "**register(linter)**, then load with `--load-plugins`."
+      ]
+    },
+    "analogy": {
+      "title": "Adding a new inspection to an existing checklist",
+      "story": "Instead of a separate clipboard, the new check joins the inspector's standard form.",
+      "mapping": [
+        [
+          "Standard form",
+          "Pylint output"
+        ],
+        [
+          "New check",
+          "Custom checker"
+        ],
+        [
+          "Inspector's waiver",
+          "# pylint: disable"
+        ]
+      ],
+      "breaks": "Pylint uses astroid (an enriched AST), so APIs differ slightly from the stdlib ast."
+    },
+    "mindmap": {
+      "center": "Pylint Plugin",
+      "branches": [
+        {
+          "label": "Class",
+          "children": [
+            "BaseChecker"
+          ]
+        },
+        {
+          "label": "Messages",
+          "children": [
+            "ID",
+            "Symbol"
+          ]
+        },
+        {
+          "label": "Visit",
+          "children": [
+            "visit_call",
+            "astroid"
+          ]
+        },
+        {
+          "label": "Load",
+          "children": [
+            "--load-plugins"
+          ]
+        },
+        {
+          "label": "Suppress",
+          "children": [
+            "disable comments"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A no-requests-without-timeout rule",
+      "scenario": "Plugin skeleton.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Use",
+          "detail": "`pylint --load-plugins=lint.timeout src/`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class TimeoutChecker(BaseChecker):\n    name = \"timeout\"\n    msgs = {\"W9001\": (\"requests call without timeout\", \"requests-no-timeout\", \"Always pass timeout=\")}\n    def visit_call(self, node):\n        if node.func.as_string().startswith(\"requests.\") and not any(k.arg == \"timeout\" for k in node.keywords or []):\n            self.add_message(\"requests-no-timeout\", node=node)\n\ndef register(linter): linter.register_checker(TimeoutChecker(linter))"
+        }
+      ],
+      "outcome": "custom rules feel like built-in ones."
+    },
+    "summary": {
+      "points": [
+        "Plug into the ecosystem.",
+        "Standard messages.",
+        "Suppressible."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why write a Pylint plugin instead of a standalone script?",
+        "a": "It gives standard output, suppression comments, configuration and IDE/CI integration for free."
+      }
+    ]
+  },
+  "integrating-custom-linters-into-cicd": {
+    "core": "A rule that isn't enforced is only a suggestion. Run custom linters in pre-commit for fast feedback and as a required CI check, and roll them out with baselines so existing violations don't block everyone.",
+    "first_principles": {
+      "problem": "A new rule would fail 300 existing files on day one, so the team disables it.",
+      "truths": [
+        "Enforcement happens at merge gates.",
+        "Fast local feedback reduces CI failures.",
+        "Legacy code needs a migration path."
+      ],
+      "derivation": [
+        "Add to **pre-commit** (fast and local).",
+        "Add a **CI job** as a required status check.",
+        "Use a **baseline or diff-only** mode for legacy code.",
+        "Track **violations over time** down to zero."
+      ]
+    },
+    "analogy": {
+      "title": "New building codes",
+      "story": "New construction must comply immediately, while existing buildings get a phased deadline.",
+      "mapping": [
+        [
+          "New construction",
+          "New/changed code"
+        ],
+        [
+          "Existing buildings",
+          "Legacy violations"
+        ],
+        [
+          "Inspection",
+          "CI gate"
+        ]
+      ],
+      "breaks": "Too many blocking rules frustrate developers, so keep the rules high-value."
+    },
+    "mindmap": {
+      "center": "Lint in CI",
+      "branches": [
+        {
+          "label": "Local",
+          "children": [
+            "pre-commit"
+          ]
+        },
+        {
+          "label": "Gate",
+          "children": [
+            "CI job",
+            "Required check"
+          ]
+        },
+        {
+          "label": "Legacy",
+          "children": [
+            "Baseline",
+            "Diff-only"
+          ]
+        },
+        {
+          "label": "Track",
+          "children": [
+            "Trend to zero"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A GitHub Actions lint job",
+      "scenario": "Diff-aware.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New violations are blocked while legacy ones are fixed gradually."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- name: Custom lint\n  run: |\n    git diff --name-only origin/main...HEAD -- '*.py' \\\n      | xargs -r pylint --load-plugins=lint.timeout --disable=all --enable=requests-no-timeout"
+        }
+      ],
+      "outcome": "rules are enforced without a revolt."
+    },
+    "summary": {
+      "points": [
+        "Enforce at the gate.",
+        "Fast local feedback.",
+        "Baseline legacy code."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you introduce a strict rule into a large legacy codebase?",
+        "a": "Enforce it only on changed code or against a baseline, then burn down existing violations over time."
+      }
+    ]
+  },
+  "advanced-patterns-detecting-attribute-calls-and-imports": {
+    "core": "Real rules have to match attribute calls (`os.system`), aliased imports (`import subprocess as sp`, `from os import system`) and keyword arguments. Track imports to resolve names before matching calls.",
+    "first_principles": {
+      "problem": "A rule that only catches `os.system(...)` misses `from os import system as run; run(cmd)`.",
+      "truths": [
+        "Code reaches the same function through many names.",
+        "Imports define what names mean.",
+        "Calls have positional and keyword arguments."
+      ],
+      "derivation": [
+        "**visit_Import / visit_ImportFrom** to build an alias map.",
+        "**visit_Call**: resolve **Attribute** chains or **Name** through the alias map.",
+        "Inspect **keywords** (shell=True).",
+        "Resolve to a **qualified name** before matching."
+      ]
+    },
+    "analogy": {
+      "title": "Tracking nicknames",
+      "story": "To know 'Bobby' is Robert, you need the introductions (imports) before the conversation (calls).",
+      "mapping": [
+        [
+          "Introductions",
+          "Import statements"
+        ],
+        [
+          "Nicknames",
+          "Aliases"
+        ],
+        [
+          "Conversation",
+          "Function calls"
+        ]
+      ],
+      "breaks": "Fully dynamic access (getattr, importlib) still evades static analysis."
+    },
+    "mindmap": {
+      "center": "Advanced Matching",
+      "branches": [
+        {
+          "label": "Imports",
+          "children": [
+            "Import",
+            "ImportFrom",
+            "Alias map"
+          ]
+        },
+        {
+          "label": "Calls",
+          "children": [
+            "Attribute chains",
+            "Name"
+          ]
+        },
+        {
+          "label": "Args",
+          "children": [
+            "keywords",
+            "shell=True"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "getattr",
+            "Dynamic"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detecting subprocess with shell=True",
+      "scenario": "Alias-aware.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "It catches `sp.run(cmd, shell=True)` even with an alias."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class ShellTrue(ast.NodeVisitor):\n    def __init__(self): self.alias = {}\n    def visit_Import(self, n):\n        for a in n.names: self.alias[a.asname or a.name] = a.name\n    def visit_Call(self, n):\n        f = n.func\n        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and self.alias.get(f.value.id) == \"subprocess\":\n            if any(k.arg == \"shell\" and getattr(k.value, \"value\", False) is True for k in n.keywords):\n                print(f\"line {n.lineno}: subprocess with shell=True\")\n        self.generic_visit(n)"
+        }
+      ],
+      "outcome": "rules robust to how code is written."
+    },
+    "summary": {
+      "points": [
+        "Track imports.",
+        "Resolve attributes.",
+        "Inspect keywords."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why track imports in a custom linter?",
+        "a": "To resolve aliases so the rule recognises the same function under different names."
+      }
+    ]
+  }
+}

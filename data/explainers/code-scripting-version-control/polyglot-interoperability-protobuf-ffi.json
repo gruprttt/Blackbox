@@ -1,0 +1,409 @@
+{
+  "introduction-the-tower-of-babel": {
+    "core": "Modern stacks mix Go, Python, Java and Rust. They need a shared language: a schema over the network (Protobuf/gRPC) or a C ABI inside one process (FFI).",
+    "first_principles": {
+      "problem": "Services in different languages miscommunicate: field names drift, types don't match and hand-written clients break.",
+      "truths": [
+        "Each language has its own native types.",
+        "Communication needs an agreed contract.",
+        "Network calls and in-process calls have different costs."
+      ],
+      "derivation": [
+        "Between processes: **schema-first serialisation** (Protobuf).",
+        "Inside one process: the **C ABI** through FFI.",
+        "Generate code **from the contract**."
+      ]
+    },
+    "analogy": {
+      "title": "A multilingual kitchen",
+      "story": "French, Italian and Mandarin-speaking chefs share standard order tickets so every dish comes out right.",
+      "mapping": [
+        [
+          "Order tickets",
+          "Protobuf schema"
+        ],
+        [
+          "Chefs",
+          "Services in different languages"
+        ],
+        [
+          "Shared hand signals",
+          "C ABI"
+        ]
+      ],
+      "breaks": "Contracts must evolve carefully, or one chef misreads an updated ticket."
+    },
+    "mindmap": {
+      "center": "Polyglot",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Many languages",
+            "Contract drift"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "Protobuf",
+            "gRPC"
+          ]
+        },
+        {
+          "label": "In-process",
+          "children": [
+            "FFI",
+            "C ABI"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "Schema-first",
+            "Codegen"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Go API with a Python ML model",
+      "scenario": "Two ways to connect them.",
+      "flow": [
+        "Option A: gRPC service (network)",
+        "Option B: Python calls Rust lib via FFI (in-process)",
+        "Choose by latency and isolation"
+      ],
+      "steps": [
+        {
+          "label": "Principle",
+          "detail": "A contract-first approach either way."
+        }
+      ],
+      "code": [],
+      "outcome": "languages interoperate reliably."
+    },
+    "summary": {
+      "points": [
+        "Shared contracts.",
+        "Network or in-process.",
+        "Generate code."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two main interop approaches?",
+        "a": "Network serialisation with a schema (Protobuf/gRPC) and in-process FFI via the C ABI."
+      }
+    ]
+  },
+  "protocol-buffers-protobuf-the-universal-tongue": {
+    "core": "Protobuf defines messages in a .proto schema and generates typed code for every language. It encodes compact binary with numbered fields, so it's smaller and faster than JSON and evolves safely.",
+    "first_principles": {
+      "problem": "JSON repeats field names in every message, has loose types and gives no schema-enforced contract between teams.",
+      "truths": [
+        "Repeating field names wastes bytes.",
+        "Typed contracts catch mismatches early.",
+        "Field numbers allow evolution."
+      ],
+      "derivation": [
+        "Define **messages** with **numbered fields**.",
+        "**protoc** generates code per language.",
+        "Binary encoding is **3–10x smaller**.",
+        "**Never reuse field numbers**; add new fields to evolve."
+      ]
+    },
+    "analogy": {
+      "title": "A pre-printed form with numbered boxes",
+      "story": "Everyone knows box 3 means 'quantity', so you write only the values, never the labels.",
+      "mapping": [
+        [
+          "Box numbers",
+          "Field tags"
+        ],
+        [
+          "Values only",
+          "Binary encoding"
+        ],
+        [
+          "Adding a new box",
+          "Backward-compatible field"
+        ]
+      ],
+      "breaks": "Binary isn't human-readable, so debugging needs tools like grpcurl or protoc --decode."
+    },
+    "mindmap": {
+      "center": "Protobuf",
+      "branches": [
+        {
+          "label": "Schema",
+          "children": [
+            ".proto",
+            "Numbered fields"
+          ]
+        },
+        {
+          "label": "Codegen",
+          "children": [
+            "protoc",
+            "buf"
+          ]
+        },
+        {
+          "label": "Wire",
+          "children": [
+            "Binary",
+            "Compact"
+          ]
+        },
+        {
+          "label": "Evolution",
+          "children": [
+            "Add fields",
+            "Never reuse numbers"
+          ]
+        },
+        {
+          "label": "Transport",
+          "children": [
+            "gRPC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A user message",
+      "scenario": "Schema and use.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Evolve",
+          "detail": "Add `string team = 4;` and old clients simply ignore it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "protobuf",
+          "text": "syntax = \"proto3\";\nmessage User {\n  int64 id = 1;\n  string email = 2;\n  repeated string roles = 3;\n}"
+        }
+      ],
+      "outcome": "fast, typed and evolvable cross-language data."
+    },
+    "summary": {
+      "points": [
+        "Schema-first.",
+        "Numbered fields.",
+        "Compact binary."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you never reuse a field number?",
+        "a": "Old data or clients would interpret the new field's bytes as the old field, corrupting meaning."
+      }
+    ]
+  },
+  "foreign-function-interfaces-ffi-crossing-process-boundaries": {
+    "core": "FFI lets one language call functions compiled in another (usually through the C ABI) inside the same process, with no serialisation or network. It's ideal for hot paths like calling a Rust library from Python.",
+    "first_principles": {
+      "problem": "Even fast gRPC adds microseconds to milliseconds per call, which is too slow for millions of tight calls.",
+      "truths": [
+        "Network calls need serialisation and kernel transitions.",
+        "Functions in one process call each other in nanoseconds.",
+        "The C ABI is the common denominator."
+      ],
+      "derivation": [
+        "Compile the library with a **C-compatible ABI** (extern \"C\").",
+        "Load it from the host (ctypes, cffi, PyO3, cgo, JNI).",
+        "**Marshal** types across.",
+        "Use it for **hot, chatty calls**."
+      ]
+    },
+    "analogy": {
+      "title": "Talking face to face vs. by post",
+      "story": "Post (network) needs envelopes and delivery time; face to face (FFI) is instant but requires being in the same room.",
+      "mapping": [
+        [
+          "Post",
+          "RPC"
+        ],
+        [
+          "Same room",
+          "Same process"
+        ],
+        [
+          "Common language",
+          "C ABI"
+        ]
+      ],
+      "breaks": "Being in the same room means sharing risks too: a crash in the library kills the host."
+    },
+    "mindmap": {
+      "center": "FFI",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "C ABI",
+            "Shared lib"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ctypes",
+            "cffi",
+            "PyO3",
+            "cgo",
+            "JNI"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "No serialisation",
+            "ns calls"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Hot paths"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Python calling a Rust hashing library",
+      "scenario": "Using PyO3.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Native speed with no network hop."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rust",
+          "text": "#[pyfunction]\nfn fast_hash(data: &[u8]) -> u64 { xxhash_rust::xxh3::xxh3_64(data) }\n// python: import fasthash; fasthash.fast_hash(b\"...\")"
+        }
+      ],
+      "outcome": "cross-language calls at native speed."
+    },
+    "summary": {
+      "points": [
+        "Same process.",
+        "Through the C ABI.",
+        "For hot paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is FFI preferable to gRPC?",
+        "a": "For very frequent, latency-critical calls where serialisation and network overhead dominate."
+      }
+    ]
+  },
+  "ffi-risks-here-be-dragons": {
+    "core": "FFI drops the host language's safety net: memory leaks, buffer overflows and segfaults in native code crash the whole process, and ownership and threading rules must be handled by hand at the boundary.",
+    "first_principles": {
+      "problem": "A small bug in a C extension segfaults a Python service with no traceback.",
+      "truths": [
+        "Native code has no GC or bounds checks.",
+        "Both sides must agree who frees memory.",
+        "Crashes cross the boundary as process death."
+      ],
+      "derivation": [
+        "Define **memory ownership** explicitly (who allocates, who frees).",
+        "**Validate** inputs at the boundary.",
+        "Watch **GIL and thread** rules.",
+        "**Isolate risky code** in a subprocess when stability matters."
+      ]
+    },
+    "analogy": {
+      "title": "Leaving the climbing gym for a real cliff",
+      "story": "Indoors there are mats and auto-belays; outside, a slip is a real fall.",
+      "mapping": [
+        [
+          "Gym mats",
+          "GC and exceptions"
+        ],
+        [
+          "Real cliff",
+          "Native code"
+        ],
+        [
+          "Belay partner",
+          "Explicit ownership rules"
+        ]
+      ],
+      "breaks": "Memory-safe native languages such as Rust with PyO3 reduce, but don't remove, these risks."
+    },
+    "mindmap": {
+      "center": "FFI Risks",
+      "branches": [
+        {
+          "label": "Memory",
+          "children": [
+            "Leaks",
+            "Double free",
+            "Overflow"
+          ]
+        },
+        {
+          "label": "Crashes",
+          "children": [
+            "Segfault kills host"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "GIL",
+            "Threads"
+          ]
+        },
+        {
+          "label": "Mitigate",
+          "children": [
+            "Ownership rules",
+            "Rust",
+            "Subprocess isolation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A leaky string return",
+      "scenario": "Who frees it?",
+      "flow": [
+        "C returns malloc'd char*",
+        "Python copies into str",
+        "Nobody calls free → leak",
+        "Fix: export free_string() and call it"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Every boundary needs an explicit ownership contract."
+        }
+      ],
+      "code": [],
+      "outcome": "FFI is used with deliberate safety rules."
+    },
+    "summary": {
+      "points": [
+        "No safety net.",
+        "Explicit ownership.",
+        "Isolate when in doubt."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can FFI bugs be worse than normal bugs?",
+        "a": "Native crashes and memory corruption take down the whole host process with no exception to catch."
+      }
+    ]
+  }
+}

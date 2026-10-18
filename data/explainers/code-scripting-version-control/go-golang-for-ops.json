@@ -1,0 +1,998 @@
+{
+  "introduction-why-go-is-an-ops-superpower": {
+    "core": "Go compiles to a single static binary, has cheap built-in concurrency and runs fast. That's why Kubernetes, Docker, Terraform and Prometheus are written in it.",
+    "first_principles": {
+      "problem": "Python tools need interpreters and dependencies on every host, and they struggle with thousands of concurrent network calls.",
+      "truths": [
+        "Distributing a runtime is painful.",
+        "Ops tools are network- and concurrency-heavy.",
+        "The cloud-native ecosystem speaks Go."
+      ],
+      "derivation": [
+        "**Single binary**: copy it and run it.",
+        "**Goroutines**: thousands of concurrent tasks cheaply.",
+        "**Static typing** catches errors at compile time.",
+        "You can read the **source of your infra tools**."
+      ]
+    },
+    "analogy": {
+      "title": "A self-contained camping stove",
+      "story": "It comes with everything inside: no gas line (runtime) to install at each campsite (server).",
+      "mapping": [
+        [
+          "Self-contained stove",
+          "Static binary"
+        ],
+        [
+          "Gas line",
+          "Interpreter + deps"
+        ],
+        [
+          "Many burners",
+          "Goroutines"
+        ]
+      ],
+      "breaks": "Go is more verbose than Python for quick data munging; use each where it fits."
+    },
+    "mindmap": {
+      "center": "Why Go",
+      "branches": [
+        {
+          "label": "Deploy",
+          "children": [
+            "Single binary",
+            "Cross-compile"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "Goroutines",
+            "Channels"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Static types"
+          ]
+        },
+        {
+          "label": "Ecosystem",
+          "children": [
+            "K8s",
+            "Docker",
+            "Terraform"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Health-checking 500 servers",
+      "scenario": "Python vs Go.",
+      "flow": [
+        "Python serial: minutes",
+        "Go goroutines: seconds",
+        "Ship one binary to the bastion"
+      ],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Fast, dependency-free tooling."
+        }
+      ],
+      "code": [],
+      "outcome": "Go is the natural choice for distributed ops tools."
+    },
+    "summary": {
+      "points": [
+        "One binary.",
+        "Cheap concurrency.",
+        "Cloud-native's language."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a static binary valuable for ops?",
+        "a": "It runs anywhere without installing a runtime or dependencies."
+      }
+    ]
+  },
+  "go-basics-the-building-blocks-you-need-first": {
+    "core": "Go has packages and imports, a `main` entry point, typed variables (`:=` infers the type), functions with multiple returns, structs, slices, maps and for loops. That's enough to read most ops code.",
+    "first_principles": {
+      "problem": "The later concurrency and JSON lessons are unreadable without the basic syntax.",
+      "truths": [
+        "Go deliberately has a small set of features.",
+        "Every file belongs to a package.",
+        "Types are explicit or inferred."
+      ],
+      "derivation": [
+        "`package main` + `func main()` = **program**.",
+        "`x := 5` = **declare and infer**.",
+        "Functions return **(value, error)**.",
+        "Use **slices** for lists, **maps** for dicts, and **for** as the only loop."
+      ]
+    },
+    "analogy": {
+      "title": "Learning the alphabet before writing",
+      "story": "A small alphabet (few keywords) and you can read every sentence.",
+      "mapping": [
+        [
+          "Alphabet",
+          "~25 keywords"
+        ],
+        [
+          "Words",
+          "Types and funcs"
+        ],
+        [
+          "Sentences",
+          "Programs"
+        ]
+      ],
+      "breaks": "Go's minimalism means some things (generics, enums) feel different from other languages."
+    },
+    "mindmap": {
+      "center": "Go Basics",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "package",
+            "import",
+            "main"
+          ]
+        },
+        {
+          "label": "Vars",
+          "children": [
+            ":=",
+            "var"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "struct",
+            "slice",
+            "map"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "for",
+            "if",
+            "switch"
+          ]
+        },
+        {
+          "label": "Funcs",
+          "children": [
+            "Multi-return"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A tiny program",
+      "scenario": "Every basic element.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Run",
+          "detail": "`go run main.go`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "package main\nimport \"fmt\"\nfunc main() {\n    hosts := []string{\"web1\", \"web2\"}\n    for i, h := range hosts { fmt.Println(i, h) }\n}"
+        }
+      ],
+      "outcome": "you can read and write simple Go."
+    },
+    "summary": {
+      "points": [
+        "package + main.",
+        ":= infers.",
+        "for is the only loop."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is Go's only loop keyword?",
+        "a": "for (it also covers while and range loops)."
+      }
+    ]
+  },
+  "concurrency-goroutines": {
+    "core": "Prefixing a call with `go` runs it as a goroutine, a lightweight concurrent task of a few KB. Use a `sync.WaitGroup` to wait for them all to finish.",
+    "first_principles": {
+      "problem": "Checking 200 servers one at a time with a 5 s timeout takes up to 1,000 seconds.",
+      "truths": [
+        "I/O waits dominate ops work.",
+        "OS threads are expensive; goroutines are cheap.",
+        "You have to know when concurrent work has finished."
+      ],
+      "derivation": [
+        "`go check(host)` **starts concurrently**.",
+        "**wg.Add(1)** before, **defer wg.Done()** inside.",
+        "**wg.Wait()** blocks until all are done.",
+        "Total time ≈ the **slowest** check."
+      ]
+    },
+    "analogy": {
+      "title": "Sending many letters at once",
+      "story": "Instead of waiting for each reply before sending the next letter, post them all and wait for the replies together.",
+      "mapping": [
+        [
+          "Letters",
+          "Goroutines"
+        ],
+        [
+          "Replies",
+          "Results"
+        ],
+        [
+          "Counting replies",
+          "WaitGroup"
+        ]
+      ],
+      "breaks": "Unbounded goroutines can overwhelm targets or run out of file descriptors, so limit concurrency."
+    },
+    "mindmap": {
+      "center": "Goroutines",
+      "branches": [
+        {
+          "label": "Start",
+          "children": [
+            "go f()"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "~KB stack",
+            "Cheap"
+          ]
+        },
+        {
+          "label": "Wait",
+          "children": [
+            "WaitGroup"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Bound concurrency",
+            "Race conditions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "200 health checks in parallel",
+      "scenario": "From 1,000 s to about 5 s.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Runtime is bounded by the slowest host."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "var wg sync.WaitGroup\nfor _, h := range hosts {\n    wg.Add(1)\n    go func(h string) { defer wg.Done(); check(h) }(h)\n}\nwg.Wait()"
+        }
+      ],
+      "outcome": "massive I/O parallelism with little code."
+    },
+    "summary": {
+      "points": [
+        "go = concurrent.",
+        "WaitGroup to wait.",
+        "Bound concurrency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does wg.Wait() do?",
+        "a": "Blocks until every goroutine that called Add has called Done."
+      }
+    ]
+  },
+  "concurrency-channels": {
+    "core": "Channels are typed pipes between goroutines: they send results safely without shared memory or locks. 'Don't communicate by sharing memory; share memory by communicating.'",
+    "first_principles": {
+      "problem": "Goroutines writing to one shared variable cause race conditions unless you lock carefully.",
+      "truths": [
+        "Shared mutable state with concurrency is error-prone.",
+        "Message passing transfers ownership.",
+        "An unbuffered send blocks until it's received."
+      ],
+      "derivation": [
+        "`ch := make(chan Result)`.",
+        "Send with **`ch <- r`**; receive with **`r := <-ch`**.",
+        "**Buffered** channels decouple the speed of producer and consumer.",
+        "**close(ch)** + `range ch` to finish."
+      ]
+    },
+    "analogy": {
+      "title": "A pneumatic tube system",
+      "story": "Workers drop results in the tube; the receiver takes them out one at a time. No-one fights over a shared desk.",
+      "mapping": [
+        [
+          "Tube",
+          "Channel"
+        ],
+        [
+          "Capsule",
+          "Value"
+        ],
+        [
+          "Tube capacity",
+          "Buffer"
+        ]
+      ],
+      "breaks": "Sending on a channel nobody reads from blocks forever, which is a goroutine leak."
+    },
+    "mindmap": {
+      "center": "Channels",
+      "branches": [
+        {
+          "label": "Ops",
+          "children": [
+            "ch <- v",
+            "<-ch",
+            "close"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Unbuffered",
+            "Buffered"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Fan-in",
+            "Worker pool"
+          ]
+        },
+        {
+          "label": "Pitfall",
+          "children": [
+            "Leaks",
+            "Deadlock"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Collecting health results",
+      "scenario": "Each goroutine sends its result back.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No locks and no races, and results arrive as they finish."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "results := make(chan string, len(hosts))\nfor _, h := range hosts { go func(h string) { results <- check(h) }(h) }\nfor range hosts { fmt.Println(<-results) }"
+        }
+      ],
+      "outcome": "safe communication between concurrent tasks."
+    },
+    "summary": {
+      "points": [
+        "Pass messages, not memory.",
+        "Buffered vs unbuffered.",
+        "Avoid leaks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens when you send on an unbuffered channel no-one reads?",
+        "a": "The sender blocks forever, which leaks the goroutine."
+      }
+    ]
+  },
+  "concurrency-select-and-context-timeouts": {
+    "core": "`select` waits on several channel operations at once; `context` carries deadlines and cancellation. Together they ensure nothing in an ops tool waits forever.",
+    "first_principles": {
+      "problem": "A health check against a black-holed host hangs indefinitely and freezes the whole tool.",
+      "truths": [
+        "Networks can stall forever.",
+        "Work should stop when its caller gives up.",
+        "You often wait on 'result or timeout'."
+      ],
+      "derivation": [
+        "Create **`ctx, cancel := context.WithTimeout(...)`**.",
+        "Pass ctx to calls (http.NewRequestWithContext).",
+        "Use **select { case r := <-ch: … case <-ctx.Done(): … }**.",
+        "Always **defer cancel()**."
+      ]
+    },
+    "analogy": {
+      "title": "An egg timer during cooking",
+      "story": "You wait for the dish or the timer, whichever comes first. When the timer rings, you stop.",
+      "mapping": [
+        [
+          "Dish ready",
+          "Result channel"
+        ],
+        [
+          "Timer",
+          "ctx.Done()"
+        ],
+        [
+          "Waiting for whichever first",
+          "select"
+        ]
+      ],
+      "breaks": "Cancellation only works if downstream code actually checks ctx."
+    },
+    "mindmap": {
+      "center": "select + context",
+      "branches": [
+        {
+          "label": "select",
+          "children": [
+            "Wait on many",
+            "First wins"
+          ]
+        },
+        {
+          "label": "context",
+          "children": [
+            "WithTimeout",
+            "WithCancel",
+            "Propagates"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "defer cancel()",
+            "Pass ctx down"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 5-second health check",
+      "scenario": "Timeout built in.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dead hosts fail after 5 s instead of hanging."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)\ndefer cancel()\nreq, _ := http.NewRequestWithContext(ctx, \"GET\", url, nil)\nresp, err := http.DefaultClient.Do(req) // errors after 5s"
+        }
+      ],
+      "outcome": "every operation has a bounded wait."
+    },
+    "summary": {
+      "points": [
+        "select races channels.",
+        "context carries deadlines.",
+        "Always cancel."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why pass ctx to downstream calls?",
+        "a": "So their work is cancelled when the deadline passes or the caller gives up."
+      }
+    ]
+  },
+  "resource-cleanup-the-defer-keyword": {
+    "core": "`defer` schedules a call to run when the function returns, on every exit path. Placing `defer f.Close()` right after opening guarantees the cleanup happens.",
+    "first_principles": {
+      "problem": "Functions with several early error returns forget to close files or connections, leaking file descriptors.",
+      "truths": [
+        "Functions have many exit paths.",
+        "Every resource you acquire must be released.",
+        "Code next to its pair is easier to verify."
+      ],
+      "derivation": [
+        "Acquire, check the error, then **defer release** immediately.",
+        "Deferred calls run **LIFO**.",
+        "They also run during a **panic**.",
+        "Arguments are **evaluated at defer time**."
+      ]
+    },
+    "analogy": {
+      "title": "Writing 'turn off the oven' on the door",
+      "story": "Whatever path you take out of the kitchen, the note is on the door you leave through.",
+      "mapping": [
+        [
+          "Note on door",
+          "defer"
+        ],
+        [
+          "Leaving the kitchen",
+          "Function return"
+        ],
+        [
+          "Oven",
+          "Resource"
+        ]
+      ],
+      "breaks": "A defer inside a long loop only runs at function exit, so resources pile up until then."
+    },
+    "mindmap": {
+      "center": "defer",
+      "branches": [
+        {
+          "label": "When",
+          "children": [
+            "Function exit",
+            "Even panic"
+          ]
+        },
+        {
+          "label": "Order",
+          "children": [
+            "LIFO"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Close files",
+            "Unlock",
+            "cancel()"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "Loops",
+            "Args evaluated early"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reading a config file",
+      "scenario": "Close is guaranteed.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No FD leaks, even with five early returns."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "f, err := os.Open(path)\nif err != nil { return err }\ndefer f.Close()\n// any return below still closes f"
+        }
+      ],
+      "outcome": "cleanup can't be forgotten."
+    },
+    "summary": {
+      "points": [
+        "Defer right after acquiring.",
+        "Runs on every exit.",
+        "LIFO order."
+      ]
+    },
+    "check": [
+      {
+        "q": "In what order do multiple defers run?",
+        "a": "Last in, first out."
+      }
+    ]
+  },
+  "parsing-json-with-structs": {
+    "core": "Unmarshal JSON into typed structs whose field tags map JSON keys. Mistyped or missing fields become compile-time types or zero values instead of runtime surprises.",
+    "first_principles": {
+      "problem": "Accessing nested map keys by string works until a typo or type change causes a runtime crash.",
+      "truths": [
+        "APIs return JSON with a known shape.",
+        "Typed fields catch misuse at compile time.",
+        "Tags decouple Go names from JSON names."
+      ],
+      "derivation": [
+        "Define a **struct** with `json:\"name\"` **tags**.",
+        "Call **json.Unmarshal(data, &s)**.",
+        "Use **nested structs/slices** for nested JSON.",
+        "Use **omitempty** and pointers for optional fields."
+      ]
+    },
+    "analogy": {
+      "title": "A pre-labelled form",
+      "story": "Data is poured into labelled boxes; anything that doesn't fit a box is noticed.",
+      "mapping": [
+        [
+          "Form boxes",
+          "Struct fields"
+        ],
+        [
+          "Labels",
+          "JSON tags"
+        ],
+        [
+          "Filled form",
+          "Unmarshalled struct"
+        ]
+      ],
+      "breaks": "Unknown fields are silently ignored by default. Use DisallowUnknownFields for strictness."
+    },
+    "mindmap": {
+      "center": "JSON Structs",
+      "branches": [
+        {
+          "label": "Define",
+          "children": [
+            "struct",
+            "json tags"
+          ]
+        },
+        {
+          "label": "Decode",
+          "children": [
+            "Unmarshal",
+            "Decoder"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "omitempty",
+            "Pointers"
+          ]
+        },
+        {
+          "label": "Strict",
+          "children": [
+            "DisallowUnknownFields"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parsing a Kubernetes-like response",
+      "scenario": "Typed access.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "pods[0].Ready is a bool, and the compiler checks how you use it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "type Pod struct {\n    Name   string `json:\"name\"`\n    Ready  bool   `json:\"ready\"`\n}\nvar pods []Pod\njson.Unmarshal(body, &pods)"
+        }
+      ],
+      "outcome": "safe, self-documenting API handling."
+    },
+    "summary": {
+      "points": [
+        "Structs + tags.",
+        "Unmarshal into them.",
+        "Typed safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do struct tags like `json:\"name\"` do?",
+        "a": "They map the Go field to a specific JSON key."
+      }
+    ]
+  },
+  "interfaces-implicit-implementation": {
+    "core": "A Go interface is a set of methods. Any type with those methods satisfies it automatically, with no `implements` keyword, which makes swapping implementations (for example in tests) trivial.",
+    "first_principles": {
+      "problem": "Hard-coding a concrete AWS client makes code untestable without real cloud calls.",
+      "truths": [
+        "Code should depend on behaviour, not concrete types.",
+        "Small interfaces are easy to satisfy.",
+        "Implicit satisfaction keeps packages decoupled."
+      ],
+      "derivation": [
+        "Define a **small interface** where it's used (e.g. `Notifier { Send(msg) error }`).",
+        "Any type with **Send** satisfies it.",
+        "Inject the **real one in prod and a fake in tests**.",
+        "Learn the stdlib's **io.Reader / io.Writer**."
+      ]
+    },
+    "analogy": {
+      "title": "A wall socket",
+      "story": "Anything with the right plug works: a lamp or a phone charger. The socket doesn't care what's behind the plug.",
+      "mapping": [
+        [
+          "Socket",
+          "Interface"
+        ],
+        [
+          "Plug shape",
+          "Method set"
+        ],
+        [
+          "Appliances",
+          "Concrete types"
+        ]
+      ],
+      "breaks": "Interfaces defined too early or too large add abstraction without benefit."
+    },
+    "mindmap": {
+      "center": "Interfaces",
+      "branches": [
+        {
+          "label": "Definition",
+          "children": [
+            "Method set"
+          ]
+        },
+        {
+          "label": "Satisfy",
+          "children": [
+            "Implicit",
+            "No implements"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Testing fakes",
+            "io.Reader"
+          ]
+        },
+        {
+          "label": "Advice",
+          "children": [
+            "Small",
+            "Define at consumer"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Swappable alerting",
+      "scenario": "Slack in production, a fake in tests.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Test",
+          "detail": "Pass a fakeNotifier that records messages, so no network is needed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "type Notifier interface { Send(string) error }\ntype Slack struct{}\nfunc (Slack) Send(m string) error { /* post */ return nil }\nfunc alert(n Notifier) { n.Send(\"disk full\") }"
+        }
+      ],
+      "outcome": "code is decoupled and testable."
+    },
+    "summary": {
+      "points": [
+        "Behaviour contracts.",
+        "Implicit satisfaction.",
+        "Keep them small."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a Go type implement an interface?",
+        "a": "Simply by having all the interface's methods; no declaration is needed."
+      }
+    ]
+  },
+  "error-handling-patterns": {
+    "core": "Go errors are ordinary return values that you check immediately. Wrap them with `%w` to add context, and inspect them with errors.Is or errors.As. Failure handling stays visible and explicit.",
+    "first_principles": {
+      "problem": "Exceptions can bubble up invisibly, and bare errors like 'file not found' give no clue which file or why.",
+      "truths": [
+        "Failures are normal in ops code.",
+        "Context matters for debugging.",
+        "Callers need to tell error types apart."
+      ],
+      "derivation": [
+        "Write **`if err != nil { return ... }`** right after the call.",
+        "**Wrap**: `fmt.Errorf(\"read config %s: %w\", path, err)`.",
+        "**errors.Is** for sentinel errors and **errors.As** for typed ones.",
+        "Use **panic** only for truly impossible states."
+      ]
+    },
+    "analogy": {
+      "title": "Breadcrumbs on a trail",
+      "story": "Each layer adds a breadcrumb, so you can retrace exactly where things went wrong.",
+      "mapping": [
+        [
+          "Breadcrumbs",
+          "Wrapped context"
+        ],
+        [
+          "Trail start",
+          "Root error"
+        ],
+        [
+          "Retracing",
+          "Reading the error chain"
+        ]
+      ],
+      "breaks": "Verbose `if err != nil` checks are the price you pay for explicitness."
+    },
+    "mindmap": {
+      "center": "Errors",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Values",
+            "Last return"
+          ]
+        },
+        {
+          "label": "Wrap",
+          "children": [
+            "%w",
+            "Context"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "errors.Is",
+            "errors.As"
+          ]
+        },
+        {
+          "label": "Panic",
+          "children": [
+            "Only impossible"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A clear error message",
+      "scenario": "Built up through the layers.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The log line says exactly what failed and where."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "if err != nil {\n    return fmt.Errorf(\"load config %q: %w\", path, err)\n}\n// → deploy: load config \"/etc/app.yml\": open: permission denied"
+        }
+      ],
+      "outcome": "errors are explicit and debuggable."
+    },
+    "summary": {
+      "points": [
+        "Check immediately.",
+        "Wrap with context.",
+        "Is/As to inspect."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why wrap with %w instead of %v?",
+        "a": "%w keeps the original error so errors.Is and errors.As can still match it."
+      }
+    ]
+  },
+  "binaries-cross-compilation-and-static-linking": {
+    "core": "Setting GOOS and GOARCH cross-compiles for any platform from your laptop, and CGO_ENABLED=0 produces a fully static binary that runs in a scratch container or on any Linux box.",
+    "first_principles": {
+      "problem": "Deploying a Python tool to 300 mixed servers means managing interpreters and packages on each one.",
+      "truths": [
+        "Most runtimes must be installed on the target.",
+        "Static binaries carry their dependencies.",
+        "Small images reduce attack surface."
+      ],
+      "derivation": [
+        "Run **`GOOS=linux GOARCH=arm64 go build`** for any target.",
+        "Use **CGO_ENABLED=0** for static linking.",
+        "Ship it **FROM scratch** or distroless.",
+        "Use `-ldflags \"-s -w\"` to shrink it."
+      ]
+    },
+    "analogy": {
+      "title": "A pre-assembled flat-pack, ready to use",
+      "story": "No assembly or extra screws needed at the destination; you just set it down.",
+      "mapping": [
+        [
+          "Pre-assembled",
+          "Static binary"
+        ],
+        [
+          "Destination",
+          "Server"
+        ],
+        [
+          "Screws",
+          "Shared libraries"
+        ]
+      ],
+      "breaks": "Programs that need cgo (some DNS or SQLite cases) can't always be fully static."
+    },
+    "mindmap": {
+      "center": "Go Binaries",
+      "branches": [
+        {
+          "label": "Cross",
+          "children": [
+            "GOOS",
+            "GOARCH"
+          ]
+        },
+        {
+          "label": "Static",
+          "children": [
+            "CGO_ENABLED=0"
+          ]
+        },
+        {
+          "label": "Ship",
+          "children": [
+            "scratch image",
+            "scp"
+          ]
+        },
+        {
+          "label": "Shrink",
+          "children": [
+            "-ldflags -s -w"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Building for three platforms",
+      "scenario": "From one Mac.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Deploy",
+          "detail": "Copy one file to each server, or put it in a 10 MB scratch image."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/tool-linux-amd64\nGOOS=linux GOARCH=arm64 go build -o bin/tool-linux-arm64\nGOOS=windows go build -o bin/tool.exe"
+        }
+      ],
+      "outcome": "distribution is trivially simple."
+    },
+    "summary": {
+      "points": [
+        "Cross-compile anywhere.",
+        "Static with CGO off.",
+        "Tiny images."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does CGO_ENABLED=0 achieve?",
+        "a": "A pure-Go static binary with no libc dependency, so it runs anywhere."
+      }
+    ]
+  }
+}

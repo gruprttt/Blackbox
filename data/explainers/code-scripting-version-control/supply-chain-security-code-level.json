@@ -1,0 +1,686 @@
+{
+  "introduction-the-poisoned-well": {
+    "core": "Most of your software is other people's code. Attackers increasingly poison that supply (packages, build systems, registries), because one compromise reaches thousands of victims.",
+    "first_principles": {
+      "problem": "Incidents like SolarWinds, event-stream and xz-utils show attackers compromising the ingredients rather than the application.",
+      "truths": [
+        "80–90% of a typical application is dependencies.",
+        "You inherit every dependency's risks.",
+        "One upstream compromise spreads downstream."
+      ],
+      "derivation": [
+        "**Pin** what you use.",
+        "**Scan** for known vulnerabilities.",
+        "**Control** where packages come from.",
+        "**Inventory** with SBOMs.",
+        "**Prove** how artifacts were built (SLSA)."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant's suppliers",
+      "story": "You write the recipe, but if a supplier secretly taints the flour, every dish is poisoned.",
+      "mapping": [
+        [
+          "Recipe",
+          "Your code"
+        ],
+        [
+          "Suppliers",
+          "Dependencies"
+        ],
+        [
+          "Tainted flour",
+          "Malicious package"
+        ]
+      ],
+      "breaks": "You can't audit everything, so defence relies on layers and verification."
+    },
+    "mindmap": {
+      "center": "Supply Chain",
+      "branches": [
+        {
+          "label": "Threat",
+          "children": [
+            "Malicious pkgs",
+            "Build compromise",
+            "Typosquats"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Pin",
+            "SCA",
+            "Private registry",
+            "SBOM",
+            "SLSA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The event-stream incident",
+      "scenario": "A maintainer handover gone wrong.",
+      "flow": [
+        "Popular npm lib handed to a stranger",
+        "Malicious dependency added",
+        "Targeted a crypto wallet",
+        "Millions of downloads"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Trust in a package can change overnight."
+        }
+      ],
+      "code": [],
+      "outcome": "dependencies are treated as attack surface."
+    },
+    "summary": {
+      "points": [
+        "Most code isn't yours.",
+        "Attacks target the supply.",
+        "Defend in layers."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are supply-chain attacks attractive to attackers?",
+        "a": "One upstream compromise reaches every downstream user at once."
+      }
+    ]
+  },
+  "pinning-dependencies-lockfiles-and-hashes": {
+    "core": "Version ranges let the package manager pull new code silently. Lockfiles pin exact versions, and hashes verify the bytes, so every install is identical and tampering is detected.",
+    "first_principles": {
+      "problem": "`^0.21.0` silently installs a newly published, compromised 0.21.5 on the next build.",
+      "truths": [
+        "Ranges resolve to whatever is newest when you install.",
+        "The same version name could serve different bytes.",
+        "Reproducible builds need exact inputs."
+      ],
+      "derivation": [
+        "**Commit lockfiles** (package-lock.json, poetry.lock, go.sum).",
+        "Install in **frozen** mode (npm ci).",
+        "Verify **hashes** (pip --require-hashes).",
+        "Update **deliberately** through PRs (Renovate, Dependabot)."
+      ]
+    },
+    "analogy": {
+      "title": "A sealed, numbered ingredient batch",
+      "story": "You order batch #4471 with a tamper seal, not 'whatever flour you have'.",
+      "mapping": [
+        [
+          "Batch number",
+          "Pinned version"
+        ],
+        [
+          "Tamper seal",
+          "Hash"
+        ],
+        [
+          "Re-ordering deliberately",
+          "Update PR"
+        ]
+      ],
+      "breaks": "Pinning freezes vulnerabilities too, so you need scanning and regular updates."
+    },
+    "mindmap": {
+      "center": "Pinning",
+      "branches": [
+        {
+          "label": "Lockfiles",
+          "children": [
+            "package-lock",
+            "poetry.lock",
+            "go.sum"
+          ]
+        },
+        {
+          "label": "Install",
+          "children": [
+            "npm ci",
+            "frozen"
+          ]
+        },
+        {
+          "label": "Integrity",
+          "children": [
+            "Hashes"
+          ]
+        },
+        {
+          "label": "Updates",
+          "children": [
+            "Renovate",
+            "Dependabot"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hash-pinned Python requirements",
+      "scenario": "Tamper-evident.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A modified package fails installation."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "requests==2.32.3 \\\n    --hash=sha256:70761cfe03c773ceb22aa2f671b4757976145175cdfca038c02654d061d6dcc6\n# pip install --require-hashes -r requirements.txt"
+        }
+      ],
+      "outcome": "builds are reproducible and tamper-evident."
+    },
+    "summary": {
+      "points": [
+        "Lock exact versions.",
+        "Verify hashes.",
+        "Update deliberately."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use `npm ci` in CI rather than `npm install`?",
+        "a": "It installs exactly what the lockfile says and fails if the lockfile doesn't match."
+      }
+    ]
+  },
+  "software-composition-analysis-sca": {
+    "core": "SCA tools continuously match your dependency tree, transitive dependencies included, against vulnerability databases (CVE, GHSA, OSV), so a newly disclosed flaw in something you pinned months ago gets flagged.",
+    "first_principles": {
+      "problem": "Pinning keeps you consistent, but it doesn't tell you that a pinned library got a critical CVE last week.",
+      "truths": [
+        "New vulnerabilities are disclosed daily.",
+        "Transitive dependencies vastly outnumber direct ones.",
+        "Manual tracking doesn't scale."
+      ],
+      "derivation": [
+        "Scan **in CI** and **continuously** (Dependabot, Snyk, Trivy, osv-scanner).",
+        "Include **transitive** dependencies.",
+        "**Prioritise** by severity and reachability.",
+        "**Auto-open** fix PRs."
+      ]
+    },
+    "analogy": {
+      "title": "A food-recall alert service",
+      "story": "It watches recall notices and tells you when an ingredient in your pantry is affected.",
+      "mapping": [
+        [
+          "Recall notice",
+          "CVE"
+        ],
+        [
+          "Pantry",
+          "Dependency tree"
+        ],
+        [
+          "Alert",
+          "SCA finding"
+        ]
+      ],
+      "breaks": "Alert fatigue is real: not every CVE is reachable in your code."
+    },
+    "mindmap": {
+      "center": "SCA",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "CVE",
+            "GHSA",
+            "OSV"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Dependabot",
+            "Snyk",
+            "Trivy",
+            "osv-scanner"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Transitive"
+          ]
+        },
+        {
+          "label": "Triage",
+          "children": [
+            "Severity",
+            "Reachability"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Log4Shell response",
+      "scenario": "With and without SCA.",
+      "flow": [
+        "CVE-2021-44228 published",
+        "SCA flags 14 services (transitive)",
+        "Fix PRs auto-opened",
+        "Patched in hours"
+      ],
+      "steps": [
+        {
+          "label": "Without SCA",
+          "detail": "Days spent grepping repos by hand."
+        }
+      ],
+      "code": [],
+      "outcome": "known vulnerabilities are found fast."
+    },
+    "summary": {
+      "points": [
+        "Scan continuously.",
+        "Include transitive deps.",
+        "Prioritise wisely."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why scan transitive dependencies?",
+        "a": "Most of your dependency tree is indirect, and vulnerabilities often hide there (as with Log4j)."
+      }
+    ]
+  },
+  "dependency-confusion-attacks": {
+    "core": "If your build looks for an internal package name in a public registry as well, an attacker can publish that name publicly with a higher version, and your build installs their code.",
+    "first_principles": {
+      "problem": "In 2021 Alex Birsan ran code inside Apple, Microsoft and others by publishing public packages named after their internal ones.",
+      "truths": [
+        "Package managers often prefer the highest version found anywhere.",
+        "Internal names leak (package.json files, error messages).",
+        "Public registries accept any unclaimed name."
+      ],
+      "derivation": [
+        "Use **scoped/namespaced** packages (@company/pkg).",
+        "**Register** your internal names publicly as placeholders.",
+        "Configure registries so that **internal names resolve only internally**.",
+        "Route everything through a **private proxy** with rules."
+      ]
+    },
+    "analogy": {
+      "title": "A forged letter with a higher priority stamp",
+      "story": "The mailroom delivers the letter with the most urgent stamp, so a forger stamps theirs 'priority 99'.",
+      "mapping": [
+        [
+          "Mailroom",
+          "Package manager"
+        ],
+        [
+          "Priority stamp",
+          "Version number"
+        ],
+        [
+          "Forged letter",
+          "Malicious public package"
+        ]
+      ],
+      "breaks": "Defences have to cover every ecosystem (npm, pip, maven) and every build machine."
+    },
+    "mindmap": {
+      "center": "Dependency Confusion",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Same name",
+            "Higher version",
+            "Public registry"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Scopes",
+            "Placeholders",
+            "Registry rules",
+            "Private proxy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "pip with --extra-index-url",
+      "scenario": "The classic vulnerable config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "There's a single trusted index, and internal names never resolve publicly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# Vulnerable: pip checks both and picks the highest version\npip install internal-utils --extra-index-url https://pypi.corp/simple\n# Safer: --index-url pointing only at the corp proxy that mirrors PyPI"
+        }
+      ],
+      "outcome": "internal package names can't be hijacked."
+    },
+    "summary": {
+      "points": [
+        "Namespaces.",
+        "One trusted index.",
+        "Claim your names."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is --extra-index-url dangerous for internal packages?",
+        "a": "pip considers both indexes and may pick a higher-versioned malicious public package with the same name."
+      }
+    ]
+  },
+  "private-artifact-repositories": {
+    "core": "Route all package and image traffic through a private repository (Artifactory, Nexus, CodeArtifact) that proxies, caches, scans and governs what's allowed in, giving you one controlled chokepoint.",
+    "first_principles": {
+      "problem": "Every laptop and build server pulls directly from npm, PyPI and Docker Hub, with no visibility, control or caching.",
+      "truths": [
+        "A chokepoint makes policy enforceable.",
+        "Upstream registries can go down or delete packages.",
+        "Caching speeds up builds."
+      ],
+      "derivation": [
+        "Configure clients to use **only the private registry**.",
+        "It **proxies and caches** upstream.",
+        "**Scan and block** vulnerable or unlicensed packages.",
+        "Host **internal** packages alongside them."
+      ]
+    },
+    "analogy": {
+      "title": "A company's central purchasing department",
+      "story": "All supplies come through one desk that vets vendors, checks quality and keeps stock.",
+      "mapping": [
+        [
+          "Purchasing desk",
+          "Artifact repository"
+        ],
+        [
+          "Vetting vendors",
+          "Scanning and policy"
+        ],
+        [
+          "Stockroom",
+          "Cache"
+        ]
+      ],
+      "breaks": "The repository becomes critical infrastructure, so make it highly available."
+    },
+    "mindmap": {
+      "center": "Private Registry",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "Artifactory",
+            "Nexus",
+            "CodeArtifact"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "Proxy",
+            "Cache",
+            "Scan",
+            "Host internal"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Control",
+            "Resilience",
+            "Audit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The left-pad deletion",
+      "scenario": "Protected by caching.",
+      "flow": [
+        "Upstream package deleted",
+        "Private repo has a cached copy",
+        "Builds continue unaffected"
+      ],
+      "steps": [
+        {
+          "label": "Bonus",
+          "detail": "Policy blocks a newly flagged malicious version company-wide."
+        }
+      ],
+      "code": [],
+      "outcome": "one place to control and audit dependencies."
+    },
+    "summary": {
+      "points": [
+        "Single chokepoint.",
+        "Proxy and cache.",
+        "Enforce policy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name two benefits of a private artifact repository.",
+        "a": "For example, enforcing security policy on packages and caching upstream packages for resilience."
+      }
+    ]
+  },
+  "software-bill-of-materials-sbom": {
+    "core": "An SBOM is a machine-readable inventory of every component in an artifact (name, version, license, hashes) in SPDX or CycloneDX format, so you can answer 'are we affected?' in minutes.",
+    "first_principles": {
+      "problem": "When a CVE drops, nobody can quickly say which deployed artifacts contain the vulnerable library.",
+      "truths": [
+        "You can't secure what you can't list.",
+        "Builds can generate inventories automatically.",
+        "Regulators and customers increasingly require SBOMs."
+      ],
+      "derivation": [
+        "**Generate** at build time (Syft, Trivy, cdxgen).",
+        "Use a **standard** format (SPDX, CycloneDX).",
+        "**Store and attach** it to the artifact (attestation).",
+        "**Query** it when a CVE appears."
+      ]
+    },
+    "analogy": {
+      "title": "A food ingredient label",
+      "story": "With a label, an allergy alert takes a moment to check. Without one, you have to test every jar.",
+      "mapping": [
+        [
+          "Ingredient label",
+          "SBOM"
+        ],
+        [
+          "Allergy alert",
+          "New CVE"
+        ],
+        [
+          "Checking jars",
+          "Querying SBOMs"
+        ]
+      ],
+      "breaks": "An SBOM is only as accurate as its generator. Vendored or copied code can be missed."
+    },
+    "mindmap": {
+      "center": "SBOM",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "Components",
+            "Versions",
+            "Licenses",
+            "Hashes"
+          ]
+        },
+        {
+          "label": "Formats",
+          "children": [
+            "SPDX",
+            "CycloneDX"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Syft",
+            "Trivy"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Incident response",
+            "Compliance"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Generating and querying",
+      "scenario": "With Syft and Grype.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "'Are we affected?' is answered across all images in minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "syft myapp:1.4 -o cyclonedx-json > sbom.json\ngrype sbom:./sbom.json   # list known vulns"
+        }
+      ],
+      "outcome": "instant visibility into what you ship."
+    },
+    "summary": {
+      "points": [
+        "Inventory everything.",
+        "Use standard formats.",
+        "Query on incidents."
+      ]
+    },
+    "check": [
+      {
+        "q": "What question does an SBOM help answer quickly during a CVE?",
+        "a": "Which of our artifacts contain the affected component and version."
+      }
+    ]
+  },
+  "slsa-a-framework-for-build-integrity": {
+    "core": "SLSA defines levels of build integrity. Artifacts carry signed provenance (who built them, from which source, how), produced by hardened, isolated build systems, so you can verify that a binary came from the code you reviewed.",
+    "first_principles": {
+      "problem": "SolarWinds-style attacks inject code during the build, so the source looks clean but the shipped binary isn't.",
+      "truths": [
+        "Build systems are high-value targets.",
+        "Unverifiable artifacts must be trusted blindly.",
+        "Signatures make provenance tamper-evident."
+      ],
+      "derivation": [
+        "**Generate provenance** for every build.",
+        "**Sign** it (Sigstore/cosign).",
+        "Use a **hosted, isolated builder** (higher levels).",
+        "**Verify provenance** before deploying."
+      ]
+    },
+    "analogy": {
+      "title": "A chain-of-custody form for evidence",
+      "story": "Every hand-off is recorded and signed, so the court knows the evidence wasn't tampered with.",
+      "mapping": [
+        [
+          "Evidence",
+          "Artifact"
+        ],
+        [
+          "Custody form",
+          "Provenance"
+        ],
+        [
+          "Signatures",
+          "cosign"
+        ],
+        [
+          "Court check",
+          "Admission policy"
+        ]
+      ],
+      "breaks": "SLSA proves how something was built, not that the source code itself is safe."
+    },
+    "mindmap": {
+      "center": "SLSA",
+      "branches": [
+        {
+          "label": "Concept",
+          "children": [
+            "Provenance",
+            "Levels"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Sigstore",
+            "cosign",
+            "slsa-github-generator"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Before deploy",
+            "Admission control"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "Not source safety"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verifying an image before deploy",
+      "scenario": "Using cosign.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Policy",
+          "detail": "The Kubernetes admission controller rejects images without valid provenance."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cosign verify-attestation --type slsaprovenance \\\n  --certificate-identity-regexp 'github.com/acme/.*' ghcr.io/acme/api:1.4"
+        }
+      ],
+      "outcome": "only verifiably built artifacts run."
+    },
+    "summary": {
+      "points": [
+        "Provenance for every build.",
+        "Sign and verify.",
+        "Harden builders."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does SLSA provenance prove?",
+        "a": "Which source, builder and process produced an artifact, in a tamper-evident signed form."
+      }
+    ]
+  }
+}

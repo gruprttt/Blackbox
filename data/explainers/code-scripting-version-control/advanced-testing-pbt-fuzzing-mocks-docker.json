@@ -1,0 +1,797 @@
+{
+  "introduction-beyond-example-based-testing": {
+    "core": "Example tests only check the cases you thought of. Bugs live in the cases you didn't, so you also need generated inputs (PBT, fuzzing), well-chosen fakes and real dependencies in containers.",
+    "first_principles": {
+      "problem": "A function passes 2+2=4 but breaks on overflow, empty input or Unicode, none of which anyone wrote a test for.",
+      "truths": [
+        "Humans pick a few inputs from an enormous space.",
+        "Edge cases cause most failures.",
+        "Fakes can drift away from reality."
+      ],
+      "derivation": [
+        "Keep **example tests** for documenting behaviour.",
+        "Add **property-based** tests for invariants.",
+        "Use **fuzzing** for parsers and security.",
+        "Use **mocks** carefully, and **containers** for realism."
+      ]
+    },
+    "analogy": {
+      "title": "Testing a bridge with one car",
+      "story": "One car crossing proves very little; you need varied loads, wind and vibration.",
+      "mapping": [
+        [
+          "One car",
+          "Example test"
+        ],
+        [
+          "Varied loads",
+          "Generated inputs"
+        ],
+        [
+          "Real wind tunnel",
+          "Docker integration tests"
+        ]
+      ],
+      "breaks": "More test types also mean more maintenance, so apply each where it pays."
+    },
+    "mindmap": {
+      "center": "Beyond Examples",
+      "branches": [
+        {
+          "label": "EBT",
+          "children": [
+            "Known cases"
+          ]
+        },
+        {
+          "label": "PBT",
+          "children": [
+            "Invariants"
+          ]
+        },
+        {
+          "label": "Fuzzing",
+          "children": [
+            "Random bytes"
+          ]
+        },
+        {
+          "label": "Fakes",
+          "children": [
+            "Stubs",
+            "Mocks"
+          ]
+        },
+        {
+          "label": "Real deps",
+          "children": [
+            "Docker"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A date parser",
+      "scenario": "Examples miss leap years and invalid strings.",
+      "flow": [
+        "3 example tests pass",
+        "PBT finds Feb 29 bug",
+        "Fuzzer finds crash on '\\x00'"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Generated inputs explore cases humans don't think of."
+        }
+      ],
+      "code": [],
+      "outcome": "tests explore the input space rather than sample it."
+    },
+    "summary": {
+      "points": [
+        "Examples aren't enough.",
+        "Generate inputs.",
+        "Test against reality too."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the fundamental limit of example-based tests?",
+        "a": "They only cover inputs the author thought of."
+      }
+    ]
+  },
+  "property-based-testing-pbt": {
+    "core": "Instead of fixed examples, state properties that must hold for all inputs (e.g. decode(encode(x)) == x) and let the framework generate hundreds of random cases to try to break them.",
+    "first_principles": {
+      "problem": "You can't hand-write enough examples to cover every list length, value and ordering.",
+      "truths": [
+        "Many functions have invariants.",
+        "Machines can generate inputs cheaply.",
+        "A single counterexample disproves a property."
+      ],
+      "derivation": [
+        "Find **invariants**: round-trip, idempotence, ordering, conservation.",
+        "Describe the **input domain** (strategies or generators).",
+        "The framework **generates and checks** the cases.",
+        "Failures come with a **minimal counterexample**."
+      ]
+    },
+    "analogy": {
+      "title": "Laws of physics",
+      "story": "You don't drop every object to confirm gravity; you state the law and look for anything that violates it.",
+      "mapping": [
+        [
+          "Law",
+          "Property"
+        ],
+        [
+          "Experiments",
+          "Generated cases"
+        ],
+        [
+          "Violation",
+          "Counterexample"
+        ]
+      ],
+      "breaks": "Writing good properties is a skill, and weak properties pass trivially."
+    },
+    "mindmap": {
+      "center": "PBT",
+      "branches": [
+        {
+          "label": "Properties",
+          "children": [
+            "Round-trip",
+            "Idempotent",
+            "Invariant"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Hypothesis",
+            "QuickCheck",
+            "fast-check"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Generate",
+            "Check",
+            "Shrink"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Testing a sort",
+      "scenario": "Hypothesis in Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Run",
+          "detail": "Hundreds of random lists, including empty ones, duplicates and negatives."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "@given(st.lists(st.integers()))\ndef test_sort(xs):\n    out = my_sort(xs)\n    assert out == sorted(xs) and len(out) == len(xs)"
+        }
+      ],
+      "outcome": "broad coverage from a few lines."
+    },
+    "summary": {
+      "points": [
+        "State truths.",
+        "Generate inputs.",
+        "Find counterexamples."
+      ]
+    },
+    "check": [
+      {
+        "q": "Give an example of a round-trip property.",
+        "a": "parse(serialize(x)) == x for every valid x."
+      }
+    ]
+  },
+  "the-magic-of-shrinking": {
+    "core": "When a property fails on a huge random input, the framework shrinks it step by step to the smallest input that still fails, so you debug [0, -1] instead of 5,000 numbers.",
+    "first_principles": {
+      "problem": "A failing random input of 5,000 elements is almost impossible to reason about.",
+      "truths": [
+        "Most bugs are triggered by a small core of the input.",
+        "Simplifying an input can be automated.",
+        "Small reproductions make bugs obvious."
+      ],
+      "derivation": [
+        "Take the **failing input**.",
+        "Try **smaller or simpler variants** (fewer items, smaller numbers).",
+        "Keep any variant that **still fails**.",
+        "Stop at a **minimal counterexample**."
+      ]
+    },
+    "analogy": {
+      "title": "Finding which ingredient causes the allergy",
+      "story": "Remove ingredients one at a time until the reaction stops. The last one removed is the culprit.",
+      "mapping": [
+        [
+          "Full recipe",
+          "Large failing input"
+        ],
+        [
+          "Removing ingredients",
+          "Shrink steps"
+        ],
+        [
+          "Culprit",
+          "Minimal counterexample"
+        ]
+      ],
+      "breaks": "Custom generators sometimes shrink poorly unless you write shrinkers for them."
+    },
+    "mindmap": {
+      "center": "Shrinking",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "Large failure"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Simplify",
+            "Re-test",
+            "Keep failing"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Minimal case"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Fast debugging"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A dedupe bug",
+      "scenario": "From 5,000 items down to 2.",
+      "flow": [
+        "Fails on 5,000-item list",
+        "Shrink → 200 items",
+        "→ 10 items",
+        "→ [0, 0]: duplicate zeros mishandled"
+      ],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "The bug is obvious in a two-element case."
+        }
+      ],
+      "code": [],
+      "outcome": "random failures become tiny reproductions."
+    },
+    "summary": {
+      "points": [
+        "Automatic simplification.",
+        "Minimal failing input.",
+        "Debug the essence."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a shrunk counterexample?",
+        "a": "The smallest, simplest input the framework found that still makes the property fail."
+      }
+    ]
+  },
+  "fuzzing-the-bull-in-the-china-shop": {
+    "core": "Fuzzers throw mutated, often malformed bytes at code, guided by coverage, to find crashes, hangs and security bugs, especially in parsers and network-facing code.",
+    "first_principles": {
+      "problem": "Parsers trust their input, and attackers send exactly the malformed bytes nobody tested.",
+      "truths": [
+        "Untrusted input is an attack surface.",
+        "Coverage feedback guides mutation toward new code paths.",
+        "Crashes and hangs signal bugs."
+      ],
+      "derivation": [
+        "Write a **fuzz target** that takes bytes.",
+        "The fuzzer **mutates a seed corpus**.",
+        "**Coverage guidance** keeps the inputs that reach new branches.",
+        "Save **crashers** as regression tests."
+      ]
+    },
+    "analogy": {
+      "title": "A bull in a china shop",
+      "story": "It doesn't care how things are meant to be used; it finds every fragile shelf by smashing into it.",
+      "mapping": [
+        [
+          "Bull",
+          "Fuzzer"
+        ],
+        [
+          "Fragile shelves",
+          "Unhandled edge cases"
+        ],
+        [
+          "Broken china",
+          "Crash"
+        ]
+      ],
+      "breaks": "Fuzzers struggle with highly structured input like checksums, so use structure-aware fuzzing."
+    },
+    "mindmap": {
+      "center": "Fuzzing",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "Random bytes",
+            "Seed corpus"
+          ]
+        },
+        {
+          "label": "Guidance",
+          "children": [
+            "Coverage"
+          ]
+        },
+        {
+          "label": "Finds",
+          "children": [
+            "Crashes",
+            "Hangs",
+            "Memory bugs"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "go test -fuzz",
+            "libFuzzer",
+            "AFL++"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fuzzing a config parser in Go",
+      "scenario": "Built into go test.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "A panic on an unterminated quote, found in 30 seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "func FuzzParse(f *testing.F) {\n    f.Add([]byte(\"key=value\"))\n    f.Fuzz(func(t *testing.T, b []byte) { Parse(b) })\n}\n// go test -fuzz=FuzzParse"
+        }
+      ],
+      "outcome": "parsers stop crashing on hostile input."
+    },
+    "summary": {
+      "points": [
+        "Random malformed input.",
+        "Coverage-guided.",
+        "Crashers become tests."
+      ]
+    },
+    "check": [
+      {
+        "q": "How is fuzzing different from PBT?",
+        "a": "Fuzzing mutates raw, often invalid bytes looking for crashes; PBT generates valid typed data to check properties."
+      }
+    ]
+  },
+  "faking-dependencies-the-problem": {
+    "core": "Unit tests should be fast, deterministic and isolated, so you replace slow or nondeterministic dependencies (APIs, databases, clocks) with controllable fakes.",
+    "first_principles": {
+      "problem": "A test that calls the real Stripe API is slow and flaky, costs money, and fails when the network does.",
+      "truths": [
+        "External services are slow and unreliable.",
+        "Tests must give the same result every run.",
+        "You want to test your logic, not their uptime."
+      ],
+      "derivation": [
+        "Identify **external boundaries**.",
+        "Inject them through **interfaces** or parameters.",
+        "Replace them with **test doubles** in unit tests.",
+        "Verify the real integration **separately**."
+      ]
+    },
+    "analogy": {
+      "title": "A flight simulator",
+      "story": "Pilots practise emergencies in a simulator, not by crashing real planes.",
+      "mapping": [
+        [
+          "Simulator",
+          "Test double"
+        ],
+        [
+          "Real plane",
+          "External API"
+        ],
+        [
+          "Emergency drill",
+          "Error-path test"
+        ]
+      ],
+      "breaks": "A simulator that doesn't match the real plane trains the wrong reflexes. Fakes can drift."
+    },
+    "mindmap": {
+      "center": "Faking Deps",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Speed",
+            "Determinism",
+            "Isolation"
+          ]
+        },
+        {
+          "label": "How",
+          "children": [
+            "Interfaces",
+            "Injection"
+          ]
+        },
+        {
+          "label": "Doubles",
+          "children": [
+            "Stub",
+            "Mock",
+            "Fake"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Drift"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Testing payment retries",
+      "scenario": "Simulate a 503 from the gateway.",
+      "flow": [
+        "Inject a fake gateway",
+        "Fake returns 503 then 200",
+        "Assert retry happened",
+        "No network used"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Error paths become testable on demand."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, reliable unit tests."
+    },
+    "summary": {
+      "points": [
+        "Isolate boundaries.",
+        "Inject dependencies.",
+        "Validate reality separately."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not call real APIs in unit tests?",
+        "a": "They are slow and flaky, cost money, and make results depend on external systems."
+      }
+    ]
+  },
+  "stubs-vs-mocks": {
+    "core": "A stub returns canned answers so your code can run (state verification). A mock also records how it was called so the test can assert on the interaction (behaviour verification).",
+    "first_principles": {
+      "problem": "Using the wrong double makes tests either too weak or brittle.",
+      "truths": [
+        "Sometimes you only need input data.",
+        "Sometimes the interaction itself is the requirement.",
+        "Asserting on calls couples the test to the implementation."
+      ],
+      "derivation": [
+        "Need **data in**? Use a **stub**.",
+        "Need to verify that **'X was called with Y'**? Use a **mock**.",
+        "Prefer asserting on **outcomes**.",
+        "Mock only at **real boundaries** (sending email, charging cards)."
+      ]
+    },
+    "analogy": {
+      "title": "A cardboard cutout vs. a hidden camera",
+      "story": "A cutout fills a role in the scene (stub); a hidden camera records what happened (mock).",
+      "mapping": [
+        [
+          "Cutout",
+          "Stub"
+        ],
+        [
+          "Camera",
+          "Mock"
+        ],
+        [
+          "Reviewing footage",
+          "Verifying calls"
+        ]
+      ],
+      "breaks": "Real-world libraries blur the terms; what matters is what the test asserts."
+    },
+    "mindmap": {
+      "center": "Stubs vs Mocks",
+      "branches": [
+        {
+          "label": "Stub",
+          "children": [
+            "Canned data",
+            "State check"
+          ]
+        },
+        {
+          "label": "Mock",
+          "children": [
+            "Records calls",
+            "Behaviour check"
+          ]
+        },
+        {
+          "label": "Fake",
+          "children": [
+            "Working lite impl"
+          ]
+        },
+        {
+          "label": "Guideline",
+          "children": [
+            "Mock boundaries only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An order service",
+      "scenario": "A stub for prices, a mock for the email.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Sending the email is the requirement, so verifying the interaction is justified there."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "prices = Mock(get=lambda sku: 10)      # stub-like\nmailer = Mock()\nplace_order(\"A1\", prices, mailer)\nmailer.send.assert_called_once()     # mock verification"
+        }
+      ],
+      "outcome": "each double has a clear purpose."
+    },
+    "summary": {
+      "points": [
+        "Stub = provide data.",
+        "Mock = verify calls.",
+        "Prefer outcomes."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is a mock (verification) appropriate?",
+        "a": "When the side effect itself is the requirement, such as an email sent or a card charged, at a system boundary."
+      }
+    ]
+  },
+  "the-danger-of-over-mocking": {
+    "core": "Mocking every internal call encodes the current implementation into the tests. Refactors then break tests while real bugs slip through. Test behaviour at boundaries, not wiring.",
+    "first_principles": {
+      "problem": "A harmless refactor breaks 40 tests that only asserted which private helpers were called.",
+      "truths": [
+        "Tests should fail when behaviour breaks, not when code moves.",
+        "Mocks assert structure.",
+        "Mocked collaborators can hide integration bugs."
+      ],
+      "derivation": [
+        "Mock only **external boundaries**.",
+        "Use **real objects** for internal collaborators.",
+        "Assert **outputs and state**.",
+        "If setup is huge, the **design** may be the problem."
+      ]
+    },
+    "analogy": {
+      "title": "Rehearsing with every actor replaced by a script-reader",
+      "story": "The play 'passes' rehearsal but falls apart on opening night with the real cast.",
+      "mapping": [
+        [
+          "Script-readers",
+          "Mocks of internal code"
+        ],
+        [
+          "Opening night",
+          "Production"
+        ],
+        [
+          "Real cast",
+          "Real collaborators"
+        ]
+      ],
+      "breaks": "Some isolation is still needed, so the goal is balance, not zero mocks."
+    },
+    "mindmap": {
+      "center": "Over-Mocking",
+      "branches": [
+        {
+          "label": "Symptoms",
+          "children": [
+            "Brittle tests",
+            "Huge setup"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "Mocking internals"
+          ]
+        },
+        {
+          "label": "Cure",
+          "children": [
+            "Mock boundaries",
+            "Test behaviour"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Smell"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Refactoring a price calculator",
+      "scenario": "Before and after.",
+      "flow": [
+        "Tests mock 6 internal helpers",
+        "Refactor merges 2 helpers",
+        "12 tests fail, behaviour unchanged",
+        "Rewrite: assert final price only"
+      ],
+      "steps": [
+        {
+          "label": "Result",
+          "detail": "Tests survive refactors and catch real regressions."
+        }
+      ],
+      "code": [],
+      "outcome": "tests protect behaviour, not implementation."
+    },
+    "summary": {
+      "points": [
+        "Don't mock internals.",
+        "Assert outcomes.",
+        "Big setup = design smell."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are over-mocked tests brittle?",
+        "a": "They assert implementation details, so refactors that don't change behaviour still break them."
+      }
+    ]
+  },
+  "integration-tests-in-docker": {
+    "core": "Spin up real dependencies (Postgres, Redis, Kafka) in throwaway containers during tests, for example with Testcontainers, so you catch problems that fakes can't model.",
+    "first_principles": {
+      "problem": "A mock database happily accepts invalid SQL, and the bug appears only in production.",
+      "truths": [
+        "Fakes don't implement real semantics.",
+        "Containers start real software quickly and disposably.",
+        "Isolation per test run avoids shared-state flakiness."
+      ],
+      "derivation": [
+        "Start the **real dependency** in a container per suite.",
+        "Run **migrations** and the real queries.",
+        "**Tear it down** afterwards.",
+        "Keep these tests **fewer and slower** than unit tests."
+      ]
+    },
+    "analogy": {
+      "title": "A dress rehearsal on the real stage",
+      "story": "Practise with real lights and sets before opening night, not in a classroom.",
+      "mapping": [
+        [
+          "Real stage",
+          "Real Postgres container"
+        ],
+        [
+          "Classroom",
+          "Mocks"
+        ],
+        [
+          "Strike the set",
+          "Teardown"
+        ]
+      ],
+      "breaks": "They're slower and need Docker in CI, so use them for the boundary, not every case."
+    },
+    "mindmap": {
+      "center": "Docker Integration",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "Testcontainers",
+            "docker compose"
+          ]
+        },
+        {
+          "label": "Catches",
+          "children": [
+            "SQL errors",
+            "Driver quirks",
+            "Migrations"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Fresh per run",
+            "Teardown"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Slower",
+            "Needs Docker"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Testing a repository layer",
+      "scenario": "Against real Postgres.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Catch",
+          "detail": "A query using a non-existent column fails here, not in production."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "with PostgresContainer(\"postgres:16\") as pg:\n    engine = create_engine(pg.get_connection_url())\n    run_migrations(engine)\n    assert repo(engine).find_user(\"a@b.c\") is None"
+        }
+      ],
+      "outcome": "confidence that code works with the real dependencies."
+    },
+    "summary": {
+      "points": [
+        "Real deps in containers.",
+        "Disposable per run.",
+        "Fewer, focused tests."
+      ]
+    },
+    "check": [
+      {
+        "q": "What can a container-based test catch that a mock can't?",
+        "a": "Real SQL syntax and semantics errors, driver behaviour and migration problems."
+      }
+    ]
+  }
+}

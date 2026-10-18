@@ -1,0 +1,402 @@
+{
+  "introduction-why-grep-fails-at-scale": {
+    "core": "grep scans every byte on every query, so cost grows with the size of the codebase. At thousands of repositories you need a pre-built index that answers queries without scanning.",
+    "first_principles": {
+      "problem": "Searching 5,000 repos with grep takes minutes per query, and nobody can find where a deprecated API is still used.",
+      "truths": [
+        "Scanning cost is proportional to data size.",
+        "Indexes trade build time for fast lookups.",
+        "Developers search constantly."
+      ],
+      "derivation": [
+        "Build an **index once** (and update it incrementally).",
+        "Answer queries by **index lookup**, then verify candidates.",
+        "Support **regex and structure**.",
+        "Serve results **across all repos**."
+      ]
+    },
+    "analogy": {
+      "title": "A library with 5,000 rooms",
+      "story": "Reading every book per question is impossible; a card catalogue points straight to the right shelves.",
+      "mapping": [
+        [
+          "Reading every book",
+          "grep scan"
+        ],
+        [
+          "Card catalogue",
+          "Search index"
+        ],
+        [
+          "Shelves",
+          "Candidate files"
+        ]
+      ],
+      "breaks": "Indexes go stale and must be kept in sync with the repositories."
+    },
+    "mindmap": {
+      "center": "Code Search",
+      "branches": [
+        {
+          "label": "grep limits",
+          "children": [
+            "Linear scan",
+            "Single machine"
+          ]
+        },
+        {
+          "label": "Index",
+          "children": [
+            "Build once",
+            "Fast lookup"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Regex",
+            "Structural",
+            "Cross-repo"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Zoekt",
+            "Sourcegraph"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding a deprecated call everywhere",
+      "scenario": "grep vs index.",
+      "flow": [
+        "grep across 5k repos: 20 min",
+        "Zoekt index lookup: 200 ms",
+        "Answer: 37 call sites"
+      ],
+      "steps": [
+        {
+          "label": "Use",
+          "detail": "Migration planning becomes trivial."
+        }
+      ],
+      "code": [],
+      "outcome": "searching all code takes milliseconds."
+    },
+    "summary": {
+      "points": [
+        "Scanning doesn't scale.",
+        "Index once.",
+        "Query instantly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does grep get slower as the codebase grows?",
+        "a": "It scans every byte for each query, so time grows linearly with code size."
+      }
+    ]
+  },
+  "indexing-strategies-trigrams-n-grams": {
+    "core": "Code isn't made of words, so code search indexes every 3-character substring (trigram) along with where it occurs. A query is split into trigrams, their posting lists are intersected to find candidate files, and only those files are verified.",
+    "first_principles": {
+      "problem": "Word-based indexes fail on code like `getUserById(` or `->conn`, where tokens aren't natural-language words.",
+      "truths": [
+        "Any substring of 3+ characters contains trigrams.",
+        "Intersecting posting lists is fast.",
+        "Candidates still need verification."
+      ],
+      "derivation": [
+        "Index every **trigram → (file, offset)**.",
+        "Split the query: 'login' → **log, ogi, gin**.",
+        "**Intersect** the lists to get candidates.",
+        "**Verify** with an exact match."
+      ]
+    },
+    "analogy": {
+      "title": "Finding a word using letter-triplet cards",
+      "story": "Pull the cards for 'log', 'ogi' and 'gin'. Only books on all three cards can contain 'login'.",
+      "mapping": [
+        [
+          "Triplet cards",
+          "Trigram posting lists"
+        ],
+        [
+          "Books on all cards",
+          "Candidates"
+        ],
+        [
+          "Reading to confirm",
+          "Verification"
+        ]
+      ],
+      "breaks": "Queries shorter than three characters can't use the index efficiently."
+    },
+    "mindmap": {
+      "center": "Trigrams",
+      "branches": [
+        {
+          "label": "Index",
+          "children": [
+            "Every 3-char substring",
+            "Posting lists"
+          ]
+        },
+        {
+          "label": "Query",
+          "children": [
+            "Split",
+            "Intersect"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Exact match"
+          ]
+        },
+        {
+          "label": "Why",
+          "children": [
+            "Code isn't words"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Searching 'login'",
+      "scenario": "Step by step.",
+      "flow": [
+        "Trigrams: log, ogi, gin",
+        "log ∈ 50k files, ogi ∈ 2k, gin ∈ 30k",
+        "Intersection: 1.2k files",
+        "Verify → 900 matches"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only 1.2k files are scanned instead of millions."
+        }
+      ],
+      "code": [],
+      "outcome": "substring search at index speed."
+    },
+    "summary": {
+      "points": [
+        "Index trigrams.",
+        "Intersect lists.",
+        "Verify candidates."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why trigrams rather than words for code?",
+        "a": "Code identifiers and symbols don't split into natural words, but every substring of 3+ characters contains trigrams."
+      }
+    ]
+  },
+  "regex-and-structural-search": {
+    "core": "Regex queries are accelerated by pulling out their literal fragments as trigram filters before running the full regex on candidates. Structural search (Comby, Semgrep) matches code shapes with holes, independent of formatting.",
+    "first_principles": {
+      "problem": "Developers search for patterns ('functions returning err without wrapping'), not exact strings.",
+      "truths": [
+        "Most regexes contain literal substrings.",
+        "Code structure is independent of whitespace.",
+        "Pattern templates can capture parts of code."
+      ],
+      "derivation": [
+        "Extract **required literals** from the regex and filter by trigrams.",
+        "Run the **full regex** on candidates.",
+        "Use **structural patterns** with holes: `fmt.Errorf(:[msg], err)`.",
+        "Match **balanced brackets**, not lines."
+      ]
+    },
+    "analogy": {
+      "title": "A pre-filter then a microscope",
+      "story": "A coarse sieve removes most sand; the microscope checks what remains.",
+      "mapping": [
+        [
+          "Sieve",
+          "Trigram filter"
+        ],
+        [
+          "Microscope",
+          "Regex engine"
+        ],
+        [
+          "Stencil",
+          "Structural pattern"
+        ]
+      ],
+      "breaks": "Regexes with no literals (`.*`) can't be accelerated and fall back to scanning."
+    },
+    "mindmap": {
+      "center": "Regex + Structure",
+      "branches": [
+        {
+          "label": "Regex",
+          "children": [
+            "Extract literals",
+            "Trigram filter",
+            "Full match"
+          ]
+        },
+        {
+          "label": "Structural",
+          "children": [
+            "Holes :[x]",
+            "Balanced parens",
+            "Comby",
+            "Semgrep"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "No-literal regex"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding unwrapped errors in Go",
+      "scenario": "Structural query.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "It matches across line breaks and formatting styles."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "Comby: return :[_], err\nexcluding: return :[_], fmt.Errorf(:[_])"
+        }
+      ],
+      "outcome": "pattern searches across all code are precise and fast."
+    },
+    "summary": {
+      "points": [
+        "Accelerate regex with literals.",
+        "Structural search matches shapes.",
+        "Formatting-agnostic."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a code search engine speed up a regex query?",
+        "a": "It extracts required literal substrings, uses the trigram index to find candidates, then runs the regex only on them."
+      }
+    ]
+  },
+  "how-a-real-code-search-system-is-assembled": {
+    "core": "A production code search system has repo syncers, indexers building trigram shards, sharded index servers, a query planner that fans out and merges ranked results, and a UI or API, often with symbol and cross-reference data added.",
+    "first_principles": {
+      "problem": "The components only add up to a useful tool once they're composed into a fast, fresh, scalable pipeline.",
+      "truths": [
+        "Repositories change continuously.",
+        "Indexes must be sharded to scale.",
+        "Ranking makes results usable."
+      ],
+      "derivation": [
+        "**Sync** repos on push or a schedule.",
+        "**Index** into shards (Zoekt).",
+        "**Fan out** queries to shards and **merge and rank**.",
+        "Add **symbols and code intel** (SCIP) for go-to-definition across repos."
+      ]
+    },
+    "analogy": {
+      "title": "A newspaper archive service",
+      "story": "Couriers bring new editions, archivists index them into volumes, and a librarian queries all volumes and presents the best articles first.",
+      "mapping": [
+        [
+          "Couriers",
+          "Repo syncers"
+        ],
+        [
+          "Volumes",
+          "Index shards"
+        ],
+        [
+          "Librarian",
+          "Query planner"
+        ]
+      ],
+      "breaks": "Freshness costs compute. There's always some indexing lag."
+    },
+    "mindmap": {
+      "center": "Search System",
+      "branches": [
+        {
+          "label": "Ingest",
+          "children": [
+            "Repo sync",
+            "Webhooks"
+          ]
+        },
+        {
+          "label": "Index",
+          "children": [
+            "Zoekt shards",
+            "Trigrams"
+          ]
+        },
+        {
+          "label": "Query",
+          "children": [
+            "Fan-out",
+            "Merge",
+            "Rank"
+          ]
+        },
+        {
+          "label": "Intel",
+          "children": [
+            "Symbols",
+            "SCIP xrefs"
+          ]
+        },
+        {
+          "label": "UI",
+          "children": [
+            "Sourcegraph"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A query's journey",
+      "scenario": "In Sourcegraph.",
+      "flow": [
+        "User: repo:^org/ lang:go context.TODO",
+        "Planner → 40 shards in parallel",
+        "Each shard: trigram filter + match",
+        "Merge, rank, return in 300 ms"
+      ],
+      "steps": [
+        {
+          "label": "Bonus",
+          "detail": "Click a symbol to jump to its definition across repos."
+        }
+      ],
+      "code": [],
+      "outcome": "the whole organisation's code is searchable instantly."
+    },
+    "summary": {
+      "points": [
+        "Sync, index, shard.",
+        "Fan out and merge.",
+        "Add code intelligence."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are code search indexes sharded?",
+        "a": "To spread data and query load across machines so search scales with the size of the codebase."
+      }
+    ]
+  }
+}
