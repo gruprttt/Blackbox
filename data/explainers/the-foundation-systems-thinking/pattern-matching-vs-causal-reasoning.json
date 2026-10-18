@@ -1,0 +1,510 @@
+{
+  "introduction-the-detective-vs-the-bystander": {
+    "core": "In an outage your brain either pattern-matches fast (System 1: \"high CPU, so it's an infinite loop like last week\") or reasons causally (System 2: \"what mechanism produced this?\"). Only the second reliably finds root causes.",
+    "first_principles": {
+      "problem": "Under pressure, the first familiar explanation feels right. Acting on it quiets symptoms or makes things worse, and the real cause comes back.",
+      "truths": [
+        "Fast intuition is based on correlation with past events.",
+        "Each incident can have a different mechanism.",
+        "Fixes only stick if they remove the cause."
+      ],
+      "derivation": [
+        "Notice when you're in **System 1** (instant certainty).",
+        "Switch to **System 2**: list candidate mechanisms and evidence for each.",
+        "Act on the cause you can **prove**, not the one you recognise."
+      ]
+    },
+    "analogy": {
+      "title": "Detective vs. bystander",
+      "story": "The bystander shouts \"it was the butler, it's always the butler\". The detective checks alibis, fingerprints and timelines before naming anyone.",
+      "mapping": [
+        [
+          "Bystander's hunch",
+          "System 1 pattern match"
+        ],
+        [
+          "Detective's evidence",
+          "System 2 causal reasoning"
+        ],
+        [
+          "Usual suspect",
+          "Last incident's cause"
+        ]
+      ],
+      "breaks": "Detectives can take days. In an incident you mitigate fast (e.g. roll back) while still reasoning causally in parallel."
+    },
+    "mindmap": {
+      "center": "Two Modes",
+      "branches": [
+        {
+          "label": "System 1",
+          "children": [
+            "Fast",
+            "Correlation",
+            "\"Seen this before\""
+          ]
+        },
+        {
+          "label": "System 2",
+          "children": [
+            "Slow",
+            "Mechanism",
+            "Evidence"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Mitigate fast",
+            "Diagnose causally"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "High CPU again",
+      "scenario": "CPU spikes to 100%. Last week it was an infinite loop.",
+      "flow": [
+        "Hunch: infinite loop",
+        "Check: traffic? GC? job?",
+        "Evidence: GC pauses ↑",
+        "Cause: heap config change"
+      ],
+      "steps": [
+        {
+          "label": "System 1",
+          "detail": "Restart the service; the CPU drops, then returns an hour later."
+        },
+        {
+          "label": "System 2",
+          "detail": "GC logs show the heap was halved by a config change; reverting it fixes it."
+        }
+      ],
+      "code": [],
+      "outcome": "the real mechanism is fixed instead of the symptom being reset."
+    },
+    "summary": {
+      "points": [
+        "System 1 = fast correlation.",
+        "System 2 = slow causation.",
+        "Mitigate fast, diagnose slowly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where do System 1 and System 2 come from?",
+        "a": "Daniel Kahneman's research on fast intuitive and slow deliberate thinking."
+      }
+    ]
+  },
+  "the-last-changed-thing-bias": {
+    "core": "\"It broke right after our deploy, so the deploy caused it\" is the post hoc fallacy. Timing is a clue, not proof. Check the mechanism before rolling back.",
+    "first_principles": {
+      "problem": "A CSS change ships at 2:55 and the database CPU spikes at 3:00. The team rolls back, nothing improves, redeploys, and an hour later finds a 3:00 backup job on a table that just crossed a size threshold.",
+      "truths": [
+        "Many things change every minute in production.",
+        "Sequence in time doesn't prove cause.",
+        "A cause needs a plausible mechanism."
+      ],
+      "derivation": [
+        "Ask: **could this change mechanically cause this symptom?** (Can CSS raise DB CPU?)",
+        "List **everything** that changed: deploys, crons, traffic, data size, dependencies.",
+        "Roll back only if it's cheap and plausible, and keep investigating either way."
+      ]
+    },
+    "analogy": {
+      "title": "The rooster and the sunrise",
+      "story": "The rooster crows and then the sun rises. Silencing the rooster won't keep the sun down.",
+      "mapping": [
+        [
+          "Rooster crowing",
+          "Last deploy"
+        ],
+        [
+          "Sunrise",
+          "Incident"
+        ],
+        [
+          "Silencing the rooster",
+          "Rolling back an innocent change"
+        ]
+      ],
+      "breaks": "Unlike roosters, deploys often *are* the cause, so check the mechanism rather than ignoring deploys."
+    },
+    "mindmap": {
+      "center": "Last-Change Bias",
+      "branches": [
+        {
+          "label": "Fallacy",
+          "children": [
+            "Post hoc ergo propter hoc"
+          ]
+        },
+        {
+          "label": "Symptom",
+          "children": [
+            "Reflexive rollback"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Mechanism check",
+            "List all changes",
+            "Cron, data growth, traffic"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CSS deploy and DB CPU",
+      "scenario": "Frontend CSS deploy at 2:55, DB CPU at 100% at 3:00.",
+      "flow": [
+        "Suspect CSS",
+        "Mechanism? none",
+        "Check crons: backup at 3:00",
+        "Table outgrew threshold",
+        "Reschedule backup"
+      ],
+      "steps": [
+        {
+          "label": "Mechanism test",
+          "detail": "CSS doesn't touch the database, so it's unlikely."
+        },
+        {
+          "label": "Wider search",
+          "detail": "The scheduler shows a 3:00 backup and the table doubled this week."
+        }
+      ],
+      "code": [],
+      "outcome": "the incident is solved in minutes instead of an hour of pointless rollbacks."
+    },
+    "summary": {
+      "points": [
+        "Timing is a clue, not proof.",
+        "Require a mechanism.",
+        "Check scheduled jobs and data growth."
+      ]
+    },
+    "check": [
+      {
+        "q": "What question kills last-change bias fastest?",
+        "a": "\"By what mechanism could this change produce this symptom?\""
+      }
+    ]
+  },
+  "correlation-does-not-imply-causation": {
+    "core": "With thousands of metrics, some graphs always move together. Correlation is a hint, causation needs a mechanism, and hidden confounders often cause both.",
+    "first_principles": {
+      "problem": "Dashboards show latency and disk I/O rising together, so you tune disks. But a network switch failure was causing both retries and drops; the disk work was a symptom, not the cause.",
+      "truths": [
+        "Many metrics guarantee spurious matches.",
+        "A confounder can drive two metrics at once.",
+        "Causes act through specific mechanisms."
+      ],
+      "derivation": [
+        "Treat correlation as a **hypothesis**.",
+        "Write the **mechanism**: A → B → C.",
+        "Look for a **confounder** C causing both.",
+        "Test: change A (or remove it); does B follow?"
+      ]
+    },
+    "analogy": {
+      "title": "Ice cream and drownings",
+      "story": "Ice-cream sales and drownings rise together. Ice cream doesn't cause drowning; hot weather (confounder) drives both.",
+      "mapping": [
+        [
+          "Ice cream sales",
+          "Metric A"
+        ],
+        [
+          "Drownings",
+          "Metric B"
+        ],
+        [
+          "Hot weather",
+          "Confounding variable"
+        ],
+        [
+          "Banning ice cream",
+          "Fixing the wrong metric"
+        ]
+      ],
+      "breaks": "Weather is obvious. Production confounders (a bad switch, a noisy neighbour) are often invisible until you look for them."
+    },
+    "mindmap": {
+      "center": "Correlation vs Causation",
+      "branches": [
+        {
+          "label": "Correlation",
+          "children": [
+            "Move together",
+            "Hypothesis only"
+          ]
+        },
+        {
+          "label": "Causation",
+          "children": [
+            "Mechanism",
+            "Testable"
+          ]
+        },
+        {
+          "label": "Confounder",
+          "children": [
+            "Hidden third factor"
+          ]
+        },
+        {
+          "label": "Test",
+          "children": [
+            "Intervene",
+            "Observe effect"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Latency and disk I/O",
+      "scenario": "Both rise together at 14:10.",
+      "flow": [
+        "Correlated graphs",
+        "Mechanism? unclear",
+        "Look for C",
+        "Switch errors ↑",
+        "Replace switch"
+      ],
+      "steps": [
+        {
+          "label": "Hypothesis",
+          "detail": "Disk slows queries, raising latency."
+        },
+        {
+          "label": "Confounder",
+          "detail": "A failing switch causes retries (I/O) and drops (latency)."
+        },
+        {
+          "label": "Test",
+          "detail": "Fail over the switch; both metrics recover."
+        }
+      ],
+      "code": [],
+      "outcome": "the shared cause is fixed instead of tuning a symptom."
+    },
+    "summary": {
+      "points": [
+        "More metrics = more false matches.",
+        "Demand a mechanism.",
+        "Hunt for confounders."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a confounding variable?",
+        "a": "A hidden factor that causes two metrics to move together, making them look related."
+      }
+    ]
+  },
+  "building-causal-reasoning-skills": {
+    "core": "Done right, the Five Whys follows evidence through system mechanisms and ends at a fixable system weakness, not at \"human error\".",
+    "first_principles": {
+      "problem": "Bad Five Whys jumps to stories (\"the dev was careless\", \"management pressure\") and produces nothing actionable. The same failure recurs with the next person.",
+      "truths": [
+        "People make mistakes; systems decide whether mistakes become outages.",
+        "Each 'why' needs evidence.",
+        "Useful answers point to changeable controls."
+      ],
+      "derivation": [
+        "Answer each **why** with **evidence** (logs, metrics, diffs).",
+        "Follow **mechanisms**, not narratives.",
+        "Never stop at a person; ask **why the system allowed it**.",
+        "End at actions: tests, guardrails, automation."
+      ]
+    },
+    "analogy": {
+      "title": "Investigating a plane crash",
+      "story": "Air-crash investigators don't stop at \"pilot error\". They ask why the cockpit design made the error easy and why no alarm caught it, and change the aircraft.",
+      "mapping": [
+        [
+          "\"Pilot error\"",
+          "\"Human error\" root cause"
+        ],
+        [
+          "Cockpit redesign",
+          "System guardrail"
+        ],
+        [
+          "Black box data",
+          "Evidence for each why"
+        ]
+      ],
+      "breaks": "Crash investigations take months. Incidents need a quicker loop, but the same 'system not person' rule applies."
+    },
+    "mindmap": {
+      "center": "Five Whys Done Right",
+      "branches": [
+        {
+          "label": "Bad",
+          "children": [
+            "Narratives",
+            "Ends at a person"
+          ]
+        },
+        {
+          "label": "Good",
+          "children": [
+            "Evidence per why",
+            "Mechanisms"
+          ]
+        },
+        {
+          "label": "End",
+          "children": [
+            "System weakness",
+            "Actionable fix"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A bad deploy took the site down",
+      "scenario": "Rewriting a blame-chain Five Whys.",
+      "flow": [
+        "Why down? Bad config",
+        "Why shipped? No validation",
+        "Why no validation? Not in CI",
+        "Fix: schema check in CI"
+      ],
+      "steps": [
+        {
+          "label": "Evidence",
+          "detail": "The config diff set a timeout to 0."
+        },
+        {
+          "label": "System gap",
+          "detail": "CI didn't validate config values."
+        },
+        {
+          "label": "Action",
+          "detail": "Add schema validation and a canary stage."
+        }
+      ],
+      "code": [],
+      "outcome": "the class of failure is prevented, whoever makes the next mistake."
+    },
+    "summary": {
+      "points": [
+        "Evidence at every step.",
+        "Systems, not people.",
+        "End in actions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is 'human error' a bad final answer?",
+        "a": "It's not actionable and doesn't stop the next person from making the same mistake."
+      }
+    ]
+  },
+  "applying-causal-reasoning-to-system-design": {
+    "core": "Understanding why failures happen lets you design them out. \"Slow dependency → cascade\" isn't fixed by retries (they add load) but by timeouts, circuit breakers and bulkheads that break the causal chain.",
+    "first_principles": {
+      "problem": "The pattern-matching fix for a slow dependency is \"add retries\". That multiplies load on an already struggling service and makes the cascade worse.",
+      "truths": [
+        "Threads waiting on a slow call hold resources.",
+        "Exhausted pools block unrelated requests.",
+        "Retries multiply load during failure."
+      ],
+      "derivation": [
+        "Trace the **chain**: slow call → held connections → pool exhausted → all requests blocked → upstream retries.",
+        "Cut each link: **timeouts** (stop waiting), **bulkheads** (separate pools), **circuit breakers** (stop calling), **retry budgets with backoff**."
+      ]
+    },
+    "analogy": {
+      "title": "A traffic jam spreading",
+      "story": "One blocked exit backs cars onto the motorway, which blocks other exits too. You don't fix it by sending more cars; you divert traffic and give each exit its own lane.",
+      "mapping": [
+        [
+          "Blocked exit",
+          "Slow dependency"
+        ],
+        [
+          "Cars backing up",
+          "Held connections"
+        ],
+        [
+          "Other exits blocked",
+          "Cascade"
+        ],
+        [
+          "Separate lanes",
+          "Bulkheads"
+        ]
+      ],
+      "breaks": "Cars don't multiply. Retries do, which is why naive retries are actively harmful."
+    },
+    "mindmap": {
+      "center": "Causal Design",
+      "branches": [
+        {
+          "label": "Chain",
+          "children": [
+            "Slow call",
+            "Pool exhaustion",
+            "Cascade",
+            "Retry storm"
+          ]
+        },
+        {
+          "label": "Cuts",
+          "children": [
+            "Timeouts",
+            "Bulkheads",
+            "Circuit breakers",
+            "Backoff + budgets"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Recommendations service slows down",
+      "scenario": "Checkout calls recommendations, which now takes 10 s.",
+      "flow": [
+        "Recs slow",
+        "Checkout threads blocked",
+        "Checkout down",
+        "Add timeout + breaker + bulkhead",
+        "Checkout survives"
+      ],
+      "steps": [
+        {
+          "label": "Timeout",
+          "detail": "500 ms, then render without recommendations."
+        },
+        {
+          "label": "Bulkhead",
+          "detail": "A separate small pool for the recs calls."
+        },
+        {
+          "label": "Breaker",
+          "detail": "Stop calling recs while it's failing."
+        }
+      ],
+      "code": [],
+      "outcome": "a non-critical dependency can no longer take down checkout."
+    },
+    "summary": {
+      "points": [
+        "Find the mechanism of failure.",
+        "Retries can worsen cascades.",
+        "Break each causal link."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can retries make a cascading failure worse?",
+        "a": "They add more requests to a service that's already overloaded, deepening the overload."
+      }
+    ]
+  }
+}
