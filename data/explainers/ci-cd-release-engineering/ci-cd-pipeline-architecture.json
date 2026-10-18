@@ -1,0 +1,507 @@
+{
+  "introduction-from-code-to-customer": {
+    "core": "A CI/CD pipeline is an automated assembly line from commit to customer. Every change is built, tested and delivered the same way, quickly and repeatably, with no manual steps.",
+    "first_principles": {
+      "problem": "Manual builds and deploys are slow and inconsistent, and they depend on whoever happens to know the steps.",
+      "truths": [
+        "Humans make mistakes on repetitive tasks.",
+        "Fast feedback catches bugs while they're cheap.",
+        "Repeatability builds trust in releases."
+      ],
+      "derivation": [
+        "**CI**: build and test every commit.",
+        "**CD**: automatically deliver passing builds to environments.",
+        "Break the work into **stages, jobs and steps**.",
+        "Pass **artifacts**, **cache** dependencies, run on **runners**."
+      ]
+    },
+    "analogy": {
+      "title": "A car assembly line",
+      "story": "Each station does one job in order, and every car gets the same inspections.",
+      "mapping": [
+        [
+          "Stations",
+          "Stages"
+        ],
+        [
+          "Inspection",
+          "Tests"
+        ],
+        [
+          "Finished car",
+          "Released artifact"
+        ]
+      ],
+      "breaks": "A pipeline is code too. It needs design, maintenance and security."
+    },
+    "mindmap": {
+      "center": "CI/CD",
+      "branches": [
+        {
+          "label": "CI",
+          "children": [
+            "Build",
+            "Test",
+            "Every commit"
+          ]
+        },
+        {
+          "label": "CD",
+          "children": [
+            "Deliver",
+            "Deploy"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "Stages",
+            "Jobs",
+            "Steps"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "Artifacts",
+            "Cache",
+            "Runners"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A commit's journey",
+      "scenario": "From push to production.",
+      "flow": [
+        "Push",
+        "Build + unit tests",
+        "Package artifact",
+        "Deploy to staging + e2e",
+        "Promote to prod"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Minutes from commit to customer, every time the same way."
+        }
+      ],
+      "code": [],
+      "outcome": "releases are boring and frequent."
+    },
+    "summary": {
+      "points": [
+        "Automate everything.",
+        "Fast feedback.",
+        "Repeatable delivery."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between CI and CD?",
+        "a": "CI builds and tests every change; CD automatically delivers or deploys passing changes."
+      }
+    ]
+  },
+  "the-hierarchy-stages-jobs-and-steps": {
+    "core": "Pipelines are hierarchical: stages run in order, jobs within a stage run in parallel on separate runners, and steps within a job run sequentially in a shared environment.",
+    "first_principles": {
+      "problem": "One monolithic script is slow (nothing runs in parallel), opaque and hard to rerun partially.",
+      "truths": [
+        "Some work depends on earlier work.",
+        "Independent work can run in parallel.",
+        "Isolation between jobs prevents interference."
+      ],
+      "derivation": [
+        "**Stage**: an ordered phase (build → test → deploy).",
+        "**Job**: an isolated unit on its own runner; parallel within its stage.",
+        "**Step**: a command within a job, sharing its filesystem.",
+        "Use **needs/DAGs** to start jobs early."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant service",
+      "story": "Courses (stages) come in order; several cooks (jobs) prepare dishes for the same course at once; each cook follows recipe steps.",
+      "mapping": [
+        [
+          "Courses",
+          "Stages"
+        ],
+        [
+          "Cooks",
+          "Jobs"
+        ],
+        [
+          "Recipe steps",
+          "Steps"
+        ]
+      ],
+      "breaks": "Jobs don't share files. You must pass artifacts explicitly."
+    },
+    "mindmap": {
+      "center": "Pipeline Hierarchy",
+      "branches": [
+        {
+          "label": "Stage",
+          "children": [
+            "Ordered"
+          ]
+        },
+        {
+          "label": "Job",
+          "children": [
+            "Parallel",
+            "Isolated runner"
+          ]
+        },
+        {
+          "label": "Step",
+          "children": [
+            "Sequential",
+            "Shared FS"
+          ]
+        },
+        {
+          "label": "DAG",
+          "children": [
+            "needs:"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parallel test jobs",
+      "scenario": "In one stage.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "unit and lint run simultaneously after build."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "jobs:\n  build: { runs-on: ubuntu-latest, steps: [...] }\n  unit:  { needs: build, runs-on: ubuntu-latest, steps: [...] }\n  lint:  { needs: build, runs-on: ubuntu-latest, steps: [...] }\n  deploy: { needs: [unit, lint], steps: [...] }"
+        }
+      ],
+      "outcome": "fast, structured, rerunnable pipelines."
+    },
+    "summary": {
+      "points": [
+        "Stages order.",
+        "Jobs parallelise.",
+        "Steps share a workspace."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do two jobs share a filesystem?",
+        "a": "No. Each job runs on its own runner, so files must be passed as artifacts."
+      }
+    ]
+  },
+  "artifact-management-passing-the-baton": {
+    "core": "Artifacts are the outputs of one stage (binaries, images, reports) saved and handed to later stages. Build once and promote the same artifact everywhere, so what you tested is what you deploy.",
+    "first_principles": {
+      "problem": "Rebuilding in each stage means production runs a binary that was never actually tested.",
+      "truths": [
+        "Jobs run on separate machines.",
+        "Rebuilds can differ (dependencies, timestamps).",
+        "Traceability requires an immutable output."
+      ],
+      "derivation": [
+        "**Upload** the build output as an artifact.",
+        "**Download** it in later jobs.",
+        "**Build once, deploy many**.",
+        "Version and **store** release artifacts in a registry."
+      ]
+    },
+    "analogy": {
+      "title": "Passing the baton in a relay",
+      "story": "The same baton travels the whole race; you don't make a new one at each hand-off.",
+      "mapping": [
+        [
+          "Baton",
+          "Artifact"
+        ],
+        [
+          "Hand-off",
+          "Upload/download"
+        ],
+        [
+          "Same baton",
+          "Build once"
+        ]
+      ],
+      "breaks": "Pipeline artifacts expire. Long-term releases belong in an artifact registry."
+    },
+    "mindmap": {
+      "center": "Artifacts",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Binaries",
+            "Images",
+            "Reports"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Upload",
+            "Download"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "Build once",
+            "Promote"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Pipeline (short)",
+            "Registry (long)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Build once, test and deploy the same JAR",
+      "scenario": "Pipeline flow.",
+      "flow": [
+        "Build → app-1.4.jar uploaded",
+        "Test downloads same jar",
+        "Deploy downloads same jar",
+        "Checksum identical everywhere"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The tested bits are exactly the deployed bits."
+        }
+      ],
+      "code": [],
+      "outcome": "releases are traceable and trustworthy."
+    },
+    "summary": {
+      "points": [
+        "Save outputs.",
+        "Pass them forward.",
+        "Never rebuild for deploy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why 'build once, deploy many'?",
+        "a": "So the artifact you tested is byte-for-byte the one that reaches production."
+      }
+    ]
+  },
+  "caching-speeding-up-the-process": {
+    "core": "Caches store reusable inputs (dependencies, build caches) between runs to save time, keyed on something like a lockfile hash. Artifacts pass required outputs within a run. If a cache is missing, the job is just slower.",
+    "first_principles": {
+      "problem": "Every run re-downloads 800 MB of dependencies, adding minutes to every pipeline.",
+      "truths": [
+        "Dependencies rarely change between commits.",
+        "Downloads and compiles are slow.",
+        "A cache should be optional; correctness can't depend on it."
+      ],
+      "derivation": [
+        "Key caches on the **lockfile hash**.",
+        "Use **restore-keys** for partial hits.",
+        "Cache **dependency directories** and **build caches**.",
+        "Never rely on a cache for **correctness**."
+      ]
+    },
+    "analogy": {
+      "title": "Keeping pantry staples",
+      "story": "You don't buy flour for every cake; you restock only when the recipe changes.",
+      "mapping": [
+        [
+          "Pantry",
+          "Cache"
+        ],
+        [
+          "Recipe change",
+          "Lockfile change"
+        ],
+        [
+          "Shopping trip",
+          "Fresh download"
+        ]
+      ],
+      "breaks": "Poisoned or stale caches cause weird bugs, so key them carefully and allow clearing."
+    },
+    "mindmap": {
+      "center": "Caching",
+      "branches": [
+        {
+          "label": "vs Artifacts",
+          "children": [
+            "Cache = optional speed",
+            "Artifact = required output"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "Lockfile hash",
+            "restore-keys"
+          ]
+        },
+        {
+          "label": "What",
+          "children": [
+            "node_modules",
+            "~/.m2",
+            "Go build cache"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Stale",
+            "Poisoned"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Caching npm dependencies",
+      "scenario": "GitHub Actions.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Install drops from 3 minutes to 15 seconds on a hit."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- uses: actions/cache@v4\n  with:\n    path: ~/.npm\n    key: npm-${{ hashFiles('package-lock.json') }}\n    restore-keys: npm-"
+        }
+      ],
+      "outcome": "pipelines skip repeated work."
+    },
+    "summary": {
+      "points": [
+        "Cache inputs.",
+        "Key on lockfiles.",
+        "Optional by design."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key difference between a cache and an artifact?",
+        "a": "A cache is an optional speed-up; an artifact is a required output passed between jobs."
+      }
+    ]
+  },
+  "runners-the-engine-room": {
+    "core": "The CI platform only coordinates. Runners (agents) are the machines that execute jobs. Hosted runners are convenient; self-hosted ones give control, special hardware and network access, but you must secure and scale them.",
+    "first_principles": {
+      "problem": "Jobs need GPUs, private network access or lots of capacity that hosted runners don't provide, and self-hosted runners can be a security risk.",
+      "truths": [
+        "Jobs execute on real compute.",
+        "Different workloads need different machines.",
+        "Runners execute untrusted code from PRs."
+      ],
+      "derivation": [
+        "**Hosted**: zero maintenance, clean every time.",
+        "**Self-hosted**: custom hardware and network, but you maintain them.",
+        "Use **ephemeral** runners (one job, then destroy).",
+        "**Autoscale** (actions-runner-controller, Karpenter)."
+      ]
+    },
+    "analogy": {
+      "title": "A dispatch office and its drivers",
+      "story": "The office (platform) assigns deliveries; drivers (runners) actually do them. Some deliveries need special trucks.",
+      "mapping": [
+        [
+          "Dispatch office",
+          "CI platform"
+        ],
+        [
+          "Drivers",
+          "Runners"
+        ],
+        [
+          "Special trucks",
+          "GPU/ARM runners"
+        ]
+      ],
+      "breaks": "Persistent self-hosted runners accumulate state and can be compromised by malicious PRs."
+    },
+    "mindmap": {
+      "center": "Runners",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Hosted",
+            "Self-hosted"
+          ]
+        },
+        {
+          "label": "Labels",
+          "children": [
+            "runs-on",
+            "GPU",
+            "ARM"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Ephemeral",
+            "Isolate forks"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "ARC",
+            "Autoscaling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adding GPU tests",
+      "scenario": "A self-hosted runner pool.",
+      "flow": [
+        "Label pool 'gpu'",
+        "Job: runs-on: [self-hosted, gpu]",
+        "Ephemeral pod per job via ARC",
+        "Destroyed after job"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Special hardware with no leftover state."
+        }
+      ],
+      "code": [],
+      "outcome": "the right compute for each job, securely."
+    },
+    "summary": {
+      "points": [
+        "Platform coordinates.",
+        "Runners execute.",
+        "Prefer ephemeral."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefer ephemeral self-hosted runners?",
+        "a": "Each job gets a clean machine, so no state or compromise carries over between jobs."
+      }
+    ]
+  }
+}

@@ -1,0 +1,394 @@
+{
+  "introduction-the-staging-bottleneck": {
+    "core": "One shared staging environment serialises testing: teams queue for it, overwrite each other's deployments and debug each other's bugs. Ephemeral environments give every PR its own isolated, short-lived copy.",
+    "first_principles": {
+      "problem": "Five teams fight over one staging, tests are polluted by other people's changes, and the queue for staging slows everything.",
+      "truths": [
+        "Shared resources create contention.",
+        "Isolation makes test results trustworthy.",
+        "Automation makes environments cheap to create."
+      ],
+      "derivation": [
+        "**Create** an environment per PR.",
+        "**Update** it on each push.",
+        "**Destroy** it on merge or close.",
+        "Share a **preview URL** for review."
+      ]
+    },
+    "analogy": {
+      "title": "A shared whiteboard vs. personal notebooks",
+      "story": "Only one person can write on the whiteboard; everyone can sketch in their own notebook at once.",
+      "mapping": [
+        [
+          "Whiteboard",
+          "Shared staging"
+        ],
+        [
+          "Notebooks",
+          "Ephemeral envs"
+        ],
+        [
+          "Erasing",
+          "Teardown"
+        ]
+      ],
+      "breaks": "Full copies of complex systems can be expensive, so share heavy dependencies wisely."
+    },
+    "mindmap": {
+      "center": "Ephemeral Envs",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Staging queue",
+            "Collisions"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Env per PR"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Create",
+            "Update",
+            "Destroy"
+          ]
+        },
+        {
+          "label": "Challenges",
+          "children": [
+            "Data",
+            "Cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reviewing a UI change",
+      "scenario": "With a preview URL.",
+      "flow": [
+        "PR opened",
+        "Bot comments: pr-412.preview.acme.dev",
+        "Designer reviews live",
+        "Merge → env destroyed"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "There's no staging queue, and review happens on real deployments."
+        }
+      ],
+      "code": [],
+      "outcome": "parallel, isolated testing for every change."
+    },
+    "summary": {
+      "points": [
+        "Staging is a bottleneck.",
+        "Env per PR.",
+        "Automate the lifecycle."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem do ephemeral environments solve?",
+        "a": "Contention and cross-contamination in a single shared staging environment."
+      }
+    ]
+  },
+  "lifecycle-management-the-automation-loop": {
+    "core": "Tie the environment's lifecycle to Git events: PR opened → provision, push → update, PR closed or merged → destroy. The PR is the environment's single source of truth.",
+    "first_principles": {
+      "problem": "Manually created preview environments get forgotten, drift and are never cleaned up.",
+      "truths": [
+        "Git events mark the start and end of a change.",
+        "Automation is consistent.",
+        "Unique names avoid collisions."
+      ],
+      "derivation": [
+        "On **opened**: create namespace or stack `pr-<n>`.",
+        "On **synchronize**: redeploy the new image.",
+        "On **closed**: tear down everything.",
+        "Post the **URL and status** back to the PR."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel room tied to a booking",
+      "story": "Check-in creates the room assignment, extending the stay updates it, and checkout frees it, all automatically.",
+      "mapping": [
+        [
+          "Booking",
+          "PR"
+        ],
+        [
+          "Room",
+          "Environment"
+        ],
+        [
+          "Checkout",
+          "PR closed"
+        ]
+      ],
+      "breaks": "Missed close events (failed webhooks) leave orphans, so add a sweeper."
+    },
+    "mindmap": {
+      "center": "Lifecycle",
+      "branches": [
+        {
+          "label": "opened",
+          "children": [
+            "Provision"
+          ]
+        },
+        {
+          "label": "synchronize",
+          "children": [
+            "Update"
+          ]
+        },
+        {
+          "label": "closed",
+          "children": [
+            "Destroy"
+          ]
+        },
+        {
+          "label": "Feedback",
+          "children": [
+            "URL comment"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ArgoCD ApplicationSet PR generator",
+            "GitHub Actions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ArgoCD PR generator",
+      "scenario": "Automatic env per PR.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Labelled PRs get environments, and closing removes them."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "generators:\n- pullRequest:\n    github: { owner: acme, repo: web, labels: [preview] }\ntemplate:\n  metadata: { name: 'web-pr-{{number}}' }\n  spec:\n    source: { repoURL: https://github.com/acme/web, targetRevision: '{{head_sha}}', path: deploy }\n    destination: { namespace: 'pr-{{number}}' }"
+        }
+      ],
+      "outcome": "environments live exactly as long as their PRs."
+    },
+    "summary": {
+      "points": [
+        "Git events drive it.",
+        "Unique names.",
+        "Auto-destroy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Git event should trigger teardown?",
+        "a": "The PR being closed or merged."
+      }
+    ]
+  },
+  "data-seeding-the-hardest-part": {
+    "core": "Stateless services spin up easily, but tests need realistic data. Seed from fixtures, anonymised production snapshots or copy-on-write database branches, and never copy raw PII into previews.",
+    "first_principles": {
+      "problem": "An empty database makes previews useless, while copying production data leaks customer PII.",
+      "truths": [
+        "Realistic data reveals real bugs.",
+        "PII must be protected.",
+        "Copying large data is slow and expensive."
+      ],
+      "derivation": [
+        "**Fixtures/factories** for small, deterministic data.",
+        "**Anonymised snapshots** for realism.",
+        "**Database branching** (Neon, PlanetScale, Aurora clones) for speed.",
+        "**Migrations** run on seed data in every environment."
+      ]
+    },
+    "analogy": {
+      "title": "A movie set with props",
+      "story": "You need realistic props for a believable scene, but not the actors' real wallets.",
+      "mapping": [
+        [
+          "Props",
+          "Seed data"
+        ],
+        [
+          "Real wallets",
+          "Production PII"
+        ],
+        [
+          "Prop department",
+          "Anonymisation pipeline"
+        ]
+      ],
+      "breaks": "Anonymisation is hard to get perfect, since quasi-identifiers can re-identify people."
+    },
+    "mindmap": {
+      "center": "Data Seeding",
+      "branches": [
+        {
+          "label": "Options",
+          "children": [
+            "Fixtures",
+            "Anonymised snapshot",
+            "DB branching"
+          ]
+        },
+        {
+          "label": "Must",
+          "children": [
+            "No raw PII",
+            "Run migrations"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Realism",
+            "Speed",
+            "Cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Seeding with a database branch",
+      "scenario": "Copy-on-write.",
+      "flow": [
+        "Nightly: anonymised prod → 'seed' branch",
+        "PR env: branch from seed (seconds)",
+        "Run migrations",
+        "Delete branch on close"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Realistic data in seconds with no PII."
+        }
+      ],
+      "code": [],
+      "outcome": "previews are actually useful for testing."
+    },
+    "summary": {
+      "points": [
+        "Data makes previews useful.",
+        "Anonymise.",
+        "Branch, don't copy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not copy production databases into preview environments?",
+        "a": "They contain sensitive PII, and full copies are slow and expensive."
+      }
+    ]
+  },
+  "cost-control-stopping-the-bleeding": {
+    "core": "Ephemeral environments are only cheap if they're actually ephemeral. Enforce TTLs, sweep orphans, scale to zero when idle, share heavy dependencies and right-size resources.",
+    "first_principles": {
+      "problem": "Zombie environments from abandoned PRs quietly run for months and inflate the cloud bill.",
+      "truths": [
+        "Teardown events get missed.",
+        "Idle environments still cost money.",
+        "Not every service needs a dedicated copy."
+      ],
+      "derivation": [
+        "Set **TTL labels** plus a scheduled **sweeper**.",
+        "**Scale to zero** after inactivity (KEDA, Knative).",
+        "**Share** expensive backing services (one DB server, many databases).",
+        "Track **cost per environment** and show it on the PR."
+      ]
+    },
+    "analogy": {
+      "title": "Turning off lights in empty rooms",
+      "story": "Motion sensors switch off lights automatically, and a nightly guard checks for any left on.",
+      "mapping": [
+        [
+          "Motion sensor",
+          "Scale to zero"
+        ],
+        [
+          "Nightly guard",
+          "Sweeper"
+        ],
+        [
+          "Shared hallway lights",
+          "Shared dependencies"
+        ]
+      ],
+      "breaks": "Shared dependencies weaken isolation, so balance cost against fidelity."
+    },
+    "mindmap": {
+      "center": "Cost Control",
+      "branches": [
+        {
+          "label": "Risk",
+          "children": [
+            "Zombie envs"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "TTL",
+            "Sweeper",
+            "Scale to zero",
+            "Shared deps"
+          ]
+        },
+        {
+          "label": "Visibility",
+          "children": [
+            "Cost per env",
+            "PR comment"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A nightly sweeper",
+      "scenario": "Deleting expired namespaces.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Nothing lives longer than 7 days without renewal."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get ns -l preview=true -o json \\\n | jq -r '.items[] | select((now - (.metadata.creationTimestamp|fromdate)) > 7*86400) | .metadata.name' \\\n | xargs -r kubectl delete ns"
+        }
+      ],
+      "outcome": "preview environments stay affordable."
+    },
+    "summary": {
+      "points": [
+        "Enforce TTLs.",
+        "Sweep orphans.",
+        "Scale to zero."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a 'zombie environment'?",
+        "a": "A preview environment that keeps running after its PR is gone, costing money for nothing."
+      }
+    ]
+  }
+}

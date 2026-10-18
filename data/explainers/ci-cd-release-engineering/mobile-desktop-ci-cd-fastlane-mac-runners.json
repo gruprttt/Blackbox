@@ -1,0 +1,503 @@
+{
+  "introduction-why-dockerize-everything-fails-here": {
+    "core": "Mobile and desktop builds depend on proprietary toolchains (Xcode only runs on macOS, signing tied to Apple and Google accounts) and real hardware, so Linux containers can't solve them. CI needs special runners, signing automation and device testing.",
+    "first_principles": {
+      "problem": "A backend team's container-only CI can't build iOS apps at all.",
+      "truths": [
+        "Xcode requires macOS on Apple hardware.",
+        "App stores require cryptographic signing.",
+        "Device behaviour differs from simulators."
+      ],
+      "derivation": [
+        "Provision **macOS runners**.",
+        "Automate **code signing**.",
+        "Script releases with **Fastlane**.",
+        "Test on **device farms**."
+      ]
+    },
+    "analogy": {
+      "title": "Walled gardens",
+      "story": "Each app store is a gated garden with its own rules, tools and gatekeepers.",
+      "mapping": [
+        [
+          "Garden walls",
+          "Platform restrictions"
+        ],
+        [
+          "Gatekeepers",
+          "Signing and review"
+        ],
+        [
+          "Special tools",
+          "Xcode/Gradle"
+        ]
+      ],
+      "breaks": "Android builds can run on Linux containers; iOS and macOS can't."
+    },
+    "mindmap": {
+      "center": "Mobile CI/CD",
+      "branches": [
+        {
+          "label": "Constraints",
+          "children": [
+            "macOS only",
+            "Signing",
+            "Store review"
+          ]
+        },
+        {
+          "label": "Solutions",
+          "children": [
+            "Mac runners",
+            "Fastlane",
+            "Device farms"
+          ]
+        },
+        {
+          "label": "Android",
+          "children": [
+            "Linux OK"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One app, two platforms",
+      "scenario": "Different pipelines.",
+      "flow": [
+        "Android: Linux container + Gradle",
+        "iOS: macOS runner + Xcode",
+        "Both: Fastlane for signing + upload"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each platform gets the infrastructure it requires."
+        }
+      ],
+      "code": [],
+      "outcome": "mobile CI built around its real constraints."
+    },
+    "summary": {
+      "points": [
+        "Containers don't fit iOS.",
+        "Signing is mandatory.",
+        "Real devices matter."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't iOS apps be built in standard Linux containers?",
+        "a": "Xcode only runs on macOS, which Apple's licence restricts to Apple hardware."
+      }
+    ]
+  },
+  "the-specific-hell-of-mac-runners": {
+    "core": "Apple's EULA restricts macOS to Apple hardware, so Mac CI capacity is scarce and expensive: hosted macOS minutes cost far more, cloud Mac instances have 24-hour minimum allocations, and self-hosted Mac minis need fleet management.",
+    "first_principles": {
+      "problem": "iOS builds queue for hours on a few Mac machines, while Linux jobs start instantly.",
+      "truths": [
+        "Licensing ties macOS to Apple hardware.",
+        "Mac capacity can't burst like Linux.",
+        "Xcode versions must be managed."
+      ],
+      "derivation": [
+        "**Hosted** macOS runners: easy but costly.",
+        "**Cloud Macs** (EC2 mac, 24h minimum allocation) or **Mac fleets** (MacStadium, self-hosted minis).",
+        "**Virtualise** with Tart/Anka for clean ephemeral VMs.",
+        "Minimise Mac minutes: run **Linux for everything else**."
+      ]
+    },
+    "analogy": {
+      "title": "A rare specialist doctor",
+      "story": "Only a few can perform the procedure, so you book carefully and handle prep elsewhere.",
+      "mapping": [
+        [
+          "Specialist",
+          "Mac runner"
+        ],
+        [
+          "Booking",
+          "Queue"
+        ],
+        [
+          "Prep elsewhere",
+          "Linux pre-steps"
+        ]
+      ],
+      "breaks": "Apple Silicon versus Intel differences add yet another dimension."
+    },
+    "mindmap": {
+      "center": "Mac Runners",
+      "branches": [
+        {
+          "label": "Constraint",
+          "children": [
+            "EULA",
+            "Apple hardware"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Hosted",
+            "EC2 mac",
+            "MacStadium",
+            "Self-hosted minis"
+          ]
+        },
+        {
+          "label": "Virtualise",
+          "children": [
+            "Tart",
+            "Anka"
+          ]
+        },
+        {
+          "label": "Optimise",
+          "children": [
+            "Linux for lint/tests",
+            "Cache DerivedData"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cutting Mac minutes",
+      "scenario": "Pipeline split.",
+      "flow": [
+        "Linux: lint, Swift unit tests (Linux-compatible parts)",
+        "Mac: only xcodebuild archive + UI tests",
+        "Cache SPM/DerivedData"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Mac usage halved and the queue shortened."
+        }
+      ],
+      "code": [],
+      "outcome": "Mac capacity is used where it's truly needed."
+    },
+    "summary": {
+      "points": [
+        "Mac capacity is scarce.",
+        "Virtualise for cleanliness.",
+        "Offload to Linux."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do cloud Mac instances often have a 24-hour minimum?",
+        "a": "Apple's licensing requires dedicated hardware allocations with a minimum lease period."
+      }
+    ]
+  },
+  "code-signing-the-identity-crisis": {
+    "core": "Every iOS binary must be signed with a certificate and a provisioning profile that matches the app ID, devices and entitlements. CI needs those secrets available securely and reproducibly, without the keychain chaos of personal Macs.",
+    "first_principles": {
+      "problem": "Builds fail with 'no matching provisioning profile' because certificates live on one developer's laptop.",
+      "truths": [
+        "Apple ties signing identities to team accounts.",
+        "Profiles expire and must match exactly.",
+        "Signing keys are sensitive secrets."
+      ],
+      "derivation": [
+        "Store certificates and profiles **encrypted** in a repo or cloud bucket (fastlane match).",
+        "Create a **temporary keychain** per CI job.",
+        "Use **App Store Connect API keys**, not personal Apple IDs.",
+        "**Rotate** and audit."
+      ]
+    },
+    "analogy": {
+      "title": "A notarised identity document",
+      "story": "Without the official stamp matching your name and destination, the border won't let the package through.",
+      "mapping": [
+        [
+          "Official stamp",
+          "Certificate"
+        ],
+        [
+          "Destination visa",
+          "Provisioning profile"
+        ],
+        [
+          "Border",
+          "Device/App Store"
+        ]
+      ],
+      "breaks": "Android signing is simpler (a keystore), but losing the upload key is still painful."
+    },
+    "mindmap": {
+      "center": "Code Signing",
+      "branches": [
+        {
+          "label": "iOS",
+          "children": [
+            "Certificate",
+            "Provisioning profile",
+            "Entitlements"
+          ]
+        },
+        {
+          "label": "CI",
+          "children": [
+            "fastlane match",
+            "Temp keychain",
+            "ASC API key"
+          ]
+        },
+        {
+          "label": "Android",
+          "children": [
+            "Keystore",
+            "Play App Signing"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Encrypt",
+            "Rotate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Signing in CI with match",
+      "scenario": "Reproducible.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any runner can sign, and nothing lives on personal machines."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ruby",
+          "text": "lane :beta do\n  setup_ci                       # temp keychain\n  match(type: \"appstore\", readonly: true)\n  build_app(scheme: \"App\")\nend"
+        }
+      ],
+      "outcome": "signing is automated and reproducible."
+    },
+    "summary": {
+      "points": [
+        "Signing is mandatory.",
+        "Centralise encrypted identities.",
+        "Temp keychains in CI."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does fastlane match manage?",
+        "a": "Encrypted, shared iOS certificates and provisioning profiles for the team and CI."
+      }
+    ]
+  },
+  "fastlane-the-automation-savior": {
+    "core": "Fastlane wraps the painful mobile release steps (building, signing, screenshots, metadata, TestFlight and Play Store uploads) into Ruby 'lanes' that run the same way locally and in CI.",
+    "first_principles": {
+      "problem": "Releasing an app means 30 manual clicks across Xcode, App Store Connect and the Play Console.",
+      "truths": [
+        "Release steps are repetitive.",
+        "Store APIs exist but are complex.",
+        "One script beats tribal knowledge."
+      ],
+      "derivation": [
+        "Define **lanes** in a Fastfile (test, beta, release).",
+        "Use **actions**: build_app, match, upload_to_testflight, supply.",
+        "Run lanes **in CI** with API keys.",
+        "Version **metadata** in Git."
+      ]
+    },
+    "analogy": {
+      "title": "A universal remote for app stores",
+      "story": "One button sequence does what used to need many devices and menus.",
+      "mapping": [
+        [
+          "Remote",
+          "Fastlane"
+        ],
+        [
+          "Buttons",
+          "Lanes"
+        ],
+        [
+          "Devices",
+          "Xcode, ASC, Play Console"
+        ]
+      ],
+      "breaks": "Fastlane depends on Ruby, and Apple API changes can break actions temporarily."
+    },
+    "mindmap": {
+      "center": "Fastlane",
+      "branches": [
+        {
+          "label": "Lanes",
+          "children": [
+            "test",
+            "beta",
+            "release"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "build_app",
+            "match",
+            "pilot",
+            "supply",
+            "snapshot"
+          ]
+        },
+        {
+          "label": "CI",
+          "children": [
+            "API keys",
+            "setup_ci"
+          ]
+        },
+        {
+          "label": "Metadata",
+          "children": [
+            "deliver",
+            "Git"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A beta lane",
+      "scenario": "TestFlight upload.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "`fastlane beta` ships to testers in one command."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ruby",
+          "text": "lane :beta do\n  increment_build_number(build_number: ENV[\"GITHUB_RUN_NUMBER\"])\n  match(type: \"appstore\", readonly: true)\n  build_app(scheme: \"App\")\n  upload_to_testflight(api_key_path: \"asc_key.json\")\nend"
+        }
+      ],
+      "outcome": "mobile releases become one command."
+    },
+    "summary": {
+      "points": [
+        "Lanes automate releases.",
+        "Same locally and in CI.",
+        "Metadata as code."
+      ]
+    },
+    "check": [
+      {
+        "q": "What Fastlane action uploads Android builds to Google Play?",
+        "a": "supply (upload_to_play_store)."
+      }
+    ]
+  },
+  "device-farms-real-hardware-testing": {
+    "core": "Simulators and emulators miss real-device issues: memory pressure, GPU and camera behaviour, OEM Android quirks, network conditions. Device farms (Firebase Test Lab, AWS Device Farm, BrowserStack) run tests on real phones in CI.",
+    "first_principles": {
+      "problem": "The app passes every simulator test but crashes on a 3-year-old Samsung with low memory.",
+      "truths": [
+        "Real hardware behaves differently.",
+        "Device fragmentation is huge on Android.",
+        "Buying every device yourself is impractical."
+      ],
+      "derivation": [
+        "Run **unit and simulator tests** on every PR (fast).",
+        "Run a **device farm** matrix nightly or before release.",
+        "Choose devices by **user analytics** (top models and OS versions).",
+        "Collect **videos, logs and performance** data."
+      ]
+    },
+    "analogy": {
+      "title": "Crash-testing real cars, not just simulations",
+      "story": "Simulations are cheap, but you still crash a real car before selling it.",
+      "mapping": [
+        [
+          "Simulation",
+          "Simulator"
+        ],
+        [
+          "Real crash test",
+          "Device farm run"
+        ],
+        [
+          "Car models",
+          "Phone models"
+        ]
+      ],
+      "breaks": "Device farms are slower and cost per minute, so be selective."
+    },
+    "mindmap": {
+      "center": "Device Farms",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Memory",
+            "GPU",
+            "OEM quirks"
+          ]
+        },
+        {
+          "label": "Services",
+          "children": [
+            "Firebase Test Lab",
+            "AWS Device Farm",
+            "BrowserStack"
+          ]
+        },
+        {
+          "label": "Strategy",
+          "children": [
+            "Simulators per PR",
+            "Devices nightly"
+          ]
+        },
+        {
+          "label": "Select",
+          "children": [
+            "Analytics-driven"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A pre-release device matrix",
+      "scenario": "Firebase Test Lab.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "An OOM crash on the A51 is fixed before release."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "gcloud firebase test android run --app app.apk --test app-test.apk \\\n  --device model=a51,version=31 --device model=oriole,version=34"
+        }
+      ],
+      "outcome": "releases are validated on the devices users actually own."
+    },
+    "summary": {
+      "points": [
+        "Simulators aren't enough.",
+        "Test real devices.",
+        "Pick by analytics."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use device farms in addition to simulators?",
+        "a": "Real devices reveal hardware, memory, OEM and performance issues that simulators miss."
+      }
+    ]
+  }
+}

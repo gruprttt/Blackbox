@@ -1,0 +1,618 @@
+{
+  "introduction-the-poisoned-well-problem": {
+    "core": "Most of what you ship comes from dependencies, base images and build tools. Securing the supply chain means knowing what's inside (SBOM), finding known flaws (scanning), proving who built it (signing) and how (provenance).",
+    "first_principles": {
+      "problem": "Attackers target the build and dependency pipeline (SolarWinds, Codecov, xz) because one compromise reaches thousands.",
+      "truths": [
+        "Your code is a small fraction of the artifact.",
+        "Artifacts can be tampered with between build and deploy.",
+        "Trust must be verifiable."
+      ],
+      "derivation": [
+        "**SBOM**: what's inside.",
+        "**Scan**: what's vulnerable.",
+        "**Sign**: who produced it.",
+        "**Provenance/SLSA**: how it was built.",
+        "**Verify** at deploy."
+      ]
+    },
+    "analogy": {
+      "title": "Building with Lego from unknown suppliers",
+      "story": "You glue together bricks made elsewhere, so you need to check each brick's origin and integrity.",
+      "mapping": [
+        [
+          "Bricks",
+          "Dependencies"
+        ],
+        [
+          "Glue",
+          "Your code"
+        ],
+        [
+          "Origin stamp",
+          "Signature/provenance"
+        ]
+      ],
+      "breaks": "Each control covers one gap. You need all of them together."
+    },
+    "mindmap": {
+      "center": "Supply Chain",
+      "branches": [
+        {
+          "label": "Know",
+          "children": [
+            "SBOM"
+          ]
+        },
+        {
+          "label": "Find",
+          "children": [
+            "Grype",
+            "Trivy"
+          ]
+        },
+        {
+          "label": "Prove who",
+          "children": [
+            "Signing",
+            "Sigstore"
+          ]
+        },
+        {
+          "label": "Prove how",
+          "children": [
+            "SLSA provenance"
+          ]
+        },
+        {
+          "label": "Enforce",
+          "children": [
+            "Admission policy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The Codecov breach",
+      "scenario": "A modified CI script.",
+      "flow": [
+        "Attacker modifies bash uploader",
+        "Thousands of CI runs exfiltrate secrets",
+        "Undetected for months"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Verify the integrity of everything you pull into CI."
+        }
+      ],
+      "code": [],
+      "outcome": "supply-chain risk is managed explicitly."
+    },
+    "summary": {
+      "points": [
+        "Most code isn't yours.",
+        "Know, find, prove, verify.",
+        "Layered controls."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the four core supply-chain controls?",
+        "a": "SBOM generation, vulnerability scanning, signing and build provenance (SLSA)."
+      }
+    ]
+  },
+  "sboms-the-ingredients-label": {
+    "core": "An SBOM lists every package in an artifact (name, version, licence, hashes) in SPDX or CycloneDX format. Tools like Syft generate it from images or source at build time.",
+    "first_principles": {
+      "problem": "When a CVE drops, you can't tell which of hundreds of images contain the vulnerable library.",
+      "truths": [
+        "Images contain OS and language packages.",
+        "Inventories can be generated automatically.",
+        "Standards make SBOMs portable."
+      ],
+      "derivation": [
+        "Run **`syft <image> -o cyclonedx-json`** in CI.",
+        "**Store** SBOMs with the artifact (attestation).",
+        "**Index** them for search.",
+        "**Regenerate** on every build."
+      ]
+    },
+    "analogy": {
+      "title": "A food ingredients label",
+      "story": "You check for peanuts before eating, and SBOMs let you check for log4j before deploying.",
+      "mapping": [
+        [
+          "Ingredients label",
+          "SBOM"
+        ],
+        [
+          "Allergen",
+          "Vulnerable package"
+        ],
+        [
+          "Label standard",
+          "SPDX/CycloneDX"
+        ]
+      ],
+      "breaks": "SBOMs miss things that weren't installed through package managers (copied binaries)."
+    },
+    "mindmap": {
+      "center": "SBOM",
+      "branches": [
+        {
+          "label": "Formats",
+          "children": [
+            "SPDX",
+            "CycloneDX"
+          ]
+        },
+        {
+          "label": "Generate",
+          "children": [
+            "Syft",
+            "Trivy"
+          ]
+        },
+        {
+          "label": "Store",
+          "children": [
+            "Attestation",
+            "Registry"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "CVE response",
+            "Licence audit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Generating and attaching",
+      "scenario": "Syft and cosign.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The SBOM travels with the image, signed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "syft ghcr.io/acme/api:1.4 -o cyclonedx-json > sbom.json\ncosign attest --predicate sbom.json --type cyclonedx ghcr.io/acme/api:1.4"
+        }
+      ],
+      "outcome": "instant answers to 'what's inside?'."
+    },
+    "summary": {
+      "points": [
+        "Inventory everything.",
+        "Standard formats.",
+        "Attach to artifacts."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name the two main SBOM formats.",
+        "a": "SPDX and CycloneDX."
+      }
+    ]
+  },
+  "vulnerability-scanning-with-grype": {
+    "core": "Grype matches SBOM or image contents against vulnerability databases and reports CVEs by severity. In CI it can fail builds above a threshold, and re-scanning stored SBOMs catches newly disclosed CVEs.",
+    "first_principles": {
+      "problem": "An ingredients list is useless unless you know which ingredients are dangerous today.",
+      "truths": [
+        "New CVEs are published constantly.",
+        "Severity and fix availability guide priority.",
+        "Gates must be tuned to avoid alert fatigue."
+      ],
+      "derivation": [
+        "Run **`grype sbom:sbom.json`** or `grype <image>`.",
+        "Use **--fail-on high** as a CI gate.",
+        "Use **--only-fixed** to focus on actionable items.",
+        "**Re-scan** deployed SBOMs daily."
+      ]
+    },
+    "analogy": {
+      "title": "A recall checker",
+      "story": "It compares your pantry list against today's recall notices.",
+      "mapping": [
+        [
+          "Pantry list",
+          "SBOM"
+        ],
+        [
+          "Recall notices",
+          "CVE databases"
+        ],
+        [
+          "Recalled item",
+          "Vulnerable package"
+        ]
+      ],
+      "breaks": "Scanners report presence, not exploitability, so triage with reachability or VEX."
+    },
+    "mindmap": {
+      "center": "Grype",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "SBOM",
+            "Image"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "NVD",
+            "GHSA",
+            "Distro feeds"
+          ]
+        },
+        {
+          "label": "Gate",
+          "children": [
+            "--fail-on",
+            "--only-fixed"
+          ]
+        },
+        {
+          "label": "Ongoing",
+          "children": [
+            "Re-scan daily"
+          ]
+        },
+        {
+          "label": "Triage",
+          "children": [
+            "VEX",
+            "Reachability"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A CI gate",
+      "scenario": "Fail on high with a fix available.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Builds with fixable high CVEs are blocked."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "grype sbom:./sbom.json --fail-on high --only-fixed"
+        }
+      ],
+      "outcome": "known vulnerabilities don't ship unnoticed."
+    },
+    "summary": {
+      "points": [
+        "Scan SBOMs.",
+        "Gate on severity.",
+        "Re-scan continuously."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why re-scan SBOMs of already-deployed images?",
+        "a": "New CVEs are disclosed after deployment, so yesterday's clean image can be vulnerable today."
+      }
+    ]
+  },
+  "image-signing-the-digital-wax-seal": {
+    "core": "Signing an image digest cryptographically binds it to the signer. Verifying the signature at deploy proves the image is exactly what the trusted pipeline produced and hasn't been tampered with since.",
+    "first_principles": {
+      "problem": "An attacker who can push to the registry, or intercept traffic, can replace a scanned, clean image with malware.",
+      "truths": [
+        "Tags are mutable; digests aren't.",
+        "Signatures detect any byte change.",
+        "Verification must happen at the point of use."
+      ],
+      "derivation": [
+        "Sign the **digest** (sha256), not the tag.",
+        "Store signatures **in the registry** (OCI).",
+        "**Verify** in an admission controller (Kyverno, policy-controller).",
+        "**Deploy by digest**."
+      ]
+    },
+    "analogy": {
+      "title": "A wax seal on a letter",
+      "story": "A broken or missing seal shows the letter was opened or forged.",
+      "mapping": [
+        [
+          "Wax seal",
+          "Signature"
+        ],
+        [
+          "Signet ring",
+          "Signing key/identity"
+        ],
+        [
+          "Checking the seal",
+          "Admission verification"
+        ]
+      ],
+      "breaks": "A signature proves origin, not safety. A trusted pipeline can still sign vulnerable code."
+    },
+    "mindmap": {
+      "center": "Image Signing",
+      "branches": [
+        {
+          "label": "Sign",
+          "children": [
+            "Digest",
+            "cosign sign"
+          ]
+        },
+        {
+          "label": "Store",
+          "children": [
+            "OCI registry"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Admission controller",
+            "Kyverno"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Deploy by digest"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sign and verify",
+      "scenario": "cosign.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Policy",
+          "detail": "The cluster refuses unsigned or tampered images."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cosign sign ghcr.io/acme/api@sha256:ab12...\ncosign verify ghcr.io/acme/api@sha256:ab12... --certificate-identity ... --certificate-oidc-issuer ..."
+        }
+      ],
+      "outcome": "only authentic images run."
+    },
+    "summary": {
+      "points": [
+        "Sign digests.",
+        "Verify at admission.",
+        "Deploy by digest."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why sign the digest rather than the tag?",
+        "a": "Tags can be moved to point at different content, while a digest uniquely identifies exact bytes."
+      }
+    ]
+  },
+  "sigstore-and-keyless-signing-a-revolution": {
+    "core": "Sigstore removes long-lived signing keys. Fulcio issues a short-lived certificate bound to an OIDC identity (for example a GitHub Actions workflow), and Rekor records the signature in a public transparency log, so you trust identities, not key files.",
+    "first_principles": {
+      "problem": "Managing, rotating and protecting private signing keys is hard, and leaked keys are catastrophic.",
+      "truths": [
+        "OIDC identities already exist in CI.",
+        "Short-lived credentials limit exposure.",
+        "Public logs make misuse detectable."
+      ],
+      "derivation": [
+        "CI requests an **OIDC token**.",
+        "**Fulcio** issues a 10-minute cert for that identity.",
+        "Sign; record in the **Rekor** transparency log.",
+        "Verify by **identity + issuer**, not by key."
+      ]
+    },
+    "analogy": {
+      "title": "Signing a register with your ID at the front desk",
+      "story": "Instead of carrying a personal stamp that could be stolen, you show ID and sign a public ledger.",
+      "mapping": [
+        [
+          "Showing ID",
+          "OIDC token"
+        ],
+        [
+          "Temporary badge",
+          "Fulcio cert"
+        ],
+        [
+          "Public ledger",
+          "Rekor"
+        ]
+      ],
+      "breaks": "Verification policies must pin the expected identity, or any GitHub workflow could sign."
+    },
+    "mindmap": {
+      "center": "Sigstore",
+      "branches": [
+        {
+          "label": "Fulcio",
+          "children": [
+            "Short-lived cert",
+            "OIDC identity"
+          ]
+        },
+        {
+          "label": "Rekor",
+          "children": [
+            "Transparency log"
+          ]
+        },
+        {
+          "label": "cosign",
+          "children": [
+            "Sign",
+            "Verify"
+          ]
+        },
+        {
+          "label": "Verify by",
+          "children": [
+            "Identity",
+            "Issuer"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "No keys to manage"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Keyless signing in GitHub Actions",
+      "scenario": "No secrets needed.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Verify",
+          "detail": "`--certificate-identity-regexp 'https://github.com/acme/.*'`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "permissions: { id-token: write, packages: write }\nsteps:\n  - uses: sigstore/cosign-installer@v3\n  - run: cosign sign --yes ghcr.io/acme/api@${{ steps.build.outputs.digest }}"
+        }
+      ],
+      "outcome": "signing with no key management."
+    },
+    "summary": {
+      "points": [
+        "Identity, not keys.",
+        "Short-lived certs.",
+        "Public transparency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Rekor provide?",
+        "a": "An append-only public transparency log of signatures, making misuse detectable."
+      }
+    ]
+  },
+  "provenance-and-slsa-the-roadmap-to-trust": {
+    "core": "Provenance is a signed record of how an artifact was built: source repo and commit, builder, parameters. SLSA levels define how trustworthy it is, from 'it exists' up to 'generated by a hardened, isolated builder that the build can't tamper with'.",
+    "first_principles": {
+      "problem": "Knowing what's inside and who signed it doesn't prove the build wasn't manipulated.",
+      "truths": [
+        "Build systems can be compromised.",
+        "Provenance generated by the platform is harder to forge.",
+        "Verification closes the loop."
+      ],
+      "derivation": [
+        "Generate **provenance** (in-toto attestation).",
+        "Have it generated by the **build platform**, not by user scripts.",
+        "Use **isolated, ephemeral builders** (higher levels).",
+        "**Verify** source and builder before deploying."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe card stamped by a certified kitchen",
+      "story": "It's not just the ingredient list, but where and how the dish was made, certified by the kitchen itself.",
+      "mapping": [
+        [
+          "Recipe card",
+          "Provenance"
+        ],
+        [
+          "Certified kitchen",
+          "Hardened builder"
+        ],
+        [
+          "Certification level",
+          "SLSA level"
+        ]
+      ],
+      "breaks": "SLSA doesn't guarantee the source code is free of malicious commits."
+    },
+    "mindmap": {
+      "center": "Provenance & SLSA",
+      "branches": [
+        {
+          "label": "Provenance",
+          "children": [
+            "Source",
+            "Builder",
+            "Params"
+          ]
+        },
+        {
+          "label": "Format",
+          "children": [
+            "in-toto",
+            "SLSA predicate"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "L1 exists",
+            "L2 signed/hosted",
+            "L3 hardened"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "slsa-verifier",
+            "Policy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verifying a release binary",
+      "scenario": "slsa-verifier.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "You confirm it came from that repo and tag via the trusted builder."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "slsa-verifier verify-artifact app.tar.gz \\\n  --provenance-path app.intoto.jsonl \\\n  --source-uri github.com/acme/app --source-tag v1.4.0"
+        }
+      ],
+      "outcome": "end-to-end verifiable builds."
+    },
+    "summary": {
+      "points": [
+        "Record how it was built.",
+        "Platform-generated.",
+        "Verify before use."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does SLSA provenance add beyond an SBOM and a signature?",
+        "a": "A verifiable record of how and where the artifact was built (source, builder, process)."
+      }
+    ]
+  }
+}

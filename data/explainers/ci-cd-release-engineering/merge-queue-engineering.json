@@ -1,0 +1,595 @@
+{
+  "introduction-the-green-build-lie": {
+    "core": "Two PRs can each pass CI against an old main and still break main when combined, because neither was tested against the other. A green PR build isn't proof that main will be green.",
+    "first_principles": {
+      "problem": "Main breaks several times a week even though every PR was green, blocking everyone.",
+      "truths": [
+        "CI tests a PR against the base at the time it ran.",
+        "Main moves after that.",
+        "Semantic conflicts don't show up as Git conflicts."
+      ],
+      "derivation": [
+        "Recognise that **PR CI is stale** once main moves.",
+        "Test the **exact merge result** before landing.",
+        "**Serialise** landings through a queue.",
+        "Optimise the queue's **throughput**."
+      ]
+    },
+    "analogy": {
+      "title": "Two editors of a shared doc",
+      "story": "One renames a heading while the other adds a reference to the old name. Each edit is fine; together they break the doc.",
+      "mapping": [
+        [
+          "Rename",
+          "PR A"
+        ],
+        [
+          "Reference",
+          "PR B"
+        ],
+        [
+          "Broken doc",
+          "Red main"
+        ]
+      ],
+      "breaks": "Requiring branches to be up to date before merging works, but forces endless rebases on busy repos."
+    },
+    "mindmap": {
+      "center": "Green Build Lie",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "Stale base",
+            "Semantic conflicts"
+          ]
+        },
+        {
+          "label": "Effect",
+          "children": [
+            "Broken main",
+            "Blocked team"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Test merge result",
+            "Merge queue"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A rename vs a new call",
+      "scenario": "Both green, main red.",
+      "flow": [
+        "PR A renames fetchUser→getUser (green)",
+        "PR B adds call to fetchUser (green)",
+        "Both merge",
+        "main fails to compile"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Test what will actually land."
+        }
+      ],
+      "code": [],
+      "outcome": "you understand why a broken trunk happens."
+    },
+    "summary": {
+      "points": [
+        "Green PR ≠ green main.",
+        "Main moves.",
+        "Test the combination."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can two green PRs break main?",
+        "a": "Each was tested against an older main without the other's changes, and they conflict semantically."
+      }
+    ]
+  },
+  "what-is-a-merge-queue": {
+    "core": "A merge queue lines up approved PRs and, for each one, tests the PR applied on top of the latest main plus everything ahead of it in the queue. Only exact combinations that pass get merged, so main stays green.",
+    "first_principles": {
+      "problem": "Manual 'update branch, wait for CI, merge' races don't scale on busy repos.",
+      "truths": [
+        "Main must only receive tested states.",
+        "Ordering makes the expected state predictable.",
+        "Automation removes the human race."
+      ],
+      "derivation": [
+        "PR approved → **enters the queue**.",
+        "Queue builds a **temporary merge branch** (main + queued PRs + this PR).",
+        "CI **passes → fast-forward main**; **fails → eject** the PR.",
+        "Next in line continues."
+      ]
+    },
+    "analogy": {
+      "title": "A traffic controller on a single-lane bridge",
+      "story": "Cars cross one at a time in order, and each crossing is verified safe.",
+      "mapping": [
+        [
+          "Cars",
+          "PRs"
+        ],
+        [
+          "Controller",
+          "Merge queue"
+        ],
+        [
+          "Bridge",
+          "main"
+        ]
+      ],
+      "breaks": "A strictly serial queue is slow when CI is slow, so it needs parallelism or batching."
+    },
+    "mindmap": {
+      "center": "Merge Queue",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Approve",
+            "Enqueue",
+            "Test merge result",
+            "Land or eject"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "main always green"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Queue latency"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "GitHub merge queue",
+            "Mergify",
+            "Bors"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Queue of three PRs",
+      "scenario": "Serial.",
+      "flow": [
+        "Test main+A → pass → land",
+        "Test main+A+B → fail → eject B",
+        "Test main+A+C → pass → land"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "B's author is notified, and main never breaks."
+        }
+      ],
+      "code": [],
+      "outcome": "trunk stays green by construction."
+    },
+    "summary": {
+      "points": [
+        "Queue approved PRs.",
+        "Test the real combination.",
+        "Land only passes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What exactly does a merge queue test?",
+        "a": "The PR combined with the latest main and all PRs ahead of it in the queue."
+      }
+    ]
+  },
+  "optimistic-merging-speeding-up-the-line": {
+    "core": "Instead of waiting for each queued PR's CI to finish, start CI for the next ones speculatively, each assuming those ahead will pass. When they do, PRs land in parallel; when one fails, the speculative builds behind it are restarted without it.",
+    "first_principles": {
+      "problem": "With 30-minute CI, a serial queue lands only 2 PRs per hour.",
+      "truths": [
+        "Most PRs pass.",
+        "Parallel CI is available.",
+        "Speculation is cheap when it's usually right."
+      ],
+      "derivation": [
+        "Build **main+A**, **main+A+B** and **main+A+B+C** at once.",
+        "If all pass, **land all**.",
+        "If B fails, **eject B** and rebuild C on main+A.",
+        "Tune the **queue depth** to CI capacity."
+      ]
+    },
+    "analogy": {
+      "title": "A kitchen cooking several orders at once",
+      "story": "Start the next dishes before the first is plated, assuming no order gets cancelled.",
+      "mapping": [
+        [
+          "Next dishes",
+          "Speculative builds"
+        ],
+        [
+          "Cancelled order",
+          "Failed PR"
+        ],
+        [
+          "Re-cooking",
+          "Rebuilding behind the failure"
+        ]
+      ],
+      "breaks": "A high failure rate wastes compute on discarded speculative builds."
+    },
+    "mindmap": {
+      "center": "Optimistic Merging",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Speculative parallel CI"
+          ]
+        },
+        {
+          "label": "Success",
+          "children": [
+            "Land many at once"
+          ]
+        },
+        {
+          "label": "Failure",
+          "children": [
+            "Eject + rebuild behind"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Queue depth",
+            "Failure rate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Throughput comparison",
+      "scenario": "30-minute CI.",
+      "flow": [
+        "Serial: 2 PRs/hour",
+        "Optimistic depth 5: ~10 PRs/hour",
+        "Cost: extra builds on failures"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Throughput scales with CI capacity."
+        }
+      ],
+      "code": [],
+      "outcome": "the queue keeps up with a busy team."
+    },
+    "summary": {
+      "points": [
+        "Speculate in parallel.",
+        "Rebuild on failure.",
+        "Tune depth."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to speculative builds behind a failed PR?",
+        "a": "They're discarded and restarted without the failed PR."
+      }
+    ]
+  },
+  "batching-strategies-bors-ng-tide": {
+    "core": "Batching tests several queued PRs together in one CI run. If the batch passes, all of them land. If it fails, bisect the batch to find the culprit, which saves CI cost when test suites are very slow.",
+    "first_principles": {
+      "problem": "One-hour test suites make even parallel per-PR CI expensive and slow.",
+      "truths": [
+        "Most PRs pass, so most batches pass.",
+        "One run can validate many PRs.",
+        "Bisection isolates failures in log₂(n) runs."
+      ],
+      "derivation": [
+        "Combine **N PRs** into one merge candidate.",
+        "**Pass → land all N**.",
+        "**Fail → split** the batch in half and retest.",
+        "Pick a **batch size** based on the failure rate."
+      ]
+    },
+    "analogy": {
+      "title": "Group-testing blood samples",
+      "story": "Pool ten samples; if the pool is clean, all ten are clean. If not, split and retest.",
+      "mapping": [
+        [
+          "Pooled samples",
+          "Batched PRs"
+        ],
+        [
+          "Clean pool",
+          "Green batch"
+        ],
+        [
+          "Splitting",
+          "Bisection"
+        ]
+      ],
+      "breaks": "Flaky tests poison batches and cause needless bisection."
+    },
+    "mindmap": {
+      "center": "Batching",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "N PRs per run"
+          ]
+        },
+        {
+          "label": "Pass",
+          "children": [
+            "Land all"
+          ]
+        },
+        {
+          "label": "Fail",
+          "children": [
+            "Bisect"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Bors-NG",
+            "Prow Tide",
+            "GitHub queue groups"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Flakes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A batch of 8 with one bad PR",
+      "scenario": "Bisection.",
+      "flow": [
+        "Batch 8 → fail",
+        "Split 4+4 → one half fails",
+        "2+2 → 1+1",
+        "Culprit found in 3 extra runs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "7 PRs land with only 4 CI runs in total."
+        }
+      ],
+      "code": [],
+      "outcome": "slow suites still give high throughput."
+    },
+    "summary": {
+      "points": [
+        "Test PRs together.",
+        "Bisect failures.",
+        "Size batches to the failure rate."
+      ]
+    },
+    "check": [
+      {
+        "q": "When does batching help most?",
+        "a": "When test suites are slow and most PRs pass."
+      }
+    ]
+  },
+  "linear-history-vs-merge-commits": {
+    "core": "A merge queue can land changes by merge commit (preserves branch structure), squash (one commit per PR) or rebase (linear individual commits). Linear history makes bisect and reading easier; merge commits keep context.",
+    "first_principles": {
+      "problem": "Inconsistent landing styles make history hard to read and bisect.",
+      "truths": [
+        "History is read for debugging and audits.",
+        "Bisect works best when every commit builds.",
+        "Branch context can matter."
+      ],
+      "derivation": [
+        "**Squash**: one clean commit per PR (most common).",
+        "**Rebase**: linear, but every commit must build.",
+        "**Merge commit**: true topology, noisier history.",
+        "Pick **one policy** and enforce it."
+      ]
+    },
+    "analogy": {
+      "title": "A book's chapters vs. a draft's revision trail",
+      "story": "Squash gives clean chapters; merge commits keep every editing session's trail.",
+      "mapping": [
+        [
+          "Clean chapters",
+          "Squash"
+        ],
+        [
+          "Revision trail",
+          "Merge commits"
+        ],
+        [
+          "Page order",
+          "Linear history"
+        ]
+      ],
+      "breaks": "Squash loses intermediate commits, which matters if they were meaningful."
+    },
+    "mindmap": {
+      "center": "History Styles",
+      "branches": [
+        {
+          "label": "Squash",
+          "children": [
+            "1 commit/PR",
+            "Clean"
+          ]
+        },
+        {
+          "label": "Rebase",
+          "children": [
+            "Linear",
+            "Each commit must build"
+          ]
+        },
+        {
+          "label": "Merge",
+          "children": [
+            "Topology",
+            "Noisy"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Pick one",
+            "Enforce"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bisecting a regression",
+      "scenario": "Squashed vs merged history.",
+      "flow": [
+        "Squashed: each commit = tested PR",
+        "bisect lands on a whole PR",
+        "Merged: may land on broken WIP commit"
+      ],
+      "steps": [
+        {
+          "label": "Choice",
+          "detail": "Many teams squash through the queue."
+        }
+      ],
+      "code": [],
+      "outcome": "history is consistent and debuggable."
+    },
+    "summary": {
+      "points": [
+        "Squash for clarity.",
+        "Rebase for granularity.",
+        "Merge for topology."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does squash merging help git bisect?",
+        "a": "Every commit on main corresponds to a full tested PR, so each one builds and passes."
+      }
+    ]
+  },
+  "merge-queue-implementations-in-practice": {
+    "core": "GitHub's merge queue (native, required checks on merge_group events), GitLab merge trains (pipelines on the combined ref) and third-party tools like Mergify or Bors all implement the same idea with different configuration and features.",
+    "first_principles": {
+      "problem": "Knowing the theory isn't enough. Each platform needs specific setup, such as CI triggering on the queue's events.",
+      "truths": [
+        "Platforms differ in configuration.",
+        "CI must run on the queue's temporary refs.",
+        "Required checks gate landing."
+      ],
+      "derivation": [
+        "**GitHub**: enable the merge queue in branch rules, and trigger CI on **merge_group**.",
+        "**GitLab**: enable **merge trains**.",
+        "**Mergify/Bors**: config file rules, batching and priorities.",
+        "Set **required checks** and **concurrency**."
+      ]
+    },
+    "analogy": {
+      "title": "Different brands of traffic lights",
+      "story": "Same principle, different wiring for each city.",
+      "mapping": [
+        [
+          "Principle",
+          "Queue + test combination"
+        ],
+        [
+          "Wiring",
+          "Platform config"
+        ],
+        [
+          "City",
+          "Repo"
+        ]
+      ],
+      "breaks": "Forgetting the merge_group trigger leaves the queue waiting forever for checks."
+    },
+    "mindmap": {
+      "center": "Implementations",
+      "branches": [
+        {
+          "label": "GitHub",
+          "children": [
+            "merge_group trigger",
+            "Branch rules"
+          ]
+        },
+        {
+          "label": "GitLab",
+          "children": [
+            "Merge trains"
+          ]
+        },
+        {
+          "label": "Third-party",
+          "children": [
+            "Mergify",
+            "Bors",
+            "Aviator"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Required checks",
+            "Batch size",
+            "Concurrency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "GitHub Actions for the merge queue",
+      "scenario": "Trigger.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The queue's temporary branches get tested, and checks report back."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "on:\n  pull_request:\n  merge_group:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: [ { uses: actions/checkout@v4 }, { run: make test } ]"
+        }
+      ],
+      "outcome": "a working queue on your platform."
+    },
+    "summary": {
+      "points": [
+        "Same idea everywhere.",
+        "Trigger CI on queue refs.",
+        "Configure required checks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What event must GitHub Actions workflows listen to for the merge queue?",
+        "a": "merge_group."
+      }
+    ]
+  }
+}

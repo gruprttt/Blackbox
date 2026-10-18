@@ -1,0 +1,408 @@
+{
+  "introduction-pipelines-are-distributed-systems": {
+    "core": "A pipeline is a distributed system of queues, runners, caches, registries and external services. 'The build is slow' needs the same observability as production: traces, metrics and logs.",
+    "first_principles": {
+      "problem": "A build that went from 8 to 25 minutes is investigated by scrolling logs, and nobody knows whether it's queueing, cache misses or a slow test.",
+      "truths": [
+        "Many components contribute to build time.",
+        "Logs alone don't show where time goes.",
+        "Traces decompose duration into spans."
+      ],
+      "derivation": [
+        "Model each **pipeline run as a trace**.",
+        "Each **job and step as a span**.",
+        "Emit **metrics** (queue time, duration, cache hit rate).",
+        "Build **dashboards and alerts**."
+      ]
+    },
+    "analogy": {
+      "title": "An airport delay announcement",
+      "story": "'Delayed' could mean a late plane, crew, weather or baggage. You need breakdowns to fix it.",
+      "mapping": [
+        [
+          "Flight delay",
+          "Slow build"
+        ],
+        [
+          "Breakdown of causes",
+          "Trace spans"
+        ],
+        [
+          "Operations dashboard",
+          "CI dashboard"
+        ]
+      ],
+      "breaks": "Instrumentation adds a little overhead and needs maintaining."
+    },
+    "mindmap": {
+      "center": "CI Observability",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Black-box slowness"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Traces",
+            "Metrics",
+            "Logs"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Run = trace",
+            "Job/step = span"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Dashboards",
+            "Alerts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnosing a slow build",
+      "scenario": "With traces.",
+      "flow": [
+        "Trace shows: queue 9 min",
+        "npm install 6 min (cache miss)",
+        "Tests 8 min",
+        "Fix: more runners + cache key"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Root cause in 5 minutes instead of a day."
+        }
+      ],
+      "code": [],
+      "outcome": "CI performance problems become diagnosable."
+    },
+    "summary": {
+      "points": [
+        "Pipelines are distributed.",
+        "Trace runs.",
+        "Measure components."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why treat pipelines as distributed systems?",
+        "a": "Many independent components (queues, runners, caches, services) contribute to their behaviour and performance."
+      }
+    ]
+  },
+  "opentelemetry-for-cicd": {
+    "core": "OpenTelemetry provides a vendor-neutral way to emit traces, metrics and logs from pipelines, through CI plugins and exporters or CLI wrappers like otel-cli, which you can send to any backend (Jaeger, Honeycomb, Grafana Tempo).",
+    "first_principles": {
+      "problem": "Each CI vendor has its own proprietary insights, so cross-tool analysis is impossible.",
+      "truths": [
+        "OTel is a common standard.",
+        "Spans can be created around any command.",
+        "Context propagation links steps into one trace."
+      ],
+      "derivation": [
+        "Create a **root span** per pipeline run.",
+        "Wrap jobs and steps as **child spans** (otel-cli exec).",
+        "Add **attributes** (repo, branch, runner, cache.hit).",
+        "Export via **OTLP** to your backend."
+      ]
+    },
+    "analogy": {
+      "title": "A universal flight-tracking format",
+      "story": "Every airline reports in the same format, so one dashboard can track all of them.",
+      "mapping": [
+        [
+          "Airlines",
+          "CI tools"
+        ],
+        [
+          "Standard format",
+          "OTLP"
+        ],
+        [
+          "Tracking dashboard",
+          "Tracing backend"
+        ]
+      ],
+      "breaks": "CI semantic conventions are still maturing, so attribute names vary."
+    },
+    "mindmap": {
+      "center": "OTel for CI",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "Traces",
+            "Metrics",
+            "Logs"
+          ]
+        },
+        {
+          "label": "Instrument",
+          "children": [
+            "CI plugins",
+            "otel-cli",
+            "Exporters"
+          ]
+        },
+        {
+          "label": "Attributes",
+          "children": [
+            "repo",
+            "branch",
+            "runner",
+            "cache.hit"
+          ]
+        },
+        {
+          "label": "Export",
+          "children": [
+            "OTLP",
+            "Jaeger",
+            "Tempo"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Wrapping steps with otel-cli",
+      "scenario": "Simple tracing.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every run appears as a trace waterfall."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "export OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.acme.io\notel-cli exec --service ci --name \"npm ci\" --attrs cache.hit=$HIT -- npm ci\notel-cli exec --service ci --name \"test\" -- npm test"
+        }
+      ],
+      "outcome": "vendor-neutral visibility into every pipeline."
+    },
+    "summary": {
+      "points": [
+        "A standard format.",
+        "Spans for steps.",
+        "Rich attributes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What protocol does OpenTelemetry use to export data?",
+        "a": "OTLP (the OpenTelemetry Protocol)."
+      }
+    ]
+  },
+  "key-metrics-queue-time-vs-execution-time": {
+    "core": "Total build time = queue time (waiting for a runner) + setup time (checkout, caches) + execution time (actual work). Each has different fixes, so decompose before optimising.",
+    "first_principles": {
+      "problem": "Teams optimise tests when the real problem is jobs waiting 10 minutes for a runner.",
+      "truths": [
+        "A symptom isn't a cause.",
+        "Queue time reflects capacity.",
+        "Execution time reflects the work itself and caching."
+      ],
+      "derivation": [
+        "Measure **queue time** → add runners or autoscale.",
+        "Measure **setup time** → fix caches and images.",
+        "Measure **execution time** → parallelise, use TIA, speed up tests.",
+        "Track **p50 and p95**, not just averages."
+      ]
+    },
+    "analogy": {
+      "title": "Waiting at a restaurant",
+      "story": "Time to get a table (queue), to get menus and water (setup), and cooking time (execution) all need different fixes.",
+      "mapping": [
+        [
+          "Table wait",
+          "Queue time"
+        ],
+        [
+          "Menus",
+          "Setup"
+        ],
+        [
+          "Cooking",
+          "Execution"
+        ]
+      ],
+      "breaks": "Averages hide tail pain, because developers feel the p95."
+    },
+    "mindmap": {
+      "center": "Build Time",
+      "branches": [
+        {
+          "label": "Queue",
+          "children": [
+            "Runner capacity",
+            "Autoscale"
+          ]
+        },
+        {
+          "label": "Setup",
+          "children": [
+            "Checkout",
+            "Cache restore",
+            "Image pull"
+          ]
+        },
+        {
+          "label": "Execute",
+          "children": [
+            "Tests",
+            "Builds"
+          ]
+        },
+        {
+          "label": "Stats",
+          "children": [
+            "p50",
+            "p95"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decomposing a 20-minute build",
+      "scenario": "Where time goes.",
+      "flow": [
+        "Queue: 9 min (peak hours)",
+        "Setup: 4 min (cache miss)",
+        "Execute: 7 min",
+        "Fix runners + cache first"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "13 minutes saved without touching a test."
+        }
+      ],
+      "code": [],
+      "outcome": "optimisation goes where the time actually is."
+    },
+    "summary": {
+      "points": [
+        "Decompose first.",
+        "Queue = capacity.",
+        "Track p95."
+      ]
+    },
+    "check": [
+      {
+        "q": "If queue time dominates, what's the fix?",
+        "a": "More runner capacity or autoscaling, not faster tests."
+      }
+    ]
+  },
+  "building-a-ci-observability-dashboard": {
+    "core": "A useful CI dashboard answers concrete questions: are builds getting slower (trends), where does time go (queue, setup, execution), what's flaky (failure rates per test), and how reliable is main (success rate, MTTR of red main).",
+    "first_principles": {
+      "problem": "Raw telemetry without curated panels doesn't drive action.",
+      "truths": [
+        "Dashboards should answer specific questions.",
+        "Trends reveal regressions.",
+        "Alerts need thresholds tied to impact."
+      ],
+      "derivation": [
+        "Panel: **p50/p95 duration trend** per pipeline.",
+        "Panel: **queue vs execution breakdown**.",
+        "Panel: **top slow and flaky steps/tests**.",
+        "Panel: **main success rate**; alert on red main beyond N minutes."
+      ]
+    },
+    "analogy": {
+      "title": "A car's dashboard",
+      "story": "Speed, fuel and warning lights, not raw sensor dumps.",
+      "mapping": [
+        [
+          "Speedometer",
+          "Duration trend"
+        ],
+        [
+          "Fuel gauge",
+          "Runner capacity"
+        ],
+        [
+          "Warning lights",
+          "Alerts"
+        ]
+      ],
+      "breaks": "Too many panels dilute attention, so keep it focused."
+    },
+    "mindmap": {
+      "center": "CI Dashboard",
+      "branches": [
+        {
+          "label": "Speed",
+          "children": [
+            "p50/p95 trend"
+          ]
+        },
+        {
+          "label": "Breakdown",
+          "children": [
+            "Queue",
+            "Setup",
+            "Execute"
+          ]
+        },
+        {
+          "label": "Quality",
+          "children": [
+            "Flaky tests",
+            "Main success rate"
+          ]
+        },
+        {
+          "label": "Alerts",
+          "children": [
+            "Red main",
+            "p95 regression"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A weekly CI review",
+      "scenario": "Using the dashboard.",
+      "flow": [
+        "p95 up 30% since Tuesday",
+        "Breakdown: setup time spike",
+        "Top step: docker pull (base image grew 2 GB)",
+        "Fix image, p95 back"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Regressions are caught within days."
+        }
+      ],
+      "code": [],
+      "outcome": "CI performance is managed continuously."
+    },
+    "summary": {
+      "points": [
+        "Question-driven panels.",
+        "Trends and breakdowns.",
+        "Actionable alerts."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name two essential CI dashboard panels.",
+        "a": "For example, a duration trend (p50/p95) and a queue vs execution time breakdown."
+      }
+    ]
+  }
+}

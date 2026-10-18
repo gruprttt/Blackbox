@@ -1,0 +1,509 @@
+{
+  "introduction-not-just-for-docker-images": {
+    "core": "Modern registries are universal warehouses for every build output (images, Helm charts, binaries, SBOMs, signatures, ML models), with proxying, retention and provenance.",
+    "first_principles": {
+      "problem": "Teams scatter artifacts across S3 buckets, CI storage and ad-hoc servers, with no lifecycle or trust.",
+      "truths": [
+        "Every pipeline produces artifacts.",
+        "Artifacts need versioning, discovery and cleanup.",
+        "One standard simplifies tooling."
+      ],
+      "derivation": [
+        "Store everything as **OCI artifacts** where possible.",
+        "**Proxy and cache** upstream packages.",
+        "Apply **retention policies**.",
+        "**Sign** and attach provenance."
+      ]
+    },
+    "analogy": {
+      "title": "A factory's central warehouse",
+      "story": "Every finished product is labelled, shelved, tracked and eventually cleared out.",
+      "mapping": [
+        [
+          "Warehouse",
+          "Registry"
+        ],
+        [
+          "Labels",
+          "Tags/digests"
+        ],
+        [
+          "Clearance",
+          "Retention"
+        ]
+      ],
+      "breaks": "A central registry becomes critical infrastructure, so it needs HA and backups."
+    },
+    "mindmap": {
+      "center": "Artifact Management",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Images",
+            "Charts",
+            "Binaries",
+            "SBOMs",
+            "Models"
+          ]
+        },
+        {
+          "label": "Standard",
+          "children": [
+            "OCI"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "Proxy",
+            "Retention",
+            "Signing"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Harbor",
+            "Artifactory",
+            "ECR",
+            "GHCR"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Consolidating artifacts",
+      "scenario": "Before and after.",
+      "flow": [
+        "Before: S3 + Nexus + CI storage",
+        "After: one OCI registry",
+        "Unified auth, retention, signing"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One place to find, trust and clean up."
+        }
+      ],
+      "code": [],
+      "outcome": "artifacts are managed as a product."
+    },
+    "summary": {
+      "points": [
+        "More than images.",
+        "One warehouse.",
+        "Lifecycle and trust."
+      ]
+    },
+    "check": [
+      {
+        "q": "What kinds of artifacts can a modern OCI registry store?",
+        "a": "Container images plus Helm charts, binaries, SBOMs, signatures, WASM modules and ML models."
+      }
+    ]
+  },
+  "oci-artifacts-the-generic-envelope": {
+    "core": "The OCI distribution spec isn't image-specific. Any content can be pushed as blobs with a manifest and a media type (Helm charts, WASM, SBOMs), and referrers link related artifacts like signatures to an image.",
+    "first_principles": {
+      "problem": "Each artifact type traditionally needed its own server (Helm repos, Maven, file shares).",
+      "truths": [
+        "Registries store content-addressed blobs.",
+        "Media types describe what a blob is.",
+        "Existing auth and replication can be reused."
+      ],
+      "derivation": [
+        "Push with **ORAS** or the native tool (`helm push oci://`).",
+        "Set an **artifactType/mediaType**.",
+        "Attach **referrers** (signatures, SBOMs) to a subject digest.",
+        "Reuse registry **auth, replication and retention**."
+      ]
+    },
+    "analogy": {
+      "title": "A standard shipping container",
+      "story": "Designed for ships, but the same box goes on trucks and trains, carrying anything.",
+      "mapping": [
+        [
+          "Container",
+          "OCI manifest + blobs"
+        ],
+        [
+          "Cargo label",
+          "Media type"
+        ],
+        [
+          "Linked paperwork",
+          "Referrers"
+        ]
+      ],
+      "breaks": "Not all registries fully support artifact types or the referrers API yet."
+    },
+    "mindmap": {
+      "center": "OCI Artifacts",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Manifest",
+            "Blobs",
+            "Media type"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ORAS",
+            "helm push oci",
+            "cosign"
+          ]
+        },
+        {
+          "label": "Referrers",
+          "children": [
+            "Signatures",
+            "SBOMs"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "One infra"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pushing a Helm chart and a config bundle",
+      "scenario": "OCI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One registry serves charts, configs and images."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "helm push mychart-1.2.0.tgz oci://ghcr.io/acme/charts\noras push ghcr.io/acme/config:v3 ./config.tar.gz:application/vnd.acme.config.v1+tar"
+        }
+      ],
+      "outcome": "a single distribution system for everything."
+    },
+    "summary": {
+      "points": [
+        "OCI is generic.",
+        "Media types label content.",
+        "Referrers link metadata."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the OCI referrers API enable?",
+        "a": "Linking artifacts such as signatures and SBOMs to the image digest they describe."
+      }
+    ]
+  },
+  "universal-package-managers-the-proxy-cache": {
+    "core": "A universal artifact manager proxies and caches upstream registries (npm, PyPI, Maven, Docker Hub), so builds survive upstream outages or deletions, run faster, avoid rate limits and pass through policy checks.",
+    "first_principles": {
+      "problem": "When left-pad was unpublished from npm in 2016, thousands of builds broke instantly, and Docker Hub rate limits stall CI.",
+      "truths": [
+        "Upstream registries can fail, delete or rate-limit.",
+        "A local copy removes that dependency.",
+        "A single gateway enables policy."
+      ],
+      "derivation": [
+        "Point every client at **virtual repos** (proxy + internal).",
+        "**Cache** upstream artifacts on first fetch.",
+        "**Scan and block** by policy.",
+        "Host **internal packages** in the same place."
+      ]
+    },
+    "analogy": {
+      "title": "A local library branch",
+      "story": "Books from the central library are copied locally, so readers aren't stranded when the central branch closes.",
+      "mapping": [
+        [
+          "Central library",
+          "npm/PyPI"
+        ],
+        [
+          "Local branch",
+          "Proxy cache"
+        ],
+        [
+          "Librarian vetting",
+          "Policy scanning"
+        ]
+      ],
+      "breaks": "Cached copies of malicious packages persist, so you need the ability to purge and block."
+    },
+    "mindmap": {
+      "center": "Proxy Cache",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "Left-pad",
+            "Rate limits",
+            "Outages"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Virtual repos",
+            "Cache"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Policy",
+            "Internal hosting"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Artifactory",
+            "Nexus",
+            "Harbor proxy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Docker Hub rate limits",
+      "scenario": "Solved by a pull-through cache.",
+      "flow": [
+        "CI pulls node:20 via Harbor proxy",
+        "First pull cached",
+        "1000 CI jobs hit cache",
+        "No rate limit errors"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster, resilient builds."
+        }
+      ],
+      "code": [],
+      "outcome": "builds no longer depend on public uptime."
+    },
+    "summary": {
+      "points": [
+        "Proxy upstream.",
+        "Cache locally.",
+        "Enforce policy."
+      ]
+    },
+    "check": [
+      {
+        "q": "What incident illustrates the need for proxy caches?",
+        "a": "The 2016 left-pad unpublishing that broke builds across the npm ecosystem."
+      }
+    ]
+  },
+  "retention-policies-hoarding-vs-cleaning": {
+    "core": "High-velocity CI produces terabytes of artifacts. Retention policies delete what's unneeded (old PR builds, untagged images) while protecting releases and anything currently deployed.",
+    "first_principles": {
+      "problem": "50 PRs a day × 500 MB images grows storage costs without bound, and registries slow down.",
+      "truths": [
+        "Most build artifacts are never used again.",
+        "Releases and deployed artifacts must be kept.",
+        "Deletion is irreversible."
+      ],
+      "derivation": [
+        "**Keep**: release tags, what's deployed, the last N per branch.",
+        "**Expire**: PR and untagged images after X days.",
+        "**Garbage-collect** unreferenced blobs.",
+        "**Dry-run** policies before enforcing them."
+      ]
+    },
+    "analogy": {
+      "title": "Cleaning out a warehouse",
+      "story": "Keep the flagship products and current stock; clear out prototypes and expired samples on a schedule.",
+      "mapping": [
+        [
+          "Flagship products",
+          "Release tags"
+        ],
+        [
+          "Prototypes",
+          "PR builds"
+        ],
+        [
+          "Schedule",
+          "Retention policy"
+        ]
+      ],
+      "breaks": "Deleting an image a running pod still uses breaks rescheduling, so check what's deployed."
+    },
+    "mindmap": {
+      "center": "Retention",
+      "branches": [
+        {
+          "label": "Keep",
+          "children": [
+            "Releases",
+            "Deployed",
+            "Last N"
+          ]
+        },
+        {
+          "label": "Expire",
+          "children": [
+            "PR builds",
+            "Untagged"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "Tag rules",
+            "GC blobs"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Dry run",
+            "Check in-use"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An ECR lifecycle policy",
+      "scenario": "Expire PR images.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Storage stays flat while releases are preserved."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\"rules\":[{\"rulePriority\":1,\"selection\":{\"tagStatus\":\"tagged\",\"tagPrefixList\":[\"pr-\"],\"countType\":\"sinceImagePushed\",\"countUnit\":\"days\",\"countNumber\":14},\"action\":{\"type\":\"expire\"}}]}"
+        }
+      ],
+      "outcome": "controlled costs without losing what matters."
+    },
+    "summary": {
+      "points": [
+        "Keep releases and deployed artifacts.",
+        "Expire the ephemeral.",
+        "Dry-run first."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must a retention policy never delete?",
+        "a": "Release artifacts and anything currently deployed or needed for rollback."
+      }
+    ]
+  },
+  "artifact-signing-and-provenance": {
+    "core": "A registry tells you where an artifact is, not whether to trust it. Signatures and provenance attestations, stored as referrers next to the artifact, let consumers verify origin and build integrity before use.",
+    "first_principles": {
+      "problem": "A compromised CI credential pushes a malicious artifact under a legitimate tag.",
+      "truths": [
+        "Write access to the registry isn't proof of legitimacy.",
+        "Cryptographic signatures bind content to an identity.",
+        "Verification must happen at consumption."
+      ],
+      "derivation": [
+        "**Sign** artifacts at build (cosign keyless).",
+        "**Attest** provenance and the SBOM.",
+        "**Store** them as OCI referrers.",
+        "**Verify** in deploy tooling or admission."
+      ]
+    },
+    "analogy": {
+      "title": "Tamper-evident seals on warehouse goods",
+      "story": "Storage location doesn't prove authenticity, but an intact manufacturer's seal does.",
+      "mapping": [
+        [
+          "Warehouse shelf",
+          "Registry"
+        ],
+        [
+          "Manufacturer seal",
+          "Signature"
+        ],
+        [
+          "Shipping manifest",
+          "Provenance"
+        ]
+      ],
+      "breaks": "Signing keys and identities must be protected, or attackers sign their own artifacts."
+    },
+    "mindmap": {
+      "center": "Sign & Prove",
+      "branches": [
+        {
+          "label": "Sign",
+          "children": [
+            "cosign",
+            "Notation"
+          ]
+        },
+        {
+          "label": "Attest",
+          "children": [
+            "SLSA provenance",
+            "SBOM"
+          ]
+        },
+        {
+          "label": "Store",
+          "children": [
+            "OCI referrers"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Admission",
+            "Deploy tool"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rejecting a tampered tag",
+      "scenario": "Verification at deploy.",
+      "flow": [
+        "Attacker pushes api:1.4 (new digest)",
+        "No valid signature from CI identity",
+        "Admission policy denies",
+        "Alert raised"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Registry compromise doesn't become a cluster compromise."
+        }
+      ],
+      "code": [],
+      "outcome": "stored artifacts are verifiably trustworthy."
+    },
+    "summary": {
+      "points": [
+        "Storage ≠ trust.",
+        "Sign and attest.",
+        "Verify at use."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why isn't 'it's in our registry' enough to trust an artifact?",
+        "a": "Anyone with registry write access, such as a compromised credential, could have pushed it."
+      }
+    ]
+  }
+}

@@ -1,0 +1,396 @@
+{
+  "introduction-the-distributed-nightmare": {
+    "core": "In distributed systems you can't upgrade everything at once: services, clients and databases change at different times. Releases must be sequenced so every intermediate state stays compatible.",
+    "first_principles": {
+      "problem": "A big-bang release that changes the API, the database and three services together fails partway, leaving an incompatible mix.",
+      "truths": [
+        "Components deploy independently.",
+        "Old and new versions coexist during rollout.",
+        "Data changes are the hardest to reverse."
+      ],
+      "derivation": [
+        "Make every change **backward compatible**.",
+        "**Sequence** deploys: expand, migrate, switch, contract.",
+        "**Decouple** schema migrations from app deploys.",
+        "**Orchestrate** dependencies explicitly."
+      ]
+    },
+    "analogy": {
+      "title": "Moving house room by room",
+      "story": "Instead of moving everything in one day, you set up the new place gradually while the old one still works.",
+      "mapping": [
+        [
+          "Big moving day",
+          "Big-bang release"
+        ],
+        [
+          "Room by room",
+          "Incremental, compatible steps"
+        ],
+        [
+          "Both homes usable",
+          "Old and new versions coexisting"
+        ]
+      ],
+      "breaks": "Incremental changes take more steps and more calendar time."
+    },
+    "mindmap": {
+      "center": "Release Orchestration",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Big bang",
+            "Mixed versions"
+          ]
+        },
+        {
+          "label": "Principles",
+          "children": [
+            "Compatibility",
+            "Sequencing"
+          ]
+        },
+        {
+          "label": "Hard part",
+          "children": [
+            "Database"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Expand-contract"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Renaming a column",
+      "scenario": "Big bang vs orchestrated.",
+      "flow": [
+        "Big bang: rename + deploy → old pods crash",
+        "Orchestrated: add new col → dual write → switch → drop old"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No moment where any running version breaks."
+        }
+      ],
+      "code": [],
+      "outcome": "releases where every intermediate state works."
+    },
+    "summary": {
+      "points": [
+        "No big bang.",
+        "Every step compatible.",
+        "Data is the hard part."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't distributed systems be upgraded atomically?",
+        "a": "Components deploy independently, so old and new versions inevitably run at the same time."
+      }
+    ]
+  },
+  "the-database-problem-migrations-in-cicd": {
+    "core": "Code rolls back in seconds, but data has gravity: schema changes on large tables lock, take time, and can't simply be reverted. Migrations must be versioned, tested, safe online and compatible with both app versions.",
+    "first_principles": {
+      "problem": "An ALTER TABLE on 500 million rows locks the table for 40 minutes in production, and 'rollback' would lose new data.",
+      "truths": [
+        "Destructive changes can't be undone without data loss.",
+        "Some DDL locks tables.",
+        "Old app versions keep running during deploys."
+      ],
+      "derivation": [
+        "**Version** migrations (Flyway, Liquibase, Alembic).",
+        "**Test** them on production-sized data.",
+        "Prefer **online and additive** changes.",
+        "Roll **forward** with fix migrations rather than down."
+      ]
+    },
+    "analogy": {
+      "title": "Renovating a load-bearing wall",
+      "story": "You can't just undo it; you add supports first, then change it carefully.",
+      "mapping": [
+        [
+          "Load-bearing wall",
+          "Production schema"
+        ],
+        [
+          "Supports",
+          "Additive changes"
+        ],
+        [
+          "Demolition",
+          "Destructive DDL"
+        ]
+      ],
+      "breaks": "Down migrations exist, but they rarely restore data, so treat them as last resort."
+    },
+    "mindmap": {
+      "center": "DB Migrations",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Data gravity",
+            "Locks",
+            "No easy rollback"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Versioned",
+            "Tested at scale",
+            "Online",
+            "Additive"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Flyway",
+            "Liquibase",
+            "Alembic",
+            "gh-ost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adding an index safely",
+      "scenario": "Postgres.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No write lock, so production keeps running."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- locks writes on a large table:\n-- CREATE INDEX idx_orders_user ON orders(user_id);\nCREATE INDEX CONCURRENTLY idx_orders_user ON orders(user_id);"
+        }
+      ],
+      "outcome": "schema changes don't cause outages."
+    },
+    "summary": {
+      "points": [
+        "Data has gravity.",
+        "Online, additive changes.",
+        "Roll forward."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is rolling back a migration harder than rolling back code?",
+        "a": "Data written or destroyed by the migration can't simply be restored by reverting files."
+      }
+    ]
+  },
+  "the-expand-contract-pattern-parallel-change": {
+    "core": "Make breaking changes in compatible phases. Expand (add the new structure), migrate (dual-write and backfill, then switch reads), contract (remove the old structure) once nothing uses it. Every phase is deployable and reversible.",
+    "first_principles": {
+      "problem": "Renaming a column in one step breaks every app instance still using the old name.",
+      "truths": [
+        "Old and new code coexist.",
+        "Additive changes are safe for old code.",
+        "Removal is safe once nothing references the old structure."
+      ],
+      "derivation": [
+        "**Expand**: add the new column; the app writes both.",
+        "**Backfill** the existing rows.",
+        "**Switch** reads to the new column.",
+        "**Contract**: stop writing the old one, then drop it."
+      ]
+    },
+    "analogy": {
+      "title": "Building a new bridge before demolishing the old one",
+      "story": "Traffic keeps flowing on the old bridge until the new one is open and proven.",
+      "mapping": [
+        [
+          "New bridge",
+          "New column"
+        ],
+        [
+          "Both open",
+          "Dual write"
+        ],
+        [
+          "Demolition",
+          "Contract"
+        ]
+      ],
+      "breaks": "It takes several releases, and dual writes must be kept consistent."
+    },
+    "mindmap": {
+      "center": "Expand-Contract",
+      "branches": [
+        {
+          "label": "Expand",
+          "children": [
+            "Add new",
+            "Dual write"
+          ]
+        },
+        {
+          "label": "Migrate",
+          "children": [
+            "Backfill",
+            "Switch reads"
+          ]
+        },
+        {
+          "label": "Contract",
+          "children": [
+            "Stop old writes",
+            "Drop old"
+          ]
+        },
+        {
+          "label": "Property",
+          "children": [
+            "Each step reversible"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Renaming users.name to full_name",
+      "scenario": "Phases.",
+      "flow": [
+        "R1: add full_name; write both",
+        "Backfill full_name = name",
+        "R2: read full_name",
+        "R3: stop writing name",
+        "R4: drop name"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No downtime, and you can stop or roll back at any phase."
+        }
+      ],
+      "code": [],
+      "outcome": "breaking changes without breaking anything."
+    },
+    "summary": {
+      "points": [
+        "Expand first.",
+        "Migrate gradually.",
+        "Contract last."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is it safe to drop the old column?",
+        "a": "Once no running code reads or writes it, after the contract phase deploys everywhere."
+      }
+    ]
+  },
+  "decoupling-migrations-jobs-vs-initcontainers": {
+    "core": "Run migrations once per release as a dedicated Job (a Helm hook or ArgoCD PreSync), not in initContainers, which run on every pod start and race each other.",
+    "first_principles": {
+      "problem": "With 20 replicas, initContainer migrations run 20 times concurrently, causing lock contention, partial runs and crash loops.",
+      "truths": [
+        "A migration should run exactly once per release.",
+        "Pods restart for many reasons.",
+        "Concurrent DDL causes contention."
+      ],
+      "derivation": [
+        "Use a **Job** or hook before the rollout.",
+        "**Gate** the app rollout on the Job's success.",
+        "Rely on the migration tool's **locking** (Flyway, Liquibase) as a backstop.",
+        "Make migrations **idempotent**."
+      ]
+    },
+    "analogy": {
+      "title": "One person updates the shared calendar, not everyone",
+      "story": "If all 20 staff edit the calendar at once, it ends up a mess.",
+      "mapping": [
+        [
+          "Shared calendar",
+          "Database schema"
+        ],
+        [
+          "Designated person",
+          "Migration Job"
+        ],
+        [
+          "Everyone editing",
+          "initContainers"
+        ]
+      ],
+      "breaks": "Jobs need cleanup policies and clear failure handling."
+    },
+    "mindmap": {
+      "center": "Where to Migrate",
+      "branches": [
+        {
+          "label": "Job/hook",
+          "children": [
+            "Once per release",
+            "Gates rollout"
+          ]
+        },
+        {
+          "label": "initContainer",
+          "children": [
+            "Every pod start",
+            "Races"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Helm pre-upgrade",
+            "Argo PreSync"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Tool locks",
+            "Idempotent"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Helm pre-upgrade migration",
+      "scenario": "Hook Job.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One migration runs, and the app rolls out only on success."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: migrate-{{ .Release.Revision }}\n  annotations:\n    helm.sh/hook: pre-upgrade,pre-install\n    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded\nspec:\n  template:\n    spec:\n      restartPolicy: Never\n      containers: [{ name: migrate, image: app:1.5, command: [\"flyway\", \"migrate\"] }]"
+        }
+      ],
+      "outcome": "migrations are deterministic and decoupled."
+    },
+    "summary": {
+      "points": [
+        "Once per release.",
+        "Job, not initContainer.",
+        "Gate the rollout."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are initContainers poor places for migrations?",
+        "a": "They run on every pod start, so replicas race to apply the same migration."
+      }
+    ]
+  }
+}

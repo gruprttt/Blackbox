@@ -1,0 +1,724 @@
+{
+  "introduction-when-npm-run-build-isnt-enough": {
+    "core": "Simple build commands rebuild everything and depend on the machine they run on. At monorepo scale you need hermetic builds, a dependency graph to rebuild only what changed, and shared caching and execution.",
+    "first_principles": {
+      "problem": "A 4-hour full build across 500 engineers means nobody gets fast feedback, and results differ between laptops and CI.",
+      "truths": [
+        "Most changes affect a small part of the code.",
+        "Implicit dependencies make builds unpredictable.",
+        "Repeated work across engineers is waste."
+      ],
+      "derivation": [
+        "Make builds **hermetic** (declared inputs only).",
+        "Model the **dependency graph**.",
+        "**Cache** results by input hash.",
+        "**Distribute** execution."
+      ]
+    },
+    "analogy": {
+      "title": "A city kitchen cooking for millions",
+      "story": "You can't re-cook every dish when one recipe changes; you track which dishes use which ingredient.",
+      "mapping": [
+        [
+          "Dishes",
+          "Build targets"
+        ],
+        [
+          "Ingredients",
+          "Inputs"
+        ],
+        [
+          "Shared prep station",
+          "Remote cache"
+        ]
+      ],
+      "breaks": "These tools (Bazel, Buck2) have a steep adoption cost. Smaller repos may not need them."
+    },
+    "mindmap": {
+      "center": "Builds at Scale",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "Slow full builds",
+            "Non-determinism"
+          ]
+        },
+        {
+          "label": "Solutions",
+          "children": [
+            "Hermeticity",
+            "Graph",
+            "Remote cache",
+            "Remote exec"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Bazel",
+            "Buck2",
+            "Pants",
+            "Nx"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A one-line change in a monorepo",
+      "scenario": "Naive vs graph-aware.",
+      "flow": [
+        "Naive: rebuild all (4h)",
+        "Graph-aware: 3 affected targets",
+        "Cache hits for the rest",
+        "Done in 2 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Feedback goes from hours to minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "builds scale with the organisation."
+    },
+    "summary": {
+      "points": [
+        "Full rebuilds don't scale.",
+        "Track dependencies.",
+        "Share the work."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't simple build scripts scale to huge monorepos?",
+        "a": "They rebuild everything and have implicit inputs, so they're slow and non-deterministic."
+      }
+    ]
+  },
+  "the-core-principle-hermetic-builds": {
+    "core": "A hermetic build uses only explicitly declared inputs (pinned toolchains, dependencies, sources) and is isolated from the host's environment, network and installed software.",
+    "first_principles": {
+      "problem": "Builds silently use whatever compiler, library or env var happens to be on the machine.",
+      "truths": [
+        "Undeclared inputs vary between machines.",
+        "Sandboxing can block undeclared access.",
+        "Pinned toolchains remove version drift."
+      ],
+      "derivation": [
+        "**Declare** every input (sources, deps, tools).",
+        "**Pin** the toolchains by hash.",
+        "**Sandbox** actions so they see only the declared inputs.",
+        "**No network** during build actions."
+      ]
+    },
+    "analogy": {
+      "title": "Baking in a sealed room with a measured kit",
+      "story": "Not 'flour from the pantry and tap water', but exactly these sealed ingredients, in a room where nothing else can get in.",
+      "mapping": [
+        [
+          "Sealed kit",
+          "Declared inputs"
+        ],
+        [
+          "Sealed room",
+          "Sandbox"
+        ],
+        [
+          "Tap water",
+          "Host environment"
+        ]
+      ],
+      "breaks": "Perfect hermeticity is hard. Timestamps and some tools leak non-determinism."
+    },
+    "mindmap": {
+      "center": "Hermetic Builds",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Declared",
+            "Pinned"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Sandbox",
+            "No network"
+          ]
+        },
+        {
+          "label": "Toolchains",
+          "children": [
+            "Hermetic compilers"
+          ]
+        },
+        {
+          "label": "Enemy",
+          "children": [
+            "Host state"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Bazel Go target",
+      "scenario": "Inputs declared.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The build sees only these sources and pinned deps."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "go_binary(\n    name = \"api\",\n    srcs = [\"main.go\"],\n    deps = [\"//pkg/auth\", \"@com_github_gorilla_mux//:mux\"],\n)"
+        }
+      ],
+      "outcome": "builds that don't depend on the machine."
+    },
+    "summary": {
+      "points": [
+        "Declare inputs.",
+        "Pin toolchains.",
+        "Sandbox actions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes a build non-hermetic?",
+        "a": "Relying on undeclared inputs like host-installed tools, env vars or network fetches."
+      }
+    ]
+  },
+  "the-benefit-of-hermeticity-determinism": {
+    "core": "Hermeticity gives determinism: the same inputs always produce bit-identical outputs on any machine. That makes builds reproducible, debuggable and cacheable.",
+    "first_principles": {
+      "problem": "'Works on my machine' bugs and CI failures that nobody can reproduce locally waste days.",
+      "truths": [
+        "The same function with the same inputs gives the same output.",
+        "Non-determinism blocks caching.",
+        "Reproducibility is also a security property."
+      ],
+      "derivation": [
+        "Control **inputs** fully.",
+        "Strip **timestamps** and other volatile data.",
+        "**Verify** by rebuilding and comparing hashes.",
+        "Use it to enable **caching** and **reproducible releases**."
+      ]
+    },
+    "analogy": {
+      "title": "A calculator",
+      "story": "2+2 gives 4 on every calculator in the world. A build should behave the same way.",
+      "mapping": [
+        [
+          "Calculator",
+          "Build function"
+        ],
+        [
+          "Same keys pressed",
+          "Same inputs"
+        ],
+        [
+          "Same answer",
+          "Same output hash"
+        ]
+      ],
+      "breaks": "Floating-point and parallel ordering can still introduce subtle variation."
+    },
+    "mindmap": {
+      "center": "Determinism",
+      "branches": [
+        {
+          "label": "Definition",
+          "children": [
+            "Same in → same out"
+          ]
+        },
+        {
+          "label": "Enemies",
+          "children": [
+            "Timestamps",
+            "Random",
+            "Host state"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Reproducible",
+            "Cacheable",
+            "Verifiable"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "Rebuild + compare hash"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A CI failure reproduced locally",
+      "scenario": "Thanks to determinism.",
+      "flow": [
+        "CI fails on target //svc:test",
+        "Dev runs same command",
+        "Identical inputs → identical failure",
+        "Fixed in minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No 'can't reproduce'."
+        }
+      ],
+      "code": [],
+      "outcome": "builds are trustworthy and debuggable."
+    },
+    "summary": {
+      "points": [
+        "Same inputs, same outputs.",
+        "Kill volatility.",
+        "Enables caching."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is determinism a prerequisite for remote caching?",
+        "a": "Outputs can only be reused safely if the same inputs are guaranteed to produce the same outputs."
+      }
+    ]
+  },
+  "monorepo-tooling-the-dependency-graph": {
+    "core": "Build tools model the codebase as a graph of targets and their dependencies. A change rebuilds and retests only the affected targets (the changed node and its dependents), not the whole repo.",
+    "first_principles": {
+      "problem": "Rebuilding everything for a one-line change wastes hours for every engineer.",
+      "truths": [
+        "Most targets don't depend on a given change.",
+        "Dependencies can be declared explicitly.",
+        "Reverse dependencies reveal the impact."
+      ],
+      "derivation": [
+        "Declare a **target graph**.",
+        "Compute the **changed files → affected targets**.",
+        "Build or test **only those**.",
+        "Enforce **visibility** to keep the graph clean."
+      ]
+    },
+    "analogy": {
+      "title": "A subway map",
+      "story": "A closure on one line only affects the stations downstream on it, not the whole network.",
+      "mapping": [
+        [
+          "Stations",
+          "Targets"
+        ],
+        [
+          "Lines",
+          "Dependencies"
+        ],
+        [
+          "Downstream stations",
+          "Affected targets"
+        ]
+      ],
+      "breaks": "Undeclared dependencies break the model, which is why hermeticity matters."
+    },
+    "mindmap": {
+      "center": "Dependency Graph",
+      "branches": [
+        {
+          "label": "Nodes",
+          "children": [
+            "Targets"
+          ]
+        },
+        {
+          "label": "Edges",
+          "children": [
+            "deps"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "rdeps",
+            "affected"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Bazel query",
+            "Nx affected",
+            "Pants"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "Visibility"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Querying affected targets",
+      "scenario": "Bazel.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only 12 of 4,000 targets are tested."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "bazel query 'rdeps(//..., //pkg/auth:auth)'\nnx affected -t test --base=origin/main"
+        }
+      ],
+      "outcome": "CI time scales with the size of the change, not the repo."
+    },
+    "summary": {
+      "points": [
+        "Model the graph.",
+        "Find affected targets.",
+        "Build only those."
+      ]
+    },
+    "check": [
+      {
+        "q": "What determines which targets need rebuilding after a change?",
+        "a": "The changed targets plus everything that transitively depends on them."
+      }
+    ]
+  },
+  "remote-caching-dont-do-the-same-work-twice": {
+    "core": "Because outputs are a pure function of their inputs, each build action is keyed by the hash of its inputs. Before running it, check a shared remote cache: if anyone has already built it, download the result instead.",
+    "first_principles": {
+      "problem": "500 engineers and CI all compile the same unchanged libraries again and again.",
+      "truths": [
+        "Deterministic actions can be memoised.",
+        "Content hashes identify inputs exactly.",
+        "Downloading is faster than compiling."
+      ],
+      "derivation": [
+        "Compute the **action key** = hash(inputs, command, env).",
+        "**Look up** the key in the remote cache (CAS).",
+        "**Hit** → download; **miss** → run and upload.",
+        "Have **CI write**; devs read (trust model)."
+      ]
+    },
+    "analogy": {
+      "title": "A shared answer book for maths homework",
+      "story": "If someone has already solved exactly this problem, you copy the verified answer.",
+      "mapping": [
+        [
+          "Problem",
+          "Action inputs"
+        ],
+        [
+          "Answer book",
+          "Remote cache"
+        ],
+        [
+          "Verified answer",
+          "Cached output"
+        ]
+      ],
+      "breaks": "Cache poisoning is a risk if untrusted machines can write, so restrict writes."
+    },
+    "mindmap": {
+      "center": "Remote Cache",
+      "branches": [
+        {
+          "label": "Key",
+          "children": [
+            "Hash of inputs"
+          ]
+        },
+        {
+          "label": "Store",
+          "children": [
+            "CAS",
+            "Action cache"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Lookup",
+            "Hit → download",
+            "Miss → run + upload"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "CI-only writes"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "BuildBuddy",
+            "bazel-remote"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A fresh laptop build",
+      "scenario": "With a warm remote cache.",
+      "flow": [
+        "10,000 actions",
+        "9,950 cache hits",
+        "50 actually run",
+        "Build 90 s instead of 40 min"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Nobody repeats work someone else has already done."
+        }
+      ],
+      "code": [],
+      "outcome": "builds approach the cost of the true change."
+    },
+    "summary": {
+      "points": [
+        "Hash inputs.",
+        "Share results.",
+        "Restrict writes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a remote cache keyed on?",
+        "a": "A hash of all inputs to a build action (files, command and environment)."
+      }
+    ]
+  },
+  "remote-execution-infinite-compute-power": {
+    "core": "Remote execution sends build actions to a farm of workers, so thousands run in parallel and builds aren't limited to a laptop's 16 cores. Hermeticity makes this safe.",
+    "first_principles": {
+      "problem": "Even with caching, a large genuine change takes an hour on one machine.",
+      "truths": [
+        "Independent actions can run anywhere in parallel.",
+        "Hermetic actions behave the same on any worker.",
+        "Clusters have far more cores than laptops."
+      ],
+      "derivation": [
+        "The client sends **action + input digests**.",
+        "Workers fetch inputs from the **CAS**, execute and upload outputs.",
+        "Parallelism is limited only by **graph width**.",
+        "Uses the **REAPI** standard (BuildBuddy, EngFlow, Buildbarn)."
+      ]
+    },
+    "analogy": {
+      "title": "Outsourcing to a thousand cooks",
+      "story": "Instead of one chef cooking 1,000 dishes, you send each order to a huge kitchen that cooks them all at once.",
+      "mapping": [
+        [
+          "One chef",
+          "Laptop"
+        ],
+        [
+          "Huge kitchen",
+          "Remote execution farm"
+        ],
+        [
+          "Orders",
+          "Actions"
+        ]
+      ],
+      "breaks": "Network transfer of inputs can dominate for small actions, so tune it."
+    },
+    "mindmap": {
+      "center": "Remote Execution",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Send action",
+            "Workers run",
+            "CAS outputs"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "Hermeticity"
+          ]
+        },
+        {
+          "label": "Protocol",
+          "children": [
+            "REAPI"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "BuildBuddy",
+            "EngFlow",
+            "Buildbarn"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "Graph width",
+            "Network"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Compiling 5,000 C++ files",
+      "scenario": "Laptop vs farm.",
+      "flow": [
+        "Laptop: 16 cores → 45 min",
+        "Farm: 1,000 workers → 3 min",
+        "Results cached for everyone"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Big changes get fast feedback too."
+        }
+      ],
+      "code": [],
+      "outcome": "build speed scales with compute, not laptops."
+    },
+    "summary": {
+      "points": [
+        "Distribute actions.",
+        "Hermeticity enables it.",
+        "Massive parallelism."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does remote execution require hermetic builds?",
+        "a": "Actions must produce identical results on any worker, using only declared inputs."
+      }
+    ]
+  },
+  "putting-it-all-together-the-build-system-stack": {
+    "core": "The build stack is layered: hermeticity gives determinism, determinism enables a precise dependency graph and safe caching, and caching plus remote execution make builds fast at any scale.",
+    "first_principles": {
+      "problem": "Teams adopt remote caching without hermeticity and get wrong results, or a graph without caching and still get slow builds.",
+      "truths": [
+        "Each layer depends on the one below.",
+        "Skipping a layer undermines the ones above it.",
+        "The combined effect compounds."
+      ],
+      "derivation": [
+        "1. **Hermetic** inputs.",
+        "2. **Deterministic** outputs.",
+        "3. **Dependency graph** for selection.",
+        "4. **Remote cache** for reuse.",
+        "5. **Remote execution** for parallelism."
+      ]
+    },
+    "analogy": {
+      "title": "A building's floors",
+      "story": "You can't build the penthouse (remote execution) without the foundation (hermeticity).",
+      "mapping": [
+        [
+          "Foundation",
+          "Hermeticity"
+        ],
+        [
+          "Middle floors",
+          "Graph + cache"
+        ],
+        [
+          "Penthouse",
+          "Remote execution"
+        ]
+      ],
+      "breaks": "Adoption is incremental. Start with hermeticity in critical paths."
+    },
+    "mindmap": {
+      "center": "Build Stack",
+      "branches": [
+        {
+          "label": "1",
+          "children": [
+            "Hermetic"
+          ]
+        },
+        {
+          "label": "2",
+          "children": [
+            "Deterministic"
+          ]
+        },
+        {
+          "label": "3",
+          "children": [
+            "Graph"
+          ]
+        },
+        {
+          "label": "4",
+          "children": [
+            "Remote cache"
+          ]
+        },
+        {
+          "label": "5",
+          "children": [
+            "Remote exec"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Bazel",
+            "Buck2"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A monorepo migration roadmap",
+      "scenario": "Layer by layer.",
+      "flow": [
+        "Q1: Bazel + hermetic toolchains",
+        "Q2: affected-target CI",
+        "Q3: remote cache",
+        "Q4: remote execution"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "CI drops from 90 minutes to 8."
+        }
+      ],
+      "code": [],
+      "outcome": "a build system that scales with growth."
+    },
+    "summary": {
+      "points": [
+        "Layers depend on each other.",
+        "Start with hermeticity.",
+        "Compound gains."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you safely add remote caching to a non-hermetic build?",
+        "a": "Undeclared inputs mean the same cache key could correspond to different outputs, giving wrong results."
+      }
+    ]
+  }
+}

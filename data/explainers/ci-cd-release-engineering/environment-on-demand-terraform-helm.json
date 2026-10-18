@@ -1,0 +1,501 @@
+{
+  "introduction-the-staging-bottleneck": {
+    "core": "A single shared QA environment is a queue: only one change can be tested at a time, and changes collide. On-demand environments give each PR its own stack, built from infrastructure-as-code.",
+    "first_principles": {
+      "problem": "Teams wait days for 'their turn' on staging, and tests break because of others' half-deployed changes.",
+      "truths": [
+        "Shared resources serialise work.",
+        "IaC makes environments reproducible.",
+        "Isolation makes results trustworthy."
+      ],
+      "derivation": [
+        "Keep the **long-lived foundation** (cluster, network) shared.",
+        "Make the **per-PR layer** (namespace, release, DB) ephemeral.",
+        "Automate with **Terraform and Helm**.",
+        "Give each one a **URL** and clean it up."
+      ]
+    },
+    "analogy": {
+      "title": "A single office bathroom",
+      "story": "Everyone queues for one room; on-demand environments give everyone their own.",
+      "mapping": [
+        [
+          "One bathroom",
+          "Shared staging"
+        ],
+        [
+          "Queue",
+          "Waiting for QA"
+        ],
+        [
+          "Personal rooms",
+          "Per-PR environments"
+        ]
+      ],
+      "breaks": "Cost and data seeding are the main challenges."
+    },
+    "mindmap": {
+      "center": "Env on Demand",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "QA queue",
+            "Collisions"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "Shared foundation",
+            "Ephemeral per PR"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Terraform",
+            "Helm"
+          ]
+        },
+        {
+          "label": "UX",
+          "children": [
+            "URL",
+            "Cleanup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two PRs tested in parallel",
+      "scenario": "No queue.",
+      "flow": [
+        "PR 101 → pr-101.preview.acme.dev",
+        "PR 102 → pr-102.preview.acme.dev",
+        "Both tested at once"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "QA throughput scales with the number of PRs."
+        }
+      ],
+      "code": [],
+      "outcome": "no more queueing for staging."
+    },
+    "summary": {
+      "points": [
+        "Staging is a queue.",
+        "Env per PR.",
+        "IaC makes it possible."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main benefit of on-demand environments?",
+        "a": "Parallel, isolated testing of every change without waiting for a shared environment."
+      }
+    ]
+  },
+  "the-architecture-terraform-vs-helm": {
+    "core": "Split the infrastructure in two. Terraform manages the slow-changing foundation (VPC, cluster, DNS zone, wildcard certificate, shared DB server). Helm deploys the fast, per-PR application layer into a namespace in seconds.",
+    "first_principles": {
+      "problem": "Creating a whole cluster per PR with Terraform takes 20 minutes and costs a fortune.",
+      "truths": [
+        "Infrastructure layers change at different rates.",
+        "Cluster creation is slow; namespace creation is fast.",
+        "Each tool fits a layer."
+      ],
+      "derivation": [
+        "**Terraform**: foundation, applied rarely.",
+        "**Helm**: a release per PR into namespace `pr-N`.",
+        "Use Terraform for **per-PR cloud resources** only when needed (a DB on a shared server, a bucket).",
+        "Pass **outputs** (endpoints) into Helm values."
+      ]
+    },
+    "analogy": {
+      "title": "Building a mall vs. setting up pop-up stalls",
+      "story": "The mall (foundation) is built once; stalls (PR environments) go up and come down in minutes.",
+      "mapping": [
+        [
+          "Mall",
+          "Cluster + network"
+        ],
+        [
+          "Stalls",
+          "Helm releases"
+        ],
+        [
+          "Construction crew",
+          "Terraform"
+        ]
+      ],
+      "breaks": "Per-PR cloud resources through Terraform need state per environment (workspaces or state keys)."
+    },
+    "mindmap": {
+      "center": "Terraform vs Helm",
+      "branches": [
+        {
+          "label": "Terraform",
+          "children": [
+            "VPC",
+            "Cluster",
+            "DNS",
+            "Wildcard cert",
+            "Shared DB"
+          ]
+        },
+        {
+          "label": "Helm",
+          "children": [
+            "App release",
+            "Namespace per PR"
+          ]
+        },
+        {
+          "label": "Glue",
+          "children": [
+            "Outputs → values"
+          ]
+        },
+        {
+          "label": "Per-PR TF",
+          "children": [
+            "Workspaces",
+            "State keys"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deploying PR 412",
+      "scenario": "Layers.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "An environment is ready in about 60 seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# foundation exists (terraform apply once)\nhelm upgrade --install web-pr-412 ./chart -n pr-412 --create-namespace \\\n  --set image.tag=$SHA --set ingress.host=pr-412.preview.acme.dev"
+        }
+      ],
+      "outcome": "fast, affordable environments."
+    },
+    "summary": {
+      "points": [
+        "Foundation by Terraform.",
+        "PR layer by Helm.",
+        "Connect through outputs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not create a full cluster per PR?",
+        "a": "It's slow and expensive. A namespace on a shared cluster is created in seconds."
+      }
+    ]
+  },
+  "dynamic-routing-the-magic-url": {
+    "core": "A wildcard DNS record (*.preview.acme.dev) points at the ingress controller, and a wildcard TLS certificate covers it. Each PR's ingress claims pr-N.preview.acme.dev, so every PR gets a working HTTPS URL with no per-PR DNS changes.",
+    "first_principles": {
+      "problem": "Creating DNS records and certificates per PR is slow and hits rate limits.",
+      "truths": [
+        "Wildcard DNS resolves any subdomain.",
+        "Ingress routes by host header.",
+        "Wildcard certificates cover every subdomain."
+      ],
+      "derivation": [
+        "Create **\\*.preview.acme.dev → ingress LB** once (Terraform).",
+        "Issue a **wildcard cert** (cert-manager DNS-01).",
+        "Each Helm release sets **ingress.host = pr-N...**.",
+        "The ingress controller **routes by Host**."
+      ]
+    },
+    "analogy": {
+      "title": "An apartment building with a single street address",
+      "story": "The street address gets mail to the building, and the unit number on each letter routes it to the right apartment.",
+      "mapping": [
+        [
+          "Street address",
+          "Wildcard DNS"
+        ],
+        [
+          "Unit number",
+          "Subdomain/Host header"
+        ],
+        [
+          "Concierge",
+          "Ingress controller"
+        ]
+      ],
+      "breaks": "Cookies and OAuth callback URLs may need wildcard support too."
+    },
+    "mindmap": {
+      "center": "Magic URL",
+      "branches": [
+        {
+          "label": "DNS",
+          "children": [
+            "*.preview → LB"
+          ]
+        },
+        {
+          "label": "TLS",
+          "children": [
+            "Wildcard cert",
+            "DNS-01"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "Host-based ingress"
+          ]
+        },
+        {
+          "label": "Per PR",
+          "children": [
+            "ingress.host value"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "OAuth callbacks",
+            "Cookies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ingress for a PR",
+      "scenario": "Helm values.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "https://pr-412.preview.acme.dev works instantly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "ingress:\n  host: pr-412.preview.acme.dev\n  tls:\n    - hosts: [\"*.preview.acme.dev\"]\n      secretName: preview-wildcard-tls"
+        }
+      ],
+      "outcome": "every PR gets a clickable, secure URL."
+    },
+    "summary": {
+      "points": [
+        "Wildcard DNS.",
+        "Wildcard TLS.",
+        "Host-based routing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use a wildcard certificate for previews?",
+        "a": "One certificate covers every PR subdomain, avoiding per-PR issuance delays and rate limits."
+      }
+    ]
+  },
+  "lifecycle-management-the-cleanup": {
+    "core": "Forgotten environments bankrupt you. Destroy on PR close, set TTLs, run a scheduled reaper for orphans, and reconcile environments against the list of open PRs.",
+    "first_principles": {
+      "problem": "Fifty environments a week with missed teardowns means hundreds running after a quarter.",
+      "truths": [
+        "Webhooks and jobs fail sometimes.",
+        "Idle resources still cost money.",
+        "Reconciliation beats relying on events alone."
+      ],
+      "derivation": [
+        "On **PR closed** → helm uninstall + delete the namespace (+ terraform destroy).",
+        "Add a **TTL label**; the reaper deletes expired ones.",
+        "**Reconcile**: list namespaces vs open PRs and delete the extras.",
+        "**Alert** on environment count and cost."
+      ]
+    },
+    "analogy": {
+      "title": "Rental car returns",
+      "story": "Returned cars are checked in, and a nightly audit finds any car whose rental ended but was never returned.",
+      "mapping": [
+        [
+          "Return",
+          "PR close teardown"
+        ],
+        [
+          "Nightly audit",
+          "Reaper"
+        ],
+        [
+          "Rental end date",
+          "TTL"
+        ]
+      ],
+      "breaks": "Aggressive reaping can kill environments people still need, so allow extensions via labels."
+    },
+    "mindmap": {
+      "center": "Cleanup",
+      "branches": [
+        {
+          "label": "Event",
+          "children": [
+            "PR closed → destroy"
+          ]
+        },
+        {
+          "label": "TTL",
+          "children": [
+            "Labels",
+            "Extensions"
+          ]
+        },
+        {
+          "label": "Reaper",
+          "children": [
+            "Scheduled",
+            "Reconcile vs open PRs"
+          ]
+        },
+        {
+          "label": "Visibility",
+          "children": [
+            "Count",
+            "Cost alerts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reconciliation job",
+      "scenario": "Delete namespaces whose PRs are closed.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Orphans can't survive more than a day."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "open=$(gh pr list --state open --json number -q '.[].number' | sed 's/^/pr-/')\nfor ns in $(kubectl get ns -l preview=true -o name | cut -d/ -f2); do\n  echo \"$open\" | grep -qx \"$ns\" || kubectl delete ns \"$ns\"\ndone"
+        }
+      ],
+      "outcome": "preview costs stay bounded."
+    },
+    "summary": {
+      "points": [
+        "Destroy on close.",
+        "TTL + reaper.",
+        "Reconcile with open PRs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why reconcile against open PRs instead of relying only on close events?",
+        "a": "Close events can be missed, and reconciliation catches every orphan regardless."
+      }
+    ]
+  },
+  "posting-the-preview-url-back-to-the-pr": {
+    "core": "An environment nobody can find is useless. Post the preview URL (and status) as a PR comment or GitHub deployment, update it on each push, and mark it inactive on teardown.",
+    "first_principles": {
+      "problem": "Reviewers don't know a preview exists, or which URL matches which PR.",
+      "truths": [
+        "Reviewers live in the PR UI.",
+        "Deployments API shows environment links natively.",
+        "Stale links confuse people."
+      ],
+      "derivation": [
+        "Create or update a **sticky comment** with the URL.",
+        "Or use the **GitHub Deployments API** (environment URL shown in the PR).",
+        "**Update** it on every push (the commit SHA deployed).",
+        "Mark **inactive** on teardown."
+      ]
+    },
+    "analogy": {
+      "title": "A sign on the door saying which room the meeting is in",
+      "story": "Without it, people wander the halls looking for it.",
+      "mapping": [
+        [
+          "Door sign",
+          "PR comment/deployment"
+        ],
+        [
+          "Room",
+          "Preview env"
+        ],
+        [
+          "Updating the sign",
+          "Updating on push"
+        ]
+      ],
+      "breaks": "Bots spamming a new comment per push create noise, so update a single comment."
+    },
+    "mindmap": {
+      "center": "Preview URL UX",
+      "branches": [
+        {
+          "label": "Channels",
+          "children": [
+            "Sticky PR comment",
+            "Deployments API",
+            "Check run"
+          ]
+        },
+        {
+          "label": "Content",
+          "children": [
+            "URL",
+            "SHA",
+            "Status"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Update on push",
+            "Inactive on close"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A sticky comment with GitHub Actions",
+      "scenario": "Update in place.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One always-current link on every PR."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- uses: marocchino/sticky-pull-request-comment@v2\n  with:\n    header: preview\n    message: |\n      🚀 Preview: https://pr-${{ github.event.number }}.preview.acme.dev\n      Commit: ${{ github.sha }}"
+        }
+      ],
+      "outcome": "previews are discoverable and used."
+    },
+    "summary": {
+      "points": [
+        "Put the URL in the PR.",
+        "Update, don't spam.",
+        "Mark inactive on close."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why update a single sticky comment instead of posting new ones?",
+        "a": "It keeps one current link and avoids flooding the PR with outdated comments."
+      }
+    ]
+  }
+}

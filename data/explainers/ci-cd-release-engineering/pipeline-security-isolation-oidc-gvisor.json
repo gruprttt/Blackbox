@@ -1,0 +1,489 @@
+{
+  "introduction-the-ci-pipeline-is-a-weapon": {
+    "core": "CI pipelines hold the keys to production (cloud credentials, signing keys, deploy rights) and run code from many sources. Compromising one is like stealing a factory's master key.",
+    "first_principles": {
+      "problem": "Attackers target CI (Codecov, SolarWinds, malicious PRs) because one foothold reaches every environment.",
+      "truths": [
+        "Pipelines have privileged access.",
+        "They execute third-party code (actions, deps, PRs).",
+        "Secrets in CI are exposed to every step."
+      ],
+      "derivation": [
+        "Treat the pipeline as **production infrastructure**.",
+        "**Don't run unverified scripts**.",
+        "**Isolate** untrusted builds.",
+        "Replace static keys with **OIDC**.",
+        "Use **least-privilege secrets**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory master key",
+      "story": "Stealing one worker's badge opens one room; the master key opens everything.",
+      "mapping": [
+        [
+          "Master key",
+          "CI credentials"
+        ],
+        [
+          "Thief",
+          "Attacker"
+        ],
+        [
+          "Every room",
+          "All environments"
+        ]
+      ],
+      "breaks": "Perfect isolation is costly, so tier your protections by risk."
+    },
+    "mindmap": {
+      "center": "CI Threats",
+      "branches": [
+        {
+          "label": "Assets",
+          "children": [
+            "Cloud creds",
+            "Signing keys",
+            "Deploy rights"
+          ]
+        },
+        {
+          "label": "Vectors",
+          "children": [
+            "Malicious PRs",
+            "Compromised actions",
+            "curl|bash"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Isolation",
+            "OIDC",
+            "Least privilege",
+            "Pinning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A poisoned dependency in CI",
+      "scenario": "Blast radius.",
+      "flow": [
+        "Build installs compromised package",
+        "postinstall reads env secrets",
+        "Exfiltrates AWS keys",
+        "Attacker owns prod"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Every step in CI can read what the job can read."
+        }
+      ],
+      "code": [],
+      "outcome": "pipelines are secured like production."
+    },
+    "summary": {
+      "points": [
+        "CI = master key.",
+        "Third-party code runs there.",
+        "Minimise what it holds."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are CI pipelines high-value targets?",
+        "a": "They hold privileged credentials and execute third-party code, so a compromise reaches every environment."
+      }
+    ]
+  },
+  "the-curl-bash-anti-pattern": {
+    "core": "Piping a downloaded script straight into a shell runs unreviewed, mutable remote code with the job's full privileges. Pin, verify and review what you run instead.",
+    "first_principles": {
+      "problem": "An installer script on a vendor's site is modified by an attacker, and every pipeline that curls it executes the malware.",
+      "truths": [
+        "Remote content can change at any time.",
+        "There's no integrity check in a pipe.",
+        "CI jobs hold secrets."
+      ],
+      "derivation": [
+        "**Download** to a file first.",
+        "**Verify** a checksum or signature.",
+        "**Pin** versions (no 'latest').",
+        "Prefer **package managers or vendored copies**."
+      ]
+    },
+    "analogy": {
+      "title": "Reading a sealed envelope aloud on stage",
+      "story": "You don't know what's inside, and you've committed to saying it before you can check.",
+      "mapping": [
+        [
+          "Sealed envelope",
+          "Remote script"
+        ],
+        [
+          "Reading aloud",
+          "Piping to bash"
+        ],
+        [
+          "Opening first",
+          "Download + verify"
+        ]
+      ],
+      "breaks": "Checksums only help if they come from a trusted, separate channel."
+    },
+    "mindmap": {
+      "center": "curl | bash",
+      "branches": [
+        {
+          "label": "Risks",
+          "children": [
+            "Mutable remote",
+            "No integrity",
+            "Full privileges"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Download + checksum",
+            "Pin version",
+            "Package manager",
+            "Vendor it"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Installing a tool safely",
+      "scenario": "Verified.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A tampered download fails the checksum, and nothing runs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -fsSLo tool.tgz https://dl.example.com/tool/v1.8.2/tool-linux-amd64.tgz\necho \"3b1f...e9  tool.tgz\" | sha256sum -c -\ntar xzf tool.tgz"
+        }
+      ],
+      "outcome": "pipelines run only verified code."
+    },
+    "summary": {
+      "points": [
+        "Never pipe unverified scripts.",
+        "Pin and checksum.",
+        "Prefer packages."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the core danger of `curl | bash`?",
+        "a": "It executes mutable, unverified remote code with the job's full privileges."
+      }
+    ]
+  },
+  "runner-isolation-handling-untrusted-builds": {
+    "core": "CI for public PRs runs code written by strangers. Run it on ephemeral, isolated runners (or sandboxes like gVisor or Firecracker) with no secrets and no network path to internal systems.",
+    "first_principles": {
+      "problem": "A fork PR modifies the build script to read secrets or plant a backdoor on a persistent self-hosted runner.",
+      "truths": [
+        "Untrusted code can do anything the runner allows.",
+        "Persistent runners keep state between jobs.",
+        "Containers share the host kernel."
+      ],
+      "derivation": [
+        "Give fork PRs **no secrets** (the default on GitHub).",
+        "Use **ephemeral** runners: one job, then destroy.",
+        "Add **stronger sandboxing** (gVisor, Firecracker microVMs).",
+        "**Segment the network** away from internal systems."
+      ]
+    },
+    "analogy": {
+      "title": "A quarantine lab for unknown samples",
+      "story": "Unknown samples go in a sealed lab with no access to the main building, and the lab is sterilised after each use.",
+      "mapping": [
+        [
+          "Unknown samples",
+          "Untrusted PRs"
+        ],
+        [
+          "Sealed lab",
+          "Sandboxed runner"
+        ],
+        [
+          "Sterilisation",
+          "Ephemeral teardown"
+        ]
+      ],
+      "breaks": "`pull_request_target` runs with secrets in the base repo's context, which is a common hole if you check out PR code."
+    },
+    "mindmap": {
+      "center": "Runner Isolation",
+      "branches": [
+        {
+          "label": "Risk",
+          "children": [
+            "Fork PRs",
+            "Persistent state"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "No secrets",
+            "Ephemeral",
+            "gVisor/Firecracker",
+            "Network segmentation"
+          ]
+        },
+        {
+          "label": "Pitfall",
+          "children": [
+            "pull_request_target + checkout"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An open-source project's CI",
+      "scenario": "Tiered.",
+      "flow": [
+        "Fork PR → hosted ephemeral runner, no secrets",
+        "Maintainer label → trusted workflow",
+        "Release → isolated signing runner"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Strangers' code never sees credentials."
+        }
+      ],
+      "code": [],
+      "outcome": "untrusted builds can't reach anything valuable."
+    },
+    "summary": {
+      "points": [
+        "No secrets for forks.",
+        "Ephemeral runners.",
+        "Sandbox strongly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is pull_request_target dangerous with a PR checkout?",
+        "a": "It runs with base-repo secrets and write permissions while executing untrusted PR code."
+      }
+    ]
+  },
+  "oidc-federation-death-to-long-lived-keys": {
+    "core": "Instead of storing static cloud keys in CI, the job presents a short-lived OIDC token signed by the CI provider. The cloud trusts that issuer and exchanges the token for temporary credentials scoped to that repo and branch.",
+    "first_principles": {
+      "problem": "Long-lived AKIA keys in CI secrets leak, never expire and grant broad access.",
+      "truths": [
+        "CI platforms can sign identity tokens per job.",
+        "Clouds can trust external identity providers.",
+        "Short-lived credentials limit the damage of a leak."
+      ],
+      "derivation": [
+        "Register the CI provider as an **OIDC identity provider** in the cloud.",
+        "Create a **role** trusting it, with **conditions** on repo and branch.",
+        "The job requests a token → **AssumeRoleWithWebIdentity**.",
+        "Credentials **expire in minutes**."
+      ]
+    },
+    "analogy": {
+      "title": "A visitor badge issued at reception",
+      "story": "Instead of a permanent key, you show ID and get a badge valid for one floor, for one hour.",
+      "mapping": [
+        [
+          "ID",
+          "OIDC token"
+        ],
+        [
+          "Reception",
+          "Cloud STS"
+        ],
+        [
+          "Day badge",
+          "Temporary credentials"
+        ],
+        [
+          "Floor restriction",
+          "Role conditions"
+        ]
+      ],
+      "breaks": "Loose trust conditions (any repo, any branch) undo the benefit."
+    },
+    "mindmap": {
+      "center": "OIDC Federation",
+      "branches": [
+        {
+          "label": "Old",
+          "children": [
+            "Static keys",
+            "Never expire"
+          ]
+        },
+        {
+          "label": "New",
+          "children": [
+            "OIDC token",
+            "Temp creds"
+          ]
+        },
+        {
+          "label": "Trust",
+          "children": [
+            "Issuer",
+            "sub claim: repo/branch"
+          ]
+        },
+        {
+          "label": "Clouds",
+          "children": [
+            "AWS",
+            "GCP WIF",
+            "Azure"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "GitHub Actions → AWS",
+      "scenario": "No secrets stored.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "There's nothing to leak or rotate, and only main can deploy."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "permissions: { id-token: write, contents: read }\nsteps:\n  - uses: aws-actions/configure-aws-credentials@v4\n    with:\n      role-to-assume: arn:aws:iam::123456789012:role/deploy-prod\n      aws-region: eu-west-1\n# trust policy condition: token.actions.githubusercontent.com:sub = repo:acme/api:ref:refs/heads/main"
+        }
+      ],
+      "outcome": "CI has keyless, scoped, short-lived cloud access."
+    },
+    "summary": {
+      "points": [
+        "No static keys.",
+        "Scoped trust.",
+        "Minutes-long credentials."
+      ]
+    },
+    "check": [
+      {
+        "q": "What claim should AWS trust policies restrict for GitHub OIDC?",
+        "a": "The `sub` claim, limiting access to a specific repo (and branch or environment)."
+      }
+    ]
+  },
+  "secrets-management-beyond-environment-variables": {
+    "core": "Env-var secrets leak through process listings, child processes, crash dumps and accidental `env` output. Fetch secrets just-in-time from a vault, scope them per job and environment, mask them, and prefer files or short-lived tokens.",
+    "first_principles": {
+      "problem": "A debug step runs `env` and prints every secret into logs that many people can read.",
+      "truths": [
+        "Every process in the job inherits env vars.",
+        "Logs are widely accessible.",
+        "Long-lived secrets accumulate risk."
+      ],
+      "derivation": [
+        "**Scope** secrets to environments with approvals.",
+        "**Fetch at runtime** from Vault or a secrets manager with OIDC auth.",
+        "Pass via **files with tight permissions** when possible.",
+        "**Mask** them, never echo them, and **rotate** regularly."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel safe vs. cash on the dresser",
+      "story": "Cash on the dresser is visible to anyone who walks in; the safe opens only when needed.",
+      "mapping": [
+        [
+          "Dresser",
+          "Env vars"
+        ],
+        [
+          "Safe",
+          "Vault"
+        ],
+        [
+          "Opening briefly",
+          "Just-in-time fetch"
+        ]
+      ],
+      "breaks": "Masking is best-effort. Transformed secrets (base64) can still leak."
+    },
+    "mindmap": {
+      "center": "CI Secrets",
+      "branches": [
+        {
+          "label": "Env var risks",
+          "children": [
+            "Inherited",
+            "Logged",
+            "Dumps"
+          ]
+        },
+        {
+          "label": "Better",
+          "children": [
+            "Vault JIT",
+            "OIDC auth",
+            "Files"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Environments",
+            "Approvals"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "Mask",
+            "Rotate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fetching a DB password from Vault",
+      "scenario": "Just in time.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The secret exists only for this job, and access is audited in Vault."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- uses: hashicorp/vault-action@v3\n  with:\n    url: https://vault.acme.io\n    method: jwt\n    role: ci-migrate\n    secrets: secret/data/prod/db password | DB_PASSWORD"
+        }
+      ],
+      "outcome": "secrets are short-lived, scoped and auditable."
+    },
+    "summary": {
+      "points": [
+        "Env vars leak.",
+        "Fetch just-in-time.",
+        "Scope and rotate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are environment variables risky for secrets?",
+        "a": "Every child process inherits them, and they easily end up in logs or crash dumps."
+      }
+    ]
+  }
+}

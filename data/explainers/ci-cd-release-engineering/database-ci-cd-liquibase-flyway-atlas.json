@@ -1,0 +1,493 @@
+{
+  "introduction-why-databases-are-different": {
+    "core": "Application code is like a whiteboard: wipe it and rewrite it. Databases hold accumulated state that can't be recreated, so changes must be versioned, tested, compatible and forward-only.",
+    "first_principles": {
+      "problem": "Teams apply CI/CD to code but still change schemas by hand, which causes drift between environments and risky releases.",
+      "truths": [
+        "Data persists across deploys.",
+        "Destructive changes lose information permanently.",
+        "Environments drift without automation."
+      ],
+      "derivation": [
+        "**Version** schema changes in Git.",
+        "**Automate** applying them in CI/CD.",
+        "Stay **compatible** with old and new code (expand-contract).",
+        "Choose an **imperative or declarative** tool."
+      ]
+    },
+    "analogy": {
+      "title": "A whiteboard vs. a stone tablet",
+      "story": "Mistakes on a whiteboard are erased; carvings in stone are permanent, so you plan every cut.",
+      "mapping": [
+        [
+          "Whiteboard",
+          "Stateless code"
+        ],
+        [
+          "Stone tablet",
+          "Database with data"
+        ],
+        [
+          "Planning cuts",
+          "Reviewed migrations"
+        ]
+      ],
+      "breaks": "Small, frequent, reversible-by-design changes make database CD practical."
+    },
+    "mindmap": {
+      "center": "Database CI/CD",
+      "branches": [
+        {
+          "label": "Why different",
+          "children": [
+            "State",
+            "Irreversible"
+          ]
+        },
+        {
+          "label": "Practices",
+          "children": [
+            "Version",
+            "Automate",
+            "Compatible"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Flyway",
+            "Liquibase",
+            "Atlas"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Manual vs automated schema changes",
+      "scenario": "Drift.",
+      "flow": [
+        "Manual: staging has index, prod doesn't",
+        "Automated: same migrations everywhere in order"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Environments match, and changes are reviewed."
+        }
+      ],
+      "code": [],
+      "outcome": "schema changes go through the same pipeline as code."
+    },
+    "summary": {
+      "points": [
+        "Data has gravity.",
+        "Version everything.",
+        "Compatible changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you treat schema changes like code deploys?",
+        "a": "The database holds persistent state, and destructive changes can't be undone by redeploying."
+      }
+    ]
+  },
+  "the-expand-contract-pattern-safe-schema-changes": {
+    "core": "Never make a breaking schema change in one step. Expand (add the new, compatible structure), migrate the code and data, then contract (remove the old) once nothing depends on it.",
+    "first_principles": {
+      "problem": "Dropping or renaming a column in the same deploy as the code change crashes old instances still running.",
+      "truths": [
+        "Rolling deploys run old and new code together.",
+        "Additive changes don't break old code.",
+        "Removal is safe only after every reader is gone."
+      ],
+      "derivation": [
+        "**Add** the new column or table (nullable or defaulted).",
+        "**Dual-write** and **backfill**.",
+        "**Switch reads**.",
+        "**Drop** the old one in a later release."
+      ]
+    },
+    "analogy": {
+      "title": "Adding a new door before bricking up the old one",
+      "story": "People keep using the old door until the new one is open and familiar.",
+      "mapping": [
+        [
+          "New door",
+          "New column"
+        ],
+        [
+          "Both doors open",
+          "Compatibility window"
+        ],
+        [
+          "Bricking up",
+          "Contract"
+        ]
+      ],
+      "breaks": "It adds releases and temporary complexity (dual writes)."
+    },
+    "mindmap": {
+      "center": "Expand-Contract",
+      "branches": [
+        {
+          "label": "Expand",
+          "children": [
+            "Additive DDL"
+          ]
+        },
+        {
+          "label": "Migrate",
+          "children": [
+            "Dual write",
+            "Backfill",
+            "Switch reads"
+          ]
+        },
+        {
+          "label": "Contract",
+          "children": [
+            "Drop old"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Each step deployable"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Changing an email column type",
+      "scenario": "Phases.",
+      "flow": [
+        "Add email_v2 (citext)",
+        "Write both, backfill",
+        "Read email_v2",
+        "Drop email"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Zero downtime and no crashing old pods."
+        }
+      ],
+      "code": [],
+      "outcome": "breaking changes are delivered safely."
+    },
+    "summary": {
+      "points": [
+        "Add first.",
+        "Migrate gradually.",
+        "Remove last."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add a column as nullable during expand?",
+        "a": "So old code that doesn't write it keeps working."
+      }
+    ]
+  },
+  "the-migration-based-approach-imperative": {
+    "core": "Flyway and Liquibase apply ordered, versioned migration scripts (V1__init.sql, V2__add_index.sql) and record what's been applied in a history table, so every environment replays the same sequence.",
+    "first_principles": {
+      "problem": "Without an ordered record, nobody knows which changes each database has received.",
+      "truths": [
+        "Order matters for schema changes.",
+        "A history table records the state.",
+        "Applied migrations must never change."
+      ],
+      "derivation": [
+        "Write **numbered migrations**.",
+        "The tool applies **pending ones in order**.",
+        "It records them in **flyway_schema_history / DATABASECHANGELOG**.",
+        "**Never edit** applied migrations (checksums detect it)."
+      ]
+    },
+    "analogy": {
+      "title": "Turn-by-turn directions",
+      "story": "Each step assumes the previous ones were followed, and the log shows how far you've got.",
+      "mapping": [
+        [
+          "Directions",
+          "Migrations"
+        ],
+        [
+          "Progress log",
+          "History table"
+        ],
+        [
+          "Rewriting past directions",
+          "Editing applied migrations"
+        ]
+      ],
+      "breaks": "Long migration histories get slow to replay from scratch, so use baselines."
+    },
+    "mindmap": {
+      "center": "Migration-Based",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "Flyway",
+            "Liquibase",
+            "Alembic"
+          ]
+        },
+        {
+          "label": "Files",
+          "children": [
+            "V1__x.sql",
+            "changesets"
+          ]
+        },
+        {
+          "label": "Tracking",
+          "children": [
+            "History table",
+            "Checksums"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Immutable",
+            "Ordered"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Flyway migration in CI",
+      "scenario": "Validate and apply.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every environment converges through the same steps."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "flyway -url=$DB_URL validate   # checksums match?\nflyway -url=$DB_URL migrate    # apply pending V*__*.sql"
+        }
+      ],
+      "outcome": "predictable, auditable schema evolution."
+    },
+    "summary": {
+      "points": [
+        "Ordered scripts.",
+        "History table.",
+        "Never edit applied ones."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if you edit an already-applied Flyway migration?",
+        "a": "The checksum no longer matches, so validation fails."
+      }
+    ]
+  },
+  "the-schema-as-code-approach-declarative": {
+    "core": "Declarative tools like Atlas take the desired schema (HCL or SQL) and compute the diff against the live database to generate the migration plan, the way Terraform does for infrastructure.",
+    "first_principles": {
+      "problem": "Hand-writing every migration is tedious, and the current schema is hard to see across 300 migration files.",
+      "truths": [
+        "The desired end state is easier to read than a history.",
+        "Diffing can generate the steps.",
+        "Generated plans still need review."
+      ],
+      "derivation": [
+        "Describe the **desired schema**.",
+        "Run **atlas schema diff/plan** against the live DB.",
+        "**Review** the generated SQL (lint for destructive changes).",
+        "**Apply**, or commit the plan as a versioned migration."
+      ]
+    },
+    "analogy": {
+      "title": "Giving a destination vs. turn-by-turn directions",
+      "story": "The GPS computes the route from where you are.",
+      "mapping": [
+        [
+          "Destination",
+          "Desired schema"
+        ],
+        [
+          "GPS",
+          "Atlas diff engine"
+        ],
+        [
+          "Route",
+          "Generated migration"
+        ]
+      ],
+      "breaks": "Diff engines can't infer intent: a rename looks like drop plus add, which loses data."
+    },
+    "mindmap": {
+      "center": "Declarative Schema",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "Desired schema HCL/SQL"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Diff",
+            "Plan",
+            "Lint"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Rename = drop+add"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Atlas",
+            "Skeema",
+            "sqldef"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An Atlas plan with lint",
+      "scenario": "Catches a destructive change.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A destructive diff is blocked for human review."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "atlas migrate diff add_status --to file://schema.hcl --dev-url docker://postgres/16\natlas migrate lint --latest 1   # flags: dropping column 'state'"
+        }
+      ],
+      "outcome": "readable schemas and generated, linted plans."
+    },
+    "summary": {
+      "points": [
+        "Describe the end state.",
+        "Generate the diff.",
+        "Review destructive changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a declarative diff be dangerous for renames?",
+        "a": "It sees a removed column and a new column, generating a drop plus add that loses data."
+      }
+    ]
+  },
+  "rollback-strategies-the-myth-of-undo": {
+    "core": "Database rollbacks rarely restore reality: new data has been written since. Prefer roll-forward fixes, backward-compatible changes (so code can roll back independently), and backups or PITR for disasters.",
+    "first_principles": {
+      "problem": "A 'down' migration drops a new column that already holds a day of customer data.",
+      "truths": [
+        "Data written after the change has to be preserved.",
+        "Code rollback is easy when the schema stays compatible.",
+        "Backups are the true last resort."
+      ],
+      "derivation": [
+        "Design changes so **old code still works** (expand-contract).",
+        "**Roll back code**, not the schema.",
+        "Fix forward with a **new migration**.",
+        "Keep **PITR/backups** tested for disasters."
+      ]
+    },
+    "analogy": {
+      "title": "Un-baking a cake",
+      "story": "You can't remove eggs from a baked cake; you bake a better one next time.",
+      "mapping": [
+        [
+          "Baked cake",
+          "Migrated DB with new data"
+        ],
+        [
+          "Removing eggs",
+          "Down migration"
+        ],
+        [
+          "Better next cake",
+          "Roll-forward fix"
+        ]
+      ],
+      "breaks": "Some trivial changes (adding an unused index) can be safely reversed."
+    },
+    "mindmap": {
+      "center": "DB Rollback",
+      "branches": [
+        {
+          "label": "Myth",
+          "children": [
+            "Down migration = undo"
+          ]
+        },
+        {
+          "label": "Reality",
+          "children": [
+            "New data exists"
+          ]
+        },
+        {
+          "label": "Strategies",
+          "children": [
+            "Compatible schema",
+            "Code rollback",
+            "Roll forward"
+          ]
+        },
+        {
+          "label": "Last resort",
+          "children": [
+            "PITR",
+            "Backups"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A bad release with a new column",
+      "scenario": "The right response.",
+      "flow": [
+        "v2 adds column + code using it",
+        "Bug found",
+        "Roll back code to v1 (column ignored)",
+        "Fix forward in v2.1"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No data lost and a quick recovery."
+        }
+      ],
+      "code": [],
+      "outcome": "recovery without destroying data."
+    },
+    "summary": {
+      "points": [
+        "Undo is a myth.",
+        "Keep schema compatible.",
+        "Roll forward."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are down migrations risky in production?",
+        "a": "They can destroy data written since the migration ran."
+      }
+    ]
+  }
+}

@@ -1,0 +1,704 @@
+{
+  "introduction-the-end-of-the-maintenance-window": {
+    "core": "Modern deployment strategies release without downtime by running old and new versions side by side and controlling which traffic reaches which, so a release is reversible and low-risk.",
+    "first_principles": {
+      "problem": "Saturday-night maintenance windows mean downtime, big-bang risk and painful rollbacks.",
+      "truths": [
+        "Users expect 24/7 availability.",
+        "Every release carries risk.",
+        "Running versions side by side makes switching possible."
+      ],
+      "derivation": [
+        "**Rolling**: replace gradually.",
+        "**Blue/green**: switch all at once and switch back.",
+        "**Canary**: expose a small slice first.",
+        "**Shadow**: mirror traffic with no user impact."
+      ]
+    },
+    "analogy": {
+      "title": "Renovating a restaurant while staying open",
+      "story": "Redo one section at a time, or open a twin restaurant next door and move diners over.",
+      "mapping": [
+        [
+          "Closing for renovation",
+          "Maintenance window"
+        ],
+        [
+          "Section by section",
+          "Rolling"
+        ],
+        [
+          "Twin restaurant",
+          "Blue/green"
+        ]
+      ],
+      "breaks": "Zero-downtime deploys still need backward-compatible schemas and APIs."
+    },
+    "mindmap": {
+      "center": "Deployment Strategies",
+      "branches": [
+        {
+          "label": "Old way",
+          "children": [
+            "Maintenance window"
+          ]
+        },
+        {
+          "label": "Strategies",
+          "children": [
+            "Rolling",
+            "Blue/Green",
+            "Canary",
+            "Shadow"
+          ]
+        },
+        {
+          "label": "Need",
+          "children": [
+            "Compatibility",
+            "Monitoring"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The same release, two ways",
+      "scenario": "Window vs canary.",
+      "flow": [
+        "Window: 2h downtime, all-or-nothing",
+        "Canary: 1% → 10% → 100%, no downtime, auto-rollback"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Releases happen on a Tuesday afternoon, safely."
+        }
+      ],
+      "code": [],
+      "outcome": "releases without downtime or drama."
+    },
+    "summary": {
+      "points": [
+        "No maintenance windows.",
+        "Side-by-side versions.",
+        "Reversible releases."
+      ]
+    },
+    "check": [
+      {
+        "q": "What enables zero-downtime deployment strategies?",
+        "a": "Running old and new versions simultaneously and controlling traffic between them."
+      }
+    ]
+  },
+  "rolling-updates-the-slow-and-steady-replacement": {
+    "core": "A rolling update replaces instances a few at a time (controlled by maxSurge and maxUnavailable) and waits for readiness before continuing. It's the Kubernetes default: simple and cheap, but rollback is gradual and both versions serve at once.",
+    "first_principles": {
+      "problem": "You need to update 20 pods without downtime or doubling capacity.",
+      "truths": [
+        "Capacity must stay sufficient during the update.",
+        "New instances must be healthy before they take traffic.",
+        "Two versions coexist briefly."
+      ],
+      "derivation": [
+        "Replace in **batches**.",
+        "**maxSurge**: extra pods allowed; **maxUnavailable**: pods allowed down.",
+        "Gate on **readiness probes**.",
+        "Pause or undo if things go wrong."
+      ]
+    },
+    "analogy": {
+      "title": "Changing tyres on a moving car, one at a time",
+      "story": "The car keeps rolling because the other three tyres carry it.",
+      "mapping": [
+        [
+          "Tyre",
+          "Pod"
+        ],
+        [
+          "Keeps rolling",
+          "No downtime"
+        ],
+        [
+          "One at a time",
+          "Batch size"
+        ]
+      ],
+      "breaks": "Both versions serve at once, so they must be compatible. Rollback is another rolling update."
+    },
+    "mindmap": {
+      "center": "Rolling Update",
+      "branches": [
+        {
+          "label": "Knobs",
+          "children": [
+            "maxSurge",
+            "maxUnavailable"
+          ]
+        },
+        {
+          "label": "Gate",
+          "children": [
+            "Readiness probe"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Simple",
+            "No extra infra"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Mixed versions",
+            "Slow rollback"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Kubernetes rolling update",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Rollback",
+          "detail": "`kubectl rollout undo deploy/api`."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "strategy:\n  type: RollingUpdate\n  rollingUpdate:\n    maxSurge: 25%\n    maxUnavailable: 0"
+        }
+      ],
+      "outcome": "zero-downtime updates with minimal cost."
+    },
+    "summary": {
+      "points": [
+        "Batch replacement.",
+        "Readiness-gated.",
+        "Mixed versions briefly."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does maxUnavailable: 0 guarantee?",
+        "a": "Capacity never drops below the desired replica count during the update."
+      }
+    ]
+  },
+  "bluegreen-deployment-the-instant-switch": {
+    "core": "Run two complete environments. Blue serves production while green gets the new version and is tested. Then the router flips all traffic to green at once, and switching back is just as instant.",
+    "first_principles": {
+      "problem": "You need an instant cut-over and an instant rollback, with no mixed versions serving users.",
+      "truths": [
+        "A full parallel environment can be verified before any users touch it.",
+        "Switching a router is fast.",
+        "Keeping the old environment allows instant reversal."
+      ],
+      "derivation": [
+        "Deploy to **idle green**.",
+        "**Smoke-test** green.",
+        "**Switch** the load balancer or service selector.",
+        "Keep blue warm for **instant rollback**."
+      ]
+    },
+    "analogy": {
+      "title": "A light switch between two rooms",
+      "story": "Flip it and the whole house is lit by the new room; flip it back if the bulb flickers.",
+      "mapping": [
+        [
+          "Two rooms",
+          "Blue and green"
+        ],
+        [
+          "Switch",
+          "Router/selector"
+        ],
+        [
+          "Flip back",
+          "Rollback"
+        ]
+      ],
+      "breaks": "It doubles infrastructure cost, and database changes must work for both versions."
+    },
+    "mindmap": {
+      "center": "Blue/Green",
+      "branches": [
+        {
+          "label": "Setup",
+          "children": [
+            "Two full envs"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Deploy green",
+            "Test",
+            "Switch",
+            "Keep blue"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Instant switch",
+            "Instant rollback"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "2x cost",
+            "DB compatibility"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Switching a Kubernetes Service",
+      "scenario": "Selector flip.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "100% of traffic moves in seconds, and rollback takes seconds too."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl patch svc api -p '{\"spec\":{\"selector\":{\"app\":\"api\",\"color\":\"green\"}}}'\n# rollback: color: blue"
+        }
+      ],
+      "outcome": "all-or-nothing releases with instant reversal."
+    },
+    "summary": {
+      "points": [
+        "Two environments.",
+        "Test before switching.",
+        "Instant rollback."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's blue/green's main cost?",
+        "a": "Running two full production environments at the same time."
+      }
+    ]
+  },
+  "canary-deployment-testing-the-waters": {
+    "core": "Release the new version to a small slice of real traffic (1–5%), compare its metrics with the baseline, and increase step by step, or roll back automatically if errors or latency get worse.",
+    "first_principles": {
+      "problem": "Some bugs only appear under real production traffic, and exposing everyone at once maximises the blast radius.",
+      "truths": [
+        "Real traffic reveals real bugs.",
+        "A small exposure limits damage.",
+        "Metrics can decide automatically."
+      ],
+      "derivation": [
+        "Route **1–5%** to the canary.",
+        "**Compare** error rate and latency against the baseline.",
+        "**Promote** in steps (5 → 25 → 50 → 100).",
+        "**Auto-rollback** when thresholds are breached."
+      ]
+    },
+    "analogy": {
+      "title": "A canary in the coal mine",
+      "story": "The small bird shows danger early, before the miners are affected.",
+      "mapping": [
+        [
+          "Canary bird",
+          "Canary release"
+        ],
+        [
+          "Toxic gas",
+          "A bug"
+        ],
+        [
+          "Miners",
+          "All users"
+        ]
+      ],
+      "breaks": "Low traffic means weak statistics, and some bugs only appear at scale."
+    },
+    "mindmap": {
+      "center": "Canary",
+      "branches": [
+        {
+          "label": "Traffic",
+          "children": [
+            "1-5% first",
+            "Weighted steps"
+          ]
+        },
+        {
+          "label": "Analysis",
+          "children": [
+            "Error rate",
+            "Latency",
+            "vs baseline"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Promote",
+            "Auto-rollback"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Argo Rollouts",
+            "Flagger"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An automated canary",
+      "scenario": "Argo Rollouts.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "When the 5xx rate rises at 5%, it rolls back with 95% of users untouched."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "strategy:\n  canary:\n    steps:\n      - setWeight: 5\n      - pause: { duration: 10m }\n      - analysis: { templates: [{ templateName: error-rate }] }\n      - setWeight: 50\n      - pause: { duration: 10m }"
+        }
+      ],
+      "outcome": "real-traffic validation with limited blast radius."
+    },
+    "summary": {
+      "points": [
+        "Small slice first.",
+        "Metric-driven.",
+        "Automatic rollback."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why compare canary metrics against a baseline?",
+        "a": "So you measure the new version's effect, not general traffic fluctuations."
+      }
+    ]
+  },
+  "shadow-deployment-the-stealth-mode": {
+    "core": "Mirror copies of real production requests to the new version, whose responses are discarded. You test it with real load and real request shapes, with zero user impact.",
+    "first_principles": {
+      "problem": "You want to know how a rewritten service handles real traffic before any user depends on it.",
+      "truths": [
+        "Synthetic tests miss real-world variety.",
+        "Discarded responses can't hurt users.",
+        "Side effects in the mirror can still cause harm."
+      ],
+      "derivation": [
+        "**Mirror** traffic at the proxy or mesh (Istio, Envoy).",
+        "**Discard** the shadow's responses.",
+        "**Compare** latency, errors and outputs offline.",
+        "**Stub out side effects** (payments, emails)."
+      ]
+    },
+    "analogy": {
+      "title": "A trainee pilot in a simulator fed by real flight data",
+      "story": "They fly the real route in parallel, but their controls don't move the actual plane.",
+      "mapping": [
+        [
+          "Real flight data",
+          "Mirrored traffic"
+        ],
+        [
+          "Simulator",
+          "Shadow service"
+        ],
+        [
+          "Controls disconnected",
+          "Discarded responses"
+        ]
+      ],
+      "breaks": "Writes and side effects must be isolated, or the shadow double-charges customers."
+    },
+    "mindmap": {
+      "center": "Shadow",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Mirror requests",
+            "Discard responses"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Istio mirror",
+            "Envoy"
+          ]
+        },
+        {
+          "label": "Compare",
+          "children": [
+            "Latency",
+            "Errors",
+            "Diff outputs"
+          ]
+        },
+        {
+          "label": "Danger",
+          "children": [
+            "Side effects",
+            "2x load"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rewriting a search service",
+      "scenario": "Shadow before canary.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "v2's p99 is 3x higher on long queries, so it's fixed before any user sees it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "http:\n- route: [{ destination: { host: search-v1 } }]\n  mirror: { host: search-v2 }\n  mirrorPercentage: { value: 100 }"
+        }
+      ],
+      "outcome": "risk-free validation against real traffic."
+    },
+    "summary": {
+      "points": [
+        "Mirror real traffic.",
+        "Discard responses.",
+        "Isolate side effects."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main danger of shadow deployments?",
+        "a": "Side effects such as writes, payments or emails being executed twice by the shadow service."
+      }
+    ]
+  },
+  "choosing-the-right-strategy-a-decision-framework": {
+    "core": "Choose a strategy by risk, cost and need: rolling for routine low-risk changes, blue/green for instant all-or-nothing switches, canary for risky changes validated on real traffic, and shadow for rewrites or performance validation.",
+    "first_principles": {
+      "problem": "Using one strategy for everything either wastes money or takes unnecessary risk.",
+      "truths": [
+        "Releases differ in risk.",
+        "Strategies differ in cost and complexity.",
+        "Rollback speed matters differently per change."
+      ],
+      "derivation": [
+        "**Minor fix** → rolling.",
+        "**Big change needing instant rollback** → blue/green.",
+        "**Risky behaviour change** → canary.",
+        "**Rewrite or performance unknown** → shadow, then canary."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing transport for a trip",
+      "story": "Walk to the corner shop, drive across town, take a test drive before buying a car.",
+      "mapping": [
+        [
+          "Walk",
+          "Rolling"
+        ],
+        [
+          "Swap cars",
+          "Blue/green"
+        ],
+        [
+          "Test drive",
+          "Canary/shadow"
+        ]
+      ],
+      "breaks": "Strategies combine. For example, shadow, then canary, then a full rollout."
+    },
+    "mindmap": {
+      "center": "Choosing",
+      "branches": [
+        {
+          "label": "Rolling",
+          "children": [
+            "Routine",
+            "Cheap"
+          ]
+        },
+        {
+          "label": "Blue/Green",
+          "children": [
+            "Instant switch",
+            "2x cost"
+          ]
+        },
+        {
+          "label": "Canary",
+          "children": [
+            "Risky change",
+            "Metrics"
+          ]
+        },
+        {
+          "label": "Shadow",
+          "children": [
+            "Rewrites",
+            "Perf"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "Shadow → canary"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three releases this week",
+      "scenario": "Different strategies.",
+      "flow": [
+        "Typo fix → rolling",
+        "New checkout flow → canary + flags",
+        "Search engine rewrite → shadow, then canary"
+      ],
+      "steps": [
+        {
+          "label": "Principle",
+          "detail": "Match the strategy to the risk."
+        }
+      ],
+      "code": [],
+      "outcome": "appropriate safety at appropriate cost."
+    },
+    "summary": {
+      "points": [
+        "No single best strategy.",
+        "Match it to risk.",
+        "Combine when needed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which strategy suits a performance-critical rewrite?",
+        "a": "Shadow (to validate under real load safely), followed by a canary."
+      }
+    ]
+  },
+  "deployment-strategies-in-the-real-world-tooling-and-automation": {
+    "core": "Production teams automate strategies with controllers (Argo Rollouts, Flagger, Spinnaker) that shift traffic through meshes or ingress, run metric analysis against Prometheus or Datadog, and promote or abort without humans.",
+    "first_principles": {
+      "problem": "Manually adjusting traffic weights and watching dashboards is slow, error-prone and doesn't scale to many services.",
+      "truths": [
+        "Humans are slow at 3 AM.",
+        "Metrics can be queried programmatically.",
+        "Declarative rollouts are repeatable."
+      ],
+      "derivation": [
+        "Declare the rollout **steps** as a CRD.",
+        "Use the **mesh/ingress** for traffic weights.",
+        "Define **AnalysisTemplates** (PromQL success rate).",
+        "**Auto-promote or abort**, and notify."
+      ]
+    },
+    "analogy": {
+      "title": "An autopilot with automatic abort",
+      "story": "The plane follows the approach and goes around automatically if the instruments show danger.",
+      "mapping": [
+        [
+          "Approach path",
+          "Rollout steps"
+        ],
+        [
+          "Instruments",
+          "Metric analysis"
+        ],
+        [
+          "Go-around",
+          "Auto-abort"
+        ]
+      ],
+      "breaks": "Bad metrics give bad decisions, so choose meaningful SLIs."
+    },
+    "mindmap": {
+      "center": "Rollout Automation",
+      "branches": [
+        {
+          "label": "Controllers",
+          "children": [
+            "Argo Rollouts",
+            "Flagger",
+            "Spinnaker"
+          ]
+        },
+        {
+          "label": "Traffic",
+          "children": [
+            "Istio",
+            "NGINX",
+            "ALB"
+          ]
+        },
+        {
+          "label": "Analysis",
+          "children": [
+            "Prometheus",
+            "Datadog"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Promote",
+            "Abort",
+            "Notify"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An analysis template",
+      "scenario": "Success-rate gate.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A rollout below 99% success aborts automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "metrics:\n- name: success-rate\n  successCondition: result[0] >= 0.99\n  provider:\n    prometheus:\n      query: sum(rate(http_requests_total{app=\"api\",code!~\"5..\"}[5m])) / sum(rate(http_requests_total{app=\"api\"}[5m]))"
+        }
+      ],
+      "outcome": "hands-off, safe releases at scale."
+    },
+    "summary": {
+      "points": [
+        "Declarative rollouts.",
+        "Metric gates.",
+        "Automatic decisions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an AnalysisTemplate do in Argo Rollouts?",
+        "a": "It defines metric queries and success conditions that gate promotion or trigger an abort."
+      }
+    ]
+  }
+}

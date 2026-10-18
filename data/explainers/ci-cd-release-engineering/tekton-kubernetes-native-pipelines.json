@@ -1,0 +1,505 @@
+{
+  "introduction-cicd-for-kubernetes-by-kubernetes": {
+    "core": "Tekton implements CI/CD as Kubernetes CRDs: each Task runs as a Pod, so pipelines scale with the cluster, use no resources when idle, and use Kubernetes RBAC, secrets and scheduling.",
+    "first_principles": {
+      "problem": "A traditional CI server is always on, separately managed and scaled, and isolated from the cluster it deploys to.",
+      "truths": [
+        "Kubernetes already schedules containers well.",
+        "CRDs extend the Kubernetes API.",
+        "Idle capacity is waste."
+      ],
+      "derivation": [
+        "Define **Tasks** (steps in containers).",
+        "Compose **Pipelines** (a DAG of Tasks).",
+        "Run with **TaskRun/PipelineRun** objects.",
+        "Trigger from events with **Tekton Triggers**."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant that hires chefs per order",
+      "story": "No standing kitchen staff at 3 AM; chefs appear when an order arrives and leave when it's done.",
+      "mapping": [
+        [
+          "Standing staff",
+          "Always-on CI server"
+        ],
+        [
+          "Chefs per order",
+          "Pods per Task"
+        ],
+        [
+          "Order ticket",
+          "PipelineRun"
+        ]
+      ],
+      "breaks": "It's very low-level. Many teams use higher-level products built on Tekton (OpenShift Pipelines)."
+    },
+    "mindmap": {
+      "center": "Tekton",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "CRDs",
+            "Pods per Task"
+          ]
+        },
+        {
+          "label": "Objects",
+          "children": [
+            "Task",
+            "Pipeline",
+            "TaskRun",
+            "PipelineRun"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Workspaces",
+            "Triggers"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "K8s-native",
+            "Scale to zero"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A build on demand",
+      "scenario": "Lifecycle.",
+      "flow": [
+        "Git push → Trigger",
+        "PipelineRun created",
+        "Pods for each Task",
+        "Pods exit, resources freed"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No idle CI servers."
+        }
+      ],
+      "code": [],
+      "outcome": "CI/CD that is just more Kubernetes."
+    },
+    "summary": {
+      "points": [
+        "CRD-based.",
+        "Pod per Task.",
+        "Event-driven."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a Tekton Task execute?",
+        "a": "As a Kubernetes Pod, with each step as a container."
+      }
+    ]
+  },
+  "the-atomic-units-task-and-taskrun": {
+    "core": "A Task is a reusable template: parameters, workspaces and ordered steps (containers). A TaskRun is one execution of it with concrete values. Steps in a Task share the Pod's volumes.",
+    "first_principles": {
+      "problem": "You need reusable, parameterised build units that run predictably.",
+      "truths": [
+        "Templates separate definition from execution.",
+        "Steps in a Pod can share files.",
+        "Parameters make Tasks reusable."
+      ],
+      "derivation": [
+        "Define **params**, **workspaces** and **steps** (image + script).",
+        "Create a **TaskRun** with param values.",
+        "Steps run **sequentially** in one Pod.",
+        "Use **results** to emit small outputs."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe card and a cooking session",
+      "story": "The card (Task) lists ingredients and steps; tonight's session (TaskRun) uses specific quantities.",
+      "mapping": [
+        [
+          "Recipe card",
+          "Task"
+        ],
+        [
+          "Cooking session",
+          "TaskRun"
+        ],
+        [
+          "Quantities",
+          "Params"
+        ]
+      ],
+      "breaks": "Large data shouldn't go through results; use workspaces."
+    },
+    "mindmap": {
+      "center": "Task & TaskRun",
+      "branches": [
+        {
+          "label": "Task",
+          "children": [
+            "params",
+            "workspaces",
+            "steps",
+            "results"
+          ]
+        },
+        {
+          "label": "TaskRun",
+          "children": [
+            "Concrete params",
+            "One execution"
+          ]
+        },
+        {
+          "label": "Execution",
+          "children": [
+            "One Pod",
+            "Steps sequential"
+          ]
+        },
+        {
+          "label": "Catalog",
+          "children": [
+            "Tekton Hub"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A simple test Task",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Run",
+          "detail": "A TaskRun references go-test with pkg=./api/..."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: tekton.dev/v1\nkind: Task\nmetadata: { name: go-test }\nspec:\n  params: [ { name: pkg, default: ./... } ]\n  workspaces: [ { name: source } ]\n  steps:\n    - name: test\n      image: golang:1.22\n      workingDir: $(workspaces.source.path)\n      script: go test $(params.pkg)"
+        }
+      ],
+      "outcome": "reusable, parameterised build units."
+    },
+    "summary": {
+      "points": [
+        "Task = template.",
+        "TaskRun = execution.",
+        "Steps share a Pod."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do steps in a Tekton Task run in the same Pod?",
+        "a": "Yes. They run sequentially as containers in one Pod and share its volumes."
+      }
+    ]
+  },
+  "orchestration-pipeline-and-pipelinerun": {
+    "core": "A Pipeline wires Tasks into a DAG, using runAfter and data dependencies (results) for order, passing params and workspaces down, with finally tasks for cleanup or notification. A PipelineRun executes it.",
+    "first_principles": {
+      "problem": "Build, test, scan and deploy must run in the right order with shared inputs.",
+      "truths": [
+        "Tasks have dependencies.",
+        "Independent tasks can run in parallel.",
+        "Some steps must always run (cleanup)."
+      ],
+      "derivation": [
+        "List **tasks** with **taskRef**.",
+        "Order with **runAfter** or result references.",
+        "Map **pipeline params and workspaces** onto tasks.",
+        "Use **finally** for notifications and cleanup."
+      ]
+    },
+    "analogy": {
+      "title": "A film production schedule",
+      "story": "Scenes (Tasks) are scheduled by dependency, some shot in parallel, with a wrap party (finally) whatever happens.",
+      "mapping": [
+        [
+          "Scenes",
+          "Tasks"
+        ],
+        [
+          "Schedule",
+          "Pipeline DAG"
+        ],
+        [
+          "Wrap party",
+          "finally"
+        ]
+      ],
+      "breaks": "Every Task is a new Pod, so data passing costs I/O; design workspaces carefully."
+    },
+    "mindmap": {
+      "center": "Pipeline",
+      "branches": [
+        {
+          "label": "DAG",
+          "children": [
+            "runAfter",
+            "Result deps"
+          ]
+        },
+        {
+          "label": "Inputs",
+          "children": [
+            "params",
+            "workspaces"
+          ]
+        },
+        {
+          "label": "Always",
+          "children": [
+            "finally"
+          ]
+        },
+        {
+          "label": "Run",
+          "children": [
+            "PipelineRun"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Clone → test ∥ lint → build",
+      "scenario": "Pipeline.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "test and lint run in parallel, and notify always runs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "tasks:\n  - { name: clone, taskRef: { name: git-clone }, workspaces: [{ name: output, workspace: src }] }\n  - { name: test, runAfter: [clone], taskRef: { name: go-test }, workspaces: [{ name: source, workspace: src }] }\n  - { name: lint, runAfter: [clone], taskRef: { name: golangci }, workspaces: [{ name: source, workspace: src }] }\n  - { name: build, runAfter: [test, lint], taskRef: { name: kaniko } }\nfinally:\n  - { name: notify, taskRef: { name: slack } }"
+        }
+      ],
+      "outcome": "complex workflows orchestrated as a DAG."
+    },
+    "summary": {
+      "points": [
+        "DAG of Tasks.",
+        "Parallel by default.",
+        "finally always runs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are Tekton finally tasks for?",
+        "a": "Tasks that always run at the end, such as notifications and cleanup, whether the pipeline succeeded or failed."
+      }
+    ]
+  },
+  "workspaces-sharing-data-between-pods": {
+    "core": "Each Task is a separate Pod, possibly on a different node, so files are shared through workspaces backed by PersistentVolumeClaims (often via volumeClaimTemplate per run), ConfigMaps or Secrets.",
+    "first_principles": {
+      "problem": "The clone Task's source code isn't visible to the test Task running in another Pod.",
+      "truths": [
+        "Pods don't share local filesystems.",
+        "PVCs persist across Pods.",
+        "Access modes affect scheduling."
+      ],
+      "derivation": [
+        "Declare **workspaces** in Tasks and the Pipeline.",
+        "Bind them in the PipelineRun: **volumeClaimTemplate** (per-run PVC).",
+        "Watch **ReadWriteOnce** (pods pinned to one node) vs **RWX**.",
+        "Use **secret/configMap** workspaces for credentials and config."
+      ]
+    },
+    "analogy": {
+      "title": "A shared locker between shifts",
+      "story": "Each shift worker (Pod) leaves materials in a locker (PVC) for the next.",
+      "mapping": [
+        [
+          "Locker",
+          "PVC workspace"
+        ],
+        [
+          "Shift workers",
+          "Task Pods"
+        ],
+        [
+          "Locker key",
+          "Workspace binding"
+        ]
+      ],
+      "breaks": "RWO PVCs can force tasks onto one node and limit parallelism."
+    },
+    "mindmap": {
+      "center": "Workspaces",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Pods don't share FS"
+          ]
+        },
+        {
+          "label": "Backends",
+          "children": [
+            "PVC",
+            "volumeClaimTemplate",
+            "ConfigMap",
+            "Secret",
+            "emptyDir"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "RWO vs RWX"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "Per-run PVC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Binding a per-run workspace",
+      "scenario": "PipelineRun.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each run gets fresh shared storage, deleted with the run."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "workspaces:\n  - name: src\n    volumeClaimTemplate:\n      spec:\n        accessModes: [ReadWriteOnce]\n        resources: { requests: { storage: 1Gi } }"
+        }
+      ],
+      "outcome": "data flows between Tasks reliably."
+    },
+    "summary": {
+      "points": [
+        "Pods need shared volumes.",
+        "Per-run PVCs.",
+        "Mind access modes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't Tekton Tasks share files through /tmp?",
+        "a": "Each Task runs in its own Pod, possibly on a different node, with a separate filesystem."
+      }
+    ]
+  },
+  "triggers-automating-pipeline-execution": {
+    "core": "Tekton Triggers turn incoming events (Git webhooks) into PipelineRuns. An EventListener receives the HTTP event, Interceptors validate and filter it, TriggerBindings extract fields, and TriggerTemplates stamp out the runs.",
+    "first_principles": {
+      "problem": "Manually applying PipelineRun YAML for every push isn't CI.",
+      "truths": [
+        "Git hosts send webhooks.",
+        "Event payloads contain the needed parameters.",
+        "Unauthenticated webhooks are a risk."
+      ],
+      "derivation": [
+        "**EventListener**: an HTTP endpoint (a Service).",
+        "**Interceptors**: verify the signature, filter events (CEL).",
+        "**TriggerBinding**: payload → params.",
+        "**TriggerTemplate**: params → PipelineRun."
+      ]
+    },
+    "analogy": {
+      "title": "A mailroom that turns letters into work orders",
+      "story": "It receives mail, checks it's genuine, extracts the details and issues a standard work order.",
+      "mapping": [
+        [
+          "Mailroom",
+          "EventListener"
+        ],
+        [
+          "Authenticity check",
+          "Interceptor"
+        ],
+        [
+          "Extracting details",
+          "TriggerBinding"
+        ],
+        [
+          "Work order",
+          "PipelineRun"
+        ]
+      ],
+      "breaks": "The EventListener must be exposed to the internet, so validate signatures."
+    },
+    "mindmap": {
+      "center": "Triggers",
+      "branches": [
+        {
+          "label": "EventListener",
+          "children": [
+            "HTTP endpoint"
+          ]
+        },
+        {
+          "label": "Interceptors",
+          "children": [
+            "GitHub secret",
+            "CEL filter"
+          ]
+        },
+        {
+          "label": "Binding",
+          "children": [
+            "Payload → params"
+          ]
+        },
+        {
+          "label": "Template",
+          "children": [
+            "→ PipelineRun"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A GitHub push trigger",
+      "scenario": "Core pieces.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A push to main automatically creates a PipelineRun."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "kind: TriggerBinding\nspec:\n  params:\n    - { name: revision, value: $(body.after) }\n    - { name: repo-url, value: $(body.repository.clone_url) }\n---\n# EventListener interceptors: github (secretRef), cel filter: body.ref == 'refs/heads/main'"
+        }
+      ],
+      "outcome": "fully event-driven Kubernetes-native CI."
+    },
+    "summary": {
+      "points": [
+        "Listen.",
+        "Validate.",
+        "Bind.",
+        "Template."
+      ]
+    },
+    "check": [
+      {
+        "q": "What role does an Interceptor play in Tekton Triggers?",
+        "a": "It validates (e.g. the webhook signature) and filters or modifies events before they create runs."
+      }
+    ]
+  }
+}

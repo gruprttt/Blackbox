@@ -1,0 +1,512 @@
+{
+  "introduction-deploy-release": {
+    "core": "Deploying puts code on servers; releasing exposes it to users. Separating the two (with flags and gradual traffic shifting) lets you ship code continuously and release features deliberately and gradually.",
+    "first_principles": {
+      "problem": "When deploying and releasing are the same event, every deploy is a high-stakes moment for all users.",
+      "truths": [
+        "Code can run in production while staying invisible.",
+        "Exposure can be controlled per user or percentage.",
+        "Gradual exposure limits the blast radius."
+      ],
+      "derivation": [
+        "**Deploy** dark (code present, feature off).",
+        "**Release** by turning on exposure gradually.",
+        "**Measure** at each step.",
+        "**Roll back** exposure, not code."
+      ]
+    },
+    "analogy": {
+      "title": "A chef cooking a new dish before adding it to the menu",
+      "story": "It's prepared in the kitchen, served to a few regulars first, and only then printed on the menu.",
+      "mapping": [
+        [
+          "Cooked in kitchen",
+          "Deployed"
+        ],
+        [
+          "Served to regulars",
+          "Limited release"
+        ],
+        [
+          "On the menu",
+          "General availability"
+        ]
+      ],
+      "breaks": "Dark code still runs some paths and needs testing, and flags add complexity."
+    },
+    "mindmap": {
+      "center": "Deploy ≠ Release",
+      "branches": [
+        {
+          "label": "Deploy",
+          "children": [
+            "Code on servers"
+          ]
+        },
+        {
+          "label": "Release",
+          "children": [
+            "Users see it"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Feature flags",
+            "Canary"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Low-risk",
+            "Gradual",
+            "Reversible"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Launching a redesign",
+      "scenario": "Separated steps.",
+      "flow": [
+        "Monday: deploy (flag off)",
+        "Tuesday: staff only",
+        "Wednesday: 10% users",
+        "Friday: 100%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No single risky moment."
+        }
+      ],
+      "code": [],
+      "outcome": "releases become business decisions, not deploy events."
+    },
+    "summary": {
+      "points": [
+        "Deploy dark.",
+        "Release gradually.",
+        "Roll back exposure."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between deploy and release?",
+        "a": "Deploying installs code in production; releasing makes it visible to users."
+      }
+    ]
+  },
+  "feature-flags-the-fundamental-switch": {
+    "core": "A feature flag wraps a code path in a runtime-evaluated condition (on/off, percentage, user segment), controlled from a flag service, so features can be turned on, targeted or killed without a deploy.",
+    "first_principles": {
+      "problem": "Turning off a broken feature normally requires an emergency rollback deploy.",
+      "truths": [
+        "Conditions can be changed at runtime.",
+        "Targeting enables gradual exposure.",
+        "Stale flags become technical debt."
+      ],
+      "derivation": [
+        "**if flags.enabled('x', user)** around the new path.",
+        "Target by **percentage, segment, region**.",
+        "Use a **kill switch** for instant disable.",
+        "Track and **remove** flags after rollout."
+      ]
+    },
+    "analogy": {
+      "title": "A light switch wired to a lamp in another room",
+      "story": "The wiring (deploy) is done; the switch (flag) decides when the light goes on.",
+      "mapping": [
+        [
+          "Wiring",
+          "Deployed code"
+        ],
+        [
+          "Switch",
+          "Flag"
+        ],
+        [
+          "Dimmer",
+          "Percentage rollout"
+        ]
+      ],
+      "breaks": "Flag evaluation must be fast and resilient, so cache it and have defaults if the flag service is down."
+    },
+    "mindmap": {
+      "center": "Feature Flags",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Release",
+            "Ops kill switch",
+            "Experiment",
+            "Permission"
+          ]
+        },
+        {
+          "label": "Targeting",
+          "children": [
+            "%",
+            "Segment",
+            "User"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "LaunchDarkly",
+            "Unleash",
+            "OpenFeature"
+          ]
+        },
+        {
+          "label": "Debt",
+          "children": [
+            "Remove after rollout"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A percentage rollout",
+      "scenario": "OpenFeature-style.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Kill",
+          "detail": "Errors spike, so set the flag to 0%: instant, no deploy."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "if client.get_boolean_value(\"new-search\", False, ctx):\n    return new_search(q)\nreturn old_search(q)"
+        }
+      ],
+      "outcome": "runtime control over feature exposure."
+    },
+    "summary": {
+      "points": [
+        "Runtime switch.",
+        "Target precisely.",
+        "Remove stale flags."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should happen if the flag service is unreachable?",
+        "a": "The SDK falls back to a safe default value (usually off)."
+      }
+    ]
+  },
+  "canary-deployments-testing-with-real-traffic": {
+    "core": "A canary routes a small percentage of real traffic to the new version and compares its health against the stable version before widening exposure, catching problems that only real traffic reveals.",
+    "first_principles": {
+      "problem": "Staging can't reproduce real traffic patterns, data and scale.",
+      "truths": [
+        "Production traffic is the only true test.",
+        "Small exposure limits damage.",
+        "Comparison needs a baseline."
+      ],
+      "derivation": [
+        "Deploy the canary **alongside stable**.",
+        "Shift **1–5%** of traffic.",
+        "**Compare** golden signals.",
+        "**Increase or roll back**."
+      ]
+    },
+    "analogy": {
+      "title": "The canary in the coal mine",
+      "story": "A small early-warning signal protects everyone else.",
+      "mapping": [
+        [
+          "Canary bird",
+          "Canary version"
+        ],
+        [
+          "Gas",
+          "Defect"
+        ],
+        [
+          "Miners",
+          "Most users"
+        ]
+      ],
+      "breaks": "At low traffic you need longer bake times to reach statistical confidence."
+    },
+    "mindmap": {
+      "center": "Canary",
+      "branches": [
+        {
+          "label": "Traffic",
+          "children": [
+            "Small %",
+            "Weighted"
+          ]
+        },
+        {
+          "label": "Compare",
+          "children": [
+            "Errors",
+            "Latency",
+            "Saturation"
+          ]
+        },
+        {
+          "label": "Decide",
+          "children": [
+            "Promote",
+            "Rollback"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "Baseline",
+            "Bake time"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A canary of v2",
+      "scenario": "Weighted routing.",
+      "flow": [
+        "v1: 95%, v2: 5%",
+        "Compare 15 min",
+        "v2 errors ≈ v1 → 25%",
+        "→ 100%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Real-traffic validation with small risk."
+        }
+      ],
+      "code": [],
+      "outcome": "problems are caught early with few users affected."
+    },
+    "summary": {
+      "points": [
+        "Small real slice.",
+        "Compare to baseline.",
+        "Widen gradually."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't staging replace a canary?",
+        "a": "Staging lacks real production traffic patterns, data and scale."
+      }
+    ]
+  },
+  "automated-canary-analysis-aca-removing-the-human-bottleneck": {
+    "core": "Automated canary analysis runs baseline and canary side by side, statistically compares their metrics (for example with Kayenta's Mann-Whitney test), scores the result, and promotes or rolls back automatically.",
+    "first_principles": {
+      "problem": "Humans watching dashboards are slow, inconsistent, biased toward shipping and asleep at 3 AM.",
+      "truths": [
+        "Metrics comparison can be automated.",
+        "Statistics separate signal from noise.",
+        "Consistent criteria beat judgement under pressure."
+      ],
+      "derivation": [
+        "Deploy a fresh **baseline** alongside the **canary** (same size and age).",
+        "Collect **metrics** for both.",
+        "Run **statistical tests** to score it.",
+        "**Pass → promote; fail → rollback**."
+      ]
+    },
+    "analogy": {
+      "title": "A drug trial with a control group",
+      "story": "Comparing treated patients to a matched control group shows the drug's real effect.",
+      "mapping": [
+        [
+          "Treatment group",
+          "Canary"
+        ],
+        [
+          "Control group",
+          "Baseline"
+        ],
+        [
+          "Statistical test",
+          "ACA judge"
+        ]
+      ],
+      "breaks": "Bad metric choice gives confident wrong decisions, so pick SLI-aligned metrics."
+    },
+    "mindmap": {
+      "center": "ACA",
+      "branches": [
+        {
+          "label": "Setup",
+          "children": [
+            "Baseline + canary"
+          ]
+        },
+        {
+          "label": "Compare",
+          "children": [
+            "Statistical tests"
+          ]
+        },
+        {
+          "label": "Score",
+          "children": [
+            "Pass/marginal/fail"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Kayenta",
+            "Argo Rollouts",
+            "Flagger"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Bad metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Why a fresh baseline?",
+      "scenario": "Fair comparison.",
+      "flow": [
+        "Old prod pods: warm caches, long uptime",
+        "Canary: cold",
+        "Fresh baseline: also cold",
+        "Compare canary vs baseline"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Comparing against warm production is unfair to the canary."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, unbiased release decisions."
+    },
+    "summary": {
+      "points": [
+        "Automate the judgement.",
+        "Use a matched baseline.",
+        "Statistical scoring."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why deploy a new baseline instead of comparing to existing production?",
+        "a": "So both groups have the same age and warm-up conditions, making the comparison fair."
+      }
+    ]
+  },
+  "putting-it-together-the-progressive-delivery-pipeline": {
+    "core": "A mature pipeline layers the techniques: merge, deploy dark behind a flag, canary with automated analysis, full deploy, then gradual flag rollout by segment, with automated rollback at every stage.",
+    "first_principles": {
+      "problem": "Flags and canaries used separately leave gaps: canaries catch infrastructure bugs, while flags control feature exposure.",
+      "truths": [
+        "Different risks need different controls.",
+        "Infrastructure risk and feature risk are distinct.",
+        "Each stage needs its own exit criteria."
+      ],
+      "derivation": [
+        "**Canary** validates the deployment (performance, crashes).",
+        "**Flags** validate the feature (business metrics, UX).",
+        "Gate each with **metrics**.",
+        "Clean up flags after **GA**."
+      ]
+    },
+    "analogy": {
+      "title": "A double safety lock",
+      "story": "One lock secures the building (canary deploy); the other secures each room (feature flags).",
+      "mapping": [
+        [
+          "Building lock",
+          "Canary"
+        ],
+        [
+          "Room locks",
+          "Flags"
+        ],
+        [
+          "Inspection",
+          "Analysis"
+        ]
+      ],
+      "breaks": "The more layers you add, the more operational complexity you take on."
+    },
+    "mindmap": {
+      "center": "Progressive Pipeline",
+      "branches": [
+        {
+          "label": "1",
+          "children": [
+            "Merge"
+          ]
+        },
+        {
+          "label": "2",
+          "children": [
+            "Deploy dark"
+          ]
+        },
+        {
+          "label": "3",
+          "children": [
+            "Canary + ACA"
+          ]
+        },
+        {
+          "label": "4",
+          "children": [
+            "Flag: internal → %"
+          ]
+        },
+        {
+          "label": "5",
+          "children": [
+            "GA + cleanup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shipping a new recommendation engine",
+      "scenario": "Layered.",
+      "flow": [
+        "Deploy with flag off via canary (ACA passes)",
+        "Flag on for employees",
+        "10% users; watch conversion",
+        "100%",
+        "Remove flag"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Infrastructure and business risks are both controlled."
+        }
+      ],
+      "code": [],
+      "outcome": "safe, measured delivery from code to everyone."
+    },
+    "summary": {
+      "points": [
+        "Canary for deploy risk.",
+        "Flags for feature risk.",
+        "Gates everywhere."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a canary catch that a feature flag rollout might not?",
+        "a": "Deployment-level problems such as crashes, memory leaks or latency regressions in the new build."
+      }
+    ]
+  }
+}

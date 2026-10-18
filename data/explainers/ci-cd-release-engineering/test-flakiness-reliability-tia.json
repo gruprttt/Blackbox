@@ -1,0 +1,505 @@
+{
+  "introduction-the-ghost-in-the-machine": {
+    "core": "A flaky test passes and fails on the same code. Each flake erodes trust: people learn to hit 're-run', real failures get ignored, and CI time is wasted.",
+    "first_principles": {
+      "problem": "Engineers habitually re-run red builds, so a real regression slips through because 'it's probably flaky'.",
+      "truths": [
+        "Non-determinism exists in tests.",
+        "Trust in CI is fragile.",
+        "Re-runs hide signal."
+      ],
+      "derivation": [
+        "**Measure** flakiness (pass/fail on the same commit).",
+        "Find **root causes**.",
+        "**Quarantine** rather than just retry.",
+        "Run **fewer, relevant** tests (TIA).",
+        "**Classify** failures probabilistically."
+      ]
+    },
+    "analogy": {
+      "title": "A smoke alarm that goes off randomly",
+      "story": "After a few false alarms, people pull out the battery, and then a real fire goes unnoticed.",
+      "mapping": [
+        [
+          "False alarms",
+          "Flaky failures"
+        ],
+        [
+          "Pulling the battery",
+          "Ignoring CI"
+        ],
+        [
+          "Real fire",
+          "Real regression"
+        ]
+      ],
+      "breaks": "Some flakiness reveals real production race conditions, so don't dismiss it automatically."
+    },
+    "mindmap": {
+      "center": "Flakiness",
+      "branches": [
+        {
+          "label": "Definition",
+          "children": [
+            "Same code, different result"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Trust",
+            "Time",
+            "Missed bugs"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "Measure",
+            "Root-cause",
+            "Quarantine",
+            "TIA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The re-run habit",
+      "scenario": "How trust erodes.",
+      "flow": [
+        "Build red → re-run → green",
+        "Repeat weekly",
+        "Real bug red → re-run → flaky pass",
+        "Bug ships"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Flakiness is a reliability problem, not a nuisance."
+        }
+      ],
+      "code": [],
+      "outcome": "flakiness is treated seriously."
+    },
+    "summary": {
+      "points": [
+        "Flakes erode trust.",
+        "Re-runs hide bugs.",
+        "Measure and fix."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes a test 'flaky'?",
+        "a": "It produces different results on the same code without any change."
+      }
+    ]
+  },
+  "root-causes-of-flakiness-know-your-enemy": {
+    "core": "Most flakes come from a few causes: race conditions and timing (sleeps), shared state and test-order dependence, external dependencies (network, time, randomness) and resource limits on CI runners.",
+    "first_principles": {
+      "problem": "You can't fix flakiness without knowing which category it falls into.",
+      "truths": [
+        "Timing varies between machines.",
+        "Shared state leaks between tests.",
+        "External systems are nondeterministic."
+      ],
+      "derivation": [
+        "**Timing**: replace sleeps with wait-for-condition.",
+        "**Order**: isolate state and randomise order to expose it.",
+        "**External**: mock time, seed randomness, stub the network.",
+        "**Resources**: right-size runners and avoid hard-coded ports."
+      ]
+    },
+    "analogy": {
+      "title": "Diagnosing an intermittent car fault",
+      "story": "It could be wiring (timing), a loose part from a previous repair (shared state), the weather (external) or overload (resources).",
+      "mapping": [
+        [
+          "Loose wiring",
+          "Race condition"
+        ],
+        [
+          "Leftover part",
+          "Shared state"
+        ],
+        [
+          "Weather",
+          "Network/time"
+        ]
+      ],
+      "breaks": "Some flakes have more than one cause."
+    },
+    "mindmap": {
+      "center": "Flake Causes",
+      "branches": [
+        {
+          "label": "Timing",
+          "children": [
+            "sleep()",
+            "Async races"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "Shared DB",
+            "Order deps"
+          ]
+        },
+        {
+          "label": "External",
+          "children": [
+            "Network",
+            "Clock",
+            "Random"
+          ]
+        },
+        {
+          "label": "Resources",
+          "children": [
+            "CPU",
+            "Ports",
+            "Memory"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A sleep-based UI test",
+      "scenario": "Fix.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "It passes on slow and fast runners alike."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "# flaky\ntime.sleep(2); assert page.has_text(\"Saved\")\n# robust\npage.wait_for_text(\"Saved\", timeout=10)"
+        }
+      ],
+      "outcome": "flakes are diagnosed by category."
+    },
+    "summary": {
+      "points": [
+        "Timing.",
+        "Shared state.",
+        "External deps.",
+        "Resources."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is sleep() a common source of flakiness?",
+        "a": "Fixed waits are too short on slow machines, and the operation's timing varies from run to run."
+      }
+    ]
+  },
+  "handling-flake-retries-vs-quarantine": {
+    "core": "Automatic retries hide flakes and cost time. Quarantine moves known-flaky tests to a non-blocking lane with an owner and a deadline, so CI stays trustworthy while flakes actually get fixed.",
+    "first_principles": {
+      "problem": "Blanket retries make CI green but hide growing flakiness and slow every run.",
+      "truths": [
+        "Retries mask the signal.",
+        "Blocking on flaky tests stalls everyone.",
+        "Unowned problems never get fixed."
+      ],
+      "derivation": [
+        "**Detect**: the test failed then passed on the same commit.",
+        "**Quarantine**: run it, but don't block on it.",
+        "**Assign an owner** and a ticket with an SLA.",
+        "**Un-quarantine** after a period of stability."
+      ]
+    },
+    "analogy": {
+      "title": "Isolating a patient instead of ignoring symptoms",
+      "story": "Quarantine protects everyone else while the patient is treated.",
+      "mapping": [
+        [
+          "Patient",
+          "Flaky test"
+        ],
+        [
+          "Quarantine ward",
+          "Non-blocking lane"
+        ],
+        [
+          "Treatment",
+          "Root-cause fix"
+        ]
+      ],
+      "breaks": "Quarantine can become a graveyard without SLAs, so track its size."
+    },
+    "mindmap": {
+      "center": "Retries vs Quarantine",
+      "branches": [
+        {
+          "label": "Retries",
+          "children": [
+            "Mask",
+            "Slow",
+            "Last resort"
+          ]
+        },
+        {
+          "label": "Quarantine",
+          "children": [
+            "Non-blocking",
+            "Owner",
+            "SLA"
+          ]
+        },
+        {
+          "label": "Exit",
+          "children": [
+            "Stable N runs"
+          ]
+        },
+        {
+          "label": "Metric",
+          "children": [
+            "Quarantine size"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An automated quarantine bot",
+      "scenario": "Workflow.",
+      "flow": [
+        "Test flips on same SHA 3x",
+        "Bot tags @flaky + opens ticket",
+        "CI excludes from gate",
+        "Fixed → 50 green runs → restored"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Blocking CI stays meaningful."
+        }
+      ],
+      "code": [],
+      "outcome": "trustworthy CI and fixed flakes."
+    },
+    "summary": {
+      "points": [
+        "Retries hide.",
+        "Quarantine with an owner.",
+        "Exit on stability."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is quarantine better than blanket retries?",
+        "a": "It keeps the blocking signal trustworthy while making flakes visible and assigned, rather than hidden."
+      }
+    ]
+  },
+  "test-impact-analysis-tia-the-smart-scalpel": {
+    "core": "Test impact analysis maps tests to the code they exercise (via coverage or the dependency graph), so a change runs only the tests that could be affected. That's faster CI and less exposure to flakes.",
+    "first_principles": {
+      "problem": "Running 50,000 tests for a one-line CSS change wastes time and maximises the chance of hitting a flake.",
+      "truths": [
+        "Most tests are unrelated to a given change.",
+        "Coverage or dependency data links tests to code.",
+        "Fewer tests means fewer flake opportunities."
+      ],
+      "derivation": [
+        "Build a **test → code map** (coverage or build graph).",
+        "**Diff** the change → affected files.",
+        "**Select** the tests touching them.",
+        "Run the **full suite periodically** as a safety net."
+      ]
+    },
+    "analogy": {
+      "title": "A surgeon's scalpel instead of a full-body scan",
+      "story": "Operate where the problem is, but still do a periodic full check-up.",
+      "mapping": [
+        [
+          "Scalpel",
+          "Selected tests"
+        ],
+        [
+          "Full-body scan",
+          "Full suite"
+        ],
+        [
+          "Check-up",
+          "Nightly full run"
+        ]
+      ],
+      "breaks": "Maps can miss indirect effects (config, reflection), hence the full-suite backstop."
+    },
+    "mindmap": {
+      "center": "TIA",
+      "branches": [
+        {
+          "label": "Map",
+          "children": [
+            "Coverage",
+            "Build graph"
+          ]
+        },
+        {
+          "label": "Select",
+          "children": [
+            "Changed → affected tests"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Speed",
+            "Fewer flakes"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Nightly full run"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Bazel",
+            "Launchable",
+            "Gradle"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A one-file change",
+      "scenario": "Selected tests.",
+      "flow": [
+        "Changed: billing/tax.py",
+        "Map → 120 tests",
+        "Run 120 instead of 50,000",
+        "6 min → 40 s"
+      ],
+      "steps": [
+        {
+          "label": "Backstop",
+          "detail": "The full suite runs nightly on main."
+        }
+      ],
+      "code": [],
+      "outcome": "CI scales with the size of the change."
+    },
+    "summary": {
+      "points": [
+        "Map tests to code.",
+        "Run only affected tests.",
+        "Keep a full-run backstop."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why keep running the full suite periodically with TIA?",
+        "a": "Impact maps can miss indirect dependencies, so the full run catches what selection skipped."
+      }
+    ]
+  },
+  "probabilistic-failure-analysis-is-it-me-or-the-test": {
+    "core": "Use history to judge each failure: a test with a known flake rate failing on unrelated code is probably flaky, while a stable test failing right after you touched its code is probably real. Surface that likelihood to developers.",
+    "first_principles": {
+      "problem": "Developers either chase flakes as if they were real bugs or dismiss real bugs as flakes.",
+      "truths": [
+        "Each test has a measurable historical failure rate.",
+        "Context (files changed) raises or lowers the likelihood.",
+        "Better diagnosis saves time both ways."
+      ],
+      "derivation": [
+        "Track each test's **historical flake rate**.",
+        "Consider **change relevance** (did you touch the code it covers?).",
+        "Show a **'likely flaky' or 'likely real'** label.",
+        "**Auto-retry only** likely-flaky failures, and flag them."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor weighing symptoms against medical history",
+      "story": "A chronic cough in a smoker is different from a sudden cough after a known exposure.",
+      "mapping": [
+        [
+          "Medical history",
+          "Flake rate"
+        ],
+        [
+          "Recent exposure",
+          "Relevant code change"
+        ],
+        [
+          "Diagnosis",
+          "Flaky vs real label"
+        ]
+      ],
+      "breaks": "Probability isn't certainty. Real regressions can hide in flaky tests."
+    },
+    "mindmap": {
+      "center": "Failure Analysis",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "Historical flake rate",
+            "Change relevance",
+            "Error signature"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Likely flaky",
+            "Likely real"
+          ]
+        },
+        {
+          "label": "Action",
+          "children": [
+            "Targeted retry",
+            "Investigate"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Not certainty"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two failures on one PR",
+      "scenario": "Classified.",
+      "flow": [
+        "test_upload: 8% flake rate, untouched code → likely flaky",
+        "test_tax: 0% history, you edited tax.py → likely real"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The developer goes straight to test_tax."
+        }
+      ],
+      "code": [],
+      "outcome": "faster, more accurate triage."
+    },
+    "summary": {
+      "points": [
+        "Use history.",
+        "Weigh relevance.",
+        "Label likelihood."
+      ]
+    },
+    "check": [
+      {
+        "q": "What two signals help judge whether a failure is real?",
+        "a": "The test's historical flake rate and whether the change touched code the test covers."
+      }
+    ]
+  }
+}

@@ -1,0 +1,392 @@
+{
+  "introduction-the-push-and-pray-cycle": {
+    "core": "Slow CI breaks focus. Developers push, switch tasks and lose context, so fixes take longer and risky batching grows. Fast feedback is a safety feature, not a luxury.",
+    "first_principles": {
+      "problem": "A 40-minute pipeline means a typo costs an hour, so people batch changes and test less.",
+      "truths": [
+        "Context switching is expensive.",
+        "Slow feedback encourages big, risky batches.",
+        "Feedback speed affects how often people test."
+      ],
+      "derivation": [
+        "Measure **time to feedback**.",
+        "Shorten the **outer loop** (CI).",
+        "Strengthen the **inner loop** (local).",
+        "**Emulate CI locally**."
+      ]
+    },
+    "analogy": {
+      "title": "A surgeon waiting 15 minutes after each incision",
+      "story": "Waiting to learn whether each cut was right would make surgery slower and more dangerous.",
+      "mapping": [
+        [
+          "Incision",
+          "Commit"
+        ],
+        [
+          "Waiting",
+          "CI queue/run"
+        ],
+        [
+          "Danger",
+          "Batched risky changes"
+        ]
+      ],
+      "breaks": "Speed shouldn't come from deleting meaningful tests."
+    },
+    "mindmap": {
+      "center": "Push and Pray",
+      "branches": [
+        {
+          "label": "Symptoms",
+          "children": [
+            "Long waits",
+            "Context switches",
+            "Big batches"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Faster CI",
+            "Local checks",
+            "act"
+          ]
+        },
+        {
+          "label": "Metric",
+          "children": [
+            "Time to feedback"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The cost of a 40-minute pipeline",
+      "scenario": "One typo.",
+      "flow": [
+        "Push → switch to email",
+        "40 min later: red (typo)",
+        "Re-load context, fix, push",
+        "Another 40 min"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "An hour lost to a 5-second mistake."
+        }
+      ],
+      "code": [],
+      "outcome": "feedback speed is treated as core DevEx."
+    },
+    "summary": {
+      "points": [
+        "Slow CI kills flow.",
+        "Encourages risky batches.",
+        "Speed is safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does slow CI make software less safe?",
+        "a": "Developers batch more changes and test less often, increasing risk per change."
+      }
+    ]
+  },
+  "the-core-metric-time-to-feedback": {
+    "core": "Time to feedback is how long it takes to learn whether a change works. The inner loop (edit → run locally) should take seconds, and the outer loop (push → CI result) should take minutes. Optimise the outer loop by ordering fast checks first and parallelising.",
+    "first_principles": {
+      "problem": "Teams optimise total pipeline time but still make developers wait 20 minutes for a lint error.",
+      "truths": [
+        "The first failure is the most useful signal.",
+        "Cheap checks catch many errors.",
+        "Parallelism reduces wall-clock time."
+      ],
+      "derivation": [
+        "**Fail fast**: lint, typecheck and unit tests first.",
+        "**Parallelise** independent jobs.",
+        "**Cache** and use **test impact analysis**.",
+        "Track **p50/p90 time-to-first-failure**."
+      ]
+    },
+    "analogy": {
+      "title": "Airport security lines",
+      "story": "Quick ID checks happen before slow bag scans, so problems surface early.",
+      "mapping": [
+        [
+          "ID check",
+          "Lint/typecheck"
+        ],
+        [
+          "Bag scan",
+          "Integration tests"
+        ],
+        [
+          "Multiple lanes",
+          "Parallel jobs"
+        ]
+      ],
+      "breaks": "Parallelism costs money in runner minutes, so balance speed against cost."
+    },
+    "mindmap": {
+      "center": "Time to Feedback",
+      "branches": [
+        {
+          "label": "Loops",
+          "children": [
+            "Inner (local, seconds)",
+            "Outer (CI, minutes)"
+          ]
+        },
+        {
+          "label": "Tactics",
+          "children": [
+            "Fail fast",
+            "Parallelise",
+            "Cache",
+            "TIA"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "p50/p90",
+            "Time to first failure"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reordering a pipeline",
+      "scenario": "Before and after.",
+      "flow": [
+        "Before: build → e2e → lint (lint fails at 25 min)",
+        "After: lint ∥ unit (2 min) → build → e2e",
+        "Lint failure in 90 s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Most failures surface in under 3 minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "developers get answers while they still have context."
+    },
+    "summary": {
+      "points": [
+        "Seconds inner, minutes outer.",
+        "Fail fast.",
+        "Parallelise."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the 'inner loop'?",
+        "a": "The local edit → build → test cycle on the developer's machine before pushing."
+      }
+    ]
+  },
+  "local-emulation-bringing-ci-to-the-laptop": {
+    "core": "When local and CI results disagree, developers waste push-and-wait cycles. Run the same containerised steps locally (act, Dagger, make targets, dev containers) so the inner loop predicts the outer one.",
+    "first_principles": {
+      "problem": "Tests pass locally but fail in CI because of different tool versions, env vars or OS, and you only find out after pushing.",
+      "truths": [
+        "Environment differences change results.",
+        "Containers can reproduce the CI environment.",
+        "The same entry points reduce drift."
+      ],
+      "derivation": [
+        "Use the **same container images** locally and in CI.",
+        "Use **one entry point** (`make ci`, a Dagger function).",
+        "Use **act** to run GitHub workflows locally.",
+        "Keep **CI config thin** and the logic in scripts."
+      ]
+    },
+    "analogy": {
+      "title": "A flight simulator matching the real cockpit",
+      "story": "Practice is only useful if the simulator behaves like the actual plane.",
+      "mapping": [
+        [
+          "Simulator",
+          "Local emulation"
+        ],
+        [
+          "Real cockpit",
+          "CI runner"
+        ],
+        [
+          "Matching controls",
+          "Same images/scripts"
+        ]
+      ],
+      "breaks": "Some CI features (OIDC, hosted services) can't be fully emulated locally."
+    },
+    "mindmap": {
+      "center": "Local Emulation",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Local ≠ CI"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Same images",
+            "make ci",
+            "Dagger",
+            "act"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "Thin YAML",
+            "Logic in scripts"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "OIDC",
+            "Secrets"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Thin CI YAML",
+      "scenario": "Logic in a Makefile.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Local and CI produce identical results."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "jobs:\n  ci:\n    runs-on: ubuntu-latest\n    container: ghcr.io/acme/ci:2024.06\n    steps: [ { uses: actions/checkout@v4 }, { run: make ci } ]\n# locally: docker run --rm -v $PWD:/w -w /w ghcr.io/acme/ci:2024.06 make ci"
+        }
+      ],
+      "outcome": "the inner loop predicts CI outcomes."
+    },
+    "summary": {
+      "points": [
+        "Same environment.",
+        "Same entry point.",
+        "Thin CI config."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why keep CI YAML thin?",
+        "a": "So the real logic lives in scripts or make targets that can run identically on a laptop."
+      }
+    ]
+  },
+  "tool-spotlight-act-for-github-actions": {
+    "core": "`act` reads your .github/workflows files and runs jobs locally in Docker containers that mimic GitHub runners, so you can debug workflow logic without commit-push-wait loops.",
+    "first_principles": {
+      "problem": "Debugging a workflow YAML typo takes ten commits titled 'fix ci' and an hour of waiting.",
+      "truths": [
+        "Workflow logic can be executed by any compatible runner.",
+        "Docker can approximate runner images.",
+        "Local iteration is far faster."
+      ],
+      "derivation": [
+        "`act` runs the **default (push) event**.",
+        "Use `act -j test` for **one job**.",
+        "Pass `-s NAME=value` or a **.secrets** file.",
+        "Choose a **runner image** size (-P ubuntu-latest=...)."
+      ]
+    },
+    "analogy": {
+      "title": "A dress rehearsal at home",
+      "story": "Run through the whole show in your living room before going to the real theatre.",
+      "mapping": [
+        [
+          "Living room",
+          "Local Docker"
+        ],
+        [
+          "Theatre",
+          "GitHub runners"
+        ],
+        [
+          "Script",
+          "Workflow YAML"
+        ]
+      ],
+      "breaks": "act isn't a perfect replica: some actions, services and OIDC behave differently."
+    },
+    "mindmap": {
+      "center": "act",
+      "branches": [
+        {
+          "label": "Run",
+          "children": [
+            "act",
+            "act -j job",
+            "act pull_request"
+          ]
+        },
+        {
+          "label": "Secrets",
+          "children": [
+            "-s",
+            ".secrets"
+          ]
+        },
+        {
+          "label": "Images",
+          "children": [
+            "-P platform=image"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "OIDC",
+            "Some actions",
+            "macOS runners"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Debugging a matrix job locally",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ten failed pushes become ten 30-second local runs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "act -l                          # list jobs\nact pull_request -j test --matrix python:3.12\nact -s GITHUB_TOKEN=\"$(gh auth token)\""
+        }
+      ],
+      "outcome": "workflow changes are debugged in seconds."
+    },
+    "summary": {
+      "points": [
+        "Run workflows locally.",
+        "Target jobs and events.",
+        "Know the limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does `act` use to emulate GitHub runners?",
+        "a": "Docker containers with runner-like images."
+      }
+    ]
+  }
+}

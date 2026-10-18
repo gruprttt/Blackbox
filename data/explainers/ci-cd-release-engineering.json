@@ -1,0 +1,2189 @@
+{
+  "ci-cd-pipeline-architecture": {
+    "core": "A CI/CD pipeline is an automated assembly line: stages, jobs and steps structure the work, artifacts carry the built output forward (build once), caches speed up repeated inputs, and runners provide the compute.",
+    "first_principles": {
+      "problem": "Manual or monolithic delivery is slow, inconsistent and untraceable.",
+      "truths": [
+        "Automation removes human error.",
+        "Parallelism and caching shorten feedback.",
+        "Immutable artifacts make releases traceable."
+      ],
+      "derivation": [
+        "Structure into **stages, jobs and steps**.",
+        "**Build once**, pass artifacts.",
+        "**Cache** dependencies.",
+        "Choose and secure **runners**."
+      ]
+    },
+    "analogy": {
+      "title": "A modern factory",
+      "story": "Production lines (stages), parallel workstations (jobs), a conveyor belt carrying the product (artifacts), a parts store (cache) and the machines (runners).",
+      "mapping": [
+        [
+          "Conveyor",
+          "Artifacts"
+        ],
+        [
+          "Parts store",
+          "Cache"
+        ],
+        [
+          "Machines",
+          "Runners"
+        ]
+      ],
+      "breaks": "The factory itself needs maintenance and security; pipelines are production systems."
+    },
+    "mindmap": {
+      "center": "Pipeline Architecture",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Stages",
+            "Jobs",
+            "Steps"
+          ]
+        },
+        {
+          "label": "Artifacts",
+          "children": [
+            "Build once"
+          ]
+        },
+        {
+          "label": "Cache",
+          "children": [
+            "Lockfile keys"
+          ]
+        },
+        {
+          "label": "Runners",
+          "children": [
+            "Hosted",
+            "Self-hosted",
+            "Ephemeral"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A well-architected pipeline",
+      "scenario": "Every concept.",
+      "flow": [
+        "build (cache deps) → artifact",
+        "unit ∥ lint ∥ security (parallel jobs)",
+        "deploy-staging uses artifact",
+        "e2e on GPU runner",
+        "promote same artifact to prod"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "A 12-minute, fully traceable path to production."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, repeatable, trustworthy delivery."
+    },
+    "summary": {
+      "points": [
+        "Structure for parallelism.",
+        "Build once.",
+        "Cache wisely.",
+        "Secure runners."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do parallel jobs need artifacts to share outputs?",
+        "a": "Each job runs on a separate runner with its own filesystem."
+      }
+    ]
+  },
+  "build-systems-at-scale": {
+    "core": "At monorepo scale, builds must be hermetic (declared inputs only), therefore deterministic, so a dependency graph can rebuild only affected targets and remote caching and execution can share and parallelise the work across the organisation.",
+    "first_principles": {
+      "problem": "Full rebuilds take hours and differ between machines, which kills feedback loops.",
+      "truths": [
+        "Most changes touch little code.",
+        "Same inputs should give the same outputs.",
+        "Work done once should be reused."
+      ],
+      "derivation": [
+        "**Hermetic** builds.",
+        "**Deterministic** outputs.",
+        "**Graph**-based selection.",
+        "**Remote cache**.",
+        "**Remote execution**."
+      ]
+    },
+    "analogy": {
+      "title": "An industrial kitchen network",
+      "story": "Sealed ingredient kits, identical recipes, cooking only changed dishes, a shared prepared-food freezer and a thousand cooks on call.",
+      "mapping": [
+        [
+          "Sealed kits",
+          "Hermetic inputs"
+        ],
+        [
+          "Freezer",
+          "Remote cache"
+        ],
+        [
+          "Cooks on call",
+          "Remote execution"
+        ]
+      ],
+      "breaks": "This is a significant investment, worth it at large scale but overkill for small repos."
+    },
+    "mindmap": {
+      "center": "Build Systems",
+      "branches": [
+        {
+          "label": "Hermetic",
+          "children": [
+            "Declared",
+            "Sandboxed"
+          ]
+        },
+        {
+          "label": "Deterministic",
+          "children": [
+            "Reproducible"
+          ]
+        },
+        {
+          "label": "Graph",
+          "children": [
+            "Affected targets"
+          ]
+        },
+        {
+          "label": "Cache",
+          "children": [
+            "Content-addressed"
+          ]
+        },
+        {
+          "label": "Exec",
+          "children": [
+            "Remote farm"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One change, end to end",
+      "scenario": "In a Bazel monorepo.",
+      "flow": [
+        "Edit //pkg/auth",
+        "Graph: 40 affected targets",
+        "Cache: 30 hits",
+        "Remote exec: 10 run in parallel",
+        "Done in 3 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Fast, correct feedback at any scale."
+        }
+      ],
+      "code": [],
+      "outcome": "builds that scale with the organisation."
+    },
+    "summary": {
+      "points": [
+        "Hermetic first.",
+        "Determinism enables reuse.",
+        "Graph + cache + remote execution."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which property must hold for any of the scaling techniques to work?",
+        "a": "Hermeticity, which gives determinism."
+      }
+    ]
+  },
+  "deployment-strategies-blue-green-canary-shadow": {
+    "core": "Zero-downtime deployment runs old and new versions side by side and controls traffic. Rolling replaces gradually, blue/green switches instantly, canary validates on a small real slice, and shadow mirrors traffic invisibly. Choose by risk, and automate with metric-gated controllers.",
+    "first_principles": {
+      "problem": "Maintenance windows and big-bang releases cause downtime and large blast radii.",
+      "truths": [
+        "Releases carry risk.",
+        "Real traffic reveals real bugs.",
+        "Fast reversal limits damage."
+      ],
+      "derivation": [
+        "Know the **four strategies**.",
+        "Match them to **risk and cost**.",
+        "Gate on **metrics**.",
+        "**Automate** with controllers."
+      ]
+    },
+    "analogy": {
+      "title": "Theatre understudies and previews",
+      "story": "Replace cast members gradually (rolling), keep a full second cast ready (blue/green), run preview nights for small audiences (canary) and rehearse with a live audio feed (shadow).",
+      "mapping": [
+        [
+          "Gradual cast change",
+          "Rolling"
+        ],
+        [
+          "Second cast",
+          "Blue/green"
+        ],
+        [
+          "Preview night",
+          "Canary"
+        ],
+        [
+          "Rehearsal feed",
+          "Shadow"
+        ]
+      ],
+      "breaks": "Every strategy requires backward-compatible data and APIs during the overlap."
+    },
+    "mindmap": {
+      "center": "Deployment Strategies",
+      "branches": [
+        {
+          "label": "Rolling",
+          "children": [
+            "Gradual"
+          ]
+        },
+        {
+          "label": "Blue/Green",
+          "children": [
+            "Instant switch"
+          ]
+        },
+        {
+          "label": "Canary",
+          "children": [
+            "Small slice",
+            "Metrics"
+          ]
+        },
+        {
+          "label": "Shadow",
+          "children": [
+            "Mirror"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Argo Rollouts",
+            "Flagger"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A high-risk payment service release",
+      "scenario": "Layered.",
+      "flow": [
+        "Shadow 24h: compare outputs",
+        "Canary 1% → 10% with success-rate gate",
+        "Auto-promote to 100%",
+        "Blue env kept 1h for rollback"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "A risky change ships with no user-visible incidents."
+        }
+      ],
+      "code": [],
+      "outcome": "releases are routine, safe and reversible."
+    },
+    "summary": {
+      "points": [
+        "Side-by-side versions.",
+        "Strategy per risk.",
+        "Metric gates.",
+        "Automate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which strategy gives instant rollback by flipping traffic back?",
+        "a": "Blue/green."
+      }
+    ]
+  },
+  "gitops-pull-vs-push-secrets": {
+    "core": "GitOps makes Git the single source of truth: desired state is declared and reviewed in Git, in-cluster agents (ArgoCD, Flux) pull and reconcile continuously (self-healing drift), sync waves order dependencies, directories model environments, and secrets are encrypted or referenced, never plaintext.",
+    "first_principles": {
+      "problem": "Manual cluster edits and push-based pipelines with powerful credentials create unknown state and security risk.",
+      "truths": [
+        "Declarative state can be versioned and reviewed.",
+        "Continuous reconciliation fixes drift.",
+        "Git isn't a secret store."
+      ],
+      "derivation": [
+        "**Declare** in Git.",
+        "**Pull** with agents.",
+        "**Self-heal** drift.",
+        "**Order** with waves.",
+        "**Structure** by directory.",
+        "**Encrypt** secrets."
+      ]
+    },
+    "analogy": {
+      "title": "A city run strictly from its official plans",
+      "story": "Every change is filed in the plans first, inspectors constantly bring buildings back into line, construction follows phases, and vault codes are never posted publicly.",
+      "mapping": [
+        [
+          "Official plans",
+          "Git"
+        ],
+        [
+          "Inspectors",
+          "ArgoCD/Flux"
+        ],
+        [
+          "Phases",
+          "Sync waves"
+        ],
+        [
+          "Vault codes",
+          "Secrets"
+        ]
+      ],
+      "breaks": "Break-glass procedures are still needed, and must be followed by committing the change back to Git."
+    },
+    "mindmap": {
+      "center": "GitOps",
+      "branches": [
+        {
+          "label": "Truth",
+          "children": [
+            "Git",
+            "PRs"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Pull",
+            "Reconcile"
+          ]
+        },
+        {
+          "label": "Powers",
+          "children": [
+            "Self-heal",
+            "Drift detection"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ArgoCD",
+            "Flux"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "Overlays",
+            "Waves"
+          ]
+        },
+        {
+          "label": "Secrets",
+          "children": [
+            "Sealed",
+            "SOPS",
+            "ESO"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A release in a GitOps shop",
+      "scenario": "End to end.",
+      "flow": [
+        "CI builds image, opens PR bumping staging tag",
+        "Merge → ArgoCD syncs staging",
+        "Promotion PR to prod overlay",
+        "PreSync migration → app",
+        "Secrets via SOPS"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Every change is reviewed, audited and reversible with git revert."
+        }
+      ],
+      "code": [],
+      "outcome": "deployments are declarative, secure and self-correcting."
+    },
+    "summary": {
+      "points": [
+        "Git is truth.",
+        "Agents pull.",
+        "Self-healing.",
+        "Encrypted secrets."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you roll back a bad release in GitOps?",
+        "a": "Revert the commit in Git, and the agent reconciles the cluster to the previous state."
+      }
+    ]
+  },
+  "progressive-delivery-feature-flags-aca": {
+    "core": "Progressive delivery separates deploy from release: flags give runtime control of feature exposure, canaries validate new versions on real traffic, automated canary analysis removes the human judgement bottleneck, and together they form a gated, reversible pipeline.",
+    "first_principles": {
+      "problem": "Big-bang releases expose every user to every bug at once.",
+      "truths": [
+        "Exposure can be controlled independently of deployment.",
+        "Real traffic reveals real problems.",
+        "Automated, statistical judgement is faster and fairer."
+      ],
+      "derivation": [
+        "**Deploy dark**.",
+        "**Flag** features.",
+        "**Canary** versions.",
+        "**Automate analysis**.",
+        "**Layer** them."
+      ]
+    },
+    "analogy": {
+      "title": "Opening a theme-park ride",
+      "story": "Build it (deploy), test with staff (flag), open to a few guests (canary) with sensors (ACA), then open to all.",
+      "mapping": [
+        [
+          "Built ride",
+          "Deployed code"
+        ],
+        [
+          "Staff test",
+          "Internal flag"
+        ],
+        [
+          "Few guests",
+          "Canary"
+        ],
+        [
+          "Sensors",
+          "ACA"
+        ]
+      ],
+      "breaks": "Flags and canaries need observability. Without metrics, progressive delivery is blind."
+    },
+    "mindmap": {
+      "center": "Progressive Delivery",
+      "branches": [
+        {
+          "label": "Principle",
+          "children": [
+            "Deploy ≠ release"
+          ]
+        },
+        {
+          "label": "Flags",
+          "children": [
+            "Targeting",
+            "Kill switch"
+          ]
+        },
+        {
+          "label": "Canary",
+          "children": [
+            "Real traffic"
+          ]
+        },
+        {
+          "label": "ACA",
+          "children": [
+            "Statistical",
+            "Automatic"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Layered gates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A complete rollout",
+      "scenario": "Every concept.",
+      "flow": [
+        "Deploy v2 dark",
+        "ACA canary 5% → pass",
+        "Flag: staff → 10% → 100%",
+        "Flag removed"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Zero user-facing incidents."
+        }
+      ],
+      "code": [],
+      "outcome": "releases are gradual, measured and reversible."
+    },
+    "summary": {
+      "points": [
+        "Decouple deploy and release.",
+        "Flags + canaries.",
+        "Automate judgement."
+      ]
+    },
+    "check": [
+      {
+        "q": "What removes the human bottleneck in canary releases?",
+        "a": "Automated canary analysis, which compares metrics statistically and decides promotion or rollback."
+      }
+    ]
+  },
+  "software-supply-chain-security-sbom-sigstore-slsa": {
+    "core": "Trusting what you build requires layered evidence: SBOMs for what's inside, Grype scans for known flaws, signatures for who produced it (keyless with Sigstore), SLSA provenance for how, and verification of all of it before deploying.",
+    "first_principles": {
+      "problem": "Dependencies and build pipelines are prime attack targets, and unverifiable artifacts must be trusted blindly.",
+      "truths": [
+        "Most artifact content is third-party.",
+        "Tampering can happen anywhere between build and run.",
+        "Only what's verified is trusted."
+      ],
+      "derivation": [
+        "**Generate SBOMs**.",
+        "**Scan** continuously.",
+        "**Sign** digests keylessly.",
+        "**Attest** provenance.",
+        "**Verify** at admission."
+      ]
+    },
+    "analogy": {
+      "title": "Pharmaceutical supply chain",
+      "story": "Ingredient lists, contamination testing, sealed packaging, manufacturing records and pharmacist checks.",
+      "mapping": [
+        [
+          "Ingredient list",
+          "SBOM"
+        ],
+        [
+          "Testing",
+          "Grype"
+        ],
+        [
+          "Sealed packaging",
+          "Signature"
+        ],
+        [
+          "Manufacturing record",
+          "Provenance"
+        ],
+        [
+          "Pharmacist",
+          "Admission controller"
+        ]
+      ],
+      "breaks": "All of this proves integrity and origin, not that the code itself is benign."
+    },
+    "mindmap": {
+      "center": "Supply Chain Security",
+      "branches": [
+        {
+          "label": "SBOM",
+          "children": [
+            "Syft"
+          ]
+        },
+        {
+          "label": "Scan",
+          "children": [
+            "Grype"
+          ]
+        },
+        {
+          "label": "Sign",
+          "children": [
+            "cosign",
+            "Sigstore"
+          ]
+        },
+        {
+          "label": "Provenance",
+          "children": [
+            "SLSA"
+          ]
+        },
+        {
+          "label": "Enforce",
+          "children": [
+            "Kyverno",
+            "policy-controller"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A secured release pipeline",
+      "scenario": "End to end.",
+      "flow": [
+        "Build image → digest",
+        "Syft SBOM + Grype gate",
+        "cosign keyless sign + attest SBOM",
+        "SLSA provenance by builder",
+        "Kyverno verifies all at deploy"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Tampered, unsigned or unprovenanced images can't run."
+        }
+      ],
+      "code": [],
+      "outcome": "every running artifact is verifiable."
+    },
+    "summary": {
+      "points": [
+        "Know what's inside.",
+        "Find flaws.",
+        "Prove who and how.",
+        "Verify always."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should signatures and provenance be verified?",
+        "a": "At deploy time, for example by a Kubernetes admission controller."
+      }
+    ]
+  },
+  "merge-queue-engineering": {
+    "core": "PR builds go stale as main moves, so green PRs can still break trunk. A merge queue tests each PR's exact combination with the latest main and the PRs ahead of it, with optimistic parallelism and batching for throughput and a consistent history style.",
+    "first_principles": {
+      "problem": "Broken trunks block whole teams despite every PR being green.",
+      "truths": [
+        "Main changes after PR CI runs.",
+        "Only tested states should land.",
+        "Throughput needs parallelism or batching."
+      ],
+      "derivation": [
+        "Understand the **green-build lie**.",
+        "**Queue** PRs and test combinations.",
+        "**Speculate** in parallel.",
+        "**Batch** for slow suites.",
+        "Choose a **history style**.",
+        "Configure your **platform**."
+      ]
+    },
+    "analogy": {
+      "title": "An airport runway controller",
+      "story": "Planes land in order, each landing slot is verified clear, several approaches are managed at once, and the log is kept tidy.",
+      "mapping": [
+        [
+          "Planes",
+          "PRs"
+        ],
+        [
+          "Runway",
+          "main"
+        ],
+        [
+          "Controller",
+          "Merge queue"
+        ],
+        [
+          "Parallel approaches",
+          "Optimistic CI"
+        ]
+      ],
+      "breaks": "Flaky tests undermine every queue strategy, so fix flakiness first."
+    },
+    "mindmap": {
+      "center": "Merge Queues",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Stale PR CI"
+          ]
+        },
+        {
+          "label": "Queue",
+          "children": [
+            "Test combination"
+          ]
+        },
+        {
+          "label": "Speed",
+          "children": [
+            "Optimistic",
+            "Batching"
+          ]
+        },
+        {
+          "label": "History",
+          "children": [
+            "Squash",
+            "Rebase",
+            "Merge"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "GitHub",
+            "GitLab trains",
+            "Mergify"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A monorepo with 200 PRs a day",
+      "scenario": "Queue in action.",
+      "flow": [
+        "Merge queue, depth 10, batch 4",
+        "merge_group CI",
+        "Squash landing",
+        "main red incidents: weekly → none"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "A permanently green trunk at high throughput."
+        }
+      ],
+      "code": [],
+      "outcome": "main stays green and teams stay unblocked."
+    },
+    "summary": {
+      "points": [
+        "Green PR ≠ green main.",
+        "Queue + test the combination.",
+        "Parallelise and batch."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does a merge queue solve?",
+        "a": "PRs that each pass CI but break main when combined, by testing the exact merge result before landing."
+      }
+    ]
+  },
+  "test-flakiness-reliability-tia": {
+    "core": "Flaky tests destroy trust in CI. Fight them by understanding root causes (timing, state, external dependencies, resources), quarantining with owners instead of blanket retries, running only impacted tests (TIA) and labelling failures as likely flaky or real from history.",
+    "first_principles": {
+      "problem": "When CI cries wolf, engineers stop listening, and real bugs ship.",
+      "truths": [
+        "Non-determinism creeps into tests.",
+        "Trust requires a reliable signal.",
+        "Running fewer relevant tests reduces noise."
+      ],
+      "derivation": [
+        "**Diagnose** by cause.",
+        "**Quarantine** and fix.",
+        "**Select** tests by impact.",
+        "**Classify** failures probabilistically."
+      ]
+    },
+    "analogy": {
+      "title": "Maintaining a reliable alarm system",
+      "story": "Fix faulty sensors, isolate the noisy ones for repair, only arm the zones that matter, and check each alarm's history before panicking.",
+      "mapping": [
+        [
+          "Faulty sensor",
+          "Flaky test"
+        ],
+        [
+          "Isolation",
+          "Quarantine"
+        ],
+        [
+          "Zones",
+          "TIA"
+        ],
+        [
+          "Alarm history",
+          "Flake rate"
+        ]
+      ],
+      "breaks": "Flaky tests sometimes point to real concurrency bugs in production code."
+    },
+    "mindmap": {
+      "center": "Test Reliability",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Timing",
+            "State",
+            "External",
+            "Resources"
+          ]
+        },
+        {
+          "label": "Handle",
+          "children": [
+            "Quarantine > retry"
+          ]
+        },
+        {
+          "label": "Select",
+          "children": [
+            "TIA"
+          ]
+        },
+        {
+          "label": "Diagnose",
+          "children": [
+            "Probabilistic labels"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Trusted CI"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A flaky-test programme",
+      "scenario": "Six months.",
+      "flow": [
+        "Measure: 4% builds hit flakes",
+        "Quarantine bot + owners",
+        "Fix top 20 root causes",
+        "TIA cuts suite 80%",
+        "Flake hit rate → 0.3%"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "A red build means something again."
+        }
+      ],
+      "code": [],
+      "outcome": "CI that engineers trust."
+    },
+    "summary": {
+      "points": [
+        "Know the causes.",
+        "Quarantine, don't hide.",
+        "Run what matters.",
+        "Label failures."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do flaky tests ultimately let real bugs ship?",
+        "a": "Engineers learn to ignore or re-run failures, so genuine regressions get dismissed as flakes."
+      }
+    ]
+  },
+  "artifact-management-oci-retention": {
+    "core": "Advanced artifact management treats the registry as a universal OCI warehouse: any artifact type, proxy caches for upstream resilience and policy, retention that keeps releases and expires noise, and signatures plus provenance so stored artifacts can be trusted.",
+    "first_principles": {
+      "problem": "Scattered artifacts, upstream outages, unbounded storage and unverifiable binaries.",
+      "truths": [
+        "Everything a pipeline produces needs a home.",
+        "Upstream registries are unreliable dependencies.",
+        "Trust requires cryptographic evidence."
+      ],
+      "derivation": [
+        "Standardise on **OCI**.",
+        "**Proxy and cache** upstream.",
+        "Enforce **retention**.",
+        "**Sign and attest**."
+      ]
+    },
+    "analogy": {
+      "title": "A modern logistics hub",
+      "story": "Standard containers for every cargo type, a local depot buffering suppliers, scheduled clearance and tamper-evident seals.",
+      "mapping": [
+        [
+          "Standard containers",
+          "OCI artifacts"
+        ],
+        [
+          "Local depot",
+          "Proxy cache"
+        ],
+        [
+          "Clearance",
+          "Retention"
+        ],
+        [
+          "Seals",
+          "Signatures"
+        ]
+      ],
+      "breaks": "The hub is a single point of failure, so it needs HA and replication."
+    },
+    "mindmap": {
+      "center": "Artifact Warehouse",
+      "branches": [
+        {
+          "label": "OCI",
+          "children": [
+            "Images",
+            "Charts",
+            "WASM",
+            "SBOMs"
+          ]
+        },
+        {
+          "label": "Proxy",
+          "children": [
+            "Cache",
+            "Policy"
+          ]
+        },
+        {
+          "label": "Retention",
+          "children": [
+            "Keep releases",
+            "Expire PRs"
+          ]
+        },
+        {
+          "label": "Trust",
+          "children": [
+            "Signing",
+            "Provenance"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A platform registry design",
+      "scenario": "Harbor.",
+      "flow": [
+        "Projects per team",
+        "Proxy caches for Docker Hub/npm",
+        "Lifecycle: PR images 14 days",
+        "cosign verification enforced",
+        "Replication to DR region"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Fast, resilient, affordable and trusted distribution."
+        }
+      ],
+      "code": [],
+      "outcome": "artifacts are managed end to end."
+    },
+    "summary": {
+      "points": [
+        "One OCI warehouse.",
+        "Cache upstream.",
+        "Retain wisely.",
+        "Sign everything."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name two benefits of a proxy cache for public registries.",
+        "a": "Resilience against upstream outages or deletions, and avoiding rate limits (plus a policy enforcement point)."
+      }
+    ]
+  },
+  "pipeline-security-isolation-oidc-gvisor": {
+    "core": "Pipelines are privileged attack surface. Never run unverified remote scripts, isolate untrusted builds on ephemeral sandboxed runners with no secrets, replace static cloud keys with OIDC federation, and fetch scoped, short-lived secrets from a vault.",
+    "first_principles": {
+      "problem": "A single CI compromise (malicious PR, poisoned script, leaked key) gives attackers production access.",
+      "truths": [
+        "CI holds the keys.",
+        "CI runs third-party code.",
+        "Static credentials leak and persist."
+      ],
+      "derivation": [
+        "**Verify** everything you execute.",
+        "**Isolate** untrusted work.",
+        "**Federate** identity with OIDC.",
+        "**Minimise** secrets in time and scope."
+      ]
+    },
+    "analogy": {
+      "title": "Securing a factory",
+      "story": "Inspect deliveries (no curl|bash), quarantine unknown visitors (isolation), day badges instead of master keys (OIDC) and a locked safe (vault).",
+      "mapping": [
+        [
+          "Delivery inspection",
+          "Checksums/pinning"
+        ],
+        [
+          "Visitor quarantine",
+          "Ephemeral runners"
+        ],
+        [
+          "Day badges",
+          "OIDC"
+        ],
+        [
+          "Safe",
+          "Vault"
+        ]
+      ],
+      "breaks": "Security controls slow pipelines down a little, so automate them to keep friction low."
+    },
+    "mindmap": {
+      "center": "Pipeline Security",
+      "branches": [
+        {
+          "label": "Code",
+          "children": [
+            "No curl|bash",
+            "Pin + verify"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Ephemeral",
+            "gVisor",
+            "No fork secrets"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "OIDC",
+            "Scoped roles"
+          ]
+        },
+        {
+          "label": "Secrets",
+          "children": [
+            "Vault",
+            "JIT",
+            "Rotate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hardening a deploy pipeline",
+      "scenario": "All controls.",
+      "flow": [
+        "Pinned, checksummed tools",
+        "PR jobs on ephemeral runners, no secrets",
+        "Deploy job: OIDC → role (main only)",
+        "DB password from Vault JIT"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "There are no static keys anywhere, and untrusted code is contained."
+        }
+      ],
+      "code": [],
+      "outcome": "a pipeline that's hard to weaponise."
+    },
+    "summary": {
+      "points": [
+        "Verify code.",
+        "Isolate builds.",
+        "OIDC, not keys.",
+        "JIT secrets."
+      ]
+    },
+    "check": [
+      {
+        "q": "What replaces long-lived cloud keys in modern CI?",
+        "a": "OIDC federation, which exchanges a short-lived identity token for temporary scoped credentials."
+      }
+    ]
+  },
+  "release-orchestration-migrations-expand-contract": {
+    "core": "Release orchestration keeps every intermediate state compatible: avoid big bangs, treat database changes with care (versioned, online, roll-forward), use expand-contract for breaking changes, and run migrations once as gated Jobs.",
+    "first_principles": {
+      "problem": "Distributed releases fail when components and schemas change incompatibly at the same time.",
+      "truths": [
+        "Versions coexist during rollout.",
+        "Data changes are hard to reverse.",
+        "Order matters."
+      ],
+      "derivation": [
+        "**Compatible** steps only.",
+        "**Safe migrations**.",
+        "**Expand → migrate → contract**.",
+        "**Gated migration Jobs**."
+      ]
+    },
+    "analogy": {
+      "title": "Rebuilding a train station while trains keep running",
+      "story": "New platforms open before old ones close, signals are updated in sequence, and one crew coordinates the switchover.",
+      "mapping": [
+        [
+          "New platforms",
+          "Expand"
+        ],
+        [
+          "Switching signals",
+          "Switch reads"
+        ],
+        [
+          "Closing old platforms",
+          "Contract"
+        ],
+        [
+          "Crew",
+          "Migration Job"
+        ]
+      ],
+      "breaks": "It's slower than a big bang, by design, and the safety is worth the time."
+    },
+    "mindmap": {
+      "center": "Release Orchestration",
+      "branches": [
+        {
+          "label": "Principle",
+          "children": [
+            "Always compatible"
+          ]
+        },
+        {
+          "label": "DB",
+          "children": [
+            "Versioned",
+            "Online",
+            "Forward"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Expand-contract"
+          ]
+        },
+        {
+          "label": "Execution",
+          "children": [
+            "Job/hook",
+            "Gated"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Splitting a 'name' field into first and last",
+      "scenario": "Full orchestration.",
+      "flow": [
+        "Migration Job: add first/last",
+        "App v2 dual-writes",
+        "Backfill job",
+        "App v3 reads new fields",
+        "App v4 stops old writes",
+        "Migration Job: drop name"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Zero downtime across 4 releases."
+        }
+      ],
+      "code": [],
+      "outcome": "complex releases happen safely."
+    },
+    "summary": {
+      "points": [
+        "Never break the running version.",
+        "Careful migrations.",
+        "Expand-contract.",
+        "Jobs gate rollouts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the three phases of expand-contract?",
+        "a": "Expand (add new), migrate (dual-write, backfill, switch) and contract (remove old)."
+      }
+    ]
+  },
+  "devex-ci-time-to-feedback-act": {
+    "core": "In CI, speed is safety. Measure time to feedback, keep the inner loop in seconds and the outer loop in minutes (fail fast, parallelise, cache), and make local runs predict CI with the same containers, thin YAML and tools like act.",
+    "first_principles": {
+      "problem": "Push-and-pray cycles waste hours, break focus and encourage risky batching.",
+      "truths": [
+        "Context switching is costly.",
+        "Early failures are the most valuable.",
+        "Environment parity removes surprises."
+      ],
+      "derivation": [
+        "**Measure** feedback time.",
+        "**Fail fast** and parallelise.",
+        "**Emulate** CI locally.",
+        "**Debug workflows** with act."
+      ]
+    },
+    "analogy": {
+      "title": "A responsive kitchen",
+      "story": "Chefs taste as they cook (inner loop), the pass checks quickly before service (outer loop), and the practice kitchen matches the real one.",
+      "mapping": [
+        [
+          "Tasting while cooking",
+          "Inner loop"
+        ],
+        [
+          "The pass",
+          "CI"
+        ],
+        [
+          "Practice kitchen",
+          "Local emulation"
+        ]
+      ],
+      "breaks": "Don't trade away meaningful coverage for speed. Restructure, don't delete."
+    },
+    "mindmap": {
+      "center": "CI DevEx",
+      "branches": [
+        {
+          "label": "Metric",
+          "children": [
+            "Time to feedback"
+          ]
+        },
+        {
+          "label": "Outer loop",
+          "children": [
+            "Fail fast",
+            "Parallel",
+            "Cache",
+            "TIA"
+          ]
+        },
+        {
+          "label": "Inner loop",
+          "children": [
+            "Local parity"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "act",
+            "Dagger",
+            "make ci"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A DevEx improvement sprint",
+      "scenario": "Results.",
+      "flow": [
+        "Measure: p90 = 38 min",
+        "Lint/unit first, parallel e2e",
+        "Remote cache + TIA",
+        "make ci in same container locally",
+        "p90 = 9 min; first failure < 2 min"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Developers stay in flow."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, trustworthy feedback at every loop."
+    },
+    "summary": {
+      "points": [
+        "Speed is safety.",
+        "Fail fast.",
+        "Local parity.",
+        "act for workflows."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which single metric best captures CI developer experience?",
+        "a": "Time to feedback (especially time to the first failure)."
+      }
+    ]
+  },
+  "ci-observability-opentelemetry": {
+    "core": "Pipelines are distributed systems and deserve production-grade observability. Use OpenTelemetry to trace runs, jobs and steps, decompose build time into queue, setup and execution, and build focused dashboards and alerts that drive action.",
+    "first_principles": {
+      "problem": "'The build is slow' gets investigated by guesswork and log scrolling.",
+      "truths": [
+        "Build time has distinct components.",
+        "Standards enable portable telemetry.",
+        "Dashboards must answer specific questions."
+      ],
+      "derivation": [
+        "**Trace** with OTel.",
+        "**Decompose** the time.",
+        "**Visualise** trends and breakdowns.",
+        "**Alert** on regressions and red main."
+      ]
+    },
+    "analogy": {
+      "title": "Air traffic operations",
+      "story": "Every flight is tracked, delays are broken down by cause, and the control room shows only what operators need.",
+      "mapping": [
+        [
+          "Flight tracking",
+          "Traces"
+        ],
+        [
+          "Delay causes",
+          "Queue/setup/execute"
+        ],
+        [
+          "Control room",
+          "Dashboard"
+        ]
+      ],
+      "breaks": "Observability costs money too, so sample and retain wisely."
+    },
+    "mindmap": {
+      "center": "CI Observability",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Distributed system"
+          ]
+        },
+        {
+          "label": "OTel",
+          "children": [
+            "Traces",
+            "otel-cli",
+            "OTLP"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "Queue",
+            "Setup",
+            "Execute",
+            "p95"
+          ]
+        },
+        {
+          "label": "Dashboard",
+          "children": [
+            "Trends",
+            "Flaky",
+            "Main health"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A platform team's CI SLOs",
+      "scenario": "Observed.",
+      "flow": [
+        "SLO: p95 PR pipeline < 12 min",
+        "Traces in Tempo",
+        "Dashboard + burn-rate alert",
+        "Regression found and fixed in a day"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "CI speed is managed like a product."
+        }
+      ],
+      "code": [],
+      "outcome": "slow builds are diagnosed and fixed with data."
+    },
+    "summary": {
+      "points": [
+        "Trace pipelines.",
+        "Decompose time.",
+        "Focused dashboards."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the first step when someone says 'the build is slow'?",
+        "a": "Decompose total time into queue, setup and execution to find where the time actually goes."
+      }
+    ]
+  },
+  "ephemeral-environments-preview-stacks": {
+    "core": "Ephemeral environments replace the shared staging bottleneck with an isolated copy per PR. Git events drive create, update and destroy; seeding provides realistic but safe data; and TTLs, sweepers and scale-to-zero keep costs in check.",
+    "first_principles": {
+      "problem": "Shared staging serialises testing, mixes changes and slows delivery.",
+      "truths": [
+        "Isolation makes tests trustworthy.",
+        "Automation makes environments disposable.",
+        "Data and cost are the hard parts."
+      ],
+      "derivation": [
+        "**Env per PR**.",
+        "**Git-driven lifecycle**.",
+        "**Safe seeding**.",
+        "**Cost guardrails**."
+      ]
+    },
+    "analogy": {
+      "title": "Pop-up shops",
+      "story": "Each launches for a campaign, is stocked with sample goods, and closes automatically when the campaign ends.",
+      "mapping": [
+        [
+          "Pop-up shop",
+          "Preview env"
+        ],
+        [
+          "Campaign",
+          "PR"
+        ],
+        [
+          "Sample goods",
+          "Seed data"
+        ],
+        [
+          "Auto-close",
+          "Teardown"
+        ]
+      ],
+      "breaks": "Some integrations (third-party webhooks, OAuth callbacks) are hard to replicate per PR."
+    },
+    "mindmap": {
+      "center": "Ephemeral Environments",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Staging bottleneck"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Git events",
+            "ApplicationSet"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Fixtures",
+            "Branching",
+            "No PII"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "TTL",
+            "Sweeper",
+            "Scale to zero"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A complete preview platform",
+      "scenario": "Every piece.",
+      "flow": [
+        "PR → namespace pr-N via ApplicationSet",
+        "Neon DB branch from anonymised seed",
+        "URL posted to PR",
+        "Idle 2h → scale to zero",
+        "Close → destroy; sweeper backstop"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Unlimited parallel staging at a small cost."
+        }
+      ],
+      "code": [],
+      "outcome": "every change is tested in isolation before merging."
+    },
+    "summary": {
+      "points": [
+        "One env per PR.",
+        "Automated lifecycle.",
+        "Safe data.",
+        "Cost control."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two hardest parts of ephemeral environments?",
+        "a": "Providing realistic, safe data and controlling cost (zombie environments)."
+      }
+    ]
+  },
+  "github-actions-mastery-syntax-security": {
+    "core": "GitHub Actions is event-driven automation next to your code: workflows, jobs and steps, reuse through actions and reusable workflows, matrices for coverage, OIDC and environments for credentials, and hardening (SHA pins, minimal permissions, injection-safe inputs, ephemeral runners) for security.",
+    "first_principles": {
+      "problem": "Easy automation turns into copy-paste sprawl, credential leaks and supply-chain holes if it isn't designed deliberately.",
+      "truths": [
+        "Repository events drive automation.",
+        "Reuse beats duplication.",
+        "Workflows run with real privileges."
+      ],
+      "derivation": [
+        "Master the **syntax**.",
+        "**Reuse** with actions and workflows.",
+        "**Matrix** for coverage.",
+        "Use **OIDC + environments**.",
+        "**Secure runners** and **harden** workflows."
+      ]
+    },
+    "analogy": {
+      "title": "A city transit system",
+      "story": "Routes (workflows), shared bus designs (reusable workflows), parallel lines (matrix), passes instead of keys (OIDC) and security checks (hardening).",
+      "mapping": [
+        [
+          "Routes",
+          "Workflows"
+        ],
+        [
+          "Shared designs",
+          "Reusable workflows"
+        ],
+        [
+          "Passes",
+          "OIDC"
+        ],
+        [
+          "Security checks",
+          "Hardening"
+        ]
+      ],
+      "breaks": "Deep platform coupling. Keep the logic in scripts for portability."
+    },
+    "mindmap": {
+      "center": "GHA Mastery",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "on",
+            "jobs",
+            "steps"
+          ]
+        },
+        {
+          "label": "Reuse",
+          "children": [
+            "Actions",
+            "workflow_call"
+          ]
+        },
+        {
+          "label": "Matrix",
+          "children": [
+            "include/exclude"
+          ]
+        },
+        {
+          "label": "Creds",
+          "children": [
+            "OIDC",
+            "Environments"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "SHA pins",
+            "Permissions",
+            "Ephemeral runners"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An organisation-wide CI standard",
+      "scenario": "All lessons.",
+      "flow": [
+        "Reusable ci.yml@v2 (SHA-pinned actions)",
+        "Matrix across versions",
+        "OIDC deploy with prod approval",
+        "ARC ephemeral runners",
+        "Scorecard in CI"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Consistent, secure pipelines in every repo."
+        }
+      ],
+      "code": [],
+      "outcome": "powerful automation that stays safe."
+    },
+    "summary": {
+      "points": [
+        "Event-driven.",
+        "Reuse.",
+        "OIDC.",
+        "Harden everything."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name three GitHub Actions hardening practices.",
+        "a": "Pin actions to SHAs, set minimal token permissions, and pass untrusted inputs via env vars rather than inline expressions."
+      }
+    ]
+  },
+  "database-ci-cd-liquibase-flyway-atlas": {
+    "core": "Database CI/CD respects data gravity: version every schema change, deliver breaking changes through expand-contract, apply them with migration-based (Flyway, Liquibase) or declarative (Atlas) tools, and recover by rolling code back and fixing forward rather than 'undoing' data.",
+    "first_principles": {
+      "problem": "Manual, big-bang schema changes cause drift, downtime and data loss.",
+      "truths": [
+        "Data persists and accumulates.",
+        "Old and new code overlap during deploys.",
+        "Undo rarely restores reality."
+      ],
+      "derivation": [
+        "**Version and automate**.",
+        "**Expand-contract**.",
+        "Pick **imperative or declarative** tooling.",
+        "**Roll forward**, and keep PITR ready."
+      ]
+    },
+    "analogy": {
+      "title": "Renovating an occupied building",
+      "story": "Plans are versioned, new rooms are built before old ones close, and you can't 'un-renovate', only renovate again.",
+      "mapping": [
+        [
+          "Versioned plans",
+          "Migrations"
+        ],
+        [
+          "New rooms first",
+          "Expand"
+        ],
+        [
+          "Re-renovate",
+          "Roll forward"
+        ]
+      ],
+      "breaks": "Large data migrations still need special tooling (online schema change, batching)."
+    },
+    "mindmap": {
+      "center": "Database CI/CD",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Data gravity"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Expand-contract"
+          ]
+        },
+        {
+          "label": "Imperative",
+          "children": [
+            "Flyway",
+            "Liquibase"
+          ]
+        },
+        {
+          "label": "Declarative",
+          "children": [
+            "Atlas"
+          ]
+        },
+        {
+          "label": "Recovery",
+          "children": [
+            "Roll forward",
+            "PITR"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A pipeline with schema changes",
+      "scenario": "End to end.",
+      "flow": [
+        "PR: migration + code",
+        "CI: atlas lint + apply to ephemeral DB + tests",
+        "Deploy: migration job (expand)",
+        "App rollout",
+        "Later PR: contract"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Schema changes are as routine as code changes."
+        }
+      ],
+      "code": [],
+      "outcome": "safe, automated database delivery."
+    },
+    "summary": {
+      "points": [
+        "Version it.",
+        "Expand-contract.",
+        "Lint and test.",
+        "Fix forward."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the safest rollback strategy for a bad release with schema changes?",
+        "a": "Keep the schema backward compatible, roll back only the code, then fix forward."
+      }
+    ]
+  },
+  "mobile-desktop-ci-cd-fastlane-mac-runners": {
+    "core": "Mobile and desktop CI/CD fight hardware and platform constraints: scarce macOS runners (licensing), mandatory code signing managed centrally, Fastlane to automate store releases, and device farms for real-hardware testing.",
+    "first_principles": {
+      "problem": "Container-centric CI patterns don't work for iOS and desktop apps.",
+      "truths": [
+        "Apple tooling requires Apple hardware.",
+        "Stores require signed binaries.",
+        "Real devices behave differently."
+      ],
+      "derivation": [
+        "Provision **Mac runners** wisely.",
+        "Centralise **signing**.",
+        "Automate with **Fastlane**.",
+        "Validate on **device farms**."
+      ]
+    },
+    "analogy": {
+      "title": "Exporting goods to strict markets",
+      "story": "Special factories (Mac runners), official certifications (signing), a customs broker (Fastlane) and real-world product testing (device farms).",
+      "mapping": [
+        [
+          "Special factory",
+          "Mac runner"
+        ],
+        [
+          "Certification",
+          "Signing"
+        ],
+        [
+          "Customs broker",
+          "Fastlane"
+        ],
+        [
+          "Product testing",
+          "Device farm"
+        ]
+      ],
+      "breaks": "Store review is still a manual gate you can't automate away."
+    },
+    "mindmap": {
+      "center": "Mobile CI/CD",
+      "branches": [
+        {
+          "label": "Runners",
+          "children": [
+            "macOS",
+            "Tart/Anka",
+            "EC2 mac"
+          ]
+        },
+        {
+          "label": "Signing",
+          "children": [
+            "match",
+            "Keystore"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Fastlane lanes"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "Simulators",
+            "Device farms"
+          ]
+        },
+        {
+          "label": "Gate",
+          "children": [
+            "Store review"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An iOS release pipeline",
+      "scenario": "End to end.",
+      "flow": [
+        "PR: Linux lint + simulator tests",
+        "Main: Mac runner, match signing, build_app",
+        "TestFlight via Fastlane",
+        "Nightly device-farm run",
+        "Release lane → App Store review"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Push-button mobile releases."
+        }
+      ],
+      "code": [],
+      "outcome": "mobile delivery as automated as backend delivery."
+    },
+    "summary": {
+      "points": [
+        "Hardware constraints.",
+        "Central signing.",
+        "Fastlane.",
+        "Real devices."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two unique constraints of iOS CI compared with backend CI?",
+        "a": "It requires macOS on Apple hardware, and every binary must be signed with Apple certificates and profiles."
+      }
+    ]
+  },
+  "dagger-ci-as-code": {
+    "core": "Dagger replaces YAML-bound pipelines with code: SDKs build container-operation DAGs that the BuildKit-based engine runs identically anywhere, with real programming constructs, automatic content-addressed caching and thin integration into any CI.",
+    "first_principles": {
+      "problem": "YAML pipelines are untestable locally, hard to make dynamic and locked to one vendor.",
+      "truths": [
+        "Pipelines are software.",
+        "Containers make execution portable.",
+        "Content addressing makes caching automatic."
+      ],
+      "derivation": [
+        "Write pipelines **as code**.",
+        "Run them on the **engine** locally and in CI.",
+        "Use **language features** for logic.",
+        "Get **caching** for free.",
+        "Wrap them in **thin CI YAML**."
+      ]
+    },
+    "analogy": {
+      "title": "Write once, run anywhere for pipelines",
+      "story": "Like a portable app that runs on any computer the same way.",
+      "mapping": [
+        [
+          "Portable app",
+          "Dagger module"
+        ],
+        [
+          "Any computer",
+          "Laptop or any CI"
+        ],
+        [
+          "App data cache",
+          "Engine cache"
+        ]
+      ],
+      "breaks": "Adds an engine dependency and a learning curve, and simple pipelines may not need it."
+    },
+    "mindmap": {
+      "center": "Dagger",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "End YAML hell"
+          ]
+        },
+        {
+          "label": "Arch",
+          "children": [
+            "SDK",
+            "Engine",
+            "BuildKit"
+          ]
+        },
+        {
+          "label": "Code",
+          "children": [
+            "Loops",
+            "Types",
+            "Modules"
+          ]
+        },
+        {
+          "label": "Cache",
+          "children": [
+            "Layers",
+            "Volumes"
+          ]
+        },
+        {
+          "label": "CI",
+          "children": [
+            "Thin wrapper"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A monorepo moves to Dagger",
+      "scenario": "Results.",
+      "flow": [
+        "Logic in Go module",
+        "dagger call ci locally",
+        "GitHub Actions thin wrapper",
+        "Cache via Dagger Cloud",
+        "CI time −40%, pipeline bugs fixed locally"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Pipelines become maintainable software."
+        }
+      ],
+      "code": [],
+      "outcome": "CI pipelines with a real development workflow."
+    },
+    "summary": {
+      "points": [
+        "Code pipelines.",
+        "Run anywhere.",
+        "Cache by default.",
+        "Thin CI."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does Dagger replace GitHub Actions or GitLab CI?",
+        "a": "No. It runs inside them, handling pipeline logic while they handle triggers, secrets and runners."
+      }
+    ]
+  },
+  "tekton-kubernetes-native-pipelines": {
+    "core": "Tekton makes CI/CD a native part of Kubernetes: Tasks (Pods of step containers) and their runs, Pipelines composing Tasks into DAGs, workspaces sharing data through volumes, and Triggers turning webhooks into PipelineRuns. It scales with the cluster and is idle when unused.",
+    "first_principles": {
+      "problem": "Always-on CI servers are separate infrastructure that doesn't use Kubernetes' scheduling, RBAC and scaling.",
+      "truths": [
+        "Kubernetes schedules containers well.",
+        "CRDs make pipelines API objects.",
+        "Event-driven execution saves resources."
+      ],
+      "derivation": [
+        "Define **Tasks**.",
+        "Compose **Pipelines**.",
+        "Share with **workspaces**.",
+        "Automate with **Triggers**."
+      ]
+    },
+    "analogy": {
+      "title": "An on-demand film studio",
+      "story": "Sets (Pods) are built per scene, scheduled by the production plan (Pipeline), props are kept in shared storage (workspaces), and production starts when a script arrives (Triggers).",
+      "mapping": [
+        [
+          "Scenes",
+          "Tasks"
+        ],
+        [
+          "Production plan",
+          "Pipeline"
+        ],
+        [
+          "Prop storage",
+          "Workspaces"
+        ],
+        [
+          "Script arrival",
+          "Trigger"
+        ]
+      ],
+      "breaks": "Verbose YAML and a low-level UX. Consider higher-level layers on top of it."
+    },
+    "mindmap": {
+      "center": "Tekton",
+      "branches": [
+        {
+          "label": "Units",
+          "children": [
+            "Task",
+            "TaskRun"
+          ]
+        },
+        {
+          "label": "Orchestration",
+          "children": [
+            "Pipeline",
+            "PipelineRun",
+            "finally"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Workspaces",
+            "PVC"
+          ]
+        },
+        {
+          "label": "Events",
+          "children": [
+            "EventListener",
+            "Interceptors",
+            "Bindings",
+            "Templates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A complete Tekton CI",
+      "scenario": "Push to deploy.",
+      "flow": [
+        "GitHub webhook → EventListener",
+        "Interceptor validates + filters main",
+        "PipelineRun: clone → test ∥ lint → kaniko build → deploy",
+        "Per-run PVC workspace",
+        "finally: Slack"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Kubernetes-native CI with no CI servers."
+        }
+      ],
+      "code": [],
+      "outcome": "pipelines are Kubernetes objects."
+    },
+    "summary": {
+      "points": [
+        "Pods per Task.",
+        "DAG pipelines.",
+        "Shared workspaces.",
+        "Event-driven."
+      ]
+    },
+    "check": [
+      {
+        "q": "What turns a Git webhook into a PipelineRun in Tekton?",
+        "a": "Tekton Triggers: an EventListener with Interceptors, TriggerBindings and a TriggerTemplate."
+      }
+    ]
+  },
+  "environment-on-demand-terraform-helm": {
+    "core": "On-demand environments split infrastructure into a Terraform-managed foundation and Helm-deployed per-PR stacks, give each PR a wildcard-DNS HTTPS URL, clean up with events, TTLs and reconciliation, and surface the URL right in the PR.",
+    "first_principles": {
+      "problem": "A single shared QA environment serialises testing and causes collisions.",
+      "truths": [
+        "Layers change at different speeds.",
+        "Wildcard DNS and TLS make URLs instant.",
+        "Cleanup must not rely on events alone."
+      ],
+      "derivation": [
+        "**Foundation** via Terraform.",
+        "**PR stacks** via Helm.",
+        "**Magic URLs** with wildcards.",
+        "**Cleanup**: close + TTL + reconcile.",
+        "**Surface** the URL in the PR."
+      ]
+    },
+    "analogy": {
+      "title": "A mall with pop-up stalls",
+      "story": "The mall is permanent, stalls open per campaign with their own sign, are listed in the directory, and are cleared when the campaign ends.",
+      "mapping": [
+        [
+          "Mall",
+          "Cluster foundation"
+        ],
+        [
+          "Stall",
+          "PR environment"
+        ],
+        [
+          "Stall sign",
+          "Preview URL"
+        ],
+        [
+          "Clearance",
+          "Teardown"
+        ]
+      ],
+      "breaks": "Stateful dependencies and third-party integrations remain the hard parts."
+    },
+    "mindmap": {
+      "center": "Env on Demand",
+      "branches": [
+        {
+          "label": "Foundation",
+          "children": [
+            "Terraform"
+          ]
+        },
+        {
+          "label": "Per PR",
+          "children": [
+            "Helm",
+            "Namespace"
+          ]
+        },
+        {
+          "label": "URL",
+          "children": [
+            "Wildcard DNS",
+            "Wildcard TLS"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "Close",
+            "TTL",
+            "Reconcile"
+          ]
+        },
+        {
+          "label": "UX",
+          "children": [
+            "PR comment",
+            "Deployments"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The full loop",
+      "scenario": "PR to teardown.",
+      "flow": [
+        "PR opened → helm install pr-N",
+        "URL posted to PR",
+        "Pushes update release + comment",
+        "PR closed → uninstall",
+        "Nightly reconcile catches strays"
+      ],
+      "steps": [
+        {
+          "label": "Outcome",
+          "detail": "Unlimited parallel QA at controlled cost."
+        }
+      ],
+      "code": [],
+      "outcome": "every change is testable in isolation, instantly."
+    },
+    "summary": {
+      "points": [
+        "Two layers.",
+        "Magic URLs.",
+        "Reliable cleanup.",
+        "Visible links."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which layer does Terraform own in this architecture?",
+        "a": "The long-lived foundation: network, cluster, DNS zone, wildcard certificate and shared services."
+      }
+    ]
+  }
+}
