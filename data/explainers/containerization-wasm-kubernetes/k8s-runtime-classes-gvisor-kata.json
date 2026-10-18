@@ -1,0 +1,411 @@
+{
+  "introduction-is-docker-secure-enough": {
+    "core": "Standard runc containers share the host kernel, so a kernel vulnerability or container escape can compromise the node and other tenants. For trusted, well-hardened workloads this is acceptable. For untrusted or multi-tenant code (customer plugins, CI jobs, user notebooks), stronger isolation via sandboxed runtimes is prudent.",
+    "first_principles": {
+      "problem": "A platform runs arbitrary customer code in standard containers next to sensitive internal services.",
+      "truths": [
+        "The kernel is a shared attack surface.",
+        "Hardening reduces but doesn't remove risk.",
+        "Trust levels differ by workload."
+      ],
+      "derivation": [
+        "**Classify workloads** by trust.",
+        "**Harden** all containers (non-root, seccomp, caps).",
+        "**Sandbox** untrusted code (gVisor/Kata).",
+        "**Separate node pools** for sandboxed workloads.",
+        "**Monitor** runtime behaviour (Falco)."
+      ]
+    },
+    "analogy": {
+      "title": "Office cubicles versus locked labs",
+      "story": "Cubicles are fine for colleagues, but strangers with unknown chemicals need a sealed lab.",
+      "mapping": [
+        [
+          "Cubicles",
+          "runc containers"
+        ],
+        [
+          "Sealed lab",
+          "Sandboxed runtime"
+        ],
+        [
+          "Strangers",
+          "Untrusted code"
+        ]
+      ],
+      "breaks": "Labs are physically sealed; sandboxes reduce, not eliminate, escape risk."
+    },
+    "mindmap": {
+      "center": "Is runc Enough?",
+      "branches": [
+        {
+          "label": "Risk",
+          "children": [
+            "Shared kernel",
+            "Escapes",
+            "CVEs"
+          ]
+        },
+        {
+          "label": "Trusted",
+          "children": [
+            "Hardened runc"
+          ]
+        },
+        {
+          "label": "Untrusted",
+          "children": [
+            "gVisor",
+            "Kata"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Separate nodes",
+            "Runtime detection"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Classifying workloads",
+      "scenario": "Mapping.",
+      "flow": [
+        "Internal APIs → hardened runc",
+        "Customer-uploaded code → gVisor",
+        "Untrusted VMs-like tenants → Kata"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolation proportional to risk."
+        }
+      ],
+      "code": [],
+      "outcome": "risk-based runtime choices."
+    },
+    "summary": {
+      "points": [
+        "Shared kernel risk.",
+        "Harden everything.",
+        "Sandbox the untrusted."
+      ]
+    },
+    "check": [
+      {
+        "q": "When are standard runc containers insufficient isolation?",
+        "a": "When running untrusted or multi-tenant code where a kernel escape would expose other tenants or the host."
+      }
+    ]
+  },
+  "sandboxed-runtimes-gvisor-and-kata-containers": {
+    "core": "gVisor (runsc) runs a user-space kernel (Sentry) that implements Linux syscalls, so container syscalls hit gVisor rather than the host kernel, giving a much smaller attack surface with modest memory overhead but some syscall and I/O performance cost. Kata Containers run each Pod in a lightweight VM (QEMU, Cloud Hypervisor or Firecracker) with its own guest kernel for hardware-enforced isolation, with higher startup and memory overhead.",
+    "first_principles": {
+      "problem": "A team must choose between gVisor and Kata for untrusted workloads.",
+      "truths": [
+        "Syscall interception reduces host exposure.",
+        "Hardware virtualisation is a strong boundary.",
+        "Both have compatibility and performance trade-offs."
+      ],
+      "derivation": [
+        "**gVisor**: lightweight, syscall-heavy apps slower, some syscalls unsupported.",
+        "**Kata**: VM isolation, needs nested virt or bare metal, more overhead.",
+        "**Benchmark** your workload.",
+        "Check **GPU/device support**.",
+        "Consider **managed options** (GKE Sandbox)."
+      ]
+    },
+    "analogy": {
+      "title": "An interpreter versus a separate room",
+      "story": "gVisor translates every request through an interpreter; Kata gives each guest their own soundproof room.",
+      "mapping": [
+        [
+          "Interpreter",
+          "gVisor Sentry"
+        ],
+        [
+          "Soundproof room",
+          "Kata VM"
+        ],
+        [
+          "Guests",
+          "Pods"
+        ]
+      ],
+      "breaks": "Interpreters can be fast for short talks; gVisor overhead grows with syscall intensity."
+    },
+    "mindmap": {
+      "center": "gVisor vs Kata",
+      "branches": [
+        {
+          "label": "gVisor",
+          "children": [
+            "User-space kernel",
+            "runsc",
+            "Low memory",
+            "Syscall overhead"
+          ]
+        },
+        {
+          "label": "Kata",
+          "children": [
+            "MicroVM per Pod",
+            "Guest kernel",
+            "Hardware isolation",
+            "Higher overhead"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Kata: virtualisation support"
+          ]
+        },
+        {
+          "label": "Managed",
+          "children": [
+            "GKE Sandbox (gVisor)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Benchmark snapshot",
+      "scenario": "Typical results.",
+      "flow": [
+        "CPU-bound app: gVisor ~same, Kata ~same",
+        "Syscall-heavy (many small file ops): gVisor slower",
+        "Startup: runc 0.3 s, gVisor 0.5 s, Kata 1–2 s"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Profile before choosing."
+        }
+      ],
+      "code": [],
+      "outcome": "informed sandbox selection."
+    },
+    "summary": {
+      "points": [
+        "gVisor intercepts syscalls.",
+        "Kata uses VMs.",
+        "Benchmark both."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Kata Containers use to isolate Pods?",
+        "a": "A lightweight virtual machine with its own guest kernel per Pod."
+      }
+    ]
+  },
+  "runtimeclass-the-selector-mechanism": {
+    "core": "RuntimeClass is a cluster-scoped object mapping a name to a CRI handler configured on nodes (runsc, kata-qemu, kata-fc). It can declare overhead (extra CPU and memory the sandbox consumes, added to Pod requests for scheduling and quotas) and scheduling constraints (nodeSelector, tolerations) so Pods land only where that runtime exists.",
+    "first_principles": {
+      "problem": "Sandboxed Pods are scheduled onto nodes without gVisor installed and fail to start.",
+      "truths": [
+        "Not all nodes have every runtime.",
+        "Sandboxes consume extra resources.",
+        "Pods need a simple way to choose."
+      ],
+      "derivation": [
+        "Install and configure **handlers** in containerd.",
+        "Create **RuntimeClass** with handler name.",
+        "Add **scheduling.nodeSelector/tolerations**.",
+        "Declare **overhead**.",
+        "Label and taint **sandbox node pools**."
+      ]
+    },
+    "analogy": {
+      "title": "Labelled service counters",
+      "story": "Each counter offers a specific service, and signs direct customers only to counters that offer it.",
+      "mapping": [
+        [
+          "Counter",
+          "Node with handler"
+        ],
+        [
+          "Service sign",
+          "RuntimeClass"
+        ],
+        [
+          "Extra handling fee",
+          "Overhead"
+        ]
+      ],
+      "breaks": "Counters can be added instantly; nodes need runtime installation first."
+    },
+    "mindmap": {
+      "center": "RuntimeClass",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "handler",
+            "overhead.podFixed",
+            "scheduling"
+          ]
+        },
+        {
+          "label": "Node setup",
+          "children": [
+            "containerd runtime config"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "nodeSelector",
+            "tolerations"
+          ]
+        },
+        {
+          "label": "Accounting",
+          "children": [
+            "Overhead in scheduling and quotas"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "containerd + RuntimeClass",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Handler available and selectable by name."
+        }
+      ],
+      "code": [
+        {
+          "lang": "toml",
+          "text": "# /etc/containerd/config.toml\n[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.runsc]\n  runtime_type = \"io.containerd.runsc.v1\"\n# then:\n# kind: RuntimeClass, handler: runsc, scheduling.nodeSelector: {sandbox: gvisor}"
+        }
+      ],
+      "outcome": "reliable runtime selection."
+    },
+    "summary": {
+      "points": [
+        "Name → handler.",
+        "Schedule where installed.",
+        "Account for overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why declare overhead in a RuntimeClass?",
+        "a": "So the sandbox's extra CPU and memory are added to Pod requests for accurate scheduling and quota accounting."
+      }
+    ]
+  },
+  "assigning-pods-to-runtimes": {
+    "core": "Pods opt into a runtime with spec.runtimeClassName. Enforce usage with admission policies (Kyverno, Gatekeeper or CEL) so tenant namespaces must use the sandbox class, keep sandbox nodes tainted and dedicated, and verify the runtime by inspecting the node (crictl inspect) or dmesg inside gVisor. Without a runtimeClassName, the default runtime (runc) applies.",
+    "first_principles": {
+      "problem": "Developers forget runtimeClassName, so untrusted Pods run on runc anyway.",
+      "truths": [
+        "Opt-in mechanisms get forgotten.",
+        "Policy can enforce selection.",
+        "Verification proves isolation."
+      ],
+      "derivation": [
+        "Set **runtimeClassName** in Pod templates.",
+        "**Enforce** via policy for tenant namespaces.",
+        "**Taint** sandbox nodes; tolerations come from the RuntimeClass.",
+        "**Verify** runtime in use.",
+        "Default to **runc** elsewhere."
+      ]
+    },
+    "analogy": {
+      "title": "A rule that all visitors must use the visitor entrance",
+      "story": "Guards check badges so nobody slips in through the staff door.",
+      "mapping": [
+        [
+          "Visitor entrance",
+          "Sandbox runtime"
+        ],
+        [
+          "Guards",
+          "Admission policy"
+        ],
+        [
+          "Staff door",
+          "Default runc"
+        ]
+      ],
+      "breaks": "Guards can be distracted; admission policies check every Pod."
+    },
+    "mindmap": {
+      "center": "Assigning Runtimes",
+      "branches": [
+        {
+          "label": "Pod",
+          "children": [
+            "runtimeClassName"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "Kyverno",
+            "Gatekeeper",
+            "CEL policy"
+          ]
+        },
+        {
+          "label": "Nodes",
+          "children": [
+            "Taints",
+            "Dedicated pools"
+          ]
+        },
+        {
+          "label": "Verification",
+          "children": [
+            "crictl inspect",
+            "dmesg in gVisor"
+          ]
+        },
+        {
+          "label": "Default",
+          "children": [
+            "runc"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enforce sandbox for tenants",
+      "scenario": "Kyverno policy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No tenant Pod can run outside the sandbox."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: kyverno.io/v1\nkind: ClusterPolicy\nmetadata: {name: require-gvisor-in-tenants}\nspec:\n  validationFailureAction: Enforce\n  rules:\n  - name: tenant-pods-use-gvisor\n    match: {any: [{resources: {kinds: [Pod], namespaceSelector: {matchLabels: {tenant: \"true\"}}}}]}\n    validate:\n      message: \"Tenant Pods must use runtimeClassName gvisor\"\n      pattern: {spec: {runtimeClassName: gvisor}}"
+        }
+      ],
+      "outcome": "guaranteed isolation for untrusted code."
+    },
+    "summary": {
+      "points": [
+        "Opt in per Pod.",
+        "Enforce with policy.",
+        "Verify on nodes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What runtime does a Pod use if runtimeClassName is omitted?",
+        "a": "The node's default runtime handler (typically runc)."
+      }
+    ]
+  }
+}

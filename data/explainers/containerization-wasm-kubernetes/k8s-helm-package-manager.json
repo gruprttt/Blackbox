@@ -1,0 +1,639 @@
+{
+  "introduction-escaping-yaml-hell": {
+    "core": "Real applications need dozens of near-identical manifests across environments, differing only in a few values. Helm packages manifests as charts with templates and values, renders them per environment, installs them as versioned releases with upgrade and rollback, and shares them through repositories.",
+    "first_principles": {
+      "problem": "A team copies 30 YAML files per environment and changes drift between them.",
+      "truths": [
+        "Most config differences are small.",
+        "Templates remove duplication.",
+        "Deployments need versioning."
+      ],
+      "derivation": [
+        "Write **templates** with placeholders.",
+        "Supply **values** per environment.",
+        "Install as **releases**.",
+        "**Upgrade/rollback** by revision.",
+        "**Share** via chart repositories/OCI."
+      ]
+    },
+    "analogy": {
+      "title": "A mail-merge letter template",
+      "story": "One template, a list of names and addresses, many personalised letters.",
+      "mapping": [
+        [
+          "Template letter",
+          "Chart templates"
+        ],
+        [
+          "Address list",
+          "Values"
+        ],
+        [
+          "Printed letters",
+          "Rendered manifests"
+        ]
+      ],
+      "breaks": "Mail-merge has no undo; Helm keeps release history for rollback."
+    },
+    "mindmap": {
+      "center": "Helm",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Chart",
+            "Values",
+            "Release",
+            "Repository"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "DRY manifests",
+            "Versioning",
+            "Rollback",
+            "Sharing"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Kustomize",
+            "Jsonnet",
+            "cdk8s"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Install a chart",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Redis installed with prod values, tracked as a release."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "helm repo add bitnami https://charts.bitnami.com/bitnami\nhelm install cache bitnami/redis -f values-prod.yaml -n data\nhelm history cache -n data"
+        }
+      ],
+      "outcome": "templated, versioned deployments."
+    },
+    "summary": {
+      "points": [
+        "Templates + values.",
+        "Releases with history.",
+        "Shareable charts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does Helm primarily solve?",
+        "a": "Duplicated, drifting YAML across environments, by templating manifests with values and managing releases."
+      }
+    ]
+  },
+  "core-concepts-charts-values-and-releases": {
+    "core": "A chart is a package (Chart.yaml metadata, templates/, values.yaml defaults, optional dependencies). Values are configuration merged from defaults, -f files and --set flags. A release is an installed instance of a chart with a name and namespace; each install or upgrade creates a revision stored as a Secret in the release namespace.",
+    "first_principles": {
+      "problem": "Engineers confuse charts, values and releases, and can't tell why a setting was applied.",
+      "truths": [
+        "Packages, config and instances are distinct.",
+        "Value precedence decides outcomes.",
+        "History enables rollback."
+      ],
+      "derivation": [
+        "**Chart** = package.",
+        "**Values** precedence: defaults < -f files (in order) < --set.",
+        "**Release** = named instance.",
+        "**Revisions** stored as Secrets.",
+        "Inspect with **helm get values/manifest**."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe, your preferences and the dish you served",
+      "story": "The recipe is the chart, preferences are values, and each dinner party is a release.",
+      "mapping": [
+        [
+          "Recipe",
+          "Chart"
+        ],
+        [
+          "Preferences",
+          "Values"
+        ],
+        [
+          "Dinner party",
+          "Release"
+        ]
+      ],
+      "breaks": "Dinners aren't re-served; Helm can roll back to a previous revision exactly."
+    },
+    "mindmap": {
+      "center": "Helm Concepts",
+      "branches": [
+        {
+          "label": "Chart",
+          "children": [
+            "Chart.yaml",
+            "templates",
+            "values.yaml",
+            "dependencies"
+          ]
+        },
+        {
+          "label": "Values",
+          "children": [
+            "Defaults",
+            "-f files",
+            "--set"
+          ]
+        },
+        {
+          "label": "Release",
+          "children": [
+            "Name",
+            "Namespace",
+            "Revisions"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Secrets"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "helm get values",
+            "helm get manifest"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What did we deploy?",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exact applied config visible."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "helm get values cache -n data --all\nhelm get manifest cache -n data | less"
+        }
+      ],
+      "outcome": "clear mental model of Helm."
+    },
+    "summary": {
+      "points": [
+        "Chart, values, release.",
+        "Value precedence.",
+        "Revisions for history."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where does Helm 3 store release history?",
+        "a": "As Secrets in the release's namespace."
+      }
+    ]
+  },
+  "how-helm-works-the-templating-engine": {
+    "core": "Helm renders templates with Go templates plus Sprig functions: {{ .Values.x }}, conditionals, range loops, include of named templates from _helpers.tpl, toYaml with nindent for nested blocks, required for mandatory values and lookup for live objects. The rendered YAML is then applied to the cluster.",
+    "first_principles": {
+      "problem": "Templates produce invalid YAML because indentation of nested blocks is wrong.",
+      "truths": [
+        "Templates generate text, not structured objects.",
+        "Indentation matters in YAML.",
+        "Reusable snippets avoid repetition."
+      ],
+      "derivation": [
+        "Use **{{- -}}** to trim whitespace.",
+        "Use **toYaml | nindent N** for nested values.",
+        "Put shared snippets in **_helpers.tpl** with **include**.",
+        "Use **required** for mandatory values.",
+        "Debug with **helm template** and **--debug**."
+      ]
+    },
+    "analogy": {
+      "title": "A mail-merge that must keep exact spacing",
+      "story": "Wrong spacing in a form letter is ugly; wrong indentation in YAML breaks it.",
+      "mapping": [
+        [
+          "Placeholders",
+          "{{ .Values }}"
+        ],
+        [
+          "Reusable paragraphs",
+          "Named templates"
+        ],
+        [
+          "Spacing rules",
+          "nindent"
+        ]
+      ],
+      "breaks": "Letters tolerate formatting errors; Kubernetes rejects invalid YAML."
+    },
+    "mindmap": {
+      "center": "Templating",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "Go templates",
+            "Sprig"
+          ]
+        },
+        {
+          "label": "Constructs",
+          "children": [
+            "if",
+            "range",
+            "with",
+            "include",
+            "define"
+          ]
+        },
+        {
+          "label": "Helpers",
+          "children": [
+            "toYaml",
+            "nindent",
+            "required",
+            "default",
+            "lookup"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "helm template",
+            "--debug",
+            "helm lint"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe nested resources block",
+      "scenario": "Template.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Check",
+          "detail": "helm template . | kubeconform"
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "containers:\n- name: {{ include \"app.name\" . }}\n  image: \"{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}\"\n  {{- with .Values.resources }}\n  resources:\n    {{- toYaml . | nindent 4 }}\n  {{- end }}"
+        }
+      ],
+      "outcome": "correct, reusable templates."
+    },
+    "summary": {
+      "points": [
+        "Go templates + Sprig.",
+        "nindent for structure.",
+        "Render and lint."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'toYaml . | nindent 4' do?",
+        "a": "Converts a value to YAML and indents it by four spaces on a new line, preserving structure."
+      }
+    ]
+  },
+  "artifact-hub-and-chart-repositories": {
+    "core": "Charts are distributed via HTTP chart repositories (index.yaml) or OCI registries (helm push/pull oci://…). Artifact Hub is a discovery site for public charts and other cloud-native packages. Evaluate charts for maintenance, security (images, defaults), provenance (signatures) and values flexibility before using them.",
+    "first_principles": {
+      "problem": "A team installs a random public chart that runs privileged containers by default.",
+      "truths": [
+        "Charts are code you run in your cluster.",
+        "Quality varies widely.",
+        "OCI registries unify artefact storage."
+      ],
+      "derivation": [
+        "Search **Artifact Hub**; check **verified publishers**.",
+        "Review **templates and default values**.",
+        "Prefer **OCI registries** for your charts.",
+        "**Pin chart versions**.",
+        "Verify **signatures** (cosign/provenance)."
+      ]
+    },
+    "analogy": {
+      "title": "An app store for cluster software",
+      "story": "Read reviews, check the publisher and permissions before installing.",
+      "mapping": [
+        [
+          "App store",
+          "Artifact Hub"
+        ],
+        [
+          "Publisher badge",
+          "Verified publisher"
+        ],
+        [
+          "Permissions",
+          "Chart defaults"
+        ]
+      ],
+      "breaks": "App stores vet apps somewhat; chart repos often don't, so you must."
+    },
+    "mindmap": {
+      "center": "Chart Distribution",
+      "branches": [
+        {
+          "label": "Formats",
+          "children": [
+            "HTTP repo (index.yaml)",
+            "OCI registry"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "Artifact Hub"
+          ]
+        },
+        {
+          "label": "Evaluation",
+          "children": [
+            "Maintenance",
+            "Security defaults",
+            "Provenance"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Pin versions",
+            "Mirror internally"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Publish to OCI",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Charts versioned alongside images."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "helm package ./charts/api\nhelm push api-1.4.0.tgz oci://123.dkr.ecr.eu-west-1.amazonaws.com/charts\nhelm install api oci://123.dkr.ecr.eu-west-1.amazonaws.com/charts/api --version 1.4.0"
+        }
+      ],
+      "outcome": "trusted chart supply chain."
+    },
+    "summary": {
+      "points": [
+        "Repos or OCI.",
+        "Vet public charts.",
+        "Pin and sign."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the modern way to host private Helm charts?",
+        "a": "In an OCI registry (e.g. ECR, GHCR, Harbor)."
+      }
+    ]
+  },
+  "overriding-values-customizing-a-release": {
+    "core": "Customise releases by layering values files (-f base.yaml -f prod.yaml, later wins), --set for small overrides, --set-file or --set-json for complex input, and subchart values under the dependency name. Use helm diff to preview, --atomic to roll back on failure and --reuse-values carefully (it can hide new defaults).",
+    "first_principles": {
+      "problem": "A prod upgrade silently loses a setting because --set flags weren't repeated.",
+      "truths": [
+        "Values merge in a defined order.",
+        "Command-line flags are easy to forget.",
+        "Upgrades should be previewable and safe."
+      ],
+      "derivation": [
+        "Keep **values in Git** per environment.",
+        "Layer **-f** files; avoid long **--set** chains.",
+        "Preview with **helm diff upgrade**.",
+        "Use **--atomic --wait**.",
+        "Avoid **--reuse-values** surprises."
+      ]
+    },
+    "analogy": {
+      "title": "Layered transparencies of settings",
+      "story": "Base settings, then environment overlay, then a tiny sticky note on top.",
+      "mapping": [
+        [
+          "Base layer",
+          "values.yaml"
+        ],
+        [
+          "Environment overlay",
+          "prod.yaml"
+        ],
+        [
+          "Sticky note",
+          "--set"
+        ]
+      ],
+      "breaks": "Transparencies are visible; forgotten --set flags vanish on the next upgrade."
+    },
+    "mindmap": {
+      "center": "Overriding Values",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "values.yaml",
+            "-f files",
+            "--set",
+            "--set-file",
+            "--set-json"
+          ]
+        },
+        {
+          "label": "Order",
+          "children": [
+            "Later wins"
+          ]
+        },
+        {
+          "label": "Subcharts",
+          "children": [
+            "Nested keys"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "helm diff",
+            "--atomic",
+            "--wait"
+          ]
+        },
+        {
+          "label": "Pitfall",
+          "children": [
+            "--reuse-values"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe prod upgrade",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reviewed diff, automatic rollback on failure."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "helm diff upgrade api ./charts/api -f values.yaml -f values-prod.yaml -n prod\nhelm upgrade api ./charts/api -f values.yaml -f values-prod.yaml -n prod --atomic --wait --timeout 10m"
+        }
+      ],
+      "outcome": "predictable customisation."
+    },
+    "summary": {
+      "points": [
+        "Layer values files.",
+        "Preview diffs.",
+        "Atomic upgrades."
+      ]
+    },
+    "check": [
+      {
+        "q": "When multiple -f files are given, which wins?",
+        "a": "The last file specified overrides earlier ones."
+      }
+    ]
+  },
+  "anatomy-of-a-helm-chart-directory": {
+    "core": "A chart directory contains Chart.yaml (name, version, appVersion, dependencies), values.yaml (defaults), values.schema.json (optional validation), templates/ (manifests, _helpers.tpl, NOTES.txt), charts/ (vendored dependencies), crds/ (installed before templates, not upgraded) and templates/tests/ for helm test hooks.",
+    "first_principles": {
+      "problem": "A new chart author doesn't know where to put helpers, CRDs or validation.",
+      "truths": [
+        "Convention aids collaboration.",
+        "Values should be validated.",
+        "CRDs have special lifecycle rules."
+      ],
+      "derivation": [
+        "Use **helm create** to scaffold.",
+        "Bump **version** for chart changes, **appVersion** for app.",
+        "Add **values.schema.json**.",
+        "Put CRDs in **crds/** (or manage separately).",
+        "Add **tests** and **NOTES.txt**."
+      ]
+    },
+    "analogy": {
+      "title": "A standard project folder layout",
+      "story": "Everyone knows where the README, source and tests live.",
+      "mapping": [
+        [
+          "README",
+          "NOTES.txt/Chart.yaml"
+        ],
+        [
+          "Source",
+          "templates/"
+        ],
+        [
+          "Tests",
+          "templates/tests/"
+        ]
+      ],
+      "breaks": "Project layouts are suggestions; Helm treats crds/ specially (install only, no upgrade)."
+    },
+    "mindmap": {
+      "center": "Chart Anatomy",
+      "branches": [
+        {
+          "label": "Metadata",
+          "children": [
+            "Chart.yaml",
+            "version",
+            "appVersion"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "values.yaml",
+            "values.schema.json"
+          ]
+        },
+        {
+          "label": "Templates",
+          "children": [
+            "Manifests",
+            "_helpers.tpl",
+            "NOTES.txt",
+            "tests/"
+          ]
+        },
+        {
+          "label": "Dependencies",
+          "children": [
+            "charts/"
+          ]
+        },
+        {
+          "label": "CRDs",
+          "children": [
+            "crds/ (no upgrades)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Directory tree",
+      "scenario": "Layout.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Familiar layout for every contributor."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "api/\n  Chart.yaml\n  values.yaml\n  values.schema.json\n  crds/\n  charts/\n  templates/\n    _helpers.tpl\n    deployment.yaml\n    service.yaml\n    NOTES.txt\n    tests/test-connection.yaml"
+        }
+      ],
+      "outcome": "well-structured charts."
+    },
+    "summary": {
+      "points": [
+        "Standard layout.",
+        "Validate values.",
+        "Mind CRD handling."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's special about CRDs placed in a chart's crds/ directory?",
+        "a": "Helm installs them before templates but never upgrades or deletes them."
+      }
+    ]
+  }
+}

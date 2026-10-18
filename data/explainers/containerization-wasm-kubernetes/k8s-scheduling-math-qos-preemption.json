@@ -1,0 +1,722 @@
+{
+  "introduction-the-ultimate-game-of-tetris": {
+    "core": "The scheduler places each Pending Pod on a node in two phases: filtering (which nodes can fit it, given resources, taints, affinity, volumes and ports) and scoring (which feasible node is best, considering balance, spreading and affinities), then binds the Pod. It uses requests, not actual usage.",
+    "first_principles": {
+      "problem": "Pods stay Pending while nodes look underutilised in monitoring dashboards.",
+      "truths": [
+        "Scheduling uses declared requests.",
+        "Constraints filter nodes.",
+        "Scoring picks among feasible nodes."
+      ],
+      "derivation": [
+        "**Filter**: resources, taints, affinity, volumes.",
+        "**Score**: least/most allocated, spread, affinity.",
+        "**Bind** the Pod.",
+        "Read **events** for FailedScheduling reasons.",
+        "Tune **requests** to match reality."
+      ]
+    },
+    "analogy": {
+      "title": "Tetris with rules",
+      "story": "Each piece must fit the space and obey colour rules, and you choose the spot that keeps the board tidy.",
+      "mapping": [
+        [
+          "Pieces",
+          "Pods"
+        ],
+        [
+          "Board columns",
+          "Nodes"
+        ],
+        [
+          "Fit check",
+          "Filtering"
+        ],
+        [
+          "Best spot",
+          "Scoring"
+        ]
+      ],
+      "breaks": "Tetris pieces have fixed shapes; Pod requests are declared and may not match real usage."
+    },
+    "mindmap": {
+      "center": "Scheduler",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "Filter",
+            "Score",
+            "Bind"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "Resources",
+            "Taints",
+            "Affinity",
+            "Volumes",
+            "Ports"
+          ]
+        },
+        {
+          "label": "Scoring",
+          "children": [
+            "Spread",
+            "Balance",
+            "Affinity"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "FailedScheduling events"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Why Pending?",
+      "scenario": "Event.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Lower inflated CPU request or add capacity."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl describe pod api-7f9 | sed -n '/Events/,$p'\n# 0/12 nodes are available: 8 Insufficient cpu, 4 node(s) had untolerated taint {gpu: true}"
+        }
+      ],
+      "outcome": "scheduling decisions explained."
+    },
+    "summary": {
+      "points": [
+        "Filter then score.",
+        "Requests drive placement.",
+        "Read events."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does the scheduler use actual CPU usage when placing Pods?",
+        "a": "No; it uses the Pods' resource requests."
+      }
+    ]
+  },
+  "requests-vs-limits-the-foundation-of-all-scheduling-math": {
+    "core": "Requests are what the scheduler reserves and guarantees; limits are the maximum a container may use. CPU over the limit is throttled (CFS quota); memory over the limit causes an OOM kill. Requests also set CPU shares under contention and determine QoS class and eviction order.",
+    "first_principles": {
+      "problem": "Pods without memory limits trigger node OOMs; pods with tight CPU limits are throttled despite idle CPUs.",
+      "truths": [
+        "CPU is compressible, memory isn't.",
+        "Scheduling sums requests.",
+        "Limits cap usage."
+      ],
+      "derivation": [
+        "Set **requests ≈ typical usage** (P50–P90).",
+        "Set **memory limits** to prevent runaway use.",
+        "Be cautious with **CPU limits** (throttling).",
+        "Use **LimitRanges/ResourceQuotas** per namespace.",
+        "Right-size with **VPA recommendations**."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant reservation and a table size limit",
+      "story": "The reservation guarantees seats; the limit stops a party from taking over the whole room.",
+      "mapping": [
+        [
+          "Reservation",
+          "Request"
+        ],
+        [
+          "Maximum party size",
+          "Limit"
+        ],
+        [
+          "Being asked to leave",
+          "OOM kill"
+        ]
+      ],
+      "breaks": "Restaurants ask politely; the kernel kills memory overusers instantly."
+    },
+    "mindmap": {
+      "center": "Requests vs Limits",
+      "branches": [
+        {
+          "label": "Requests",
+          "children": [
+            "Scheduling",
+            "Guarantee",
+            "CPU shares"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "CPU throttling",
+            "Memory OOM kill"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "LimitRange",
+            "ResourceQuota"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "VPA",
+            "Metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sensible resources",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Guaranteed memory, burstable CPU, no OOM surprises."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "resources:\n  requests: {cpu: 250m, memory: 512Mi}\n  limits:   {memory: 512Mi}   # no CPU limit to avoid throttling"
+        }
+      ],
+      "outcome": "predictable scheduling and runtime behaviour."
+    },
+    "summary": {
+      "points": [
+        "Requests reserve.",
+        "Limits cap.",
+        "Memory kills, CPU throttles."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens when a container exceeds its memory limit?",
+        "a": "It's OOM-killed by the kernel."
+      }
+    ]
+  },
+  "bin-packing-filling-the-boxes-efficiently": {
+    "core": "Bin packing places Pods to use node capacity efficiently. The default scorer spreads load (LeastAllocated); MostAllocated or RequestedToCapacityRatio pack tightly so autoscalers can remove empty nodes. Multi-dimensional resources (CPU, memory, GPU) create fragmentation, where nodes have leftover capacity of the wrong shape.",
+    "first_principles": {
+      "problem": "Nodes average 40% CPU but 95% memory, so new Pods can't fit and costs climb.",
+      "truths": [
+        "Resources are multi-dimensional.",
+        "Mismatched ratios fragment capacity.",
+        "Packing tightly enables scale-down."
+      ],
+      "derivation": [
+        "Match **node shapes** to workload ratios.",
+        "Use **MostAllocated** scoring for cost.",
+        "Keep **requests accurate**.",
+        "Use **Karpenter consolidation** or descheduler.",
+        "Watch **fragmentation** metrics."
+      ]
+    },
+    "analogy": {
+      "title": "Packing a removal van",
+      "story": "Heavy boxes fill weight capacity while bulky light boxes fill space; mix them well or the van is 'full' half-empty.",
+      "mapping": [
+        [
+          "Weight",
+          "Memory"
+        ],
+        [
+          "Space",
+          "CPU"
+        ],
+        [
+          "Half-empty full van",
+          "Fragmentation"
+        ]
+      ],
+      "breaks": "Vans are packed once; Pods come and go continuously."
+    },
+    "mindmap": {
+      "center": "Bin Packing",
+      "branches": [
+        {
+          "label": "Strategies",
+          "children": [
+            "LeastAllocated (spread)",
+            "MostAllocated (pack)",
+            "RequestedToCapacityRatio"
+          ]
+        },
+        {
+          "label": "Problem",
+          "children": [
+            "Fragmentation",
+            "Ratio mismatch"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Node shapes",
+            "Karpenter",
+            "Descheduler"
+          ]
+        },
+        {
+          "label": "Prerequisite",
+          "children": [
+            "Accurate requests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ratio mismatch",
+      "scenario": "Fix.",
+      "flow": [
+        "Workloads need 1 vCPU : 8 GiB",
+        "Nodes are 1 : 4 (m-family)",
+        "Switch to r-family (1 : 8)",
+        "Same Pods on 30% fewer nodes"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Shape nodes to the workload."
+        }
+      ],
+      "code": [],
+      "outcome": "less wasted capacity."
+    },
+    "summary": {
+      "points": [
+        "Multi-dimensional packing.",
+        "Match ratios.",
+        "Pack for cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is resource fragmentation in scheduling?",
+        "a": "Nodes have free capacity in some dimensions but not others, so new Pods can't fit despite unused resources."
+      }
+    ]
+  },
+  "the-fairness-problem-dominant-resource-fairness-drf": {
+    "core": "When many tenants share a cluster with multiple resource types, fairness isn't obvious. Dominant Resource Fairness allocates so each tenant's dominant share (the largest fraction of any single resource they use) is equalised. It's strategy-proof and used in Mesos, YARN and batch schedulers like Kueue and Volcano.",
+    "first_principles": {
+      "problem": "A CPU-heavy team and a memory-heavy team argue about who gets more of a shared cluster.",
+      "truths": [
+        "Tenants need different resource mixes.",
+        "Fairness on one resource ignores others.",
+        "Incentives matter: no gaming."
+      ],
+      "derivation": [
+        "Compute each tenant's **dominant share**.",
+        "**Equalise** dominant shares.",
+        "Use **queues/quotas** (Kueue ClusterQueues).",
+        "Allow **borrowing** of idle capacity.",
+        "Enforce with **ResourceQuotas**."
+      ]
+    },
+    "analogy": {
+      "title": "Sharing a buffet fairly between a vegetarian and a meat lover",
+      "story": "Equalise how much of each person's favourite dish they get, not just the number of plates.",
+      "mapping": [
+        [
+          "Favourite dish",
+          "Dominant resource"
+        ],
+        [
+          "Share of that dish",
+          "Dominant share"
+        ],
+        [
+          "Fair split",
+          "DRF allocation"
+        ]
+      ],
+      "breaks": "Buffets refill; cluster resources are finite at any moment."
+    },
+    "mindmap": {
+      "center": "DRF",
+      "branches": [
+        {
+          "label": "Concept",
+          "children": [
+            "Dominant share",
+            "Equalise"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Strategy-proof",
+            "Envy-free"
+          ]
+        },
+        {
+          "label": "Used in",
+          "children": [
+            "YARN",
+            "Mesos",
+            "Kueue",
+            "Volcano"
+          ]
+        },
+        {
+          "label": "K8s tools",
+          "children": [
+            "ResourceQuota",
+            "Kueue queues",
+            "Borrowing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "DRF calculation",
+      "scenario": "Two tenants.",
+      "flow": [
+        "Cluster: 90 CPU, 180 GiB",
+        "A tasks: 1 CPU + 4 GiB (dominant: memory 2.2%)",
+        "B tasks: 3 CPU + 1 GiB (dominant: CPU 3.3%)",
+        "DRF gives A 3 tasks per B's 2 to equalise dominant shares"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Both teams get equal shares of what they need most."
+        }
+      ],
+      "code": [],
+      "outcome": "fair multi-resource sharing."
+    },
+    "summary": {
+      "points": [
+        "Dominant resource per tenant.",
+        "Equalise those shares.",
+        "Queues enforce it."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a tenant's dominant share in DRF?",
+        "a": "The maximum, across resource types, of the fraction of the cluster's resource that tenant uses."
+      }
+    ]
+  },
+  "quality-of-service-qos-classes": {
+    "core": "Kubernetes assigns each Pod a QoS class from its requests and limits. When a node runs short of memory, the kubelet evicts BestEffort Pods first, then Burstable Pods using the most above their requests, and Guaranteed Pods last. The kernel's OOM score adjustment follows the same ordering.",
+    "first_principles": {
+      "problem": "A critical payment Pod is evicted under memory pressure while low-priority batch Pods survive.",
+      "truths": [
+        "Nodes can overcommit memory.",
+        "Something must be evicted under pressure.",
+        "Classes encode importance."
+      ],
+      "derivation": [
+        "Understand **eviction order** by QoS.",
+        "Make critical Pods **Guaranteed**.",
+        "Give batch Pods **Burstable/BestEffort**.",
+        "Set **eviction thresholds** on kubelets.",
+        "Combine with **PriorityClass**."
+      ]
+    },
+    "analogy": {
+      "title": "Airline seat classes during overbooking",
+      "story": "Standby passengers are bumped first, economy next and first class last.",
+      "mapping": [
+        [
+          "Standby",
+          "BestEffort"
+        ],
+        [
+          "Economy",
+          "Burstable"
+        ],
+        [
+          "First class",
+          "Guaranteed"
+        ]
+      ],
+      "breaks": "Airlines compensate bumped passengers; evicted Pods simply restart elsewhere if possible."
+    },
+    "mindmap": {
+      "center": "QoS Classes",
+      "branches": [
+        {
+          "label": "Classes",
+          "children": [
+            "Guaranteed",
+            "Burstable",
+            "BestEffort"
+          ]
+        },
+        {
+          "label": "Eviction",
+          "children": [
+            "BestEffort first",
+            "Burstable over request",
+            "Guaranteed last"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "oom_score_adj"
+          ]
+        },
+        {
+          "label": "Pair",
+          "children": [
+            "PriorityClass"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Checking QoS",
+      "scenario": "kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Payments survives memory pressure longest."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get pod payments-0 -o jsonpath='{.status.qosClass}'\n# Guaranteed"
+        }
+      ],
+      "outcome": "importance encoded in resources."
+    },
+    "summary": {
+      "points": [
+        "Three classes.",
+        "Eviction order.",
+        "Critical = Guaranteed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which QoS class is evicted first under node memory pressure?",
+        "a": "BestEffort."
+      }
+    ]
+  },
+  "defining-the-three-qos-classes": {
+    "core": "Guaranteed: every container has CPU and memory requests equal to limits. Burstable: at least one container has a request or limit but doesn't meet Guaranteed. BestEffort: no container has any requests or limits. CPU manager static policy can pin exclusive cores for Guaranteed Pods with integer CPU requests.",
+    "first_principles": {
+      "problem": "A team sets requests equal to limits for memory only and is surprised the Pod is Burstable.",
+      "truths": [
+        "Guaranteed requires CPU and memory, all containers.",
+        "Any request or limit means at least Burstable.",
+        "Exclusive CPUs need integer Guaranteed requests."
+      ],
+      "derivation": [
+        "**Guaranteed**: requests = limits for CPU & memory in all containers.",
+        "**Burstable**: some requests/limits set.",
+        "**BestEffort**: none set.",
+        "Init containers count too.",
+        "Use **static CPU manager** for latency-critical Guaranteed Pods."
+      ]
+    },
+    "analogy": {
+      "title": "Hotel bookings",
+      "story": "A fixed room booked and paid (Guaranteed), a room with possible upgrade (Burstable), or a walk-in hoping for space (BestEffort).",
+      "mapping": [
+        [
+          "Fixed booking",
+          "Guaranteed"
+        ],
+        [
+          "Upgradeable",
+          "Burstable"
+        ],
+        [
+          "Walk-in",
+          "BestEffort"
+        ]
+      ],
+      "breaks": "Hotels can move you; Kubernetes assigns QoS automatically from the spec."
+    },
+    "mindmap": {
+      "center": "QoS Definitions",
+      "branches": [
+        {
+          "label": "Guaranteed",
+          "children": [
+            "req = lim",
+            "CPU + memory",
+            "All containers"
+          ]
+        },
+        {
+          "label": "Burstable",
+          "children": [
+            "Some req/lim"
+          ]
+        },
+        {
+          "label": "BestEffort",
+          "children": [
+            "Nothing set"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Static CPU manager",
+            "Integer CPUs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Guaranteed Pod",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Guaranteed QoS; eligible for exclusive cores."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "resources:\n  requests: {cpu: \"2\", memory: 4Gi}\n  limits:   {cpu: \"2\", memory: 4Gi}"
+        }
+      ],
+      "outcome": "QoS classes set intentionally."
+    },
+    "summary": {
+      "points": [
+        "All containers, both resources.",
+        "Partial = Burstable.",
+        "None = BestEffort."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes a Pod Guaranteed?",
+        "a": "Every container has CPU and memory requests equal to their limits."
+      }
+    ]
+  },
+  "priorityclasses-and-preemption": {
+    "core": "PriorityClasses assign integer priorities to Pods. When a high-priority Pod can't be scheduled, the scheduler may preempt (evict) lower-priority Pods to make room, respecting PDBs on a best-effort basis. preemptionPolicy: Never lets Pods queue ahead without evicting others. System classes protect critical cluster components.",
+    "first_principles": {
+      "problem": "During a capacity crunch, production Pods stay Pending while batch jobs hold the resources.",
+      "truths": [
+        "Not all workloads are equally important.",
+        "Capacity can run out.",
+        "Evicting lower-value work can be acceptable."
+      ],
+      "derivation": [
+        "Create **PriorityClasses** (prod-high, batch-low).",
+        "Assign via **priorityClassName**.",
+        "Use **preemptionPolicy: Never** for queue-jumping only.",
+        "Keep **system-cluster-critical/system-node-critical** for core components.",
+        "Combine with **QoS and PDBs**."
+      ]
+    },
+    "analogy": {
+      "title": "An ambulance on a busy road",
+      "story": "Other cars pull over so it can pass.",
+      "mapping": [
+        [
+          "Ambulance",
+          "High-priority Pod"
+        ],
+        [
+          "Pulling over",
+          "Preemption"
+        ],
+        [
+          "Ordinary cars",
+          "Low-priority Pods"
+        ]
+      ],
+      "breaks": "Cars resume their journey; preempted Pods must reschedule and may lose work."
+    },
+    "mindmap": {
+      "center": "Priority & Preemption",
+      "branches": [
+        {
+          "label": "PriorityClass",
+          "children": [
+            "value",
+            "globalDefault",
+            "preemptionPolicy"
+          ]
+        },
+        {
+          "label": "Preemption",
+          "children": [
+            "Evict lower priority",
+            "Best-effort PDB"
+          ]
+        },
+        {
+          "label": "System",
+          "children": [
+            "system-cluster-critical",
+            "system-node-critical"
+          ]
+        },
+        {
+          "label": "Pair",
+          "children": [
+            "QoS",
+            "Checkpointing batch"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two priority classes",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Prod Pods evict batch when capacity is short."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: scheduling.k8s.io/v1\nkind: PriorityClass\nmetadata: {name: prod-high}\nvalue: 100000\n---\napiVersion: scheduling.k8s.io/v1\nkind: PriorityClass\nmetadata: {name: batch-low}\nvalue: 1000\npreemptionPolicy: Never"
+        }
+      ],
+      "outcome": "important work runs first."
+    },
+    "summary": {
+      "points": [
+        "Rank workloads.",
+        "Preempt low priority.",
+        "Protect system components."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does preemptionPolicy: Never do?",
+        "a": "The Pod gets queue priority but won't evict other Pods to be scheduled."
+      }
+    ]
+  }
+}

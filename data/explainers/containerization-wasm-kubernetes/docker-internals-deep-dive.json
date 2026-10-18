@@ -1,0 +1,751 @@
+{
+  "introduction-its-not-magic-its-linux": {
+    "core": "A container is an ordinary Linux process with restricted views and limits: namespaces isolate what it sees (PIDs, network, mounts, users, hostname, IPC), cgroups limit what it can use (CPU, memory, I/O), and a layered root filesystem provides its files. There's no hypervisor; containers share the host kernel.",
+    "first_principles": {
+      "problem": "Engineers treat containers as lightweight VMs and are surprised by shared-kernel behaviour and security limits.",
+      "truths": [
+        "Processes can be given private views of the system.",
+        "Resource usage can be capped per group of processes.",
+        "A filesystem can be assembled from layers."
+      ],
+      "derivation": [
+        "**Namespaces** → isolation of view.",
+        "**cgroups** → limits and accounting.",
+        "**Union filesystem** → image layers.",
+        "**Capabilities/seccomp** → reduced privileges.",
+        "Shared **kernel** → lighter but weaker isolation than VMs."
+      ]
+    },
+    "analogy": {
+      "title": "An office worker in a cubicle with blinkers and a budget",
+      "story": "They only see their own desk, can spend only their allowance, but share the building's power and plumbing.",
+      "mapping": [
+        [
+          "Cubicle walls",
+          "Namespaces"
+        ],
+        [
+          "Budget",
+          "cgroups"
+        ],
+        [
+          "Shared building",
+          "Host kernel"
+        ]
+      ],
+      "breaks": "Cubicle walls are physical; namespace isolation can be escaped through kernel bugs."
+    },
+    "mindmap": {
+      "center": "Containers = Linux",
+      "branches": [
+        {
+          "label": "Isolation",
+          "children": [
+            "PID",
+            "NET",
+            "MNT",
+            "UTS",
+            "IPC",
+            "USER"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "cgroups CPU",
+            "Memory",
+            "I/O"
+          ]
+        },
+        {
+          "label": "Filesystem",
+          "children": [
+            "Layers",
+            "OverlayFS"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Capabilities",
+            "seccomp",
+            "AppArmor/SELinux"
+          ]
+        },
+        {
+          "label": "Shared",
+          "children": [
+            "Kernel"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Seeing it from the host",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The 'container' is a process with namespaces and cgroups."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "docker run -d --name web nginx\nps -ef | grep nginx            # just a host process\nlsns -p $(docker inspect -f '{{.State.Pid}}' web)\ncat /sys/fs/cgroup/system.slice/docker-*.scope/memory.max"
+        }
+      ],
+      "outcome": "containers demystified."
+    },
+    "summary": {
+      "points": [
+        "Namespaces isolate.",
+        "cgroups limit.",
+        "Kernel is shared."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do cgroups provide for containers?",
+        "a": "Resource limits and accounting for CPU, memory, I/O and other resources."
+      }
+    ]
+  },
+  "image-layers-the-union-filesystem": {
+    "core": "An image is a stack of read-only layers, each the filesystem diff from one build step, identified by content hash. OverlayFS merges them into one view and adds a thin writable layer per container (copy-on-write). Layers are shared and cached across images, so ordering Dockerfile steps from least to most frequently changing speeds builds.",
+    "first_principles": {
+      "problem": "Every code change triggers a full dependency reinstall and a 1 GB image push.",
+      "truths": [
+        "Each instruction creates a layer.",
+        "Unchanged layers are cached by hash.",
+        "A changed layer invalidates all layers after it."
+      ],
+      "derivation": [
+        "Put **rarely changing steps first** (base, OS packages, dependencies).",
+        "**Copy source last**.",
+        "**Combine** related RUN commands and clean up in the same layer.",
+        "Use **.dockerignore**.",
+        "Inspect with **docker history/dive**."
+      ]
+    },
+    "analogy": {
+      "title": "Transparent sheets stacked on an overhead projector",
+      "story": "Each sheet adds or covers something; you see the combined picture, and only the top sheet is writable.",
+      "mapping": [
+        [
+          "Sheets",
+          "Layers"
+        ],
+        [
+          "Combined picture",
+          "Merged filesystem"
+        ],
+        [
+          "Top sheet",
+          "Writable container layer"
+        ]
+      ],
+      "breaks": "Erasing on a lower sheet is impossible; deleting a file in a later layer only hides it, it still takes space."
+    },
+    "mindmap": {
+      "center": "Image Layers",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Read-only layers",
+            "Content hashes",
+            "Writable top"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "OverlayFS",
+            "Copy-on-write"
+          ]
+        },
+        {
+          "label": "Caching",
+          "children": [
+            "Order matters",
+            "Invalidation cascades"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            ".dockerignore",
+            "Clean in same RUN"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cache-friendly Dockerfile",
+      "scenario": "Node app.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Code edits rebuild only the last layer."
+        }
+      ],
+      "code": [
+        {
+          "lang": "dockerfile",
+          "text": "FROM node:22-slim\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci --omit=dev\nCOPY . .\nCMD [\"node\", \"server.js\"]"
+        }
+      ],
+      "outcome": "fast builds and small pushes."
+    },
+    "summary": {
+      "points": [
+        "Layers are diffs.",
+        "Order for cache hits.",
+        "Deletes don't shrink earlier layers."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why copy package.json before the source code?",
+        "a": "So the dependency install layer stays cached when only source files change."
+      }
+    ]
+  },
+  "multi-stage-builds-the-builder-pattern": {
+    "core": "Multi-stage builds use several FROM stages in one Dockerfile: a fat build stage with compilers and dev dependencies produces artefacts, and a slim final stage copies only those artefacts (COPY --from=build). The shipped image contains no toolchain, which makes it smaller, faster to pull and with less attack surface.",
+    "first_principles": {
+      "problem": "A Go service image is 1.2 GB because it includes the whole Go toolchain and source.",
+      "truths": [
+        "Build tools aren't needed at runtime.",
+        "Smaller images pull faster.",
+        "Fewer packages mean fewer vulnerabilities."
+      ],
+      "derivation": [
+        "**Build stage** with full SDK.",
+        "**Final stage** minimal base (distroless, alpine, scratch).",
+        "**COPY --from** only artefacts.",
+        "Use **--target** for test stages.",
+        "Cache dependencies with **BuildKit mounts**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory and a showroom",
+      "story": "Products are made in the messy factory; only the finished goods go to the showroom.",
+      "mapping": [
+        [
+          "Factory",
+          "Build stage"
+        ],
+        [
+          "Showroom",
+          "Final image"
+        ],
+        [
+          "Finished goods",
+          "Compiled artefacts"
+        ]
+      ],
+      "breaks": "Showrooms display everything nicely; final images still need any runtime libraries the artefact depends on."
+    },
+    "mindmap": {
+      "center": "Multi-Stage",
+      "branches": [
+        {
+          "label": "Stages",
+          "children": [
+            "Build",
+            "Test",
+            "Final"
+          ]
+        },
+        {
+          "label": "Transfer",
+          "children": [
+            "COPY --from"
+          ]
+        },
+        {
+          "label": "Bases",
+          "children": [
+            "distroless",
+            "alpine",
+            "scratch"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Small",
+            "Secure",
+            "Fast pulls"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "--target",
+            "BuildKit cache"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Go service",
+      "scenario": "Dockerfile.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "1.2 GB → ~15 MB."
+        }
+      ],
+      "code": [
+        {
+          "lang": "dockerfile",
+          "text": "FROM golang:1.23 AS build\nWORKDIR /src\nCOPY . .\nRUN CGO_ENABLED=0 go build -o /out/api ./cmd/api\n\nFROM gcr.io/distroless/static-debian12\nCOPY --from=build /out/api /api\nUSER nonroot\nENTRYPOINT [\"/api\"]"
+        }
+      ],
+      "outcome": "lean production images."
+    },
+    "summary": {
+      "points": [
+        "Build fat, ship thin.",
+        "Copy only artefacts.",
+        "Smaller and safer."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does COPY --from=build do?",
+        "a": "Copies files from an earlier build stage into the current stage."
+      }
+    ]
+  },
+  "distroless-images-the-ultimate-minimalism": {
+    "core": "Distroless images contain only your app and its runtime dependencies (libc, CA certificates, timezone data, language runtime), with no shell, package manager or utilities. That shrinks size and CVE counts and removes tools attackers use, but debugging requires ephemeral debug containers or :debug variants.",
+    "first_principles": {
+      "problem": "Security scans flag hundreds of CVEs in packages the app never uses (bash, curl, apt).",
+      "truths": [
+        "Unused packages still carry vulnerabilities.",
+        "Attackers use shells and tools.",
+        "Apps need only a few runtime files."
+      ],
+      "derivation": [
+        "Use **gcr.io/distroless** or **Chainguard** images.",
+        "Pick the right variant (**static, base, cc, java, python**).",
+        "Run as **nonroot**.",
+        "Debug with **kubectl debug** or **:debug** tags.",
+        "Use **exec-form** ENTRYPOINT (no shell)."
+      ]
+    },
+    "analogy": {
+      "title": "A sealed appliance with no user-serviceable parts",
+      "story": "It does one job, and there are no tools inside for tampering.",
+      "mapping": [
+        [
+          "Sealed appliance",
+          "Distroless image"
+        ],
+        [
+          "No screws",
+          "No shell"
+        ],
+        [
+          "Repair kit",
+          "Debug container"
+        ]
+      ],
+      "breaks": "Appliances can be opened by technicians; distroless needs a separate debug image to inspect."
+    },
+    "mindmap": {
+      "center": "Distroless",
+      "branches": [
+        {
+          "label": "Contains",
+          "children": [
+            "App",
+            "Runtime libs",
+            "CA certs",
+            "tzdata"
+          ]
+        },
+        {
+          "label": "Omits",
+          "children": [
+            "Shell",
+            "Package manager",
+            "Utilities"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Fewer CVEs",
+            "Smaller",
+            "Less attack surface"
+          ]
+        },
+        {
+          "label": "Debugging",
+          "children": [
+            "kubectl debug",
+            ":debug variants"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Exec-form entrypoint",
+            "nonroot"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CVE comparison",
+      "scenario": "Scan results.",
+      "flow": [
+        "debian-based image: 180 CVEs",
+        "distroless static: 0–2 CVEs",
+        "No shell for attackers to exec into"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cleaner scans, smaller attack surface."
+        }
+      ],
+      "code": [],
+      "outcome": "minimal, hardened images."
+    },
+    "summary": {
+      "points": [
+        "Only what the app needs.",
+        "No shell.",
+        "Debug separately."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must distroless images use exec-form ENTRYPOINT?",
+        "a": "There's no shell to interpret shell-form commands."
+      }
+    ]
+  },
+  "buildkit-the-modern-docker-builder": {
+    "core": "BuildKit is Docker's modern build engine: it builds stages in parallel, skips unused stages, supports cache mounts (persist package caches between builds), secret mounts (use credentials without baking them into layers), SSH forwarding, multi-platform builds via buildx and remote/registry cache export for CI.",
+    "first_principles": {
+      "problem": "CI builds take 15 minutes because dependency caches are lost each run, and a token ended up in an image layer.",
+      "truths": [
+        "Independent stages can run in parallel.",
+        "Package caches can be reused safely.",
+        "Secrets in layers are permanent."
+      ],
+      "derivation": [
+        "Enable **BuildKit** (default in modern Docker).",
+        "**RUN --mount=type=cache** for package managers.",
+        "**RUN --mount=type=secret** for tokens.",
+        "**buildx** for multi-arch (amd64/arm64).",
+        "**--cache-to/--cache-from** registry cache in CI."
+      ]
+    },
+    "analogy": {
+      "title": "A modern kitchen with several cooks and a shared pantry",
+      "story": "Dishes are prepped in parallel, staples are kept between services, and the safe key is never left on the counter.",
+      "mapping": [
+        [
+          "Several cooks",
+          "Parallel stages"
+        ],
+        [
+          "Shared pantry",
+          "Cache mounts"
+        ],
+        [
+          "Safe key",
+          "Secret mounts"
+        ]
+      ],
+      "breaks": "Kitchens reuse leftovers freely; cache mounts aren't included in the final image."
+    },
+    "mindmap": {
+      "center": "BuildKit",
+      "branches": [
+        {
+          "label": "Speed",
+          "children": [
+            "Parallel stages",
+            "Skip unused",
+            "Cache mounts"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Secret mounts",
+            "SSH forwarding"
+          ]
+        },
+        {
+          "label": "Platforms",
+          "children": [
+            "buildx",
+            "multi-arch"
+          ]
+        },
+        {
+          "label": "CI",
+          "children": [
+            "Registry cache",
+            "--cache-to/from"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cache and secret mounts",
+      "scenario": "Dockerfile.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster installs; token never stored in a layer."
+        }
+      ],
+      "code": [
+        {
+          "lang": "dockerfile",
+          "text": "# syntax=docker/dockerfile:1\nFROM python:3.12-slim\nRUN --mount=type=cache,target=/root/.cache/pip \\\n    --mount=type=secret,id=pip_token \\\n    PIP_INDEX_URL=https://$(cat /run/secrets/pip_token)@pypi.example.com/simple \\\n    pip install -r requirements.txt"
+        }
+      ],
+      "outcome": "fast, secure builds."
+    },
+    "summary": {
+      "points": [
+        "Parallel and cached.",
+        "Secrets never in layers.",
+        "Multi-arch with buildx."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you use a credential during a build without leaving it in the image?",
+        "a": "Use a BuildKit secret mount (RUN --mount=type=secret)."
+      }
+    ]
+  },
+  "entrypoint-vs-cmd-the-eternal-confusion": {
+    "core": "ENTRYPOINT defines the executable that always runs; CMD supplies default arguments (or a default command if there's no ENTRYPOINT). docker run args replace CMD, and --entrypoint overrides ENTRYPOINT. Use exec form (JSON arrays) so the process runs as PID 1 and receives signals; shell form wraps it in /bin/sh -c.",
+    "first_principles": {
+      "problem": "docker run myimage --debug fails because the flag replaced the whole command instead of being appended.",
+      "truths": [
+        "Combined command = ENTRYPOINT + CMD.",
+        "Run arguments replace CMD only.",
+        "Shell form inserts a shell process."
+      ],
+      "derivation": [
+        "Use **ENTRYPOINT** for the fixed executable.",
+        "Use **CMD** for default, overridable args.",
+        "Prefer **exec form** [\"bin\", \"arg\"].",
+        "In Kubernetes: **command** ↔ ENTRYPOINT, **args** ↔ CMD.",
+        "Use an **entrypoint script** with exec \"$@\" for setup."
+      ]
+    },
+    "analogy": {
+      "title": "A coffee machine and its default order",
+      "story": "The machine (ENTRYPOINT) always makes coffee; the default is a latte (CMD) unless you ask for something else.",
+      "mapping": [
+        [
+          "Machine",
+          "ENTRYPOINT"
+        ],
+        [
+          "Default order",
+          "CMD"
+        ],
+        [
+          "Your order",
+          "docker run args"
+        ]
+      ],
+      "breaks": "Coffee machines don't care about signals; shell-form entrypoints can swallow SIGTERM."
+    },
+    "mindmap": {
+      "center": "ENTRYPOINT vs CMD",
+      "branches": [
+        {
+          "label": "ENTRYPOINT",
+          "children": [
+            "Fixed executable",
+            "--entrypoint override"
+          ]
+        },
+        {
+          "label": "CMD",
+          "children": [
+            "Default args",
+            "Replaced by run args"
+          ]
+        },
+        {
+          "label": "Forms",
+          "children": [
+            "Exec (JSON)",
+            "Shell (sh -c)"
+          ]
+        },
+        {
+          "label": "Kubernetes",
+          "children": [
+            "command",
+            "args"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "exec \"$@\""
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Combining both",
+      "scenario": "Dockerfile.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Flags extend the fixed executable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "dockerfile",
+          "text": "ENTRYPOINT [\"/app/server\"]\nCMD [\"--port=8080\"]\n# docker run img            → /app/server --port=8080\n# docker run img --debug    → /app/server --debug"
+        }
+      ],
+      "outcome": "predictable container commands."
+    },
+    "summary": {
+      "points": [
+        "ENTRYPOINT = program.",
+        "CMD = defaults.",
+        "Exec form always."
+      ]
+    },
+    "check": [
+      {
+        "q": "In Kubernetes, which field overrides a Docker ENTRYPOINT?",
+        "a": "The container's command field (args overrides CMD)."
+      }
+    ]
+  },
+  "signals-handling-and-the-pid-1-problem": {
+    "core": "The first process in a container is PID 1. Linux gives PID 1 special behaviour: it doesn't get default signal handlers (SIGTERM is ignored unless handled) and must reap zombie child processes. Shell-form entrypoints or apps without handlers cause slow, forced shutdowns (SIGKILL after the grace period) and zombie build-up. Use exec form, handle SIGTERM, or add a tiny init (tini, --init).",
+    "first_principles": {
+      "problem": "Pods take the full 30-second grace period to stop and then get killed, dropping in-flight requests.",
+      "truths": [
+        "Orchestrators send SIGTERM, then SIGKILL.",
+        "PID 1 ignores unhandled signals.",
+        "Orphaned children need reaping."
+      ],
+      "derivation": [
+        "Use **exec-form** entrypoints.",
+        "**Handle SIGTERM** gracefully (drain, close).",
+        "Use **tini / docker run --init / shareProcessNamespace** to reap zombies.",
+        "Use **exec** in entrypoint scripts.",
+        "Tune **terminationGracePeriodSeconds** and **preStop**."
+      ]
+    },
+    "analogy": {
+      "title": "A shop manager who must lock up and send staff home",
+      "story": "If the manager ignores the closing bell, security eventually throws everyone out mid-sale.",
+      "mapping": [
+        [
+          "Closing bell",
+          "SIGTERM"
+        ],
+        [
+          "Security throwing out",
+          "SIGKILL"
+        ],
+        [
+          "Sending staff home",
+          "Reaping children"
+        ]
+      ],
+      "breaks": "Managers notice bells; a process only reacts to signals it registers handlers for."
+    },
+    "mindmap": {
+      "center": "PID 1",
+      "branches": [
+        {
+          "label": "Special",
+          "children": [
+            "No default handlers",
+            "Must reap zombies"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Slow shutdown",
+            "SIGKILL",
+            "Zombies"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Exec form",
+            "Signal handlers",
+            "tini/--init",
+            "exec in scripts"
+          ]
+        },
+        {
+          "label": "K8s",
+          "children": [
+            "Grace period",
+            "preStop"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Graceful shutdown",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clean stop in seconds, no dropped requests."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import signal, sys\ndef shutdown(signum, frame):\n    server.stop_accepting(); server.drain(timeout=20); sys.exit(0)\nsignal.signal(signal.SIGTERM, shutdown)"
+        }
+      ],
+      "outcome": "fast, graceful container shutdowns."
+    },
+    "summary": {
+      "points": [
+        "PID 1 is special.",
+        "Handle SIGTERM.",
+        "Use an init for reaping."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a shell-form ENTRYPOINT break graceful shutdown?",
+        "a": "The shell becomes PID 1 and doesn't forward SIGTERM to the app, so it's eventually SIGKILLed."
+      }
+    ]
+  }
+}

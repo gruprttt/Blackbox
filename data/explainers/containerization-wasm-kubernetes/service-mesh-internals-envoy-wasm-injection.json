@@ -1,0 +1,754 @@
+{
+  "introduction-the-universal-data-plane": {
+    "core": "Service meshes move networking concerns (mTLS, retries, timeouts, traffic splitting, telemetry) out of application code into proxies. Envoy is the dominant data-plane proxy, configured dynamically by a control plane (Istio's istiod) via the xDS APIs, running as a sidecar per Pod or, in ambient/sidecar-less modes, as node-level and waypoint proxies.",
+    "first_principles": {
+      "problem": "Every service team reimplements retries, TLS and metrics differently in each language.",
+      "truths": [
+        "Cross-cutting network logic repeats.",
+        "Proxies can intercept traffic transparently.",
+        "A control plane can configure proxies centrally."
+      ],
+      "derivation": [
+        "Deploy **Envoy** next to (or near) workloads.",
+        "Configure via **xDS** from the control plane.",
+        "Enforce **mTLS** by identity.",
+        "Apply **traffic policies** declaratively.",
+        "Collect **uniform telemetry**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal translator and bodyguard for every service",
+      "story": "Each service just talks; the companion handles security, retries and record-keeping.",
+      "mapping": [
+        [
+          "Companion",
+          "Envoy proxy"
+        ],
+        [
+          "Agency HQ",
+          "Control plane"
+        ],
+        [
+          "Instructions",
+          "xDS config"
+        ]
+      ],
+      "breaks": "Bodyguards are visible; sidecars are transparent but add latency and resource cost."
+    },
+    "mindmap": {
+      "center": "Service Mesh",
+      "branches": [
+        {
+          "label": "Data plane",
+          "children": [
+            "Envoy",
+            "Sidecar",
+            "Ambient/ztunnel",
+            "Waypoint"
+          ]
+        },
+        {
+          "label": "Control plane",
+          "children": [
+            "istiod",
+            "xDS"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "mTLS",
+            "Retries",
+            "Timeouts",
+            "Traffic split",
+            "Telemetry"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Latency",
+            "Resources",
+            "Complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Policy without code",
+      "scenario": "Effect.",
+      "flow": [
+        "VirtualService: retries 3, timeout 2s",
+        "PeerAuthentication: STRICT mTLS",
+        "All services comply without code changes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Uniform network behaviour."
+        }
+      ],
+      "code": [],
+      "outcome": "networking as infrastructure."
+    },
+    "summary": {
+      "points": [
+        "Proxies handle networking.",
+        "Control plane configures.",
+        "Uniform across languages."
+      ]
+    },
+    "check": [
+      {
+        "q": "What protocol does Istio use to configure Envoy proxies?",
+        "a": "The xDS APIs (LDS, RDS, CDS, EDS, SDS)."
+      }
+    ]
+  },
+  "envoy-internals-the-russian-doll-model": {
+    "core": "Envoy's configuration nests: listeners (bind addresses and ports) contain filter chains matched by connection properties; network filters (e.g. the HTTP connection manager) contain HTTP filters; routes map requests to clusters; clusters group endpoints with load-balancing, health checking and circuit breaking. Each layer is delivered by an xDS API: LDS, RDS, CDS, EDS and SDS for secrets.",
+    "first_principles": {
+      "problem": "Engineers can't interpret Envoy config dumps when traffic misroutes.",
+      "truths": [
+        "Traffic is processed in layers.",
+        "Each layer has its own config source.",
+        "Dumps reveal the effective config."
+      ],
+      "derivation": [
+        "**Listener** → filter chain → **HTTP connection manager**.",
+        "**Routes** select **clusters**.",
+        "**Clusters** contain **endpoints**.",
+        "Map to **LDS/RDS/CDS/EDS/SDS**.",
+        "Inspect with **istioctl proxy-config**."
+      ]
+    },
+    "analogy": {
+      "title": "Russian nesting dolls",
+      "story": "Open the listener to find filters, open those to find routes, then clusters, then endpoints.",
+      "mapping": [
+        [
+          "Outer doll",
+          "Listener"
+        ],
+        [
+          "Middle dolls",
+          "Filters, routes"
+        ],
+        [
+          "Inner doll",
+          "Endpoints"
+        ]
+      ],
+      "breaks": "Dolls are static; Envoy layers update live via xDS without restarts."
+    },
+    "mindmap": {
+      "center": "Envoy Model",
+      "branches": [
+        {
+          "label": "Layers",
+          "children": [
+            "Listener",
+            "Filter chain",
+            "HTTP filters",
+            "Route",
+            "Cluster",
+            "Endpoint"
+          ]
+        },
+        {
+          "label": "xDS",
+          "children": [
+            "LDS",
+            "RDS",
+            "CDS",
+            "EDS",
+            "SDS"
+          ]
+        },
+        {
+          "label": "Cluster features",
+          "children": [
+            "LB",
+            "Health checks",
+            "Circuit breaking",
+            "Outlier detection"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "istioctl proxy-config",
+            "/config_dump"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect a sidecar",
+      "scenario": "istioctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Route points to an old subset with zero endpoints."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "istioctl proxy-config listeners api-7f9.shop\nistioctl proxy-config routes api-7f9.shop --name 8080 -o json\nistioctl proxy-config endpoints api-7f9.shop --cluster 'outbound|80||payments.pay.svc.cluster.local'"
+        }
+      ],
+      "outcome": "Envoy config readable."
+    },
+    "summary": {
+      "points": [
+        "Nested layers.",
+        "xDS per layer.",
+        "Inspect effective config."
+      ]
+    },
+    "check": [
+      {
+        "q": "In Envoy, what groups upstream endpoints with load-balancing settings?",
+        "a": "A cluster."
+      }
+    ]
+  },
+  "deep-dive-the-filter-chain": {
+    "core": "Envoy processes requests through ordered filters: network filters (TCP proxy, TLS inspector, RBAC) and, inside the HTTP connection manager, HTTP filters (JWT authentication, external authorisation, rate limiting, fault injection, CORS, Wasm, Lua, router last). Each filter can inspect, modify, stop or continue the request, so order determines behaviour.",
+    "first_principles": {
+      "problem": "Rate limiting runs after authentication fails, wasting work, or auth is skipped because filters are misordered.",
+      "truths": [
+        "Filters run in sequence.",
+        "Early filters can short-circuit.",
+        "The router must be last."
+      ],
+      "derivation": [
+        "**TLS inspector** to select chains.",
+        "**Authn/authz** early (jwt_authn, ext_authz, RBAC).",
+        "**Rate limit** before expensive work.",
+        "**Custom logic** via Wasm/Lua.",
+        "**Router** filter last."
+      ]
+    },
+    "analogy": {
+      "title": "An airport security line",
+      "story": "ID check, then bag scan, then boarding gate, in that order.",
+      "mapping": [
+        [
+          "ID check",
+          "Auth filters"
+        ],
+        [
+          "Bag scan",
+          "Policy/rate limit"
+        ],
+        [
+          "Boarding gate",
+          "Router filter"
+        ]
+      ],
+      "breaks": "Airport lines rarely reorder; mesh configs can inject filters in unexpected positions."
+    },
+    "mindmap": {
+      "center": "Filter Chain",
+      "branches": [
+        {
+          "label": "Network filters",
+          "children": [
+            "TLS inspector",
+            "TCP proxy",
+            "RBAC"
+          ]
+        },
+        {
+          "label": "HTTP filters",
+          "children": [
+            "jwt_authn",
+            "ext_authz",
+            "ratelimit",
+            "fault",
+            "cors",
+            "wasm",
+            "lua",
+            "router"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Continue",
+            "Stop",
+            "Modify"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Order matters",
+            "Router last"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Istio EnvoyFilter insertion",
+      "scenario": "Concept.",
+      "flow": [
+        "Insert Wasm filter BEFORE envoy.filters.http.router",
+        "Filter adds tenant header from JWT claim",
+        "Router uses header for routing"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Custom logic at the right point."
+        }
+      ],
+      "code": [],
+      "outcome": "predictable request processing."
+    },
+    "summary": {
+      "points": [
+        "Ordered filters.",
+        "Auth early.",
+        "Router last."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which HTTP filter must always be last in Envoy's chain?",
+        "a": "The router filter."
+      }
+    ]
+  },
+  "wasm-extensions-safer-faster-customization": {
+    "core": "Envoy can load WebAssembly filters (Proxy-Wasm ABI) written in Rust, Go (TinyGo), C++ or AssemblyScript to add custom logic like header transformation, custom auth or telemetry without recompiling Envoy. Wasm runs sandboxed, so a buggy filter can't crash the proxy's memory, and it's distributed as OCI images (Istio WasmPlugin).",
+    "first_principles": {
+      "problem": "Custom Envoy logic previously required C++ filters compiled into a custom Envoy build.",
+      "truths": [
+        "Recompiling the proxy is costly.",
+        "Sandboxing limits blast radius.",
+        "OCI makes distribution easy."
+      ],
+      "derivation": [
+        "Write against **Proxy-Wasm SDKs**.",
+        "Build to **.wasm** and push as **OCI**.",
+        "Deploy with **Istio WasmPlugin**.",
+        "Mind **performance overhead** vs native.",
+        "Use **Lua** for tiny scripts, **ext_authz** for external services."
+      ]
+    },
+    "analogy": {
+      "title": "Plug-in cartridges for a games console",
+      "story": "Add new games without rebuilding the console, and a faulty cartridge can't damage it.",
+      "mapping": [
+        [
+          "Console",
+          "Envoy"
+        ],
+        [
+          "Cartridge",
+          "Wasm filter"
+        ],
+        [
+          "Cartridge slot",
+          "Proxy-Wasm ABI"
+        ]
+      ],
+      "breaks": "Cartridges run at full speed; Wasm filters add some overhead versus native C++ filters."
+    },
+    "mindmap": {
+      "center": "Wasm in Envoy",
+      "branches": [
+        {
+          "label": "ABI",
+          "children": [
+            "Proxy-Wasm"
+          ]
+        },
+        {
+          "label": "Languages",
+          "children": [
+            "Rust",
+            "TinyGo",
+            "C++",
+            "AssemblyScript"
+          ]
+        },
+        {
+          "label": "Distribution",
+          "children": [
+            "OCI images",
+            "WasmPlugin"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No rebuild",
+            "Sandbox"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Lua",
+            "ext_authz",
+            "Native filters"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "WasmPlugin",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Custom logic rolled out like an image."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: extensions.istio.io/v1alpha1\nkind: WasmPlugin\nmetadata: {name: tenant-header, namespace: shop}\nspec:\n  selector: {matchLabels: {app: api}}\n  url: oci://registry.example.com/wasm/tenant-header:1.2.0\n  phase: AUTHN\n  pluginConfig: {claim: tenant_id, header: x-tenant}"
+        }
+      ],
+      "outcome": "safe proxy extensibility."
+    },
+    "summary": {
+      "points": [
+        "Wasm filters.",
+        "No proxy rebuild.",
+        "Sandboxed and OCI-distributed."
+      ]
+    },
+    "check": [
+      {
+        "q": "What ABI do Envoy Wasm filters implement?",
+        "a": "Proxy-Wasm."
+      }
+    ]
+  },
+  "sidecar-injection-the-mutating-webhook": {
+    "core": "Istio's sidecar injection uses a mutating admission webhook: when a Pod is created in a namespace labelled istio-injection=enabled (or with revision labels), the API server calls istiod's webhook, which adds the istio-proxy container, an init container (istio-init) or CNI plugin for traffic redirection, volumes and annotations. Existing Pods need restarting to get or update sidecars.",
+    "first_principles": {
+      "problem": "A team enables the mesh label but their Pods have no sidecars.",
+      "truths": [
+        "Injection happens at Pod creation.",
+        "Webhooks need to be reachable.",
+        "Labels control scope."
+      ],
+      "derivation": [
+        "Label namespace **istio-injection=enabled** or **istio.io/rev**.",
+        "**Restart** workloads to inject.",
+        "Check **webhook config** and istiod health.",
+        "Use **annotations** to opt out per Pod.",
+        "Upgrade sidecars via **revisions/canary**."
+      ]
+    },
+    "analogy": {
+      "title": "A tailor who adds a pocket to every suit made in one workshop",
+      "story": "Suits already sold need to come back to get the pocket.",
+      "mapping": [
+        [
+          "Workshop",
+          "Labelled namespace"
+        ],
+        [
+          "Tailor",
+          "Injection webhook"
+        ],
+        [
+          "Pocket",
+          "Sidecar container"
+        ]
+      ],
+      "breaks": "Tailors can alter suits later; Pods must be recreated for injection."
+    },
+    "mindmap": {
+      "center": "Sidecar Injection",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Mutating webhook",
+            "istiod"
+          ]
+        },
+        {
+          "label": "Adds",
+          "children": [
+            "istio-proxy",
+            "istio-init/CNI",
+            "Volumes"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Namespace label",
+            "Revision label",
+            "Pod annotations"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Restart to inject",
+            "Revision upgrades"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable and verify",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Sidecars present after restart."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl label namespace shop istio-injection=enabled\nkubectl rollout restart deploy -n shop\nkubectl get pod -n shop -o jsonpath='{.items[0].spec.containers[*].name}'   # api istio-proxy"
+        }
+      ],
+      "outcome": "injection understood and verified."
+    },
+    "summary": {
+      "points": [
+        "Webhook at creation.",
+        "Labels scope it.",
+        "Restart to apply."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why don't existing Pods get sidecars after labelling the namespace?",
+        "a": "Injection happens via admission at Pod creation, so existing Pods must be recreated."
+      }
+    ]
+  },
+  "networking-redirection-the-iptables-magic": {
+    "core": "To make the sidecar transparent, istio-init (or the Istio CNI plugin) installs iptables rules in the Pod's network namespace: outbound traffic is redirected to Envoy's port 15001 and inbound to 15006, excluding Envoy's own traffic (by UID 1337) to avoid loops. Envoy then applies policy and forwards to the real destination. Ambient mode replaces this with node-level ztunnel and eBPF/iptables redirection.",
+    "first_principles": {
+      "problem": "Apps break when calling certain ports, or init containers need NET_ADMIN, which security policies forbid.",
+      "truths": [
+        "Transparent proxying needs redirection.",
+        "Loops must be avoided.",
+        "Init containers with NET_ADMIN conflict with restricted policies."
+      ],
+      "derivation": [
+        "Understand **15001 outbound / 15006 inbound**.",
+        "Exclusion by **UID 1337**.",
+        "Use **Istio CNI** to avoid privileged init containers.",
+        "Exclude ports via **annotations** when needed.",
+        "Consider **ambient mode**."
+      ]
+    },
+    "analogy": {
+      "title": "Mail diverted through the building's post room",
+      "story": "All letters in and out pass through the post room, except the post room's own mail.",
+      "mapping": [
+        [
+          "Post room",
+          "Envoy sidecar"
+        ],
+        [
+          "Diversion rules",
+          "iptables"
+        ],
+        [
+          "Post room's own mail",
+          "UID 1337 exclusion"
+        ]
+      ],
+      "breaks": "Post rooms are visible; iptables redirection is invisible to the app."
+    },
+    "mindmap": {
+      "center": "Traffic Redirection",
+      "branches": [
+        {
+          "label": "Ports",
+          "children": [
+            "15001 outbound",
+            "15006 inbound"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "iptables in Pod netns",
+            "istio-init",
+            "Istio CNI"
+          ]
+        },
+        {
+          "label": "Loop avoidance",
+          "children": [
+            "UID 1337"
+          ]
+        },
+        {
+          "label": "Exclusions",
+          "children": [
+            "Port/IP annotations"
+          ]
+        },
+        {
+          "label": "Ambient",
+          "children": [
+            "ztunnel",
+            "Waypoints"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspecting rules",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See ISTIO_OUTPUT/ISTIO_INBOUND redirection chains."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl debug -it api-7f9 --image=nicolaka/netshoot --profile=netadmin -- iptables -t nat -S | grep ISTIO"
+        }
+      ],
+      "outcome": "transparent proxying demystified."
+    },
+    "summary": {
+      "points": [
+        "iptables redirect.",
+        "UID exclusion.",
+        "CNI avoids NET_ADMIN init."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does Istio prevent Envoy's outbound traffic from being redirected back to itself?",
+        "a": "iptables rules exclude traffic from Envoy's user ID (1337)."
+      }
+    ]
+  },
+  "debugging-injection-and-mesh-failures": {
+    "core": "Common mesh failures: missing sidecars (label or webhook issues), 503s with response flags like UF/UH/NR (upstream failure, no healthy hosts, no route), mTLS mismatches (STRICT vs plaintext clients), startup races (app starts before Envoy is ready, fixed by holdApplicationUntilProxyStarts) and config drift. istioctl analyze, proxy-status, proxy-config and Envoy access logs are the main tools.",
+    "first_principles": {
+      "problem": "After enabling STRICT mTLS, a legacy client outside the mesh gets connection resets.",
+      "truths": [
+        "Envoy response flags explain failures.",
+        "Policy mismatches break connections.",
+        "Startup order matters."
+      ],
+      "derivation": [
+        "Run **istioctl analyze**.",
+        "Check **proxy-status** for config sync.",
+        "Read **access logs** with response flags.",
+        "Check **PeerAuthentication/DestinationRule** TLS modes.",
+        "Set **holdApplicationUntilProxyStarts**."
+      ]
+    },
+    "analogy": {
+      "title": "Reading airline delay codes",
+      "story": "Each code tells you whether it's weather, crew or mechanical, so you know who to call.",
+      "mapping": [
+        [
+          "Delay codes",
+          "Response flags"
+        ],
+        [
+          "Weather",
+          "No healthy upstream"
+        ],
+        [
+          "Crew mismatch",
+          "mTLS mismatch"
+        ]
+      ],
+      "breaks": "Delay codes are standardised worldwide; mesh issues also depend on your specific policies."
+    },
+    "mindmap": {
+      "center": "Mesh Debugging",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "istioctl analyze",
+            "proxy-status",
+            "proxy-config",
+            "Access logs"
+          ]
+        },
+        {
+          "label": "Flags",
+          "children": [
+            "UF",
+            "UH",
+            "NR",
+            "URX",
+            "DC"
+          ]
+        },
+        {
+          "label": "Common issues",
+          "children": [
+            "No sidecar",
+            "mTLS mismatch",
+            "Startup race",
+            "Stale config"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "PERMISSIVE migration",
+            "holdApplicationUntilProxyStarts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "mTLS migration",
+      "scenario": "Steps.",
+      "flow": [
+        "Set PeerAuthentication PERMISSIVE",
+        "Onboard legacy client into mesh",
+        "Verify all traffic is mTLS (Kiali/metrics)",
+        "Switch to STRICT"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No broken clients during migration."
+        }
+      ],
+      "code": [],
+      "outcome": "systematic mesh troubleshooting."
+    },
+    "summary": {
+      "points": [
+        "Use istioctl.",
+        "Read response flags.",
+        "Migrate policies gradually."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the Envoy response flag 'UH' indicate?",
+        "a": "No healthy upstream hosts in the target cluster."
+      }
+    ]
+  }
+}

@@ -1,0 +1,944 @@
+{
+  "introduction-the-lego-bricks-of-kubernetes": {
+    "core": "Kubernetes is a declarative system: you submit desired state as API objects (Pods, Services, Deployments, ConfigMaps, Secrets), and controllers continuously reconcile actual state toward it. A handful of primitives compose into almost every application architecture.",
+    "first_principles": {
+      "problem": "Engineers write imperative scripts to start, restart and scale containers by hand.",
+      "truths": [
+        "Desired state can be declared.",
+        "Controllers reconcile continuously.",
+        "Small primitives compose."
+      ],
+      "derivation": [
+        "**Pod**: run containers together.",
+        "**Deployment**: manage replicated Pods.",
+        "**Service**: stable network identity.",
+        "**ConfigMap/Secret**: configuration.",
+        "Apply with **kubectl apply -f**."
+      ]
+    },
+    "analogy": {
+      "title": "Lego bricks with a self-repairing model",
+      "story": "You describe the model; if a brick falls off, it snaps back automatically.",
+      "mapping": [
+        [
+          "Bricks",
+          "API objects"
+        ],
+        [
+          "Instructions",
+          "YAML manifests"
+        ],
+        [
+          "Self-repair",
+          "Reconciliation"
+        ]
+      ],
+      "breaks": "Lego doesn't rebuild itself; Kubernetes controllers do, continuously."
+    },
+    "mindmap": {
+      "center": "K8s Primitives",
+      "branches": [
+        {
+          "label": "Workloads",
+          "children": [
+            "Pod",
+            "Deployment",
+            "ReplicaSet"
+          ]
+        },
+        {
+          "label": "Networking",
+          "children": [
+            "Service"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "ConfigMap",
+            "Secret"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Declarative",
+            "Reconciliation"
+          ]
+        },
+        {
+          "label": "Tool",
+          "children": [
+            "kubectl apply"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A minimal app",
+      "scenario": "Objects.",
+      "flow": [
+        "Deployment: 3 replicas of web:1.0",
+        "Service: ClusterIP selecting app=web",
+        "ConfigMap: app settings",
+        "kubectl apply -f app/"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Self-healing, discoverable app."
+        }
+      ],
+      "code": [],
+      "outcome": "declarative application management."
+    },
+    "summary": {
+      "points": [
+        "Declare desired state.",
+        "Controllers reconcile.",
+        "Few primitives compose."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'reconciliation' mean in Kubernetes?",
+        "a": "Controllers continuously compare actual state with desired state and act to close the gap."
+      }
+    ]
+  },
+  "pods-the-atomic-unit": {
+    "core": "A Pod is the smallest deployable unit: one or more containers that share a network namespace (same IP and ports, localhost between them), can share volumes, and are scheduled together onto one node. Pods are ephemeral and replaceable; you rarely create them directly.",
+    "first_principles": {
+      "problem": "A team puts a web server and its log shipper in separate Pods and can't share files or localhost.",
+      "truths": [
+        "Some processes must be co-located.",
+        "Shared networking simplifies sidecars.",
+        "Pods die and get replaced."
+      ],
+      "derivation": [
+        "Put **tightly coupled** containers in one Pod.",
+        "Use **sidecars** (proxies, log shippers) and **init containers**.",
+        "Share data via **emptyDir** volumes.",
+        "Don't create **bare Pods**; use controllers.",
+        "Treat Pods as **cattle**."
+      ]
+    },
+    "analogy": {
+      "title": "A shared flat",
+      "story": "Flatmates share an address and kitchen, but each has their own room.",
+      "mapping": [
+        [
+          "Address",
+          "Pod IP"
+        ],
+        [
+          "Kitchen",
+          "Shared volumes"
+        ],
+        [
+          "Rooms",
+          "Containers"
+        ]
+      ],
+      "breaks": "Flatmates move out separately; containers in a Pod are scheduled and removed together."
+    },
+    "mindmap": {
+      "center": "Pods",
+      "branches": [
+        {
+          "label": "Shared",
+          "children": [
+            "Network namespace",
+            "IP",
+            "Volumes"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Sidecar",
+            "Init container",
+            "Ambassador"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Ephemeral",
+            "Replaced, not repaired"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Use controllers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sidecar log shipper",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shipper reads nginx logs from the shared volume."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: v1\nkind: Pod\nmetadata: {name: web}\nspec:\n  volumes: [{name: logs, emptyDir: {}}]\n  containers:\n  - name: app\n    image: nginx\n    volumeMounts: [{name: logs, mountPath: /var/log/nginx}]\n  - name: shipper\n    image: fluent/fluent-bit\n    volumeMounts: [{name: logs, mountPath: /logs}]"
+        }
+      ],
+      "outcome": "co-located helpers done right."
+    },
+    "summary": {
+      "points": [
+        "Shared network and volumes.",
+        "Co-scheduled.",
+        "Ephemeral."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do two containers in one Pod communicate over the network?",
+        "a": "Via localhost, since they share a network namespace."
+      }
+    ]
+  },
+  "pod-lifecycle-and-probes": {
+    "core": "Pods move through phases (Pending, Running, Succeeded, Failed). Probes tell Kubernetes about container health: startupProbe protects slow starters, readinessProbe controls whether a Pod receives Service traffic, and livenessProbe restarts containers that are stuck. Misconfigured probes cause restart loops or traffic to unready Pods.",
+    "first_principles": {
+      "problem": "A Java app is killed by its liveness probe before it finishes starting, looping forever.",
+      "truths": [
+        "Running isn't the same as ready.",
+        "Restarts fix deadlocks, not dependency outages.",
+        "Slow starts need protection."
+      ],
+      "derivation": [
+        "**startupProbe** for slow initialisation.",
+        "**readinessProbe** gates traffic.",
+        "**livenessProbe** only for unrecoverable hangs.",
+        "Don't check **external dependencies** in liveness.",
+        "Tune **thresholds and periods**."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant opening routine",
+      "story": "The 'open' sign goes up only when the kitchen is ready (readiness); if the chef faints, someone replaces them (liveness).",
+      "mapping": [
+        [
+          "Open sign",
+          "Readiness"
+        ],
+        [
+          "Replacing the chef",
+          "Liveness restart"
+        ],
+        [
+          "Setup time",
+          "Startup probe"
+        ]
+      ],
+      "breaks": "Restaurants can partially open; readiness is binary per Pod."
+    },
+    "mindmap": {
+      "center": "Lifecycle & Probes",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "Pending",
+            "Running",
+            "Succeeded",
+            "Failed"
+          ]
+        },
+        {
+          "label": "Probes",
+          "children": [
+            "startup",
+            "readiness",
+            "liveness"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "HTTP",
+            "TCP",
+            "exec",
+            "gRPC"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Liveness on deps",
+            "Tight thresholds"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Probe config",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "150 s to start; traffic only when ready."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "startupProbe:\n  httpGet: {path: /healthz, port: 8080}\n  failureThreshold: 30\n  periodSeconds: 5\nreadinessProbe:\n  httpGet: {path: /ready, port: 8080}\n  periodSeconds: 5\nlivenessProbe:\n  httpGet: {path: /healthz, port: 8080}\n  periodSeconds: 10\n  failureThreshold: 3"
+        }
+      ],
+      "outcome": "healthy rollouts and restarts."
+    },
+    "summary": {
+      "points": [
+        "Startup protects boot.",
+        "Readiness gates traffic.",
+        "Liveness restarts hangs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shouldn't a liveness probe check a database connection?",
+        "a": "A DB outage would restart every Pod in a loop without fixing anything."
+      }
+    ]
+  },
+  "services-stable-networking-for-unstable-pods": {
+    "core": "Pods come and go with changing IPs. A Service gives a stable virtual IP and DNS name, selects Pods by label, and load-balances across ready endpoints (tracked in EndpointSlices). kube-proxy (iptables/IPVS) or eBPF implements the virtual IP on each node.",
+    "first_principles": {
+      "problem": "Clients hard-code Pod IPs that change after every restart.",
+      "truths": [
+        "Pod IPs are ephemeral.",
+        "Labels identify groups.",
+        "Only ready Pods should get traffic."
+      ],
+      "derivation": [
+        "**Label** Pods (app=api).",
+        "**Service selector** matches labels.",
+        "**EndpointSlices** list ready Pod IPs.",
+        "Clients use **DNS name** (api.ns.svc).",
+        "Use **headless Services** for direct Pod discovery."
+      ]
+    },
+    "analogy": {
+      "title": "A company switchboard number",
+      "story": "Callers dial one number; it rings whichever staff member is available.",
+      "mapping": [
+        [
+          "Switchboard number",
+          "Service ClusterIP/DNS"
+        ],
+        [
+          "Staff",
+          "Pods"
+        ],
+        [
+          "Available",
+          "Ready"
+        ]
+      ],
+      "breaks": "Switchboards route by availability; Services load-balance roughly randomly per connection."
+    },
+    "mindmap": {
+      "center": "Services",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "ClusterIP",
+            "DNS name"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "Labels",
+            "EndpointSlices"
+          ]
+        },
+        {
+          "label": "Implementation",
+          "children": [
+            "kube-proxy iptables/IPVS",
+            "eBPF"
+          ]
+        },
+        {
+          "label": "Variants",
+          "children": [
+            "Headless",
+            "ExternalName"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Service for an API",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "http://api reaches any ready api Pod."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: v1\nkind: Service\nmetadata: {name: api}\nspec:\n  selector: {app: api}\n  ports: [{port: 80, targetPort: 8080}]"
+        }
+      ],
+      "outcome": "stable access to changing Pods."
+    },
+    "summary": {
+      "points": [
+        "Stable VIP and DNS.",
+        "Label selectors.",
+        "Ready endpoints only."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a headless Service (clusterIP: None) provide?",
+        "a": "DNS records pointing directly at individual Pod IPs instead of a single virtual IP."
+      }
+    ]
+  },
+  "service-types-exposing-your-app": {
+    "core": "ClusterIP (default) exposes a Service inside the cluster. NodePort opens a port (30000–32767) on every node. LoadBalancer provisions a cloud load balancer that targets the Service. ExternalName returns a CNAME to an external host. For HTTP, most apps use ClusterIP Services behind an Ingress or Gateway.",
+    "first_principles": {
+      "problem": "Every service gets its own cloud LoadBalancer, costing hundreds a month and multiplying public endpoints.",
+      "truths": [
+        "Internal traffic doesn't need public exposure.",
+        "Each cloud LB costs money.",
+        "HTTP routing can share one entry point."
+      ],
+      "derivation": [
+        "**ClusterIP** for internal.",
+        "**LoadBalancer** for TCP/UDP or single public services.",
+        "**Ingress/Gateway** to share an L7 entry.",
+        "**NodePort** mostly as a building block.",
+        "**ExternalName** for external aliases."
+      ]
+    },
+    "analogy": {
+      "title": "Doors to a building",
+      "story": "Internal doors (ClusterIP), a side door on every floor (NodePort), the main entrance with a receptionist (LoadBalancer).",
+      "mapping": [
+        [
+          "Internal door",
+          "ClusterIP"
+        ],
+        [
+          "Side doors",
+          "NodePort"
+        ],
+        [
+          "Main entrance",
+          "LoadBalancer"
+        ]
+      ],
+      "breaks": "Buildings have one main entrance; each LoadBalancer Service creates another."
+    },
+    "mindmap": {
+      "center": "Service Types",
+      "branches": [
+        {
+          "label": "ClusterIP",
+          "children": [
+            "Internal",
+            "Default"
+          ]
+        },
+        {
+          "label": "NodePort",
+          "children": [
+            "Port on every node"
+          ]
+        },
+        {
+          "label": "LoadBalancer",
+          "children": [
+            "Cloud LB",
+            "Public/internal"
+          ]
+        },
+        {
+          "label": "ExternalName",
+          "children": [
+            "CNAME"
+          ]
+        },
+        {
+          "label": "HTTP",
+          "children": [
+            "Ingress",
+            "Gateway API"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Exposure plan",
+      "scenario": "Mapping.",
+      "flow": [
+        "10 HTTP microservices → ClusterIP + one Ingress",
+        "MQTT broker (TCP) → LoadBalancer",
+        "Managed DB alias → ExternalName"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One public LB for HTTP instead of ten."
+        }
+      ],
+      "code": [],
+      "outcome": "cost-effective, controlled exposure."
+    },
+    "summary": {
+      "points": [
+        "ClusterIP by default.",
+        "LoadBalancer sparingly.",
+        "Ingress/Gateway for HTTP."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Service type provisions a cloud load balancer?",
+        "a": "LoadBalancer."
+      }
+    ]
+  },
+  "deployments-managing-stateless-apps": {
+    "core": "A Deployment manages ReplicaSets, which keep N identical Pods running. Changing the Pod template creates a new ReplicaSet and shifts Pods over, keeping history for rollbacks. Deployments are the standard for stateless apps, combined with HPA for scaling and PDBs for availability.",
+    "first_principles": {
+      "problem": "A team runs Pods directly and nothing restarts them when a node dies.",
+      "truths": [
+        "Replicas need a controller.",
+        "Template changes need controlled rollout.",
+        "History enables rollback."
+      ],
+      "derivation": [
+        "Define **replicas**, **selector**, **template**.",
+        "Each template change → **new ReplicaSet**.",
+        "**kubectl rollout status/undo**.",
+        "Scale with **HPA**.",
+        "Protect with **PDB**."
+      ]
+    },
+    "analogy": {
+      "title": "A franchise manager keeping N shops open",
+      "story": "If one closes, another opens; when the menu changes, shops are converted one by one.",
+      "mapping": [
+        [
+          "Shops",
+          "Pods"
+        ],
+        [
+          "Menu version",
+          "Pod template"
+        ],
+        [
+          "Conversion",
+          "Rollout"
+        ]
+      ],
+      "breaks": "Franchises convert shops slowly; Deployments roll out in seconds to minutes."
+    },
+    "mindmap": {
+      "center": "Deployments",
+      "branches": [
+        {
+          "label": "Manages",
+          "children": [
+            "ReplicaSets",
+            "Pods"
+          ]
+        },
+        {
+          "label": "Changes",
+          "children": [
+            "New ReplicaSet",
+            "Rollout"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "rollout status",
+            "undo",
+            "history"
+          ]
+        },
+        {
+          "label": "Pairs",
+          "children": [
+            "HPA",
+            "PDB"
+          ]
+        },
+        {
+          "label": "Fit",
+          "children": [
+            "Stateless apps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rollback",
+      "scenario": "kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Instant rollback to the last good version."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl set image deploy/web web=web:2.0\nkubectl rollout status deploy/web\nkubectl rollout undo deploy/web   # back to previous ReplicaSet"
+        }
+      ],
+      "outcome": "self-healing, versioned stateless apps."
+    },
+    "summary": {
+      "points": [
+        "ReplicaSets underneath.",
+        "Template change = rollout.",
+        "Easy rollback."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens when you change a Deployment's Pod template?",
+        "a": "A new ReplicaSet is created and Pods shift to it according to the rollout strategy."
+      }
+    ]
+  },
+  "rolling-updates-zero-downtime": {
+    "core": "RollingUpdate replaces Pods gradually: maxSurge sets how many extra Pods can be created, and maxUnavailable how many can be down during the update. With readiness probes, graceful shutdown (preStop + SIGTERM handling) and connection draining, users see no errors. Recreate kills all old Pods first (downtime).",
+    "first_principles": {
+      "problem": "Deploys cause brief 502s because old Pods die before load balancers stop sending them traffic.",
+      "truths": [
+        "New Pods must be ready before old ones leave.",
+        "Endpoints update asynchronously.",
+        "In-flight requests need time."
+      ],
+      "derivation": [
+        "Set **maxSurge 25%, maxUnavailable 0** for safety.",
+        "Add **readinessProbe**.",
+        "Add **preStop sleep** (5–10 s) for endpoint propagation.",
+        "Handle **SIGTERM** and drain.",
+        "Use **minReadySeconds** and progress deadlines."
+      ]
+    },
+    "analogy": {
+      "title": "Replacing lanes on a busy motorway",
+      "story": "Open the new lane before closing the old one, and wait for traffic to clear.",
+      "mapping": [
+        [
+          "New lane",
+          "New Pod"
+        ],
+        [
+          "Closing old lane",
+          "Terminating Pod"
+        ],
+        [
+          "Traffic clearing",
+          "Draining"
+        ]
+      ],
+      "breaks": "Drivers see lane signs instantly; endpoint changes take seconds to reach every proxy."
+    },
+    "mindmap": {
+      "center": "Rolling Updates",
+      "branches": [
+        {
+          "label": "Knobs",
+          "children": [
+            "maxSurge",
+            "maxUnavailable",
+            "minReadySeconds"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Readiness",
+            "preStop",
+            "SIGTERM drain"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "Recreate"
+          ]
+        },
+        {
+          "label": "Advanced",
+          "children": [
+            "Canary",
+            "Blue/green (Argo Rollouts)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Zero-downtime settings",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No 502s during deploys."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "strategy:\n  type: RollingUpdate\n  rollingUpdate: {maxSurge: 25%, maxUnavailable: 0}\ntemplate:\n  spec:\n    terminationGracePeriodSeconds: 30\n    containers:\n    - name: web\n      lifecycle: {preStop: {exec: {command: [\"sleep\", \"10\"]}}}"
+        }
+      ],
+      "outcome": "truly zero-downtime releases."
+    },
+    "summary": {
+      "points": [
+        "Surge before removing.",
+        "Readiness gates.",
+        "Drain on shutdown."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why add a preStop sleep?",
+        "a": "To give endpoint and load balancer updates time to stop sending traffic before the app shuts down."
+      }
+    ]
+  },
+  "configmaps-and-secrets-decoupling-config-from-code": {
+    "core": "ConfigMaps hold non-sensitive configuration and Secrets hold sensitive data (base64-encoded, not encrypted by default), so the same image runs in every environment with different config. Protect Secrets with encryption at rest (KMS provider), RBAC and, ideally, external secret stores (External Secrets Operator, CSI Secrets Store).",
+    "first_principles": {
+      "problem": "Database passwords are baked into images and differ per environment, forcing separate builds.",
+      "truths": [
+        "Config differs per environment.",
+        "Images should be immutable.",
+        "Base64 isn't encryption."
+      ],
+      "derivation": [
+        "**ConfigMap** for settings.",
+        "**Secret** for credentials.",
+        "Enable **encryption at rest**.",
+        "Restrict with **RBAC**.",
+        "Sync from **Vault/Secrets Manager** with External Secrets."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe card separate from the kitchen",
+      "story": "The same kitchen cooks different dishes depending on the card handed in.",
+      "mapping": [
+        [
+          "Kitchen",
+          "Container image"
+        ],
+        [
+          "Recipe card",
+          "ConfigMap"
+        ],
+        [
+          "Locked recipe",
+          "Secret"
+        ]
+      ],
+      "breaks": "Recipe cards are visible; Secrets need extra controls because base64 is readable."
+    },
+    "mindmap": {
+      "center": "Config & Secrets",
+      "branches": [
+        {
+          "label": "ConfigMap",
+          "children": [
+            "Non-sensitive",
+            "Key-value/files"
+          ]
+        },
+        {
+          "label": "Secret",
+          "children": [
+            "Sensitive",
+            "base64"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "Encryption at rest",
+            "RBAC",
+            "External stores"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "External Secrets",
+            "CSI Secrets Store",
+            "Sealed Secrets"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "External secret",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Secret synced from AWS Secrets Manager; never in Git."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: external-secrets.io/v1beta1\nkind: ExternalSecret\nmetadata: {name: db}\nspec:\n  secretStoreRef: {name: aws-sm, kind: ClusterSecretStore}\n  target: {name: db-credentials}\n  data:\n  - secretKey: password\n    remoteRef: {key: prod/db, property: password}"
+        }
+      ],
+      "outcome": "one image, many environments, safe secrets."
+    },
+    "summary": {
+      "points": [
+        "Separate config from code.",
+        "Secrets need protection.",
+        "Use external stores."
+      ]
+    },
+    "check": [
+      {
+        "q": "Are Kubernetes Secrets encrypted by default?",
+        "a": "No; they're base64-encoded, so enable encryption at rest and restrict access."
+      }
+    ]
+  },
+  "consuming-configmaps-and-secrets": {
+    "core": "Pods consume ConfigMaps and Secrets as environment variables (env, envFrom) or as files via volume mounts. Mounted files update automatically when the object changes (after a short delay, except with subPath), while environment variables are fixed at container start. Apps must reload files or Pods must restart to pick up changes.",
+    "first_principles": {
+      "problem": "A config change is applied but the app keeps using old values.",
+      "truths": [
+        "Env vars are read at process start.",
+        "Mounted volumes are refreshed by the kubelet.",
+        "subPath mounts don't update."
+      ],
+      "derivation": [
+        "Use **env/envFrom** for simple, static values.",
+        "Use **volume mounts** for files and live updates.",
+        "Avoid **subPath** if you need updates.",
+        "Trigger **rollouts** on change (checksum annotations, Reloader).",
+        "Prefer **immutable ConfigMaps** for safety and performance."
+      ]
+    },
+    "analogy": {
+      "title": "A printed handout versus a noticeboard",
+      "story": "The handout (env var) doesn't change after it's given out; the noticeboard (mounted file) is updated in place.",
+      "mapping": [
+        [
+          "Handout",
+          "Environment variable"
+        ],
+        [
+          "Noticeboard",
+          "Mounted volume"
+        ],
+        [
+          "Reprinting",
+          "Pod restart"
+        ]
+      ],
+      "breaks": "People read noticeboards when they walk past; apps must actively re-read files."
+    },
+    "mindmap": {
+      "center": "Consuming Config",
+      "branches": [
+        {
+          "label": "Env",
+          "children": [
+            "env",
+            "envFrom",
+            "Fixed at start"
+          ]
+        },
+        {
+          "label": "Files",
+          "children": [
+            "Volume mounts",
+            "Auto-refresh"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "subPath no update",
+            "App must reload"
+          ]
+        },
+        {
+          "label": "Rollouts",
+          "children": [
+            "Checksum annotation",
+            "Reloader"
+          ]
+        },
+        {
+          "label": "Immutable",
+          "children": [
+            "immutable: true"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Checksum-triggered rollout",
+      "scenario": "Helm template.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Config change → new Pod template → rollout."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "template:\n  metadata:\n    annotations:\n      checksum/config: {{ include (print $.Template.BasePath \"/configmap.yaml\") . | sha256sum }}"
+        }
+      ],
+      "outcome": "config changes applied predictably."
+    },
+    "summary": {
+      "points": [
+        "Env vars are static.",
+        "Mounts refresh.",
+        "Roll out on change."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why don't ConfigMap updates reach environment variables in running Pods?",
+        "a": "Environment variables are set when the container starts and aren't refreshed."
+      }
+    ]
+  }
+}

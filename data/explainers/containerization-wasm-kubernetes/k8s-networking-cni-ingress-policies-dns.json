@@ -1,0 +1,735 @@
+{
+  "introduction-the-flat-network-challenge": {
+    "core": "Kubernetes' network model requires every Pod to get its own IP and reach every other Pod directly without NAT, across nodes. Nodes reach Pods, and Pods see their own IP as others see it. Implementing this flat network across many hosts is the job of CNI plugins; Services, DNS, Ingress/Gateway and NetworkPolicies build on top.",
+    "first_principles": {
+      "problem": "Docker's default per-host bridge with NAT can't give cluster-wide, routable Pod IPs.",
+      "truths": [
+        "Apps expect real IPs, not port mappings.",
+        "Pods move between nodes.",
+        "Hosts must route Pod traffic."
+      ],
+      "derivation": [
+        "Give **each Pod an IP** (CNI IPAM).",
+        "Ensure **Pod-to-Pod** across nodes (overlay or routing).",
+        "Add **Services** for stable VIPs.",
+        "Add **DNS** for discovery.",
+        "Add **policies** for security."
+      ]
+    },
+    "analogy": {
+      "title": "A city where every flat has a real postal address",
+      "story": "Mail goes directly flat to flat, no forwarding through building receptions.",
+      "mapping": [
+        [
+          "Flats",
+          "Pods"
+        ],
+        [
+          "Postal addresses",
+          "Pod IPs"
+        ],
+        [
+          "Postal network",
+          "CNI"
+        ]
+      ],
+      "breaks": "Addresses are permanent; Pod IPs change whenever Pods are replaced."
+    },
+    "mindmap": {
+      "center": "K8s Network Model",
+      "branches": [
+        {
+          "label": "Rules",
+          "children": [
+            "Pod IP per Pod",
+            "No NAT Pod-to-Pod",
+            "Node-to-Pod"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "CNI",
+            "Services",
+            "DNS",
+            "Ingress/Gateway",
+            "NetworkPolicy"
+          ]
+        },
+        {
+          "label": "Challenge",
+          "children": [
+            "Multi-host routing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cross-node Pod call",
+      "scenario": "Path.",
+      "flow": [
+        "Pod A 10.244.1.5 on node 1",
+        "Pod B 10.244.2.7 on node 2",
+        "CNI routes 10.244.2.0/24 to node 2",
+        "A connects to B's IP directly"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Apps see a simple flat network."
+        }
+      ],
+      "code": [],
+      "outcome": "network model understood."
+    },
+    "summary": {
+      "points": [
+        "Every Pod has an IP.",
+        "No NAT between Pods.",
+        "CNI implements it."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the Kubernetes network model require between Pods?",
+        "a": "Every Pod can reach every other Pod by IP without NAT."
+      }
+    ]
+  },
+  "cni-plugins-the-plumbers-of-kubernetes": {
+    "core": "The Container Network Interface is a spec for plugins the runtime calls when Pods are created and deleted: create the network interface (veth), assign an IP (IPAM), set routes and clean up. Popular CNIs: Calico (BGP or overlay, policies), Cilium (eBPF, policies, observability), Flannel (simple overlay), AWS VPC CNI and Azure CNI (cloud-native IPs).",
+    "first_principles": {
+      "problem": "Teams pick a CNI without knowing it determines performance, policy support and IP planning.",
+      "truths": [
+        "Pods need interfaces and IPs.",
+        "Plugins differ in data path and features.",
+        "Cloud CNIs integrate with VPC networking."
+      ],
+      "derivation": [
+        "**ADD/DEL** calls per Pod.",
+        "**IPAM** assigns addresses.",
+        "Choose **data path** (iptables, eBPF, VPC).",
+        "Check **NetworkPolicy** support.",
+        "Consider **observability** (Hubble) and scale."
+      ]
+    },
+    "analogy": {
+      "title": "Plumbers hired for each new flat",
+      "story": "They connect pipes when someone moves in and disconnect them when they leave.",
+      "mapping": [
+        [
+          "Pipes",
+          "veth + routes"
+        ],
+        [
+          "Plumber",
+          "CNI plugin"
+        ],
+        [
+          "Address assignment",
+          "IPAM"
+        ]
+      ],
+      "breaks": "Plumbers take days; CNI setup takes milliseconds per Pod."
+    },
+    "mindmap": {
+      "center": "CNI Plugins",
+      "branches": [
+        {
+          "label": "Spec",
+          "children": [
+            "ADD",
+            "DEL",
+            "CHECK"
+          ]
+        },
+        {
+          "label": "Jobs",
+          "children": [
+            "Interface",
+            "IPAM",
+            "Routes"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Calico",
+            "Cilium",
+            "Flannel",
+            "AWS VPC CNI",
+            "Azure CNI"
+          ]
+        },
+        {
+          "label": "Differentiators",
+          "children": [
+            "Data path",
+            "Policy",
+            "Observability",
+            "Scale"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspecting Pod networking",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See how each Pod is plumbed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ls /etc/cni/net.d/              # CNI config on the node\nip link | grep veth              # Pod veth pairs\ncilium status                     # if using Cilium"
+        }
+      ],
+      "outcome": "informed CNI choice."
+    },
+    "summary": {
+      "points": [
+        "CNI wires Pods.",
+        "IPAM assigns IPs.",
+        "Choose by data path and features."
+      ]
+    },
+    "check": [
+      {
+        "q": "What two main jobs does a CNI plugin perform for a new Pod?",
+        "a": "Creating its network interface and assigning it an IP address (plus routes)."
+      }
+    ]
+  },
+  "networking-modes-overlay-vs-direct-routing": {
+    "core": "Overlay networking (VXLAN, Geneve, IPIP) encapsulates Pod packets inside node-to-node packets, working on any underlay but adding overhead and MTU reduction. Direct routing (BGP, cloud route tables or native VPC IPs) routes Pod CIDRs natively for better performance and visibility, but needs underlay cooperation.",
+    "first_principles": {
+      "problem": "Pod-to-Pod throughput is lower than expected, and packets mysteriously drop due to MTU mismatches.",
+      "truths": [
+        "Encapsulation adds headers.",
+        "Underlays may not know Pod routes.",
+        "Native routing is faster."
+      ],
+      "derivation": [
+        "**Overlay** when you can't change the underlay.",
+        "**Direct routing/BGP** when you can.",
+        "**Cloud-native IPs** (VPC CNI) for no overlay at all.",
+        "Set **MTU** correctly (e.g. 1450 for VXLAN).",
+        "Benchmark **throughput and latency**."
+      ]
+    },
+    "analogy": {
+      "title": "Envelopes inside envelopes versus direct addressing",
+      "story": "Overlay wraps each letter in a courier envelope; direct routing writes the real address on it.",
+      "mapping": [
+        [
+          "Outer envelope",
+          "Encapsulation header"
+        ],
+        [
+          "Courier",
+          "Node underlay"
+        ],
+        [
+          "Direct address",
+          "Native routing"
+        ]
+      ],
+      "breaks": "Extra envelopes cost paper; extra headers reduce MTU and add CPU work."
+    },
+    "mindmap": {
+      "center": "Overlay vs Direct",
+      "branches": [
+        {
+          "label": "Overlay",
+          "children": [
+            "VXLAN",
+            "Geneve",
+            "IPIP",
+            "Works anywhere",
+            "MTU overhead"
+          ]
+        },
+        {
+          "label": "Direct",
+          "children": [
+            "BGP",
+            "Route tables",
+            "Native VPC IPs",
+            "Faster"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "MTU",
+            "Benchmarks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "MTU fix",
+      "scenario": "Calico.",
+      "flow": [
+        "Underlay MTU 1500",
+        "VXLAN adds 50 bytes",
+        "Set Pod MTU 1450",
+        "Large-packet drops disappear"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stable large transfers."
+        }
+      ],
+      "code": [],
+      "outcome": "right network mode chosen and tuned."
+    },
+    "summary": {
+      "points": [
+        "Overlay: portable, overhead.",
+        "Direct: fast, needs underlay.",
+        "Get MTU right."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must Pod MTU be lowered with VXLAN?",
+        "a": "Encapsulation adds headers, so packets must be smaller to fit the underlay MTU."
+      }
+    ]
+  },
+  "dns-within-kubernetes-the-internal-phonebook": {
+    "core": "CoreDNS serves cluster DNS: Services get names like svc.namespace.svc.cluster.local (A/AAAA records to the ClusterIP, or Pod IPs for headless), plus SRV records for named ports. Pods' resolv.conf includes search domains and ndots:5, which causes multiple lookups for external names unless tuned. NodeLocal DNSCache cuts latency and conntrack issues.",
+    "first_principles": {
+      "problem": "External API calls are slow because each lookup tries five search-domain suffixes first.",
+      "truths": [
+        "Search domains expand short names.",
+        "ndots:5 treats most names as relative.",
+        "DNS is on every request path."
+      ],
+      "derivation": [
+        "Use **short names** within a namespace (api), **FQDN** across.",
+        "Add **trailing dot** or lower **ndots** for external names.",
+        "Deploy **NodeLocal DNSCache**.",
+        "**Scale CoreDNS** with cluster size.",
+        "Monitor **DNS latency and errors**."
+      ]
+    },
+    "analogy": {
+      "title": "An internal phone directory with extension shortcuts",
+      "story": "Dialling '201' works inside, but outside numbers first get tried as internal extensions.",
+      "mapping": [
+        [
+          "Extensions",
+          "Short service names"
+        ],
+        [
+          "Directory",
+          "CoreDNS"
+        ],
+        [
+          "Trying internal first",
+          "Search domains"
+        ]
+      ],
+      "breaks": "Phone systems fail fast; DNS retries add seconds of delay."
+    },
+    "mindmap": {
+      "center": "Cluster DNS",
+      "branches": [
+        {
+          "label": "Server",
+          "children": [
+            "CoreDNS"
+          ]
+        },
+        {
+          "label": "Records",
+          "children": [
+            "Service A/AAAA",
+            "Headless Pod IPs",
+            "SRV"
+          ]
+        },
+        {
+          "label": "Client",
+          "children": [
+            "resolv.conf",
+            "Search domains",
+            "ndots:5"
+          ]
+        },
+        {
+          "label": "Optimise",
+          "children": [
+            "FQDN with dot",
+            "dnsConfig ndots",
+            "NodeLocal DNSCache"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tuning ndots",
+      "scenario": "Pod spec.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "api.stripe.com resolved in one query, not five."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "dnsConfig:\n  options:\n  - name: ndots\n    value: \"2\""
+        }
+      ],
+      "outcome": "fast, reliable name resolution."
+    },
+    "summary": {
+      "points": [
+        "Services get DNS names.",
+        "Beware ndots:5.",
+        "Cache locally."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the full DNS name of Service 'api' in namespace 'shop'?",
+        "a": "api.shop.svc.cluster.local."
+      }
+    ]
+  },
+  "ingress-the-front-door": {
+    "core": "An Ingress resource defines HTTP(S) routing (host and path rules to Services, TLS certificates), and an Ingress controller (NGINX, Traefik, HAProxy, AWS Load Balancer Controller) implements it, typically behind one load balancer. Features beyond basics rely on controller-specific annotations, which limits portability.",
+    "first_principles": {
+      "problem": "Each web service needs its own public load balancer and certificate management.",
+      "truths": [
+        "HTTP can be routed by host and path.",
+        "One entry point simplifies TLS.",
+        "Controllers differ in features."
+      ],
+      "derivation": [
+        "Install an **Ingress controller**.",
+        "Define **rules** (host/path → Service).",
+        "Terminate **TLS** (cert-manager for certificates).",
+        "Use **IngressClass** to choose controllers.",
+        "Mind **annotation sprawl**."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel reception directing guests",
+      "story": "One entrance; reception checks the booking and points each guest to the right room.",
+      "mapping": [
+        [
+          "Entrance",
+          "Load balancer"
+        ],
+        [
+          "Reception",
+          "Ingress controller"
+        ],
+        [
+          "Room directions",
+          "Rules"
+        ]
+      ],
+      "breaks": "Receptionists are flexible; Ingress needs controller-specific annotations for anything advanced."
+    },
+    "mindmap": {
+      "center": "Ingress",
+      "branches": [
+        {
+          "label": "Resource",
+          "children": [
+            "Rules",
+            "Hosts",
+            "Paths",
+            "TLS"
+          ]
+        },
+        {
+          "label": "Controllers",
+          "children": [
+            "NGINX",
+            "Traefik",
+            "HAProxy",
+            "AWS LBC"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "IngressClass"
+          ]
+        },
+        {
+          "label": "Certs",
+          "children": [
+            "cert-manager"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Annotations",
+            "HTTP only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Host and path routing",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One LB, TLS, two services."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata: {name: shop}\nspec:\n  ingressClassName: nginx\n  tls: [{hosts: [shop.example.com], secretName: shop-tls}]\n  rules:\n  - host: shop.example.com\n    http:\n      paths:\n      - {path: /api, pathType: Prefix, backend: {service: {name: api, port: {number: 80}}}}\n      - {path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}"
+        }
+      ],
+      "outcome": "consolidated HTTP entry point."
+    },
+    "summary": {
+      "points": [
+        "Resource + controller.",
+        "Host/path rules.",
+        "TLS at the edge."
+      ]
+    },
+    "check": [
+      {
+        "q": "What implements an Ingress resource?",
+        "a": "An Ingress controller running in the cluster."
+      }
+    ]
+  },
+  "the-gateway-api-ingress-evolved": {
+    "core": "Gateway API is Ingress's successor: role-oriented resources (GatewayClass by infra providers, Gateway by cluster operators, HTTPRoute/GRPCRoute/TCPRoute by app teams), standard features (header matching, traffic splitting, redirects, cross-namespace references via ReferenceGrant) without annotations, and support for multiple protocols.",
+    "first_principles": {
+      "problem": "Ingress annotations differ per controller, and app teams can't safely own routes without cluster-wide access.",
+      "truths": [
+        "Different roles own different layers.",
+        "Portable features shouldn't need annotations.",
+        "Non-HTTP traffic needs routing too."
+      ],
+      "derivation": [
+        "**GatewayClass**: implementation.",
+        "**Gateway**: listeners, ports, TLS (ops team).",
+        "**HTTPRoute** etc.: routing (app teams).",
+        "**ReferenceGrant** for cross-namespace.",
+        "Use **weights** for canaries."
+      ]
+    },
+    "analogy": {
+      "title": "An airport with separated responsibilities",
+      "story": "The authority builds terminals, the operator runs gates and airlines manage their own flights.",
+      "mapping": [
+        [
+          "Airport authority",
+          "GatewayClass"
+        ],
+        [
+          "Terminal operator",
+          "Gateway"
+        ],
+        [
+          "Airlines",
+          "Routes"
+        ]
+      ],
+      "breaks": "Airlines can't redesign terminals, and similarly routes can only attach where Gateways allow."
+    },
+    "mindmap": {
+      "center": "Gateway API",
+      "branches": [
+        {
+          "label": "Resources",
+          "children": [
+            "GatewayClass",
+            "Gateway",
+            "HTTPRoute",
+            "GRPCRoute",
+            "TCPRoute"
+          ]
+        },
+        {
+          "label": "Roles",
+          "children": [
+            "Infra",
+            "Ops",
+            "App teams"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Header match",
+            "Weights",
+            "Redirects",
+            "Filters"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "ReferenceGrant",
+            "allowedRoutes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Canary with weights",
+      "scenario": "HTTPRoute.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "10% canary, portable across implementations."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: gateway.networking.k8s.io/v1\nkind: HTTPRoute\nmetadata: {name: api, namespace: shop}\nspec:\n  parentRefs: [{name: public, namespace: infra}]\n  hostnames: [api.example.com]\n  rules:\n  - backendRefs:\n    - {name: api-v1, port: 80, weight: 90}\n    - {name: api-v2, port: 80, weight: 10}"
+        }
+      ],
+      "outcome": "role-separated, portable traffic routing."
+    },
+    "summary": {
+      "points": [
+        "Role-oriented resources.",
+        "Standard features.",
+        "Multi-protocol."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Gateway API resource do application teams typically own?",
+        "a": "Route resources such as HTTPRoute."
+      }
+    ]
+  },
+  "network-policies-the-firewall-for-pods": {
+    "core": "NetworkPolicies select Pods by label and define allowed ingress and egress by Pod selector, namespace selector, IP block and port. Pods selected by any policy become default-deny for the specified direction. Enforcement depends on the CNI (Calico, Cilium support it; some don't). Start with default-deny and allow only what's needed.",
+    "first_principles": {
+      "problem": "A compromised frontend Pod can reach the database directly because all Pods can talk to all Pods.",
+      "truths": [
+        "Default Kubernetes networking allows everything.",
+        "Labels identify workloads.",
+        "Least privilege applies to networks."
+      ],
+      "derivation": [
+        "Apply **default-deny** per namespace.",
+        "**Allow** specific flows (frontend → api → db).",
+        "Allow **DNS egress** (kube-dns).",
+        "Use **namespaceSelector** for cross-namespace.",
+        "Verify **CNI support**; consider **L7 policies** (Cilium)."
+      ]
+    },
+    "analogy": {
+      "title": "Internal doors with keycard rules",
+      "story": "By default doors are locked; badges list exactly which rooms each person can enter.",
+      "mapping": [
+        [
+          "Locked doors",
+          "Default deny"
+        ],
+        [
+          "Badge rules",
+          "Allow rules"
+        ],
+        [
+          "Rooms",
+          "Pods"
+        ]
+      ],
+      "breaks": "Doors are physical; policies only work if the CNI enforces them."
+    },
+    "mindmap": {
+      "center": "NetworkPolicies",
+      "branches": [
+        {
+          "label": "Selectors",
+          "children": [
+            "podSelector",
+            "namespaceSelector",
+            "ipBlock"
+          ]
+        },
+        {
+          "label": "Directions",
+          "children": [
+            "Ingress",
+            "Egress"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Default deny",
+            "Explicit allows",
+            "Allow DNS"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "CNI-dependent"
+          ]
+        },
+        {
+          "label": "Advanced",
+          "children": [
+            "Cilium L7",
+            "Calico global"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Allow api → db only",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only api Pods reach the database."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: {name: db-allow-api, namespace: shop}\nspec:\n  podSelector: {matchLabels: {app: db}}\n  policyTypes: [Ingress]\n  ingress:\n  - from: [{podSelector: {matchLabels: {app: api}}}]\n    ports: [{port: 5432}]"
+        }
+      ],
+      "outcome": "segmented Pod network."
+    },
+    "summary": {
+      "points": [
+        "Default deny.",
+        "Allow by label.",
+        "CNI must enforce."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to traffic to a Pod once any NetworkPolicy selects it for ingress?",
+        "a": "Only ingress explicitly allowed by some policy is permitted; everything else is denied."
+      }
+    ]
+  }
+}

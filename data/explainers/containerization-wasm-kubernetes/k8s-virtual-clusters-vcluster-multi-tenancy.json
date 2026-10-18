@@ -1,0 +1,540 @@
+{
+  "introduction-the-tenancy-dilemma": {
+    "core": "Multi-tenancy options sit on a spectrum: namespaces (cheap, but tenants share the API server, CRDs and cluster-scoped resources) versus separate clusters (strong isolation, but costly and slow to create). Virtual clusters (vCluster) sit in between: each tenant gets its own control plane running inside a namespace of a host cluster.",
+    "first_principles": {
+      "problem": "Teams need admin-like freedom (their own CRDs, cluster roles) but separate clusters per team are too expensive.",
+      "truths": [
+        "Namespaces can't isolate cluster-scoped objects.",
+        "Real clusters have fixed overhead.",
+        "Control planes can be virtualised."
+      ],
+      "derivation": [
+        "**Namespaces** for trusted, lightweight tenancy.",
+        "**Virtual clusters** for API isolation at low cost.",
+        "**Dedicated clusters** for hard isolation/compliance.",
+        "Combine with **policies and quotas**.",
+        "Pick by **trust and needs**."
+      ]
+    },
+    "analogy": {
+      "title": "Rooms in a house versus flats versus separate houses",
+      "story": "Rooms share everything, flats have their own front door inside one building, houses are fully separate.",
+      "mapping": [
+        [
+          "Rooms",
+          "Namespaces"
+        ],
+        [
+          "Flats",
+          "Virtual clusters"
+        ],
+        [
+          "Houses",
+          "Dedicated clusters"
+        ]
+      ],
+      "breaks": "Flats have physical walls; virtual clusters still share host nodes unless isolated further."
+    },
+    "mindmap": {
+      "center": "Tenancy Spectrum",
+      "branches": [
+        {
+          "label": "Namespaces",
+          "children": [
+            "Cheap",
+            "Shared API",
+            "Soft isolation"
+          ]
+        },
+        {
+          "label": "Virtual clusters",
+          "children": [
+            "Own API server",
+            "Shared nodes",
+            "Medium cost"
+          ]
+        },
+        {
+          "label": "Dedicated clusters",
+          "children": [
+            "Strong isolation",
+            "Expensive"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "RBAC",
+            "Quotas",
+            "NetworkPolicy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing tenancy",
+      "scenario": "Scenarios.",
+      "flow": [
+        "Internal microservice teams → namespaces",
+        "Teams needing own CRDs/operators → vCluster",
+        "Regulated customer workloads → dedicated clusters"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolation matched to need."
+        }
+      ],
+      "code": [],
+      "outcome": "the right tenancy model."
+    },
+    "summary": {
+      "points": [
+        "Spectrum of isolation.",
+        "vCluster in the middle.",
+        "Choose by trust."
+      ]
+    },
+    "check": [
+      {
+        "q": "What can't namespaces isolate between tenants?",
+        "a": "Cluster-scoped resources like CRDs, ClusterRoles and the shared API server."
+      }
+    ]
+  },
+  "architecture-control-planes-inside-control-planes": {
+    "core": "A vCluster runs as a StatefulSet in a host namespace containing a lightweight Kubernetes API server (often k3s or k8s distro), a data store (SQLite, etcd or external DB), a controller manager and the syncer. Tenants get a kubeconfig to their virtual API, while actual Pods run on the host cluster's nodes.",
+    "first_principles": {
+      "problem": "Engineers can't picture how a cluster can live inside another cluster's namespace.",
+      "truths": [
+        "An API server is just a process.",
+        "Storage can be lightweight.",
+        "Workloads can be delegated to a host."
+      ],
+      "derivation": [
+        "Deploy **vCluster** via CLI/Helm.",
+        "Virtual **API server + store** in a Pod.",
+        "**Syncer** maps objects to host.",
+        "Tenants use **virtual kubeconfig**.",
+        "Host enforces **quotas and policies**."
+      ]
+    },
+    "analogy": {
+      "title": "A virtual machine for Kubernetes control planes",
+      "story": "Like a VM gives you your own OS on shared hardware, vCluster gives you your own cluster API on a shared cluster.",
+      "mapping": [
+        [
+          "VM",
+          "Virtual cluster"
+        ],
+        [
+          "Hypervisor",
+          "Host cluster"
+        ],
+        [
+          "Hardware",
+          "Host nodes"
+        ]
+      ],
+      "breaks": "VMs virtualise CPUs; vCluster virtualises only the control plane, not nodes."
+    },
+    "mindmap": {
+      "center": "vCluster Architecture",
+      "branches": [
+        {
+          "label": "Components",
+          "children": [
+            "Virtual API server",
+            "Data store",
+            "Controller manager",
+            "Syncer"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "StatefulSet in host namespace"
+          ]
+        },
+        {
+          "label": "Workloads",
+          "children": [
+            "Run on host nodes"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "Virtual kubeconfig"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create a vCluster",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A full cluster API in seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "vcluster create team-a --namespace vc-team-a\nvcluster connect team-a --namespace vc-team-a\nkubectl get namespaces   # team-a's own virtual view"
+        }
+      ],
+      "outcome": "nested control planes understood."
+    },
+    "summary": {
+      "points": [
+        "Control plane in a Pod.",
+        "Workloads on host nodes.",
+        "Own kubeconfig."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where do a virtual cluster's Pods actually run?",
+        "a": "On the host cluster's nodes, synced into the vCluster's host namespace."
+      }
+    ]
+  },
+  "the-syncer-the-magic-bridge": {
+    "core": "The syncer watches low-level objects in the virtual cluster (Pods, Services, PVCs, ConfigMaps, Secrets) and creates translated copies in the host namespace with rewritten names, then syncs status back. Higher-level objects (Deployments, CRDs, RBAC) stay virtual-only and are reconciled by the virtual control plane. Sync settings control what crosses the boundary.",
+    "first_principles": {
+      "problem": "Tenants create Deployments and CRDs, yet the host cluster only sees renamed Pods in one namespace.",
+      "truths": [
+        "Only workloads need real compute.",
+        "Names must not collide on the host.",
+        "Status must flow back to tenants."
+      ],
+      "derivation": [
+        "Sync **Pods, Services, PVCs, ConfigMaps, Secrets** down.",
+        "Keep **Deployments, CRDs, RBAC** virtual.",
+        "**Rewrite names** (pod-x-ns-vcluster).",
+        "Sync **status** up.",
+        "Configure **sync options** (nodes, ingresses, storage classes)."
+      ]
+    },
+    "analogy": {
+      "title": "A translator between two offices",
+      "story": "The client office speaks its own language; the translator files real paperwork with the main office and reports back.",
+      "mapping": [
+        [
+          "Client office",
+          "Virtual cluster"
+        ],
+        [
+          "Main office",
+          "Host cluster"
+        ],
+        [
+          "Translator",
+          "Syncer"
+        ]
+      ],
+      "breaks": "Translators summarise; the syncer must map fields precisely or workloads break."
+    },
+    "mindmap": {
+      "center": "Syncer",
+      "branches": [
+        {
+          "label": "Synced down",
+          "children": [
+            "Pods",
+            "Services",
+            "PVCs",
+            "ConfigMaps",
+            "Secrets"
+          ]
+        },
+        {
+          "label": "Virtual only",
+          "children": [
+            "Deployments",
+            "CRDs",
+            "RBAC",
+            "Namespaces"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "Name rewriting",
+            "Status sync"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Sync toggles",
+            "Node sync modes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What the host sees",
+      "scenario": "Mapping.",
+      "flow": [
+        "Virtual: Deployment web (ns shop) → 3 Pods",
+        "Host: Pods web-xyz-x-shop-x-team-a in vc-team-a",
+        "Host scheduler places them on real nodes",
+        "Status synced back to virtual Pods"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Tenants see a normal cluster."
+        }
+      ],
+      "code": [],
+      "outcome": "transparent bridging."
+    },
+    "summary": {
+      "points": [
+        "Low-level objects sync.",
+        "High-level stay virtual.",
+        "Names rewritten."
+      ]
+    },
+    "check": [
+      {
+        "q": "Are a tenant's CRDs created in the host cluster?",
+        "a": "No; CRDs and other high-level objects stay in the virtual cluster's own API."
+      }
+    ]
+  },
+  "why-use-vcluster-key-use-cases": {
+    "core": "Key use cases: self-service dev environments (each developer or PR gets a cluster in seconds), CI ephemeral clusters for testing operators and CRDs, multi-tenant platforms giving teams admin rights safely, testing Kubernetes version upgrades and isolating SaaS customers' control planes, all at a fraction of dedicated-cluster cost.",
+    "first_principles": {
+      "problem": "Every pull request needs a clean cluster to test CRD changes, but provisioning EKS takes 15 minutes and costs money.",
+      "truths": [
+        "Fast, cheap clusters enable new workflows.",
+        "Teams want admin autonomy.",
+        "Version testing needs isolation."
+      ],
+      "derivation": [
+        "**Ephemeral PR clusters** in CI.",
+        "**Developer sandboxes** with admin rights.",
+        "**Platform tenancy** with CRD freedom.",
+        "**Version testing** with different virtual versions.",
+        "**Sleep mode** to cut idle costs."
+      ]
+    },
+    "analogy": {
+      "title": "Pop-up meeting rooms",
+      "story": "Book a fully equipped private room instantly, and return it when done.",
+      "mapping": [
+        [
+          "Pop-up room",
+          "vCluster"
+        ],
+        [
+          "Instant booking",
+          "Seconds to create"
+        ],
+        [
+          "Returning it",
+          "Deleting after CI"
+        ]
+      ],
+      "breaks": "Meeting rooms are physically separate; vClusters share host nodes and kernels."
+    },
+    "mindmap": {
+      "center": "Use Cases",
+      "branches": [
+        {
+          "label": "Dev",
+          "children": [
+            "Sandboxes",
+            "Admin rights"
+          ]
+        },
+        {
+          "label": "CI",
+          "children": [
+            "Ephemeral clusters",
+            "CRD/operator tests"
+          ]
+        },
+        {
+          "label": "Platform",
+          "children": [
+            "Team tenancy"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "K8s version upgrades"
+          ]
+        },
+        {
+          "label": "SaaS",
+          "children": [
+            "Per-customer control planes"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Sleep mode"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "PR pipeline",
+      "scenario": "Flow.",
+      "flow": [
+        "PR opened → vcluster create pr-123",
+        "Install operator + CRDs, run e2e tests",
+        "vcluster delete pr-123",
+        "~40 seconds overhead"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clean cluster per PR, almost free."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, isolated testing environments."
+    },
+    "summary": {
+      "points": [
+        "Clusters in seconds.",
+        "Admin autonomy.",
+        "Cheap ephemeral testing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are vClusters well suited to CI testing of operators?",
+        "a": "They provide an isolated API (own CRDs) in seconds, cheaply, and can be deleted after each run."
+      }
+    ]
+  },
+  "vcluster-vs-alternatives-choosing-the-right-tool": {
+    "core": "Alternatives: plain namespaces with RBAC, quotas and policies (simplest), Hierarchical Namespaces (HNC) for nested policy inheritance, Capsule for tenant objects grouping namespaces, Kamaji or hosted control planes for many real clusters sharing infrastructure, and dedicated clusters for strongest isolation. vCluster wins when tenants need their own API semantics cheaply.",
+    "first_principles": {
+      "problem": "A platform team adopts vCluster for everything, including teams that only needed a namespace.",
+      "truths": [
+        "Each tool adds operational complexity.",
+        "Tenant needs differ.",
+        "Node isolation is separate from API isolation."
+      ],
+      "derivation": [
+        "**Namespace + policies** for most internal teams.",
+        "**Capsule/HNC** for grouped tenancy.",
+        "**vCluster** for API autonomy.",
+        "**Kamaji/hosted control planes** for many real clusters.",
+        "**Dedicated clusters + node isolation** for hostile tenants."
+      ]
+    },
+    "analogy": {
+      "title": "Accommodation options",
+      "story": "Shared dorm rooms, private rooms, serviced flats or your own house.",
+      "mapping": [
+        [
+          "Dorm rooms",
+          "Namespaces"
+        ],
+        [
+          "Grouped rooms",
+          "Capsule/HNC"
+        ],
+        [
+          "Serviced flats",
+          "vCluster"
+        ],
+        [
+          "Own house",
+          "Dedicated cluster"
+        ]
+      ],
+      "breaks": "Accommodation prices are clear; operational costs of tenancy tools are easy to underestimate."
+    },
+    "mindmap": {
+      "center": "Tenancy Options",
+      "branches": [
+        {
+          "label": "Namespaces",
+          "children": [
+            "RBAC",
+            "Quotas",
+            "Policies"
+          ]
+        },
+        {
+          "label": "Grouping",
+          "children": [
+            "Capsule",
+            "HNC"
+          ]
+        },
+        {
+          "label": "Virtual",
+          "children": [
+            "vCluster"
+          ]
+        },
+        {
+          "label": "Hosted CP",
+          "children": [
+            "Kamaji"
+          ]
+        },
+        {
+          "label": "Dedicated",
+          "children": [
+            "Separate clusters"
+          ]
+        },
+        {
+          "label": "Node isolation",
+          "children": [
+            "Taints",
+            "Sandboxes",
+            "Separate pools"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision matrix",
+      "scenario": "Needs.",
+      "flow": [
+        "Needs own CRDs? → vCluster",
+        "Just apps + quotas? → namespaces",
+        "Hostile tenants? → dedicated clusters or sandboxed nodes",
+        "Many real clusters cheaply? → hosted control planes"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Least complexity that meets the need."
+        }
+      ],
+      "code": [],
+      "outcome": "right-sized multi-tenancy."
+    },
+    "summary": {
+      "points": [
+        "Start simple.",
+        "vCluster for API autonomy.",
+        "Dedicated for hostility."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does vCluster isolate tenants at the node/kernel level?",
+        "a": "No; it isolates the control plane, while Pods still share host nodes unless you add node-level isolation."
+      }
+    ]
+  }
+}

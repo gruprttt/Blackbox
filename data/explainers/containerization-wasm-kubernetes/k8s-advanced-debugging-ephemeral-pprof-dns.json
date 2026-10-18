@@ -1,0 +1,537 @@
+{
+  "introduction-when-kubectl-logs-isnt-enough": {
+    "core": "Logs show what an app chose to say; many problems need more: inspecting a running distroless container, profiling CPU or memory, tracing DNS, or capturing packets. Kubernetes offers ephemeral debug containers, node debugging, port-forwarding to profiling endpoints and in-namespace packet capture to investigate without redeploying.",
+    "first_principles": {
+      "problem": "A distroless Pod has no shell, logs are unhelpful and the issue disappears on restart.",
+      "truths": [
+        "Restarting destroys evidence.",
+        "Minimal images lack tools.",
+        "Debug tools can be attached at runtime."
+      ],
+      "derivation": [
+        "**kubectl debug** with ephemeral containers.",
+        "**pprof/profilers** via port-forward.",
+        "**DNS tracing** from inside the Pod.",
+        "**tcpdump** in the Pod's network namespace.",
+        "**Node debug** for host-level issues."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor's diagnostic toolkit beyond asking 'how do you feel?'",
+      "story": "Stethoscopes, scans and blood tests reveal what the patient can't describe.",
+      "mapping": [
+        [
+          "Asking the patient",
+          "Logs"
+        ],
+        [
+          "Scans",
+          "Profilers"
+        ],
+        [
+          "Blood test",
+          "Packet capture"
+        ]
+      ],
+      "breaks": "Patients can't be cloned; you can copy a Pod for debugging with kubectl debug --copy-to."
+    },
+    "mindmap": {
+      "center": "Advanced Debugging",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "kubectl debug",
+            "pprof",
+            "DNS tools",
+            "tcpdump",
+            "Node debug"
+          ]
+        },
+        {
+          "label": "Principles",
+          "children": [
+            "Preserve evidence",
+            "Attach, don't redeploy"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "Distroless",
+            "Performance",
+            "Networking"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Escalation ladder",
+      "scenario": "Steps.",
+      "flow": [
+        "kubectl logs / describe",
+        "kubectl debug ephemeral container",
+        "Profile with pprof",
+        "Packet capture"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Evidence gathered without restarts."
+        }
+      ],
+      "code": [],
+      "outcome": "deeper investigation capabilities."
+    },
+    "summary": {
+      "points": [
+        "Logs aren't everything.",
+        "Attach tools live.",
+        "Preserve evidence."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why avoid restarting a misbehaving Pod immediately?",
+        "a": "Restarting can destroy the state and evidence needed to find the root cause."
+      }
+    ]
+  },
+  "kubectl-debug-the-ghost-in-the-shell": {
+    "core": "kubectl debug adds an ephemeral container to a running Pod (with tools like busybox, netshoot) that can share the target container's process namespace (--target) to inspect processes, files via /proc/<pid>/root and network. It can also copy a Pod with changes (--copy-to, --set-image) or debug a node (kubectl debug node/…) with host access.",
+    "first_principles": {
+      "problem": "A distroless container misbehaves and there's no shell or tools to inspect it.",
+      "truths": [
+        "Ephemeral containers can join running Pods.",
+        "Process namespace sharing exposes the target's processes.",
+        "Copies allow risky experiments."
+      ],
+      "derivation": [
+        "**kubectl debug -it pod --image=nicolaka/netshoot --target=app**.",
+        "Inspect **/proc/1/root**, open files, env.",
+        "Use **--copy-to** with **--share-processes** for experiments.",
+        "Use **kubectl debug node/x** for host issues.",
+        "Clean up **copies** afterwards."
+      ]
+    },
+    "analogy": {
+      "title": "A specialist entering the room through a side door",
+      "story": "They bring their own tools without disturbing the patient.",
+      "mapping": [
+        [
+          "Side door",
+          "Ephemeral container"
+        ],
+        [
+          "Specialist's tools",
+          "Debug image"
+        ],
+        [
+          "Patient",
+          "Target container"
+        ]
+      ],
+      "breaks": "Specialists leave when done; ephemeral containers stay in the Pod spec until the Pod is replaced."
+    },
+    "mindmap": {
+      "center": "kubectl debug",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "Ephemeral container",
+            "Copy Pod",
+            "Node debug"
+          ]
+        },
+        {
+          "label": "Flags",
+          "children": [
+            "--image",
+            "--target",
+            "--copy-to",
+            "--share-processes",
+            "--set-image"
+          ]
+        },
+        {
+          "label": "Images",
+          "children": [
+            "busybox",
+            "netshoot"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Distroless",
+            "Process inspection",
+            "Network tools"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Debug a distroless Pod",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Full toolbox next to a tool-less container."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl debug -it api-7f9 --image=nicolaka/netshoot --target=api\n# inside:\nps aux\nls /proc/1/root/etc/config\nss -tlnp\ncurl -s localhost:8080/health"
+        }
+      ],
+      "outcome": "live inspection without rebuilding."
+    },
+    "summary": {
+      "points": [
+        "Ephemeral containers.",
+        "Target for process sharing.",
+        "Copies for experiments."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does --target do in kubectl debug?",
+        "a": "Shares the process namespace with the specified container so you can see and inspect its processes."
+      }
+    ]
+  },
+  "profiling-x-raying-the-cpu-with-pprof": {
+    "core": "Profilers show where an app spends CPU, allocates memory or blocks. Go's net/http/pprof exposes /debug/pprof endpoints; you port-forward and fetch CPU, heap, goroutine and mutex profiles, then view flame graphs with go tool pprof. Other languages have equivalents (async-profiler, py-spy), and continuous profilers (Pyroscope, Parca) collect profiles in production.",
+    "first_principles": {
+      "problem": "A service burns 4 CPUs after a release, and nobody knows which function is responsible.",
+      "truths": [
+        "Metrics show that CPU is high, not why.",
+        "Sampling profilers have low overhead.",
+        "Flame graphs reveal hot paths."
+      ],
+      "derivation": [
+        "Expose **pprof endpoints** (internal only).",
+        "**kubectl port-forward** to fetch profiles.",
+        "Analyse with **go tool pprof -http**.",
+        "Compare **before/after** profiles.",
+        "Adopt **continuous profiling**."
+      ]
+    },
+    "analogy": {
+      "title": "An X-ray of where effort goes",
+      "story": "You see exactly which bone is broken instead of guessing from the limp.",
+      "mapping": [
+        [
+          "X-ray",
+          "CPU profile"
+        ],
+        [
+          "Broken bone",
+          "Hot function"
+        ],
+        [
+          "Limp",
+          "High CPU metric"
+        ]
+      ],
+      "breaks": "X-rays are one snapshot; profiles sample over a time window, so pick it during the problem."
+    },
+    "mindmap": {
+      "center": "Profiling",
+      "branches": [
+        {
+          "label": "Go",
+          "children": [
+            "net/http/pprof",
+            "go tool pprof"
+          ]
+        },
+        {
+          "label": "Profiles",
+          "children": [
+            "CPU",
+            "Heap",
+            "Goroutine",
+            "Mutex",
+            "Block"
+          ]
+        },
+        {
+          "label": "Others",
+          "children": [
+            "async-profiler",
+            "py-spy",
+            "perf"
+          ]
+        },
+        {
+          "label": "Continuous",
+          "children": [
+            "Pyroscope",
+            "Parca"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "port-forward"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CPU profile",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "60% CPU in JSON re-encoding inside a loop."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl port-forward pod/api-7f9 6060:6060 &\ngo tool pprof -http=:8081 http://localhost:6060/debug/pprof/profile?seconds=30"
+        }
+      ],
+      "outcome": "root cause in code, not guesses."
+    },
+    "summary": {
+      "points": [
+        "Profiles explain CPU.",
+        "Port-forward to fetch.",
+        "Continuous in production."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a CPU flame graph show?",
+        "a": "Which call stacks consume the most CPU time, with wider frames meaning more time."
+      }
+    ]
+  },
+  "debugging-dns-tracing-the-infinite-loop": {
+    "core": "DNS issues cause timeouts and intermittent failures: ndots:5 search-domain expansion multiplies queries, CoreDNS overload or conntrack races drop UDP packets (5-second delays), forwarding loops (CoreDNS forwarding to itself via node resolv.conf) crash CoreDNS, and NetworkPolicies may block port 53. Trace from inside the Pod and check CoreDNS logs and metrics.",
+    "first_principles": {
+      "problem": "Requests intermittently take exactly 5 seconds longer, and CoreDNS keeps restarting with 'Loop detected'.",
+      "truths": [
+        "DNS retries have fixed timeouts.",
+        "UDP drops are silent.",
+        "Misconfigured upstreams can loop."
+      ],
+      "derivation": [
+        "Test with **dig/nslookup** from the Pod.",
+        "Enable **CoreDNS log plugin** temporarily.",
+        "Check **loop plugin** errors and node resolv.conf.",
+        "Deploy **NodeLocal DNSCache**; tune **ndots**.",
+        "Allow **UDP/TCP 53** in NetworkPolicies."
+      ]
+    },
+    "analogy": {
+      "title": "A phone directory that keeps forwarding you to itself",
+      "story": "You're put on hold, transferred back to reception, and so on forever.",
+      "mapping": [
+        [
+          "Directory",
+          "CoreDNS"
+        ],
+        [
+          "Transfer back",
+          "Forwarding loop"
+        ],
+        [
+          "Hold music",
+          "5-second timeout"
+        ]
+      ],
+      "breaks": "Phone loops are obvious; DNS loops show as crashes and timeouts."
+    },
+    "mindmap": {
+      "center": "DNS Debugging",
+      "branches": [
+        {
+          "label": "Symptoms",
+          "children": [
+            "5 s delays",
+            "NXDOMAIN",
+            "CoreDNS crashes"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "ndots expansion",
+            "conntrack races",
+            "Loops",
+            "Policies blocking 53",
+            "Overload"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "dig",
+            "CoreDNS logs",
+            "metrics"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "NodeLocal DNSCache",
+            "ndots",
+            "Fix upstream",
+            "Scale CoreDNS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tracing a lookup",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Point CoreDNS forward at real upstream; deploy NodeLocal DNSCache."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl exec -it client -- cat /etc/resolv.conf\nkubectl exec -it client -- dig +search +all api.example.com\nkubectl logs -n kube-system -l k8s-app=kube-dns | grep -i loop"
+        }
+      ],
+      "outcome": "fast, stable DNS."
+    },
+    "summary": {
+      "points": [
+        "Trace from the Pod.",
+        "Watch for loops and 5 s delays.",
+        "Cache locally."
+      ]
+    },
+    "check": [
+      {
+        "q": "What often causes exactly 5-second DNS delays in Kubernetes?",
+        "a": "Dropped UDP DNS packets (e.g. conntrack races) triggering the resolver's 5-second retry timeout."
+      }
+    ]
+  },
+  "network-packet-inspection-with-tcpdump-and-ephemeral-containers": {
+    "core": "To see actual traffic, run tcpdump in the Pod's network namespace: via an ephemeral netshoot container (shares the Pod network), from the node using nsenter -t <pid> -n, or with kubectl sniff / ksniff to stream captures into Wireshark. Filter tightly, capture briefly, and remember TLS hides payloads but not handshakes and flags.",
+    "first_principles": {
+      "problem": "Two services disagree about whether requests are even being sent.",
+      "truths": [
+        "Packets are ground truth.",
+        "Pods share a network namespace across containers.",
+        "Captures can be large and sensitive."
+      ],
+      "derivation": [
+        "**kubectl debug** with netshoot → tcpdump.",
+        "Or **nsenter** from the node.",
+        "Use **filters** (host, port).",
+        "Write **.pcap** and analyse in Wireshark.",
+        "Respect **privacy** (payloads, PII)."
+      ]
+    },
+    "analogy": {
+      "title": "Putting a microphone on the phone line",
+      "story": "You hear exactly what was said and whether anyone answered.",
+      "mapping": [
+        [
+          "Microphone",
+          "tcpdump"
+        ],
+        [
+          "Phone line",
+          "Pod network namespace"
+        ],
+        [
+          "Recording",
+          ".pcap file"
+        ]
+      ],
+      "breaks": "Phone recordings are audio; packet captures may contain secrets, so handle them carefully."
+    },
+    "mindmap": {
+      "center": "Packet Inspection",
+      "branches": [
+        {
+          "label": "Access",
+          "children": [
+            "Ephemeral container",
+            "nsenter",
+            "ksniff"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "tcpdump",
+            "Wireshark",
+            "tshark"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "host",
+            "port",
+            "flags"
+          ]
+        },
+        {
+          "label": "Care",
+          "children": [
+            "Short captures",
+            "PII"
+          ]
+        },
+        {
+          "label": "Reads",
+          "children": [
+            "SYN/RST",
+            "Retransmits",
+            "TLS handshakes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Capture inside a Pod",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "SYN sent, RST returned: DB port closed on the target."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl debug -it api-7f9 --image=nicolaka/netshoot -- tcpdump -i eth0 -nn port 5432 -c 50\n# or from the node:\nnsenter -t $(crictl inspect --output go-template --template '{{.info.pid}}' <cid>) -n tcpdump -i eth0 -w /tmp/api.pcap"
+        }
+      ],
+      "outcome": "network disputes settled with evidence."
+    },
+    "summary": {
+      "points": [
+        "Capture in the Pod netns.",
+        "Filter and keep short.",
+        "Mind sensitive data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can an ephemeral debug container capture a Pod's traffic?",
+        "a": "It shares the Pod's network namespace, seeing the same interfaces and packets."
+      }
+    ]
+  }
+}

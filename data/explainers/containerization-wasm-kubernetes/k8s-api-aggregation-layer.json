@@ -1,0 +1,619 @@
+{
+  "introduction-when-crds-arent-enough": {
+    "core": "CRDs store objects in etcd with standard CRUD semantics, validation and versioning, which is perfect for most extensions. But some APIs need custom storage (an external database), computed or ephemeral results (live metrics), special subresources, very high write volumes unsuitable for etcd, or non-standard verbs. The API aggregation layer lets you serve those from your own API server behind the main one.",
+    "first_principles": {
+      "problem": "A team stores high-frequency metrics as CRDs and overloads etcd.",
+      "truths": [
+        "etcd isn't built for high-volume data.",
+        "Some data is computed, not stored.",
+        "CRDs have fixed semantics."
+      ],
+      "derivation": [
+        "Use **CRDs** for configuration-like objects.",
+        "Use **aggregation** for computed, external or high-volume data.",
+        "Implement an **extension API server**.",
+        "Register with **APIService**.",
+        "Accept **higher complexity**."
+      ]
+    },
+    "analogy": {
+      "title": "A department store with a concession counter",
+      "story": "Most goods are on the store's own shelves; the concession runs its own stock system behind the store's front door.",
+      "mapping": [
+        [
+          "Store shelves",
+          "CRDs in etcd"
+        ],
+        [
+          "Concession",
+          "Extension API server"
+        ],
+        [
+          "Front door",
+          "kube-apiserver"
+        ]
+      ],
+      "breaks": "Customers notice concessions; clients can't tell aggregated APIs from built-in ones."
+    },
+    "mindmap": {
+      "center": "When Aggregation",
+      "branches": [
+        {
+          "label": "CRDs fit",
+          "children": [
+            "Config objects",
+            "Standard CRUD"
+          ]
+        },
+        {
+          "label": "Aggregation fits",
+          "children": [
+            "Custom storage",
+            "Computed data",
+            "High volume",
+            "Special subresources"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Own server",
+            "Auth",
+            "HA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Right tool per need",
+      "scenario": "Mapping.",
+      "flow": [
+        "Database config → CRD",
+        "Live Pod metrics → aggregated API (metrics-server)",
+        "Audit search over external store → aggregated API"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "etcd protected; APIs feel native."
+        }
+      ],
+      "code": [],
+      "outcome": "correct extension mechanism."
+    },
+    "summary": {
+      "points": [
+        "CRDs first.",
+        "Aggregation for special cases.",
+        "Mind etcd limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "When should you prefer API aggregation over CRDs?",
+        "a": "When you need custom storage, computed/ephemeral data, high write volumes or non-standard semantics."
+      }
+    ]
+  },
+  "architecture-the-api-proxy": {
+    "core": "With aggregation, kube-apiserver acts as a proxy: requests for a registered group/version (e.g. /apis/metrics.k8s.io/v1beta1) are authenticated by kube-apiserver and forwarded over TLS to the extension API server's Service, along with identity headers. The extension server performs authorisation (via SubjectAccessReview), executes the request and returns a standard Kubernetes response.",
+    "first_principles": {
+      "problem": "Engineers wonder how kubectl top works without metrics being stored in etcd.",
+      "truths": [
+        "The main API server can route by API group.",
+        "Identity must be passed securely.",
+        "Clients expect standard responses."
+      ],
+      "derivation": [
+        "Register **APIService** pointing to a Service.",
+        "kube-apiserver **proxies** matching paths.",
+        "Extension server **trusts** front-proxy headers via CA.",
+        "Extension server **authorises** via SubjectAccessReview.",
+        "Return **Kubernetes-style objects**."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist forwarding calls to a specialist department",
+      "story": "The caller is verified at reception and the department handles the request.",
+      "mapping": [
+        [
+          "Receptionist",
+          "kube-apiserver"
+        ],
+        [
+          "Specialist department",
+          "Extension API server"
+        ],
+        [
+          "Caller ID",
+          "Identity headers"
+        ]
+      ],
+      "breaks": "Phone transfers are simple; proxying requires mutual TLS and trusted header configuration."
+    },
+    "mindmap": {
+      "center": "Aggregation Architecture",
+      "branches": [
+        {
+          "label": "Routing",
+          "children": [
+            "By group/version",
+            "APIService"
+          ]
+        },
+        {
+          "label": "Transport",
+          "children": [
+            "TLS to Service"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Front-proxy headers",
+            "requestheader CA"
+          ]
+        },
+        {
+          "label": "AuthZ",
+          "children": [
+            "SubjectAccessReview"
+          ]
+        },
+        {
+          "label": "Responses",
+          "children": [
+            "Standard API objects"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Request path",
+      "scenario": "Flow.",
+      "flow": [
+        "kubectl top pods → GET /apis/metrics.k8s.io/v1beta1/namespaces/shop/pods",
+        "kube-apiserver authenticates, matches APIService",
+        "Proxies to metrics-server Service with X-Remote-User",
+        "metrics-server returns PodMetrics"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Native-looking API, custom backend."
+        }
+      ],
+      "code": [],
+      "outcome": "proxy model understood."
+    },
+    "summary": {
+      "points": [
+        "Main server proxies.",
+        "Identity forwarded.",
+        "Extension authorises."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does an extension API server learn who the caller is?",
+        "a": "From front-proxy identity headers (e.g. X-Remote-User) set by kube-apiserver and trusted via a configured CA."
+      }
+    ]
+  },
+  "the-canonical-example-metrics-server": {
+    "core": "metrics-server scrapes resource usage from each kubelet's /metrics/resource endpoint, keeps the latest values in memory and serves them through the aggregated metrics.k8s.io API (NodeMetrics, PodMetrics). kubectl top, HPA and VPA consume it. It's not a monitoring system: no history, just current usage for autoscaling.",
+    "first_principles": {
+      "problem": "HPA reports 'unable to get metrics' and kubectl top fails.",
+      "truths": [
+        "Autoscaling needs current usage.",
+        "Kubelets expose resource metrics.",
+        "In-memory data needs no etcd."
+      ],
+      "derivation": [
+        "Deploy **metrics-server** (HA for production).",
+        "Ensure **kubelet TLS** and connectivity.",
+        "Check the **APIService** is Available.",
+        "Use **Prometheus** for history and custom metrics.",
+        "Use **prometheus-adapter/KEDA** for custom HPA metrics."
+      ]
+    },
+    "analogy": {
+      "title": "A live scoreboard, not a statistics archive",
+      "story": "It shows the current score for decisions now, not last season's results.",
+      "mapping": [
+        [
+          "Scoreboard",
+          "metrics-server"
+        ],
+        [
+          "Players' stats",
+          "Kubelet metrics"
+        ],
+        [
+          "Archive",
+          "Prometheus"
+        ]
+      ],
+      "breaks": "Scoreboards are public; metrics.k8s.io access is RBAC-controlled."
+    },
+    "mindmap": {
+      "center": "metrics-server",
+      "branches": [
+        {
+          "label": "Source",
+          "children": [
+            "Kubelet /metrics/resource"
+          ]
+        },
+        {
+          "label": "Serves",
+          "children": [
+            "metrics.k8s.io",
+            "NodeMetrics",
+            "PodMetrics"
+          ]
+        },
+        {
+          "label": "Consumers",
+          "children": [
+            "kubectl top",
+            "HPA",
+            "VPA"
+          ]
+        },
+        {
+          "label": "Not",
+          "children": [
+            "History",
+            "Custom metrics"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "APIService status",
+            "Logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnosing missing metrics",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Kubelet cert not trusted → add proper CA or --kubelet-preferred-address-types."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get apiservice v1beta1.metrics.k8s.io -o jsonpath='{.status.conditions[0]}'\nkubectl logs -n kube-system deploy/metrics-server | tail\nkubectl top nodes"
+        }
+      ],
+      "outcome": "working resource metrics."
+    },
+    "summary": {
+      "points": [
+        "Scrapes kubelets.",
+        "Serves via aggregation.",
+        "Current values only."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does metrics-server store historical metrics?",
+        "a": "No; it keeps only recent values in memory for autoscaling and kubectl top."
+      }
+    ]
+  },
+  "the-glue-apiservice-resource": {
+    "core": "An APIService object (apiregistration.k8s.io) registers a group and version, points to a Service (namespace, name, port), includes a caBundle to verify the extension server's TLS certificate, and sets groupPriorityMinimum and versionPriority for discovery ordering. Its Available condition reflects whether kube-apiserver can reach the backend.",
+    "first_principles": {
+      "problem": "kubectl commands hang or show discovery errors because an aggregated API is unavailable.",
+      "truths": [
+        "Discovery queries all registered APIs.",
+        "TLS must be verifiable.",
+        "Unavailable backends affect clients."
+      ],
+      "derivation": [
+        "Create **APIService** with group/version.",
+        "Point to **Service** and port.",
+        "Provide **caBundle** (or cert-manager injection).",
+        "Monitor **Available** condition.",
+        "Remove **stale APIServices** of uninstalled tools."
+      ]
+    },
+    "analogy": {
+      "title": "A directory listing for a concession counter",
+      "story": "It says which products are sold there and how to verify the staff's ID.",
+      "mapping": [
+        [
+          "Directory entry",
+          "APIService"
+        ],
+        [
+          "Counter location",
+          "Service reference"
+        ],
+        [
+          "ID verification",
+          "caBundle"
+        ]
+      ],
+      "breaks": "Directory entries don't break the whole store; unavailable APIServices can slow or break discovery."
+    },
+    "mindmap": {
+      "center": "APIService",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "group",
+            "version",
+            "service",
+            "caBundle",
+            "groupPriorityMinimum",
+            "versionPriority"
+          ]
+        },
+        {
+          "label": "Status",
+          "children": [
+            "Available condition"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "cert-manager CA injection",
+            "Clean up stale entries"
+          ]
+        },
+        {
+          "label": "Failure",
+          "children": [
+            "Discovery errors"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding broken APIServices",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Restore adapter Pods or delete the stale APIService."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get apiservices | grep -v True\n# v1beta1.custom.metrics.k8s.io  monitoring/prometheus-adapter  False (MissingEndpoints)"
+        }
+      ],
+      "outcome": "healthy API discovery."
+    },
+    "summary": {
+      "points": [
+        "Registers the API.",
+        "Points to a Service.",
+        "Watch availability."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the caBundle field in an APIService provide?",
+        "a": "The CA used by kube-apiserver to verify the extension server's TLS certificate."
+      }
+    ]
+  },
+  "authentication-delegation-trusting-the-proxy": {
+    "core": "Extension API servers delegate auth: they trust requests proxied by kube-apiserver by validating its client certificate against the requestheader client CA and reading identity from X-Remote-User/X-Remote-Group headers. For authorisation they call back with SubjectAccessReview, and for direct client tokens they can use TokenReview. RBAC on the extension-apiserver-authentication ConfigMap and auth-delegator role enable this.",
+    "first_principles": {
+      "problem": "An extension API server accepts spoofed identity headers from any client inside the cluster.",
+      "truths": [
+        "Headers can be forged unless the sender is verified.",
+        "Authorisation should stay centralised.",
+        "Delegation avoids duplicating auth logic."
+      ],
+      "derivation": [
+        "Verify **front-proxy client cert** (requestheader CA).",
+        "Read **X-Remote-User/Group**.",
+        "Authorise via **SubjectAccessReview**.",
+        "Bind **system:auth-delegator** to the server's SA.",
+        "Read **extension-apiserver-authentication** ConfigMap."
+      ]
+    },
+    "analogy": {
+      "title": "Trusting a colleague's note only if it's on official letterhead",
+      "story": "Anyone can write 'approved by Alice', but only reception's stamped letterhead is trusted.",
+      "mapping": [
+        [
+          "Official letterhead",
+          "Front-proxy client cert"
+        ],
+        [
+          "Note",
+          "Identity headers"
+        ],
+        [
+          "Checking with HR",
+          "SubjectAccessReview"
+        ]
+      ],
+      "breaks": "Letterheads can be photocopied; mTLS certificates can't be forged without the private key."
+    },
+    "mindmap": {
+      "center": "Auth Delegation",
+      "branches": [
+        {
+          "label": "AuthN",
+          "children": [
+            "requestheader client CA",
+            "X-Remote-User/Group",
+            "TokenReview"
+          ]
+        },
+        {
+          "label": "AuthZ",
+          "children": [
+            "SubjectAccessReview"
+          ]
+        },
+        {
+          "label": "RBAC",
+          "children": [
+            "system:auth-delegator",
+            "extension-apiserver-authentication-reader"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Spoofed headers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "RBAC for delegation",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Extension server can perform TokenReview/SubjectAccessReview."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata: {name: my-apiserver:auth-delegator}\nroleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: system:auth-delegator}\nsubjects: [{kind: ServiceAccount, name: my-apiserver, namespace: my-system}]"
+        }
+      ],
+      "outcome": "secure, centralised auth for extensions."
+    },
+    "summary": {
+      "points": [
+        "Trust only the proxy.",
+        "Headers carry identity.",
+        "Authorise centrally."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does an extension API server authorise requests?",
+        "a": "By sending SubjectAccessReview requests to kube-apiserver, reusing cluster RBAC."
+      }
+    ]
+  },
+  "crd-vs-aggregation-layer-choosing-the-right-tool": {
+    "core": "Choose CRDs for most extensions: no server to run, etcd storage, schema validation, CEL rules, versioning and conversion webhooks, and full tooling support. Choose aggregation when you need custom storage backends, computed or read-only views, extreme scale beyond etcd, protobuf, custom subresources or verbs, and accept the cost of building, securing and operating an API server.",
+    "first_principles": {
+      "problem": "A team builds an aggregated API server for simple configuration objects and now maintains thousands of lines of code.",
+      "truths": [
+        "Simpler solutions are easier to operate.",
+        "CRDs cover most needs.",
+        "Aggregation is powerful but costly."
+      ],
+      "derivation": [
+        "Default to **CRDs**.",
+        "Add **conversion/validation webhooks** if needed.",
+        "Use **aggregation** only for clear gaps.",
+        "Consider **operational ownership**.",
+        "Revisit as **CRD features** improve (CEL, ratcheting)."
+      ]
+    },
+    "analogy": {
+      "title": "Using the store's shelves versus opening your own shop inside",
+      "story": "Shelves are easy; your own shop gives control but you must staff and secure it.",
+      "mapping": [
+        [
+          "Shelves",
+          "CRDs"
+        ],
+        [
+          "Own shop",
+          "Aggregated API server"
+        ],
+        [
+          "Staffing",
+          "Operational burden"
+        ]
+      ],
+      "breaks": "Shops can be closed easily; removing an aggregated API affects all clients using it."
+    },
+    "mindmap": {
+      "center": "CRD vs Aggregation",
+      "branches": [
+        {
+          "label": "CRDs",
+          "children": [
+            "No server",
+            "etcd",
+            "Schema",
+            "CEL",
+            "Versioning"
+          ]
+        },
+        {
+          "label": "Aggregation",
+          "children": [
+            "Custom storage",
+            "Computed data",
+            "Scale",
+            "Custom verbs"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Low vs high"
+          ]
+        },
+        {
+          "label": "Default",
+          "children": [
+            "CRDs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision checklist",
+      "scenario": "Questions.",
+      "flow": [
+        "Is it config-like with CRUD? → CRD",
+        "Must data live outside etcd? → aggregation",
+        "Is it computed on read? → aggregation",
+        "Otherwise → CRD"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Least machinery that works."
+        }
+      ],
+      "code": [],
+      "outcome": "sustainable API extension."
+    },
+    "summary": {
+      "points": [
+        "CRDs by default.",
+        "Aggregation for real gaps.",
+        "Count operational cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are CRDs usually preferred over aggregated APIs?",
+        "a": "They need no custom server, use etcd storage and get validation, versioning and tooling for free."
+      }
+    ]
+  }
+}

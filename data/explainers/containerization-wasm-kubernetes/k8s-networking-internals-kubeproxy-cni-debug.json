@@ -1,0 +1,535 @@
+{
+  "introduction-how-services-actually-work": {
+    "core": "A Service's ClusterIP isn't bound to any interface; it's a virtual IP that kube-proxy (or an eBPF replacement like Cilium) programs into every node's packet path. When a Pod connects to the ClusterIP, rules on that node DNAT the packet to one of the Service's ready endpoint Pod IPs, and conntrack keeps the connection pinned.",
+    "first_principles": {
+      "problem": "Engineers can't ping a ClusterIP and conclude the Service is broken.",
+      "truths": [
+        "Virtual IPs exist only in rules.",
+        "Translation happens on the client's node.",
+        "Connection tracking remembers choices."
+      ],
+      "derivation": [
+        "Watch **EndpointSlices**.",
+        "Program **iptables/IPVS/eBPF** rules per node.",
+        "**DNAT** VIP:port → Pod IP:port.",
+        "**conntrack** for return traffic.",
+        "Test with **curl to port**, not ping."
+      ]
+    },
+    "analogy": {
+      "title": "A call-forwarding number",
+      "story": "The number isn't a real phone; the exchange forwards your call to an available line.",
+      "mapping": [
+        [
+          "Forwarding number",
+          "ClusterIP"
+        ],
+        [
+          "Exchange rules",
+          "kube-proxy rules"
+        ],
+        [
+          "Real phone line",
+          "Pod IP"
+        ]
+      ],
+      "breaks": "Phone exchanges are central; Service translation happens on every node independently."
+    },
+    "mindmap": {
+      "center": "Services Internals",
+      "branches": [
+        {
+          "label": "VIP",
+          "children": [
+            "Not on an interface",
+            "Rules only"
+          ]
+        },
+        {
+          "label": "Programming",
+          "children": [
+            "kube-proxy",
+            "eBPF"
+          ]
+        },
+        {
+          "label": "Translation",
+          "children": [
+            "DNAT",
+            "conntrack"
+          ]
+        },
+        {
+          "label": "Inputs",
+          "children": [
+            "EndpointSlices"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "curl port",
+            "Not ping"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Why ping fails",
+      "scenario": "Explanation.",
+      "flow": [
+        "ping 10.96.0.20 → ICMP not matched by Service rules → no reply",
+        "curl 10.96.0.20:80 → DNAT to 10.244.3.7:8080 → works"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Correct mental model for debugging."
+        }
+      ],
+      "code": [],
+      "outcome": "Services demystified."
+    },
+    "summary": {
+      "points": [
+        "ClusterIP is virtual.",
+        "Rules on every node.",
+        "DNAT + conntrack."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you usually ping a ClusterIP?",
+        "a": "It's a virtual IP implemented only by port-specific forwarding rules, not a real interface that answers ICMP."
+      }
+    ]
+  },
+  "kube-proxy-modes-iptables-vs-ipvs": {
+    "core": "In iptables mode, kube-proxy writes chains of rules with random-probability matching per endpoint, which is simple but O(n) rule traversal and slow updates with thousands of Services. IPVS mode uses kernel hash tables and real load-balancing algorithms (rr, lc, sh) with O(1) lookups. nftables mode is the modern successor, and eBPF replacements (Cilium) bypass kube-proxy entirely.",
+    "first_principles": {
+      "problem": "A cluster with 10,000 Services takes minutes to apply rule changes and adds latency.",
+      "truths": [
+        "Linear rule lists scale poorly.",
+        "Hash tables scale well.",
+        "eBPF can implement load balancing in-kernel efficiently."
+      ],
+      "derivation": [
+        "**iptables** for small/medium clusters.",
+        "**IPVS** or **nftables** for large Service counts.",
+        "**eBPF kube-proxy replacement** for performance and visibility.",
+        "Check **conntrack table** sizing.",
+        "Inspect with **iptables-save / ipvsadm -Ln**."
+      ]
+    },
+    "analogy": {
+      "title": "Searching a paper list versus an index",
+      "story": "Reading names one by one gets slow; an index finds them instantly.",
+      "mapping": [
+        [
+          "Paper list",
+          "iptables chains"
+        ],
+        [
+          "Index",
+          "IPVS hash table"
+        ],
+        [
+          "Smart switchboard",
+          "eBPF"
+        ]
+      ],
+      "breaks": "Lists don't change often; Service endpoints change constantly, so update speed matters too."
+    },
+    "mindmap": {
+      "center": "kube-proxy Modes",
+      "branches": [
+        {
+          "label": "iptables",
+          "children": [
+            "Random probability",
+            "O(n)",
+            "Simple"
+          ]
+        },
+        {
+          "label": "IPVS",
+          "children": [
+            "Hash tables",
+            "Algorithms",
+            "O(1)"
+          ]
+        },
+        {
+          "label": "nftables",
+          "children": [
+            "Modern successor"
+          ]
+        },
+        {
+          "label": "eBPF",
+          "children": [
+            "Cilium replacement",
+            "Fast",
+            "Observable"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "iptables-save",
+            "ipvsadm",
+            "conntrack"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspecting rules",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See how each mode implements Services."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "iptables-save -t nat | grep KUBE-SVC | head\nipvsadm -Ln | head -20\nconntrack -L | wc -l"
+        }
+      ],
+      "outcome": "mode chosen for scale."
+    },
+    "summary": {
+      "points": [
+        "iptables is linear.",
+        "IPVS/nftables scale.",
+        "eBPF bypasses kube-proxy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does IPVS scale better than iptables for many Services?",
+        "a": "It uses hash tables for O(1) lookup instead of traversing long rule chains."
+      }
+    ]
+  },
+  "the-packet-flow-a-service-requests-journey": {
+    "core": "A Pod calls api.shop: DNS resolves via CoreDNS to the ClusterIP; the packet leaves the Pod's veth into the node; kube-proxy/eBPF DNATs it to a backend Pod IP; the CNI routes it (same node via bridge, other node via overlay or native routing); the backend replies and conntrack reverses the translation. Each hop is a debugging checkpoint.",
+    "first_principles": {
+      "problem": "A request times out and nobody knows which hop failed.",
+      "truths": [
+        "Requests traverse several layers.",
+        "Each layer has its own tools.",
+        "Failures are hop-specific."
+      ],
+      "derivation": [
+        "**DNS**: nslookup/dig from the Pod.",
+        "**Service**: endpoints present? kube-proxy rules?",
+        "**CNI routing**: Pod-to-Pod IP reachable?",
+        "**NetworkPolicy**: allowed?",
+        "**Backend**: listening, ready?"
+      ]
+    },
+    "analogy": {
+      "title": "Tracing a parcel through depots",
+      "story": "Was the address right, did it reach the sorting hub, the van, the door?",
+      "mapping": [
+        [
+          "Address lookup",
+          "DNS"
+        ],
+        [
+          "Sorting hub",
+          "Service DNAT"
+        ],
+        [
+          "Van route",
+          "CNI routing"
+        ],
+        [
+          "Door",
+          "Backend Pod"
+        ]
+      ],
+      "breaks": "Parcels have tracking numbers; packets need tcpdump and logs at each hop."
+    },
+    "mindmap": {
+      "center": "Packet Journey",
+      "branches": [
+        {
+          "label": "Hops",
+          "children": [
+            "DNS",
+            "Pod veth",
+            "Service DNAT",
+            "CNI routing",
+            "Backend"
+          ]
+        },
+        {
+          "label": "Return",
+          "children": [
+            "conntrack reverse NAT"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "dig",
+            "Endpoints",
+            "Rules",
+            "Pod IP curl",
+            "Policies",
+            "Readiness"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hop-by-hop check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Endpoints empty: readiness probe failing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl exec -it client -- nslookup api.shop\nkubectl get endpointslices -n shop -l kubernetes.io/service-name=api\nkubectl exec -it client -- curl -m2 10.244.3.7:8080/health   # direct Pod IP\nkubectl get networkpolicy -n shop"
+        }
+      ],
+      "outcome": "systematic network debugging."
+    },
+    "summary": {
+      "points": [
+        "Follow the hops.",
+        "Test each layer.",
+        "Endpoints often the culprit."
+      ]
+    },
+    "check": [
+      {
+        "q": "If DNS resolves but the Service has no endpoints, what's the likely cause?",
+        "a": "No Pods match the selector or none are ready (e.g. failing readiness probes)."
+      }
+    ]
+  },
+  "cni-the-plugin-that-wires-pods-together": {
+    "core": "When a Pod sandbox starts, the runtime calls the CNI plugin with the network namespace path: it creates a veth pair (one end in the Pod as eth0, one on the host), assigns an IP via IPAM, sets routes and installs datapath rules (bridge, overlay, eBPF). On deletion it releases the IP. Config lives in /etc/cni/net.d and binaries in /opt/cni/bin.",
+    "first_principles": {
+      "problem": "New Pods stay in ContainerCreating with 'failed to setup network' errors.",
+      "truths": [
+        "Each Pod needs plumbing at creation.",
+        "IP pools can be exhausted.",
+        "Config and binaries must be on every node."
+      ],
+      "derivation": [
+        "Check **CNI DaemonSet** health.",
+        "Check **/etc/cni/net.d** config and **/opt/cni/bin**.",
+        "Check **IPAM** exhaustion.",
+        "Read **kubelet/containerd logs**.",
+        "Inspect **veth and routes** on the node."
+      ]
+    },
+    "analogy": {
+      "title": "An electrician wiring each new office",
+      "story": "Running cable from the wall socket into the office and labelling it with an extension number.",
+      "mapping": [
+        [
+          "Cable",
+          "veth pair"
+        ],
+        [
+          "Extension number",
+          "IP address"
+        ],
+        [
+          "Wiring plan",
+          "CNI config"
+        ]
+      ],
+      "breaks": "Electricians work for hours; CNI plumbs Pods in milliseconds."
+    },
+    "mindmap": {
+      "center": "CNI Mechanics",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "veth pair",
+            "IPAM",
+            "Routes",
+            "Datapath rules"
+          ]
+        },
+        {
+          "label": "Files",
+          "children": [
+            "/etc/cni/net.d",
+            "/opt/cni/bin"
+          ]
+        },
+        {
+          "label": "Components",
+          "children": [
+            "DaemonSet agent",
+            "IPAM store"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "Missing config",
+            "IP exhaustion",
+            "Agent down"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inside the node",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Verify Pod plumbing on the host."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ls /etc/cni/net.d /opt/cni/bin\nip -br link | grep -E 'veth|lxc|cali'\nip route | grep 10.244"
+        }
+      ],
+      "outcome": "CNI behaviour understood."
+    },
+    "summary": {
+      "points": [
+        "veth + IPAM + routes.",
+        "Config on every node.",
+        "Watch IP pools."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a CNI plugin create to connect a Pod to the host network?",
+        "a": "A veth pair, with one end in the Pod's network namespace and one on the host."
+      }
+    ]
+  },
+  "debugging-cni-failures": {
+    "core": "CNI failures show up as Pods stuck in ContainerCreating, Pods with no IP, cross-node traffic failing or intermittent drops. Debug in order: events (FailedCreatePodSandBox), CNI agent Pods and logs, IPAM availability, node routes and MTU, encapsulation ports blocked by firewalls (VXLAN UDP 8472/4789, BGP 179), and kernel modules or eBPF requirements.",
+    "first_principles": {
+      "problem": "Pods on the same node can talk, but cross-node Pod traffic silently fails after a firewall change.",
+      "truths": [
+        "Same-node and cross-node paths differ.",
+        "Overlays need specific ports.",
+        "MTU issues break large packets only."
+      ],
+      "derivation": [
+        "Read **Pod events**.",
+        "Check **CNI agent** health and logs.",
+        "Test **same-node vs cross-node** connectivity.",
+        "Verify **ports** (VXLAN/Geneve/BGP) between nodes.",
+        "Test **MTU** with large pings (ping -M do -s)."
+      ]
+    },
+    "analogy": {
+      "title": "Diagnosing a phone network fault",
+      "story": "Calls work within one building but fail between buildings, so check the trunk line.",
+      "mapping": [
+        [
+          "Within building",
+          "Same-node traffic"
+        ],
+        [
+          "Between buildings",
+          "Cross-node traffic"
+        ],
+        [
+          "Trunk line",
+          "Overlay tunnel"
+        ]
+      ],
+      "breaks": "Phone faults are usually total; MTU issues let small packets through and drop large ones."
+    },
+    "mindmap": {
+      "center": "CNI Debugging",
+      "branches": [
+        {
+          "label": "Symptoms",
+          "children": [
+            "ContainerCreating",
+            "No IP",
+            "Cross-node failure",
+            "Large-packet drops"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "Events",
+            "Agent logs",
+            "IPAM",
+            "Routes",
+            "Ports",
+            "MTU"
+          ]
+        },
+        {
+          "label": "Ports",
+          "children": [
+            "VXLAN 8472/4789",
+            "Geneve 6081",
+            "BGP 179"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "cilium status",
+            "calicoctl",
+            "tcpdump"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "MTU test",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Lower Pod MTU to underlay MTU minus encapsulation overhead."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl exec -it a -- ping -c3 -M do -s 1400 10.244.5.9   # fails?\nkubectl exec -it a -- ping -c3 -M do -s 1200 10.244.5.9   # works → MTU too high"
+        }
+      ],
+      "outcome": "network faults isolated quickly."
+    },
+    "summary": {
+      "points": [
+        "Same vs cross node.",
+        "Ports and MTU.",
+        "Agent health first."
+      ]
+    },
+    "check": [
+      {
+        "q": "What symptom suggests an MTU mismatch?",
+        "a": "Small packets (pings, handshakes) succeed but large transfers hang or fail."
+      }
+    ]
+  }
+}

@@ -1,0 +1,525 @@
+{
+  "introduction-why-one-cluster-is-not-enough": {
+    "core": "Organisations run many clusters for blast-radius isolation, regional latency and data residency, scale limits (nodes, etcd size, API load), environment separation, compliance boundaries and upgrade safety. Multi-cluster brings challenges: consistent configuration, cross-cluster service discovery and traffic, identity and fleet lifecycle.",
+    "first_principles": {
+      "problem": "A single giant cluster's control-plane issue or bad upgrade takes down every team and region.",
+      "truths": [
+        "One cluster is one failure domain.",
+        "Clusters have scale limits.",
+        "Regions and regulations require separation."
+      ],
+      "derivation": [
+        "Split by **region, environment, tenancy, compliance**.",
+        "Manage config with **GitOps**.",
+        "Connect services with **mesh/multi-cluster services**.",
+        "Provision fleets with **Cluster API**.",
+        "Centralise **observability and policy**."
+      ]
+    },
+    "analogy": {
+      "title": "Branch offices instead of one giant headquarters",
+      "story": "A fire or strike at one doesn't stop the whole company.",
+      "mapping": [
+        [
+          "Branches",
+          "Clusters"
+        ],
+        [
+          "Company policies",
+          "GitOps config"
+        ],
+        [
+          "Inter-branch phone lines",
+          "Service mesh"
+        ]
+      ],
+      "breaks": "Branches can run independently; multi-cluster apps still need cross-cluster coordination."
+    },
+    "mindmap": {
+      "center": "Why Multi-Cluster",
+      "branches": [
+        {
+          "label": "Reasons",
+          "children": [
+            "Blast radius",
+            "Latency",
+            "Residency",
+            "Scale limits",
+            "Environments",
+            "Upgrades"
+          ]
+        },
+        {
+          "label": "Challenges",
+          "children": [
+            "Config consistency",
+            "Discovery",
+            "Identity",
+            "Lifecycle"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "GitOps",
+            "Mesh",
+            "Cluster API"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cluster topology",
+      "scenario": "Typical layout.",
+      "flow": [
+        "Per region: prod-eu, prod-us",
+        "Non-prod: staging, dev",
+        "Platform: management cluster",
+        "GitOps syncs all from one repo"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failures and upgrades contained per cluster."
+        }
+      ],
+      "code": [],
+      "outcome": "justified multi-cluster design."
+    },
+    "summary": {
+      "points": [
+        "One cluster = one blast radius.",
+        "Split for reasons.",
+        "Manage as a fleet."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name two reasons to run multiple Kubernetes clusters.",
+        "a": "Blast-radius isolation and regional latency/data residency (also scale limits, environment separation, safer upgrades)."
+      }
+    ]
+  },
+  "federation-the-meta-cluster-concept": {
+    "core": "Federation treats many clusters as one logical target: a control layer distributes resources with placement and overrides (e.g. KubeFed historically, now Karmada, Open Cluster Management, Fleet), and some tools provide cross-cluster scheduling and failover. Full federation adds complexity; many teams prefer GitOps fan-out plus multi-cluster service discovery.",
+    "first_principles": {
+      "problem": "Deploying the same app to 20 clusters with slight per-region differences is repetitive and error-prone.",
+      "truths": [
+        "Most config is shared, some differs.",
+        "Placement policies can be declared.",
+        "A meta-control-plane is another thing to run."
+      ],
+      "derivation": [
+        "Define **resource templates**.",
+        "Add **placement policies** (which clusters).",
+        "Apply **overrides** per cluster.",
+        "Consider **Karmada/OCM** for federation.",
+        "Or use **GitOps ApplicationSets** for simpler fan-out."
+      ]
+    },
+    "analogy": {
+      "title": "Head office issuing one policy to all branches with local addenda",
+      "story": "The core rules are shared; each branch adds its local details.",
+      "mapping": [
+        [
+          "Head office",
+          "Federation control plane"
+        ],
+        [
+          "Policy",
+          "Resource template"
+        ],
+        [
+          "Local addenda",
+          "Overrides"
+        ]
+      ],
+      "breaks": "Head offices don't fail over branches automatically; some federation tools can reschedule workloads across clusters."
+    },
+    "mindmap": {
+      "center": "Federation",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Templates",
+            "Placement",
+            "Overrides"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Karmada",
+            "Open Cluster Management",
+            "Rancher Fleet",
+            "KubeFed (retired)"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "GitOps ApplicationSets"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Extra control plane"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Karmada propagation",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One Deployment, replicas split across two clusters."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: policy.karmada.io/v1alpha1\nkind: PropagationPolicy\nmetadata: {name: api}\nspec:\n  resourceSelectors: [{apiVersion: apps/v1, kind: Deployment, name: api}]\n  placement:\n    clusterAffinity: {clusterNames: [prod-eu, prod-us]}\n    replicaScheduling: {replicaSchedulingType: Divided}"
+        }
+      ],
+      "outcome": "fleet-wide deployment control."
+    },
+    "summary": {
+      "points": [
+        "Templates + placement + overrides.",
+        "Extra control plane.",
+        "GitOps as a simpler option."
+      ]
+    },
+    "check": [
+      {
+        "q": "What three concepts do federation systems generally use?",
+        "a": "Resource templates, placement policies and per-cluster overrides."
+      }
+    ]
+  },
+  "gitops-architectures-hub-and-spoke-vs-independent": {
+    "core": "GitOps keeps desired state in Git and agents reconcile clusters to it. Hub-and-spoke runs one central Argo CD managing many clusters (single pane of glass, but a central dependency with broad credentials). Independent (pull) runs an agent in each cluster (Flux or Argo CD per cluster), which is more resilient and secure but harder to view centrally.",
+    "first_principles": {
+      "problem": "A central Argo CD outage blocks deployments to all 40 clusters.",
+      "truths": [
+        "Central control simplifies visibility.",
+        "Central components are dependencies and targets.",
+        "Pull-based agents need only outbound access."
+      ],
+      "derivation": [
+        "**Hub-and-spoke**: central visibility, ApplicationSets.",
+        "**Independent**: agent per cluster, pull from Git.",
+        "**Hybrid**: per-cluster agents + central dashboards.",
+        "Limit **credentials** in hubs.",
+        "Structure **repos** (env folders, overlays)."
+      ]
+    },
+    "analogy": {
+      "title": "One air traffic control tower for all airports versus a tower at each",
+      "story": "Central is simpler to oversee; local towers keep working if the centre fails.",
+      "mapping": [
+        [
+          "Central tower",
+          "Hub Argo CD"
+        ],
+        [
+          "Local towers",
+          "Per-cluster agents"
+        ],
+        [
+          "Flight plans",
+          "Git repo"
+        ]
+      ],
+      "breaks": "Towers communicate by radio; GitOps agents only need Git and their own cluster."
+    },
+    "mindmap": {
+      "center": "GitOps Architectures",
+      "branches": [
+        {
+          "label": "Hub-and-spoke",
+          "children": [
+            "Central Argo CD",
+            "Visibility",
+            "Single dependency"
+          ]
+        },
+        {
+          "label": "Independent",
+          "children": [
+            "Agent per cluster",
+            "Pull",
+            "Resilient"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "Local agents + central UI"
+          ]
+        },
+        {
+          "label": "Repo design",
+          "children": [
+            "Overlays",
+            "ApplicationSets",
+            "Env folders"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ApplicationSet fan-out",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every prod cluster gets its regional overlay."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: argoproj.io/v1alpha1\nkind: ApplicationSet\nmetadata: {name: api}\nspec:\n  generators: [{clusters: {selector: {matchLabels: {env: prod}}}}]\n  template:\n    metadata: {name: 'api-{{name}}'}\n    spec:\n      project: default\n      source: {repoURL: https://git.example.com/apps.git, path: 'api/overlays/{{metadata.labels.region}}', targetRevision: main}\n      destination: {server: '{{server}}', namespace: api}\n      syncPolicy: {automated: {prune: true, selfHeal: true}}"
+        }
+      ],
+      "outcome": "consistent fleet configuration."
+    },
+    "summary": {
+      "points": [
+        "Git is the source of truth.",
+        "Hub vs independent trade-offs.",
+        "Fan out with ApplicationSets."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main risk of hub-and-spoke GitOps?",
+        "a": "The central controller is a single dependency and holds credentials to every cluster."
+      }
+    ]
+  },
+  "service-mesh-federation-connecting-services-across-clusters": {
+    "core": "Multi-cluster meshes (Istio multi-primary or primary-remote, Linkerd multicluster, Cilium Cluster Mesh) connect services across clusters with shared trust (common root CA for mTLS), cross-cluster service discovery and locality-aware load balancing with failover. Kubernetes' Multi-Cluster Services API (ServiceExport/ServiceImport) standardises discovery.",
+    "first_principles": {
+      "problem": "Services in the EU cluster can't call the US cluster's payment service securely or fail over to it.",
+      "truths": [
+        "Identity must be shared to trust across clusters.",
+        "Discovery must span clusters.",
+        "Locality reduces latency; failover adds resilience."
+      ],
+      "derivation": [
+        "Establish a **shared root of trust**.",
+        "Choose **mesh topology** (multi-primary, primary-remote).",
+        "Enable **cross-cluster discovery** (east-west gateways, MCS).",
+        "Configure **locality failover**.",
+        "Mind **latency and egress costs**."
+      ]
+    },
+    "analogy": {
+      "title": "Allied embassies with mutual ID recognition",
+      "story": "Diplomats from one embassy are trusted at another and can be redirected if one closes.",
+      "mapping": [
+        [
+          "Mutual ID recognition",
+          "Shared root CA"
+        ],
+        [
+          "Embassies",
+          "Clusters"
+        ],
+        [
+          "Redirecting",
+          "Failover"
+        ]
+      ],
+      "breaks": "Embassies negotiate trust politically; meshes need careful certificate management."
+    },
+    "mindmap": {
+      "center": "Multi-Cluster Mesh",
+      "branches": [
+        {
+          "label": "Trust",
+          "children": [
+            "Shared root CA",
+            "mTLS"
+          ]
+        },
+        {
+          "label": "Topologies",
+          "children": [
+            "Multi-primary",
+            "Primary-remote"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "East-west gateways",
+            "MCS API"
+          ]
+        },
+        {
+          "label": "Traffic",
+          "children": [
+            "Locality LB",
+            "Failover"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Istio",
+            "Linkerd",
+            "Cilium Cluster Mesh"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Locality failover",
+      "scenario": "Istio DestinationRule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "EU callers use EU payments, fail over to US when unhealthy."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "trafficPolicy:\n  loadBalancer:\n    localityLbSetting:\n      enabled: true\n      failover: [{from: eu-west-1, to: us-east-1}]\n  outlierDetection: {consecutive5xxErrors: 5, interval: 10s, baseEjectionTime: 30s}"
+        }
+      ],
+      "outcome": "secure, resilient cross-cluster calls."
+    },
+    "summary": {
+      "points": [
+        "Shared trust.",
+        "Cross-cluster discovery.",
+        "Locality and failover."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's required for mTLS to work across clusters in a mesh?",
+        "a": "A shared root of trust (common root CA) so workload certificates are mutually trusted."
+      }
+    ]
+  },
+  "cluster-api-and-fleet-provisioning": {
+    "core": "Cluster API manages Kubernetes clusters declaratively from a management cluster: Cluster, MachineDeployment and control-plane objects with infrastructure providers (AWS, Azure, vSphere, bare metal) create, upgrade and scale clusters the same way Deployments manage Pods. ClusterClass templates standardise fleets.",
+    "first_principles": {
+      "problem": "Creating and upgrading 50 clusters with scripts and console clicks produces snowflakes.",
+      "truths": [
+        "Clusters can be declared as objects.",
+        "Reconciliation keeps them correct.",
+        "Templates enforce consistency."
+      ],
+      "derivation": [
+        "Run a **management cluster**.",
+        "Install **infrastructure providers**.",
+        "Define **ClusterClass** templates.",
+        "Create **Cluster** objects via GitOps.",
+        "**Upgrade** by changing versions; CAPI rolls machines."
+      ]
+    },
+    "analogy": {
+      "title": "A factory that builds identical franchise kitchens on order",
+      "story": "You submit a spec; the factory builds and maintains each kitchen.",
+      "mapping": [
+        [
+          "Factory",
+          "Management cluster"
+        ],
+        [
+          "Spec",
+          "Cluster/ClusterClass"
+        ],
+        [
+          "Kitchens",
+          "Workload clusters"
+        ]
+      ],
+      "breaks": "Factories ship once; CAPI keeps reconciling clusters after creation."
+    },
+    "mindmap": {
+      "center": "Cluster API",
+      "branches": [
+        {
+          "label": "Objects",
+          "children": [
+            "Cluster",
+            "MachineDeployment",
+            "KubeadmControlPlane",
+            "ClusterClass"
+          ]
+        },
+        {
+          "label": "Providers",
+          "children": [
+            "AWS",
+            "Azure",
+            "GCP",
+            "vSphere",
+            "Metal3"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Create",
+            "Scale",
+            "Upgrade",
+            "Rollout"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Management cluster",
+            "GitOps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Creating a cluster",
+      "scenario": "clusterctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A full cluster from a manifest; upgrades are a version bump."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "clusterctl init --infrastructure aws\nclusterctl generate cluster prod-eu --kubernetes-version v1.31.2 \\\n  --control-plane-machine-count 3 --worker-machine-count 6 > prod-eu.yaml\nkubectl apply -f prod-eu.yaml"
+        }
+      ],
+      "outcome": "consistent, declarative fleets."
+    },
+    "summary": {
+      "points": [
+        "Clusters as objects.",
+        "Management cluster reconciles.",
+        "Templates for consistency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Cluster API's management cluster do?",
+        "a": "Runs controllers that create, scale and upgrade workload clusters from declarative objects."
+      }
+    ]
+  }
+}

@@ -1,0 +1,632 @@
+{
+  "introduction-escaping-the-cli-limitations": {
+    "core": "kubectl is powerful but verbose: navigating relationships, watching many resources and switching contexts takes many commands. UIs and power tools (Kubernetes Dashboard, Lens/Freelens, k9s, Headlamp, Octant historically) and kubectl plugins via Krew speed up exploration and troubleshooting, without replacing GitOps for changes.",
+    "first_principles": {
+      "problem": "Engineers type 20 kubectl commands to follow one failing Pod from Deployment to logs and events.",
+      "truths": [
+        "Clusters have many related objects.",
+        "Visual and interactive views speed navigation.",
+        "Changes should still go through Git."
+      ],
+      "derivation": [
+        "Use **k9s** for fast terminal navigation.",
+        "Use **Lens/Headlamp** for visual IDE-like views.",
+        "Use **Krew plugins** to extend kubectl.",
+        "Keep tools **read-mostly**; change via **GitOps**.",
+        "Respect **RBAC**: tools use your kubeconfig."
+      ]
+    },
+    "analogy": {
+      "title": "A file manager versus typing ls and cd for everything",
+      "story": "Same files, much faster browsing.",
+      "mapping": [
+        [
+          "File manager",
+          "k9s/Lens"
+        ],
+        [
+          "ls/cd",
+          "kubectl get/describe"
+        ],
+        [
+          "Plugins",
+          "Krew"
+        ]
+      ],
+      "breaks": "File managers can edit freely; cluster changes from UIs bypass review unless restricted."
+    },
+    "mindmap": {
+      "center": "K8s Tooling",
+      "branches": [
+        {
+          "label": "Terminal",
+          "children": [
+            "k9s"
+          ]
+        },
+        {
+          "label": "GUI",
+          "children": [
+            "Lens/Freelens",
+            "Headlamp",
+            "Dashboard"
+          ]
+        },
+        {
+          "label": "Plugins",
+          "children": [
+            "Krew"
+          ]
+        },
+        {
+          "label": "Principles",
+          "children": [
+            "Read-mostly",
+            "GitOps for changes",
+            "RBAC applies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Following a failure",
+      "scenario": "k9s.",
+      "flow": [
+        ":deploy → select api",
+        "Enter → ReplicaSet → Pods",
+        "l for logs, d for describe",
+        "Done in seconds"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster troubleshooting."
+        }
+      ],
+      "code": [],
+      "outcome": "productive cluster navigation."
+    },
+    "summary": {
+      "points": [
+        "kubectl is verbose.",
+        "Tools accelerate.",
+        "Change through Git."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should cluster UIs be used mostly read-only?",
+        "a": "Changes made through UIs bypass code review and drift from the Git source of truth."
+      }
+    ]
+  },
+  "the-official-kubernetes-dashboard": {
+    "core": "Kubernetes Dashboard is the official web UI for viewing and managing resources, logs and exec. It runs in-cluster and authenticates with bearer tokens or a proxy. Historically, exposed dashboards with over-privileged service accounts caused major breaches (Tesla's cryptojacking), so expose it only internally with least privilege.",
+    "first_principles": {
+      "problem": "A public Dashboard bound to cluster-admin lets attackers deploy crypto miners.",
+      "truths": [
+        "Web UIs are attack surfaces.",
+        "Service account permissions define what the UI can do.",
+        "Internal access reduces exposure."
+      ],
+      "derivation": [
+        "Never expose **publicly**.",
+        "Access via **kubectl proxy/port-forward** or SSO proxy.",
+        "Use **user tokens**, not a shared admin SA.",
+        "Bind **read-only** roles by default.",
+        "Consider **Headlamp** or managed consoles."
+      ]
+    },
+    "analogy": {
+      "title": "A building's control room",
+      "story": "Useful for staff, catastrophic if left unlocked to the street.",
+      "mapping": [
+        [
+          "Control room",
+          "Dashboard"
+        ],
+        [
+          "Unlocked door",
+          "Public exposure"
+        ],
+        [
+          "Master key on the desk",
+          "cluster-admin SA"
+        ]
+      ],
+      "breaks": "Control rooms have guards; dashboards rely entirely on your auth configuration."
+    },
+    "mindmap": {
+      "center": "Dashboard",
+      "branches": [
+        {
+          "label": "Features",
+          "children": [
+            "Resources",
+            "Logs",
+            "Exec",
+            "Edit"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "Port-forward",
+            "SSO proxy"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Public exposure",
+            "Admin SA"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Least privilege",
+            "User tokens"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Headlamp",
+            "Cloud consoles"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe access",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Local-only access with personal, limited permissions."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl -n kubernetes-dashboard port-forward svc/kubernetes-dashboard-kong-proxy 8443:443\n# log in with your own short-lived token\nkubectl create token alice-viewer -n kubernetes-dashboard"
+        }
+      ],
+      "outcome": "useful UI without a breach risk."
+    },
+    "summary": {
+      "points": [
+        "Official web UI.",
+        "Never public.",
+        "Least privilege."
+      ]
+    },
+    "check": [
+      {
+        "q": "What famous risk is associated with the Kubernetes Dashboard?",
+        "a": "Publicly exposed dashboards with admin privileges being used by attackers (e.g. for crypto-mining)."
+      }
+    ]
+  },
+  "lens-the-kubernetes-ide": {
+    "core": "Lens (and its open-source fork Freelens) is a desktop Kubernetes IDE: it reads kubeconfigs, shows clusters, workloads and relationships visually, provides logs, terminals, port-forwarding, metrics charts (with Prometheus) and Helm management. It's local, uses your credentials and is good for exploration across many clusters.",
+    "first_principles": {
+      "problem": "Developers juggling five clusters lose track of contexts and namespaces.",
+      "truths": [
+        "Visual context reduces mistakes.",
+        "Desktop apps can reuse kubeconfig.",
+        "Metrics in context speed diagnosis."
+      ],
+      "derivation": [
+        "Import **kubeconfigs**.",
+        "Use **hotbar/catalog** for clusters.",
+        "View **metrics** via Prometheus.",
+        "Use built-in **terminal and logs**.",
+        "Mind **licensing** (Lens) vs **Freelens**."
+      ]
+    },
+    "analogy": {
+      "title": "An IDE for clusters",
+      "story": "Like a code editor with file tree, terminal and debugger in one window.",
+      "mapping": [
+        [
+          "File tree",
+          "Resource tree"
+        ],
+        [
+          "Terminal",
+          "Pod shell"
+        ],
+        [
+          "Debugger panel",
+          "Metrics/logs"
+        ]
+      ],
+      "breaks": "IDEs edit local files; Lens acts on live clusters, so mistakes are immediate."
+    },
+    "mindmap": {
+      "center": "Lens",
+      "branches": [
+        {
+          "label": "Features",
+          "children": [
+            "Multi-cluster",
+            "Resource views",
+            "Logs",
+            "Terminal",
+            "Port-forward",
+            "Metrics",
+            "Helm"
+          ]
+        },
+        {
+          "label": "Auth",
+          "children": [
+            "kubeconfig"
+          ]
+        },
+        {
+          "label": "Variants",
+          "children": [
+            "Lens",
+            "Freelens"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Live changes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Investigating memory",
+      "scenario": "Lens.",
+      "flow": [
+        "Open cluster → Workloads → Pods",
+        "Sort by memory",
+        "Open Pod → metrics chart shows leak",
+        "Open logs alongside"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Context in one window."
+        }
+      ],
+      "code": [],
+      "outcome": "visual cluster exploration."
+    },
+    "summary": {
+      "points": [
+        "Desktop IDE.",
+        "Uses kubeconfig.",
+        "Metrics in context."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does Lens authenticate to clusters?",
+        "a": "Using your existing kubeconfig contexts and credentials."
+      }
+    ]
+  },
+  "k9s-the-terminal-power-users-tool": {
+    "core": "k9s is a fast terminal UI over the Kubernetes API: navigate resources with vim-like commands (:pods, :deploy), filter (/), view logs (l), describe (d), shell (s), port-forward (shift-f), delete or scale, switch contexts and namespaces, and use plugins, skins and XRay views of relationships. It's ideal over SSH and for keyboard-driven operators.",
+    "first_principles": {
+      "problem": "On-call engineers waste minutes typing kubectl commands during incidents.",
+      "truths": [
+        "Keyboard workflows are fast.",
+        "Live views beat repeated commands.",
+        "Terminal tools work everywhere."
+      ],
+      "derivation": [
+        "Learn core **commands** (:pods, :svc, :ctx, :ns).",
+        "Use **filters** and **sorting**.",
+        "Use **logs, describe, shell** hotkeys.",
+        "Enable **read-only mode** for safety.",
+        "Add **plugins/aliases** for team workflows."
+      ]
+    },
+    "analogy": {
+      "title": "A cockpit with shortcuts on every button",
+      "story": "Experienced pilots fly by muscle memory.",
+      "mapping": [
+        [
+          "Cockpit",
+          "k9s"
+        ],
+        [
+          "Buttons",
+          "Hotkeys"
+        ],
+        [
+          "Instruments",
+          "Live resource views"
+        ]
+      ],
+      "breaks": "Cockpits have safety covers on dangerous switches; enable k9s read-only mode for similar protection."
+    },
+    "mindmap": {
+      "center": "k9s",
+      "branches": [
+        {
+          "label": "Navigation",
+          "children": [
+            ":pods",
+            ":deploy",
+            ":ctx",
+            ":ns"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "l logs",
+            "d describe",
+            "s shell",
+            "shift-f port-forward"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "XRay",
+            "Pulses",
+            "Plugins",
+            "Skins"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "--readonly"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Incident workflow",
+      "scenario": "Keys.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Diagnosis in seconds, no accidental changes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "k9s --readonly -n shop\n:pods  → /api  → select → l (logs) → d (describe) → :events"
+        }
+      ],
+      "outcome": "fast terminal operations."
+    },
+    "summary": {
+      "points": [
+        "Keyboard-driven.",
+        "Live views.",
+        "Read-only for safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you start k9s in a mode that prevents modifications?",
+        "a": "With the --readonly flag."
+      }
+    ]
+  },
+  "octant-visualizing-relationships": {
+    "core": "Octant was a VMware developer-focused web UI that visualised resource relationships (Deployment → ReplicaSet → Pods → Services), with a plugin system. It's archived, but its idea of graph views lives on in Headlamp, Lens maps, k9s XRay and tools like kubectl tree and kube-lineage.",
+    "first_principles": {
+      "problem": "Developers can't see which Service, ConfigMap and Secret a failing Pod depends on.",
+      "truths": [
+        "Objects relate via owners and selectors.",
+        "Graphs reveal dependencies.",
+        "Tools come and go; concepts remain."
+      ],
+      "derivation": [
+        "Visualise **ownerReferences** (kubectl tree).",
+        "Visualise **selectors** (Service → Pods).",
+        "Use **Headlamp maps** or **k9s XRay**.",
+        "Avoid **archived tools** in production workflows.",
+        "Teach the **relationship model**."
+      ]
+    },
+    "analogy": {
+      "title": "A family tree for resources",
+      "story": "See who created whom and who depends on whom.",
+      "mapping": [
+        [
+          "Parents",
+          "Owners"
+        ],
+        [
+          "Children",
+          "Owned objects"
+        ],
+        [
+          "Friends",
+          "Selector relationships"
+        ]
+      ],
+      "breaks": "Family trees are fixed; resource graphs change with every rollout."
+    },
+    "mindmap": {
+      "center": "Relationship Views",
+      "branches": [
+        {
+          "label": "Octant",
+          "children": [
+            "Archived",
+            "Graph views"
+          ]
+        },
+        {
+          "label": "Successors",
+          "children": [
+            "Headlamp",
+            "Lens",
+            "k9s XRay"
+          ]
+        },
+        {
+          "label": "CLI",
+          "children": [
+            "kubectl tree",
+            "kube-lineage"
+          ]
+        },
+        {
+          "label": "Relationships",
+          "children": [
+            "ownerReferences",
+            "Selectors",
+            "Volume refs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ownership tree",
+      "scenario": "kubectl tree.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ownership chain at a glance."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl krew install tree\nkubectl tree deployment api -n shop\n# Deployment/api → ReplicaSet/api-7f9 → Pod/api-7f9-abc ..."
+        }
+      ],
+      "outcome": "dependencies made visible."
+    },
+    "summary": {
+      "points": [
+        "Relationships matter.",
+        "Octant archived.",
+        "Use current tools."
+      ]
+    },
+    "check": [
+      {
+        "q": "What kubectl plugin shows a resource's ownership hierarchy?",
+        "a": "kubectl tree."
+      }
+    ]
+  },
+  "krew-the-plugin-manager": {
+    "core": "Krew is a package manager for kubectl plugins: install, update and discover hundreds of plugins (ctx/ns for context switching, tree, neat, who-can, sniff, view-secret, resource-capacity, stern for multi-Pod logs). Any executable named kubectl-<name> on PATH becomes a kubectl subcommand.",
+    "first_principles": {
+      "problem": "Each engineer has a different set of hand-installed scripts for common tasks.",
+      "truths": [
+        "kubectl supports plugins by naming convention.",
+        "A package manager keeps tools consistent.",
+        "Plugins run with your credentials."
+      ],
+      "derivation": [
+        "Install **Krew**.",
+        "Install core plugins (**ctx, ns, tree, neat, who-can**).",
+        "Standardise via a **team list**.",
+        "**Review** plugins before use (they run locally with your creds).",
+        "Write your own **kubectl-x** scripts."
+      ]
+    },
+    "analogy": {
+      "title": "An app store for your multitool",
+      "story": "Add new blades to the same handle.",
+      "mapping": [
+        [
+          "Handle",
+          "kubectl"
+        ],
+        [
+          "Blades",
+          "Plugins"
+        ],
+        [
+          "App store",
+          "Krew index"
+        ]
+      ],
+      "breaks": "Multitools are physical; plugins are code with access to your clusters."
+    },
+    "mindmap": {
+      "center": "Krew",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "kubectl-<name> on PATH"
+          ]
+        },
+        {
+          "label": "Popular",
+          "children": [
+            "ctx",
+            "ns",
+            "tree",
+            "neat",
+            "who-can",
+            "sniff",
+            "view-secret",
+            "resource-capacity"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "install",
+            "upgrade",
+            "search"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Review plugins"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Setup",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Common tasks in one command."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl krew install ctx ns tree neat who-can resource-capacity\nkubectl ctx prod-eu && kubectl ns shop\nkubectl who-can delete pods -n shop\nkubectl resource-capacity --util"
+        }
+      ],
+      "outcome": "a consistent, extended kubectl."
+    },
+    "summary": {
+      "points": [
+        "Plugin package manager.",
+        "Naming convention.",
+        "Review what you install."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does kubectl discover plugins?",
+        "a": "Any executable named kubectl-<name> on the PATH becomes 'kubectl <name>'."
+      }
+    ]
+  }
+}

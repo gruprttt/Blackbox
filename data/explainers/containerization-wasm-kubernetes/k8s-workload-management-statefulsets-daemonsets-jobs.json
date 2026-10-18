@@ -1,0 +1,745 @@
+{
+  "introduction-cattle-vs-pets-revisited": {
+    "core": "Deployments treat Pods as interchangeable cattle. Some workloads aren't: databases need stable identity and storage (StatefulSet), node agents need one Pod per node (DaemonSet), and batch work must run to completion (Job/CronJob). PodDisruptionBudgets protect all of them during voluntary disruptions.",
+    "first_principles": {
+      "problem": "A database run as a Deployment loses its data and identity when Pods are rescheduled.",
+      "truths": [
+        "Not all workloads are stateless.",
+        "Some must run per node.",
+        "Some must finish, not run forever."
+      ],
+      "derivation": [
+        "**StatefulSet** for identity + storage.",
+        "**DaemonSet** for per-node agents.",
+        "**Job** for run-to-completion.",
+        "**CronJob** for schedules.",
+        "**PDB** for availability during maintenance."
+      ]
+    },
+    "analogy": {
+      "title": "Different staff contracts",
+      "story": "Temps (Deployment), named specialists with their own offices (StatefulSet), a guard on every floor (DaemonSet), project contractors (Job).",
+      "mapping": [
+        [
+          "Temps",
+          "Deployment Pods"
+        ],
+        [
+          "Named specialists",
+          "StatefulSet Pods"
+        ],
+        [
+          "Floor guards",
+          "DaemonSet"
+        ],
+        [
+          "Contractors",
+          "Jobs"
+        ]
+      ],
+      "breaks": "Staff can be retrained; controller types can't be swapped without recreating workloads."
+    },
+    "mindmap": {
+      "center": "Workload Types",
+      "branches": [
+        {
+          "label": "Stateless",
+          "children": [
+            "Deployment"
+          ]
+        },
+        {
+          "label": "Stateful",
+          "children": [
+            "StatefulSet"
+          ]
+        },
+        {
+          "label": "Per node",
+          "children": [
+            "DaemonSet"
+          ]
+        },
+        {
+          "label": "Batch",
+          "children": [
+            "Job",
+            "CronJob"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "PDB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mapping workloads",
+      "scenario": "Cluster.",
+      "flow": [
+        "API → Deployment",
+        "PostgreSQL → StatefulSet",
+        "Log agent → DaemonSet",
+        "Nightly report → CronJob"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each workload gets the right semantics."
+        }
+      ],
+      "code": [],
+      "outcome": "correct controller per workload."
+    },
+    "summary": {
+      "points": [
+        "Match controller to workload.",
+        "Identity, per-node, batch.",
+        "Protect with PDBs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which controller runs exactly one Pod per node?",
+        "a": "DaemonSet."
+      }
+    ]
+  },
+  "statefulsets-when-identity-matters": {
+    "core": "StatefulSets give each Pod a stable ordinal name (db-0, db-1), a stable DNS name via a headless Service (db-0.db.ns.svc) and its own PersistentVolumeClaim from volumeClaimTemplates that follows it across rescheduling. That suits databases, Kafka, ZooKeeper and other clustered systems needing stable membership.",
+    "first_principles": {
+      "problem": "A Kafka broker restarted by a Deployment comes back with a new name and empty disk, confusing the cluster.",
+      "truths": [
+        "Clustered systems track members by identity.",
+        "Data must follow the member.",
+        "DNS names must be predictable."
+      ],
+      "derivation": [
+        "Create a **headless Service**.",
+        "Define **volumeClaimTemplates**.",
+        "Pods get **ordinal names** and **sticky PVCs**.",
+        "Use stable **DNS** for peers.",
+        "Remember PVCs **aren't deleted** on scale-down by default."
+      ]
+    },
+    "analogy": {
+      "title": "Named, numbered lockers for team members",
+      "story": "Player 3 always gets locker 3 with their kit inside, even after a substitution.",
+      "mapping": [
+        [
+          "Player number",
+          "Ordinal"
+        ],
+        [
+          "Locker",
+          "PVC"
+        ],
+        [
+          "Name on roster",
+          "Stable DNS"
+        ]
+      ],
+      "breaks": "Lockers don't move; PVCs bound to zonal disks restrict which nodes a Pod can return to."
+    },
+    "mindmap": {
+      "center": "StatefulSets",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "Ordinal names",
+            "Stable DNS"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "volumeClaimTemplates",
+            "Sticky PVCs"
+          ]
+        },
+        {
+          "label": "Requires",
+          "children": [
+            "Headless Service"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Databases",
+            "Kafka",
+            "ZooKeeper",
+            "etcd"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "PVC retention",
+            "Zonal volumes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "StatefulSet skeleton",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "db-0, db-1, db-2 each with their own volume."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: apps/v1\nkind: StatefulSet\nmetadata: {name: db}\nspec:\n  serviceName: db\n  replicas: 3\n  selector: {matchLabels: {app: db}}\n  template:\n    metadata: {labels: {app: db}}\n    spec:\n      containers: [{name: pg, image: postgres:16, volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]}]\n  volumeClaimTemplates:\n  - metadata: {name: data}\n    spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 50Gi}}}"
+        }
+      ],
+      "outcome": "stable members with persistent data."
+    },
+    "summary": {
+      "points": [
+        "Ordinal identity.",
+        "Sticky storage.",
+        "Headless DNS."
+      ]
+    },
+    "check": [
+      {
+        "q": "What gives each StatefulSet Pod its own persistent volume?",
+        "a": "volumeClaimTemplates, which create a PVC per Pod ordinal."
+      }
+    ]
+  },
+  "statefulsets-ordered-scaling-and-update-behavior": {
+    "core": "By default (OrderedReady), StatefulSets create Pods in order 0→N, each waiting for the previous to be ready, delete them in reverse, and roll updates from the highest ordinal down. Parallel podManagementPolicy speeds independent members. RollingUpdate partitions enable canaries (only ordinals ≥ partition update).",
+    "first_principles": {
+      "problem": "A database cluster upgrade updates all replicas at once and loses quorum.",
+      "truths": [
+        "Clustered systems need orderly membership changes.",
+        "Updating one member at a time preserves quorum.",
+        "Canaries reduce risk."
+      ],
+      "derivation": [
+        "Keep **OrderedReady** for quorum systems.",
+        "Use **Parallel** for independent shards.",
+        "Update with **RollingUpdate** (highest first).",
+        "Use **partition** for staged rollouts.",
+        "Combine with **readiness** reflecting cluster health."
+      ]
+    },
+    "analogy": {
+      "title": "Changing guards one at a time",
+      "story": "Each new guard is in position before the next one leaves.",
+      "mapping": [
+        [
+          "Guards",
+          "Members"
+        ],
+        [
+          "One at a time",
+          "Ordered updates"
+        ],
+        [
+          "Trial guard",
+          "Partition canary"
+        ]
+      ],
+      "breaks": "Guards know when their replacement is ready; readiness probes must express real cluster readiness."
+    },
+    "mindmap": {
+      "center": "Ordering & Updates",
+      "branches": [
+        {
+          "label": "Policies",
+          "children": [
+            "OrderedReady",
+            "Parallel"
+          ]
+        },
+        {
+          "label": "Order",
+          "children": [
+            "Create 0→N",
+            "Delete N→0",
+            "Update N→0"
+          ]
+        },
+        {
+          "label": "Canary",
+          "children": [
+            "partition"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Readiness reflects membership",
+            "PDB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Partitioned canary",
+      "scenario": "YAML + steps.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Then",
+          "detail": "Verify db-2, set partition 0 to finish."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "updateStrategy:\n  type: RollingUpdate\n  rollingUpdate: {partition: 2}   # only db-2 gets the new version"
+        }
+      ],
+      "outcome": "safe stateful upgrades."
+    },
+    "summary": {
+      "points": [
+        "Ordered by default.",
+        "One member at a time.",
+        "Partitions for canaries."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a StatefulSet rollingUpdate partition do?",
+        "a": "Only Pods with ordinals greater than or equal to the partition are updated, enabling staged rollouts."
+      }
+    ]
+  },
+  "daemonsets-one-pod-per-node": {
+    "core": "A DaemonSet ensures one Pod runs on every node (or every node matching a selector), adding Pods as nodes join and removing them as nodes leave. It's used for node-level agents: log collectors, metrics exporters, CNI plugins, CSI node drivers and security agents, often with tolerations to run on tainted nodes.",
+    "first_principles": {
+      "problem": "A log agent deployed with replicas: 10 misses new nodes and doubles up on others.",
+      "truths": [
+        "Some software must run on every node.",
+        "Node counts change constantly.",
+        "Some nodes are tainted."
+      ],
+      "derivation": [
+        "Use **DaemonSet** for node agents.",
+        "Use **nodeSelector/affinity** to target subsets.",
+        "Add **tolerations** for control-plane or special nodes.",
+        "Use **RollingUpdate** with maxUnavailable.",
+        "Set **priorityClass** (system-node-critical) for essentials."
+      ]
+    },
+    "analogy": {
+      "title": "A fire extinguisher on every floor",
+      "story": "When a floor is added, it gets an extinguisher automatically.",
+      "mapping": [
+        [
+          "Floors",
+          "Nodes"
+        ],
+        [
+          "Extinguisher",
+          "DaemonSet Pod"
+        ],
+        [
+          "Special floors",
+          "Tainted nodes"
+        ]
+      ],
+      "breaks": "Extinguishers sit idle; DaemonSet Pods consume resources on every node, so keep them lean."
+    },
+    "mindmap": {
+      "center": "DaemonSets",
+      "branches": [
+        {
+          "label": "Behaviour",
+          "children": [
+            "One Pod per node",
+            "Follows node changes"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Logs",
+            "Metrics",
+            "CNI",
+            "CSI",
+            "Security"
+          ]
+        },
+        {
+          "label": "Targeting",
+          "children": [
+            "nodeSelector",
+            "Affinity",
+            "Tolerations"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "RollingUpdate",
+            "Priority"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Node exporter",
+      "scenario": "YAML snippet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every node, including tainted ones, exports metrics."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: apps/v1\nkind: DaemonSet\nmetadata: {name: node-exporter}\nspec:\n  selector: {matchLabels: {app: node-exporter}}\n  template:\n    metadata: {labels: {app: node-exporter}}\n    spec:\n      tolerations: [{operator: Exists}]\n      hostNetwork: true\n      containers: [{name: exporter, image: prom/node-exporter, resources: {requests: {cpu: 50m, memory: 64Mi}}}]"
+        }
+      ],
+      "outcome": "complete node coverage."
+    },
+    "summary": {
+      "points": [
+        "One per node.",
+        "Follows the fleet.",
+        "Tolerations for special nodes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do DaemonSets often include broad tolerations?",
+        "a": "So agents also run on tainted nodes like control-plane or specialised nodes."
+      }
+    ]
+  },
+  "jobs-run-to-completion-tasks": {
+    "core": "A Job runs Pods until a specified number complete successfully, retrying failures up to backoffLimit. completions and parallelism control batch size, Indexed completion mode gives each Pod an index for sharded work, activeDeadlineSeconds bounds runtime, and ttlSecondsAfterFinished cleans up. podFailurePolicy can treat certain exit codes as non-retryable.",
+    "first_principles": {
+      "problem": "A migration script run as a Deployment restarts forever after finishing.",
+      "truths": [
+        "Batch tasks should end.",
+        "Failures may be transient or permanent.",
+        "Work can be split across Pods."
+      ],
+      "derivation": [
+        "Use **Job** with restartPolicy OnFailure/Never.",
+        "Set **backoffLimit** and **activeDeadlineSeconds**.",
+        "Use **completions/parallelism** or **Indexed** mode.",
+        "Use **podFailurePolicy** for non-retryable errors.",
+        "Set **ttlSecondsAfterFinished**."
+      ]
+    },
+    "analogy": {
+      "title": "Hiring contractors to complete a set number of tasks",
+      "story": "They retry failed attempts a few times, then report done or give up.",
+      "mapping": [
+        [
+          "Contractors",
+          "Pods"
+        ],
+        [
+          "Task count",
+          "completions"
+        ],
+        [
+          "Team size",
+          "parallelism"
+        ],
+        [
+          "Give-up rule",
+          "backoffLimit"
+        ]
+      ],
+      "breaks": "Contractors judge failures; Kubernetes needs failure policies to know what not to retry."
+    },
+    "mindmap": {
+      "center": "Jobs",
+      "branches": [
+        {
+          "label": "Settings",
+          "children": [
+            "completions",
+            "parallelism",
+            "backoffLimit",
+            "activeDeadlineSeconds"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "NonIndexed",
+            "Indexed"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "podFailurePolicy"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "ttlSecondsAfterFinished"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Indexed batch job",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "10 shards, 5 at a time, each knows its index."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: batch/v1\nkind: Job\nmetadata: {name: shard-process}\nspec:\n  completions: 10\n  parallelism: 5\n  completionMode: Indexed\n  backoffLimit: 3\n  ttlSecondsAfterFinished: 3600\n  template:\n    spec:\n      restartPolicy: Never\n      containers: [{name: worker, image: proc:1.0, args: [\"--shard=$(JOB_COMPLETION_INDEX)\"]}]"
+        }
+      ],
+      "outcome": "reliable batch processing."
+    },
+    "summary": {
+      "points": [
+        "Run to completion.",
+        "Retry with limits.",
+        "Index for sharding."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Indexed completion mode provide?",
+        "a": "Each Pod gets a unique completion index (JOB_COMPLETION_INDEX) to process a specific shard."
+      }
+    ]
+  },
+  "cronjobs-scheduled-tasks": {
+    "core": "A CronJob creates Jobs on a cron schedule (with timeZone support). concurrencyPolicy (Allow, Forbid, Replace) controls overlapping runs, startingDeadlineSeconds handles missed schedules, and successful/failedJobsHistoryLimit controls retained history. Jobs should be idempotent because runs can occasionally be duplicated or skipped.",
+    "first_principles": {
+      "problem": "A nightly report job runs long, the next run starts on top of it, and both corrupt the output.",
+      "truths": [
+        "Schedules can overlap with long runs.",
+        "Controllers can miss or duplicate runs.",
+        "History accumulates."
+      ],
+      "derivation": [
+        "Set **schedule** and **timeZone**.",
+        "Choose **concurrencyPolicy: Forbid** for exclusive jobs.",
+        "Set **startingDeadlineSeconds**.",
+        "Limit **history**.",
+        "Make jobs **idempotent**."
+      ]
+    },
+    "analogy": {
+      "title": "An alarm clock that starts a task",
+      "story": "If yesterday's task is still running, decide whether to skip, wait or interrupt it.",
+      "mapping": [
+        [
+          "Alarm",
+          "Schedule"
+        ],
+        [
+          "Overlap rule",
+          "concurrencyPolicy"
+        ],
+        [
+          "Missed alarm grace",
+          "startingDeadlineSeconds"
+        ]
+      ],
+      "breaks": "Alarms ring exactly once; CronJobs may occasionally create zero or two Jobs."
+    },
+    "mindmap": {
+      "center": "CronJobs",
+      "branches": [
+        {
+          "label": "Schedule",
+          "children": [
+            "Cron syntax",
+            "timeZone"
+          ]
+        },
+        {
+          "label": "Overlap",
+          "children": [
+            "Allow",
+            "Forbid",
+            "Replace"
+          ]
+        },
+        {
+          "label": "Missed runs",
+          "children": [
+            "startingDeadlineSeconds"
+          ]
+        },
+        {
+          "label": "History",
+          "children": [
+            "successfulJobsHistoryLimit",
+            "failedJobsHistoryLimit"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Idempotent jobs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Nightly report",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One run at 02:00 London time, never overlapping."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: batch/v1\nkind: CronJob\nmetadata: {name: nightly-report}\nspec:\n  schedule: \"0 2 * * *\"\n  timeZone: \"Europe/London\"\n  concurrencyPolicy: Forbid\n  startingDeadlineSeconds: 600\n  jobTemplate:\n    spec:\n      template:\n        spec:\n          restartPolicy: OnFailure\n          containers: [{name: report, image: report:2.1}]"
+        }
+      ],
+      "outcome": "dependable scheduled tasks."
+    },
+    "summary": {
+      "points": [
+        "Cron schedules.",
+        "Control overlap.",
+        "Idempotent jobs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does concurrencyPolicy: Forbid do?",
+        "a": "Skips a new run if the previous Job is still running."
+      }
+    ]
+  },
+  "pod-disruption-budgets-protecting-availability-during-maintenance": {
+    "core": "A PodDisruptionBudget limits voluntary disruptions (node drains, upgrades, autoscaler scale-down) by requiring minAvailable or capping maxUnavailable Pods for a selector. Eviction requests that would violate it are refused until enough Pods are healthy. It doesn't protect against involuntary failures like node crashes.",
+    "first_principles": {
+      "problem": "A node pool upgrade drains nodes simultaneously and takes all replicas of a service down.",
+      "truths": [
+        "Maintenance evicts Pods.",
+        "Evictions can be coordinated.",
+        "Crashes can't be prevented by policy."
+      ],
+      "derivation": [
+        "Create **PDB** for each critical workload.",
+        "Use **maxUnavailable: 1** or **minAvailable**.",
+        "Ensure **replicas > minAvailable** (or drains block forever).",
+        "Consider **unhealthyPodEvictionPolicy**.",
+        "Pair with **topology spread** across nodes/zones."
+      ]
+    },
+    "analogy": {
+      "title": "A rule that at least two lifeguards are on duty during shift changes",
+      "story": "Breaks are allowed, but never all at once.",
+      "mapping": [
+        [
+          "Lifeguards",
+          "Pods"
+        ],
+        [
+          "Shift changes",
+          "Drains"
+        ],
+        [
+          "Minimum on duty",
+          "minAvailable"
+        ]
+      ],
+      "breaks": "Lifeguard rules can't stop someone fainting; PDBs don't stop involuntary failures."
+    },
+    "mindmap": {
+      "center": "PDBs",
+      "branches": [
+        {
+          "label": "Settings",
+          "children": [
+            "minAvailable",
+            "maxUnavailable",
+            "selector"
+          ]
+        },
+        {
+          "label": "Protects",
+          "children": [
+            "Drains",
+            "Upgrades",
+            "Autoscaler"
+          ]
+        },
+        {
+          "label": "Doesn't",
+          "children": [
+            "Node crashes"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Blocking drains",
+            "Single replica"
+          ]
+        },
+        {
+          "label": "Pair",
+          "children": [
+            "Topology spread"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "PDB for an API",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Drains evict api Pods one at a time."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata: {name: api}\nspec:\n  maxUnavailable: 1\n  selector: {matchLabels: {app: api}}"
+        }
+      ],
+      "outcome": "maintenance without outages."
+    },
+    "summary": {
+      "points": [
+        "Limit voluntary disruption.",
+        "Don't block forever.",
+        "Spread replicas too."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does a PDB protect against a node crashing?",
+        "a": "No; it only limits voluntary disruptions like drains and evictions."
+      }
+    ]
+  }
+}

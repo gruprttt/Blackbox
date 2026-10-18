@@ -1,0 +1,638 @@
+{
+  "introduction-the-master-nodes": {
+    "core": "The control plane is the cluster's brain: kube-apiserver (the only component talking to etcd, serving the API), etcd (the consistent key-value store of all state), kube-controller-manager (reconciliation loops), kube-scheduler (Pod placement) and cloud-controller-manager (cloud integrations). Worker nodes run kubelet and kube-proxy.",
+    "first_principles": {
+      "problem": "Engineers don't know which component to suspect when objects aren't created, scheduled or updated.",
+      "truths": [
+        "One source of truth avoids conflicts.",
+        "Controllers act on state changes.",
+        "Components communicate through the API server."
+      ],
+      "derivation": [
+        "**API server**: entry point, auth, validation.",
+        "**etcd**: storage.",
+        "**Controllers**: reconcile.",
+        "**Scheduler**: place Pods.",
+        "**kubelet**: run Pods on nodes."
+      ]
+    },
+    "analogy": {
+      "title": "A company's head office",
+      "story": "Reception (API server), records room (etcd), managers (controllers), dispatcher (scheduler) and site workers (kubelets).",
+      "mapping": [
+        [
+          "Reception",
+          "API server"
+        ],
+        [
+          "Records room",
+          "etcd"
+        ],
+        [
+          "Managers",
+          "Controllers"
+        ],
+        [
+          "Dispatcher",
+          "Scheduler"
+        ]
+      ],
+      "breaks": "Office staff talk directly; Kubernetes components only coordinate through the API server."
+    },
+    "mindmap": {
+      "center": "Control Plane",
+      "branches": [
+        {
+          "label": "Components",
+          "children": [
+            "kube-apiserver",
+            "etcd",
+            "controller-manager",
+            "scheduler",
+            "cloud-controller-manager"
+          ]
+        },
+        {
+          "label": "Nodes",
+          "children": [
+            "kubelet",
+            "kube-proxy",
+            "runtime"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "Hub through API server"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Creating a Deployment",
+      "scenario": "Flow.",
+      "flow": [
+        "kubectl → API server → etcd",
+        "Deployment controller creates ReplicaSet",
+        "ReplicaSet controller creates Pods",
+        "Scheduler binds Pods; kubelets start them"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each component does one step."
+        }
+      ],
+      "code": [],
+      "outcome": "control plane roles understood."
+    },
+    "summary": {
+      "points": [
+        "API server is the hub.",
+        "etcd stores state.",
+        "Controllers and scheduler act."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which component is the only one that talks directly to etcd?",
+        "a": "The kube-apiserver."
+      }
+    ]
+  },
+  "the-api-server-the-front-door": {
+    "core": "kube-apiserver serves a RESTful, versioned API for all resources, validates and persists objects in etcd, and provides watch streams so clients and controllers receive changes efficiently. Optimistic concurrency uses resourceVersion, and it's horizontally scalable and stateless, with API Priority and Fairness protecting it from overload.",
+    "first_principles": {
+      "problem": "A misbehaving controller floods the API server and slows kubectl for everyone.",
+      "truths": [
+        "All reads and writes go through one API.",
+        "Watches avoid polling.",
+        "Concurrent updates need conflict detection."
+      ],
+      "derivation": [
+        "Use **watches/informers** instead of polling.",
+        "Handle **409 conflicts** with resourceVersion.",
+        "Scale API servers **horizontally**.",
+        "Configure **API Priority and Fairness**.",
+        "Audit with **audit logs**."
+      ]
+    },
+    "analogy": {
+      "title": "A busy library front desk",
+      "story": "Every book in or out goes through the desk; regulars subscribe to notifications instead of asking every minute.",
+      "mapping": [
+        [
+          "Front desk",
+          "API server"
+        ],
+        [
+          "Notifications",
+          "Watches"
+        ],
+        [
+          "Queue rules",
+          "Priority and Fairness"
+        ]
+      ],
+      "breaks": "Desks serve in order; APF classifies and fair-queues requests by priority level."
+    },
+    "mindmap": {
+      "center": "API Server",
+      "branches": [
+        {
+          "label": "Functions",
+          "children": [
+            "REST API",
+            "Validation",
+            "Persistence",
+            "Watches"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "resourceVersion",
+            "409 Conflict"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Stateless",
+            "Horizontal"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "API Priority and Fairness"
+          ]
+        },
+        {
+          "label": "Observability",
+          "children": [
+            "Audit logs",
+            "Metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Watching Pods",
+      "scenario": "kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Changes streamed, no polling."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get pods -w\nkubectl get --raw '/api/v1/namespaces/default/pods?watch=1&resourceVersion=12345'"
+        }
+      ],
+      "outcome": "efficient API usage."
+    },
+    "summary": {
+      "points": [
+        "Single API front door.",
+        "Watches, not polling.",
+        "Optimistic concurrency."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does the API server detect conflicting updates?",
+        "a": "Through resourceVersion; stale updates are rejected with a 409 Conflict."
+      }
+    ]
+  },
+  "the-3-gates-of-the-api-server": {
+    "core": "Every request passes three gates: authentication (who are you: certificates, bearer tokens, OIDC, service account tokens), authorisation (may you do this: RBAC, Node, Webhook authorisers) and admission control (should this object be allowed or modified: mutating then validating admission, built-in plugins, webhooks, ValidatingAdmissionPolicy with CEL). Only then is the object persisted.",
+    "first_principles": {
+      "problem": "A Pod with a privileged container is created even though security policy forbids it.",
+      "truths": [
+        "Identity, permission and policy are separate questions.",
+        "Admission can mutate or reject.",
+        "Order matters: mutate then validate."
+      ],
+      "derivation": [
+        "**Authenticate**: certs, OIDC, SA tokens.",
+        "**Authorise**: RBAC.",
+        "**Mutate**: defaults, sidecar injection.",
+        "**Validate**: Pod Security Admission, policies (Kyverno, Gatekeeper, CEL).",
+        "**Persist** to etcd."
+      ]
+    },
+    "analogy": {
+      "title": "Airport entry",
+      "story": "Passport check (authentication), visa check (authorisation) and customs inspection of your luggage (admission).",
+      "mapping": [
+        [
+          "Passport",
+          "Authentication"
+        ],
+        [
+          "Visa",
+          "Authorisation"
+        ],
+        [
+          "Customs",
+          "Admission control"
+        ]
+      ],
+      "breaks": "Customs can't repack your bag; mutating admission can modify objects."
+    },
+    "mindmap": {
+      "center": "API Gates",
+      "branches": [
+        {
+          "label": "AuthN",
+          "children": [
+            "X.509",
+            "OIDC",
+            "SA tokens",
+            "Webhook"
+          ]
+        },
+        {
+          "label": "AuthZ",
+          "children": [
+            "RBAC",
+            "Node",
+            "Webhook"
+          ]
+        },
+        {
+          "label": "Admission",
+          "children": [
+            "Mutating",
+            "Validating",
+            "PSA",
+            "CEL policies",
+            "Webhooks"
+          ]
+        },
+        {
+          "label": "Then",
+          "children": [
+            "etcd"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Request journey",
+      "scenario": "Steps.",
+      "flow": [
+        "kubectl with OIDC token → authenticated as alice",
+        "RBAC: alice can create pods in dev ✓",
+        "Mutating: sidecar injected",
+        "Validating: PSA restricted rejects privileged ✗"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Policy enforced before storage."
+        }
+      ],
+      "code": [],
+      "outcome": "layered request control."
+    },
+    "summary": {
+      "points": [
+        "Who, may, should.",
+        "Mutate then validate.",
+        "Policy at admission."
+      ]
+    },
+    "check": [
+      {
+        "q": "In what order does admission control run mutating and validating phases?",
+        "a": "Mutating admission first, then validating admission."
+      }
+    ]
+  },
+  "etcd-the-clusters-memory": {
+    "core": "etcd is a distributed, strongly consistent key-value store using Raft consensus. It stores all cluster state, needs a quorum ((n/2)+1) of members to accept writes, supports watches and MVCC revisions, and is sensitive to disk latency. Losing quorum makes the cluster read-only or unavailable, and losing etcd data without backups means losing the cluster.",
+    "first_principles": {
+      "problem": "A three-member etcd cluster loses two members and the API server stops accepting changes.",
+      "truths": [
+        "Consensus needs a majority.",
+        "Every write is fsynced.",
+        "State must be backed up."
+      ],
+      "derivation": [
+        "Run **3 or 5 members** across zones.",
+        "Use **fast SSDs** (low fsync latency).",
+        "**Snapshot** regularly and test restores.",
+        "Monitor **db size, leader changes, fsync latency**.",
+        "**Compact/defragment** periodically."
+      ]
+    },
+    "analogy": {
+      "title": "A committee that needs a majority vote to record decisions",
+      "story": "With too few members present, no new decisions can be made.",
+      "mapping": [
+        [
+          "Committee",
+          "etcd members"
+        ],
+        [
+          "Majority vote",
+          "Quorum"
+        ],
+        [
+          "Minutes",
+          "Raft log"
+        ]
+      ],
+      "breaks": "Committees can postpone; Kubernetes stops writing immediately without quorum."
+    },
+    "mindmap": {
+      "center": "etcd",
+      "branches": [
+        {
+          "label": "Consensus",
+          "children": [
+            "Raft",
+            "Leader",
+            "Quorum"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "3 or 5 members"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Disk fsync latency",
+            "Network"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Snapshots",
+            "Compaction",
+            "Defrag"
+          ]
+        },
+        {
+          "label": "Failure",
+          "children": [
+            "Quorum loss → no writes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Snapshot backup",
+      "scenario": "etcdctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cluster state recoverable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 \\\n  --cacert=ca.crt --cert=etcd.crt --key=etcd.key \\\n  snapshot save /backup/etcd-$(date +%F).db"
+        }
+      ],
+      "outcome": "healthy, recoverable cluster memory."
+    },
+    "summary": {
+      "points": [
+        "Raft quorum.",
+        "Fast disks.",
+        "Back up and test."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many etcd members can fail in a 5-member cluster while keeping quorum?",
+        "a": "Two (quorum is 3)."
+      }
+    ]
+  },
+  "the-controller-manager-the-state-reconciler": {
+    "core": "kube-controller-manager runs many control loops (Deployment, ReplicaSet, Job, Node, EndpointSlice, ServiceAccount, Namespace, garbage collector…). Each watches objects via informers, compares desired and actual state and acts to converge, idempotently and repeatedly. Leader election ensures one active instance.",
+    "first_principles": {
+      "problem": "Engineers don't know why deleting a Deployment also removes its Pods, or why stuck namespaces won't terminate.",
+      "truths": [
+        "Desired and actual state diverge.",
+        "Loops converge over time.",
+        "Ownership links enable cascading deletion."
+      ],
+      "derivation": [
+        "**Watch** via informers.",
+        "**Compare** desired vs actual.",
+        "**Act** to converge.",
+        "Use **ownerReferences** for garbage collection.",
+        "**Leader election** for HA."
+      ]
+    },
+    "analogy": {
+      "title": "A thermostat for every object type",
+      "story": "Each one constantly checks the temperature and adjusts until it matches the setting.",
+      "mapping": [
+        [
+          "Thermostat",
+          "Controller"
+        ],
+        [
+          "Setting",
+          "Spec"
+        ],
+        [
+          "Temperature",
+          "Status/actual state"
+        ]
+      ],
+      "breaks": "Thermostats control one variable; controllers manage complex object graphs."
+    },
+    "mindmap": {
+      "center": "Controller Manager",
+      "branches": [
+        {
+          "label": "Loops",
+          "children": [
+            "Deployment",
+            "ReplicaSet",
+            "Job",
+            "Node",
+            "EndpointSlice",
+            "Namespace",
+            "GC"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Informers",
+            "Work queues",
+            "Reconcile"
+          ]
+        },
+        {
+          "label": "Ownership",
+          "children": [
+            "ownerReferences",
+            "Cascading delete"
+          ]
+        },
+        {
+          "label": "HA",
+          "children": [
+            "Leader election"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cascading deletion",
+      "scenario": "Flow.",
+      "flow": [
+        "Delete Deployment",
+        "GC sees ReplicaSet owned by deleted Deployment",
+        "Deletes ReplicaSet",
+        "ReplicaSet's Pods deleted next"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clean cleanup via owner references."
+        }
+      ],
+      "code": [],
+      "outcome": "reconciliation understood."
+    },
+    "summary": {
+      "points": [
+        "Many control loops.",
+        "Converge desired and actual.",
+        "Owner references cascade."
+      ]
+    },
+    "check": [
+      {
+        "q": "What mechanism makes deleting a Deployment delete its Pods?",
+        "a": "Owner references processed by the garbage collector controller."
+      }
+    ]
+  },
+  "the-scheduler-the-dispatcher": {
+    "core": "kube-scheduler watches for Pods without a nodeName, runs the scheduling framework (PreFilter, Filter, Score, Reserve, Permit, Bind plugins) to pick a node, and writes the binding. It supports multiple profiles and custom schedulers, and its decisions respect resources, affinity, taints, topology spread and priorities.",
+    "first_principles": {
+      "problem": "Batch jobs need gang scheduling and a different strategy than web services.",
+      "truths": [
+        "Placement is a pluggable decision.",
+        "Different workloads need different strategies.",
+        "Binding is just an API write."
+      ],
+      "derivation": [
+        "Understand **extension points**.",
+        "Configure **profiles** (e.g. bin-packing profile).",
+        "Use **schedulerName** for alternate schedulers.",
+        "Add **plugins** (coscheduling) or use Volcano/Kueue.",
+        "Debug via **events** and scheduler logs."
+      ]
+    },
+    "analogy": {
+      "title": "A dispatcher assigning taxis",
+      "story": "Checks which cars can take the fare, scores the best one and sends it.",
+      "mapping": [
+        [
+          "Fares",
+          "Pods"
+        ],
+        [
+          "Taxis",
+          "Nodes"
+        ],
+        [
+          "Dispatch rules",
+          "Plugins"
+        ]
+      ],
+      "breaks": "Dispatchers can reassign; once bound, Pods don't move unless evicted."
+    },
+    "mindmap": {
+      "center": "Scheduler",
+      "branches": [
+        {
+          "label": "Framework",
+          "children": [
+            "PreFilter",
+            "Filter",
+            "Score",
+            "Reserve",
+            "Permit",
+            "Bind"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Profiles",
+            "Plugin weights"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "schedulerName",
+            "Volcano",
+            "Kueue"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "Events",
+            "Logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bin-packing profile",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Batch Pods using schedulerName: bin-packing pack tightly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: kubescheduler.config.k8s.io/v1\nkind: KubeSchedulerConfiguration\nprofiles:\n- schedulerName: bin-packing\n  pluginConfig:\n  - name: NodeResourcesFit\n    args:\n      scoringStrategy: {type: MostAllocated}"
+        }
+      ],
+      "outcome": "placement tuned per workload."
+    },
+    "summary": {
+      "points": [
+        "Pluggable framework.",
+        "Profiles per workload.",
+        "Binding is the output."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a Pod choose a non-default scheduler profile?",
+        "a": "By setting spec.schedulerName."
+      }
+    ]
+  }
+}

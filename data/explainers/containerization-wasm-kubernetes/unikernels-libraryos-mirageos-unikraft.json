@@ -1,0 +1,720 @@
+{
+  "introduction-the-swiss-army-knife-problem": {
+    "core": "General-purpose operating systems include drivers, services, shells and syscalls for every possible workload, but a single cloud service uses a tiny fraction. That extra code costs boot time, memory and attack surface. Unikernels ask: what if each application shipped with only the OS parts it needs?",
+    "first_principles": {
+      "problem": "A microservice VM boots a full Linux with hundreds of unused components just to run one HTTP server.",
+      "truths": [
+        "Unused code still runs or loads.",
+        "Every component is attack surface.",
+        "Cloud VMs run single applications."
+      ],
+      "derivation": [
+        "Identify **what the app actually uses**.",
+        "**Remove** everything else.",
+        "**Link** needed OS functions into the app.",
+        "Run as a **single-purpose VM**.",
+        "Accept **specialisation trade-offs**."
+      ]
+    },
+    "analogy": {
+      "title": "Carrying a full Swiss Army knife to open one bottle",
+      "story": "A simple bottle opener would be lighter and quicker.",
+      "mapping": [
+        [
+          "Swiss Army knife",
+          "General-purpose OS"
+        ],
+        [
+          "Bottle opener",
+          "Unikernel"
+        ],
+        [
+          "Unused blades",
+          "Unneeded OS components"
+        ]
+      ],
+      "breaks": "Knives don't get hacked; unused OS code can be exploited."
+    },
+    "mindmap": {
+      "center": "General-Purpose OS Cost",
+      "branches": [
+        {
+          "label": "Includes",
+          "children": [
+            "Drivers",
+            "Services",
+            "Shells",
+            "Many syscalls"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Boot time",
+            "Memory",
+            "Attack surface"
+          ]
+        },
+        {
+          "label": "Question",
+          "children": [
+            "Only what's needed?"
+          ]
+        },
+        {
+          "label": "Answer",
+          "children": [
+            "Unikernels"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What a web service uses",
+      "scenario": "Inventory.",
+      "flow": [
+        "Needs: network stack, memory allocator, timers, maybe a filesystem",
+        "Doesn't need: USB, shells, users, cron, dozens of daemons"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Most of the OS is dead weight for one app."
+        }
+      ],
+      "code": [],
+      "outcome": "motivation for specialisation."
+    },
+    "summary": {
+      "points": [
+        "OSes are general.",
+        "Apps are specific.",
+        "Extra code costs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the 'Swiss Army knife problem'?",
+        "a": "General-purpose OSes ship far more functionality than a single application needs, adding cost and attack surface."
+      }
+    ]
+  },
+  "the-concept-libraryos": {
+    "core": "A library operating system implements OS services (network stack, filesystem, scheduler, memory management) as libraries that link directly into the application, instead of a separate kernel accessed through syscalls. Calls become ordinary function calls in one address space, removing context switches.",
+    "first_principles": {
+      "problem": "Syscalls and kernel/user transitions add overhead to every I/O operation.",
+      "truths": [
+        "Kernel boundaries cost CPU cycles.",
+        "OS functions can be implemented as libraries.",
+        "Linking can drop unused code."
+      ],
+      "derivation": [
+        "Provide OS features as **libraries**.",
+        "**Link** app + needed libraries.",
+        "Use **function calls** instead of syscalls.",
+        "**Dead-code elimination** removes unused parts.",
+        "Run on a **hypervisor** for isolation."
+      ]
+    },
+    "analogy": {
+      "title": "A chef who keeps all needed tools at their own station",
+      "story": "No walking to a shared tool room for every task.",
+      "mapping": [
+        [
+          "Shared tool room",
+          "Kernel"
+        ],
+        [
+          "Walking there",
+          "Syscall"
+        ],
+        [
+          "Own station",
+          "Linked libraries"
+        ]
+      ],
+      "breaks": "Chefs can still share a kitchen; library OSes usually run one app per VM."
+    },
+    "mindmap": {
+      "center": "LibraryOS",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "OS as libraries"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No syscall overhead",
+            "Smaller",
+            "Specialised"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "MirageOS",
+            "Unikraft",
+            "Drawbridge",
+            "gVisor (partly)"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Hypervisor"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Calling the network stack",
+      "scenario": "Comparison.",
+      "flow": [
+        "Linux: app → syscall → kernel TCP stack → driver",
+        "LibOS: app → tcp_send() library call → driver",
+        "Fewer transitions, less overhead"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Lower latency per operation."
+        }
+      ],
+      "code": [],
+      "outcome": "OS services without a kernel boundary."
+    },
+    "summary": {
+      "points": [
+        "OS as libraries.",
+        "Function calls, not syscalls.",
+        "Link only what's used."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a library OS avoid syscall overhead?",
+        "a": "OS services are linked into the application and invoked as normal function calls in one address space."
+      }
+    ]
+  },
+  "what-is-a-unikernel": {
+    "core": "A unikernel is a single-address-space machine image built by compiling an application together with just the library-OS components it needs, booting directly on a hypervisor (or bare metal). There's one process, no shell, no users and often no ability to run other programs, so the image is tiny and specialised.",
+    "first_principles": {
+      "problem": "People can't picture how an app can run without a traditional OS underneath.",
+      "truths": [
+        "Hypervisors provide virtual hardware.",
+        "An app plus drivers can boot directly.",
+        "Single-purpose systems need no multi-user features."
+      ],
+      "derivation": [
+        "**Compile** app + selected libraries.",
+        "Produce a **bootable image**.",
+        "**Boot** on KVM/Xen/Firecracker.",
+        "**Single address space**, single application.",
+        "**Rebuild** to change anything."
+      ]
+    },
+    "analogy": {
+      "title": "A single-purpose appliance like a toaster",
+      "story": "It boots instantly, does one job well and has no settings menu to break.",
+      "mapping": [
+        [
+          "Toaster",
+          "Unikernel"
+        ],
+        [
+          "No menu",
+          "No shell/users"
+        ],
+        [
+          "One job",
+          "One application"
+        ]
+      ],
+      "breaks": "Toasters can't be patched; unikernels are rebuilt and redeployed for updates."
+    },
+    "mindmap": {
+      "center": "Unikernel",
+      "branches": [
+        {
+          "label": "Build",
+          "children": [
+            "App + LibOS",
+            "Bootable image"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "Single address space",
+            "One app",
+            "Hypervisor"
+          ]
+        },
+        {
+          "label": "Lacks",
+          "children": [
+            "Shell",
+            "Users",
+            "Process model"
+          ]
+        },
+        {
+          "label": "Updates",
+          "children": [
+            "Rebuild image"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Image size",
+      "scenario": "Comparison.",
+      "flow": [
+        "Ubuntu VM with nginx: ~1 GB image",
+        "Unikraft nginx unikernel: ~2 MB",
+        "Boot: seconds vs milliseconds"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Tiny, instant-boot service VMs."
+        }
+      ],
+      "code": [],
+      "outcome": "unikernels understood."
+    },
+    "summary": {
+      "points": [
+        "App + minimal OS.",
+        "Boots on a hypervisor.",
+        "One purpose."
+      ]
+    },
+    "check": [
+      {
+        "q": "What runs inside a unikernel besides the application?",
+        "a": "Only the library-OS components the application needs, in a single address space."
+      }
+    ]
+  },
+  "unikernels-vs-containers-vs-vms": {
+    "core": "VMs give strong isolation (own kernel) but are heavy. Containers are light but share the host kernel. Unikernels combine VM-level isolation (hypervisor boundary) with container-like size and boot speed, at the cost of specialisation: limited language/runtime support, difficult debugging and rebuilds for changes.",
+    "first_principles": {
+      "problem": "A team needs strong isolation and fast boot and can't decide between VMs, containers and unikernels.",
+      "truths": [
+        "Isolation strength depends on the boundary.",
+        "Size and boot depend on what's included.",
+        "Tooling maturity affects operations."
+      ],
+      "derivation": [
+        "**VMs**: strongest general isolation, heaviest.",
+        "**Containers**: lightest ops, shared kernel.",
+        "**Unikernels**: VM isolation, tiny, specialised.",
+        "**MicroVMs** (Firecracker) as a middle ground.",
+        "Decide by **isolation, density, ecosystem**."
+      ]
+    },
+    "analogy": {
+      "title": "Detached houses, shared flats and custom tiny homes",
+      "story": "Houses are separate but big; flats share walls; tiny homes are separate and small but suit only minimalists.",
+      "mapping": [
+        [
+          "Detached house",
+          "VM"
+        ],
+        [
+          "Shared flat",
+          "Container"
+        ],
+        [
+          "Tiny home",
+          "Unikernel"
+        ]
+      ],
+      "breaks": "Tiny homes can be lived in by anyone patient; unikernels need apps that fit their constraints."
+    },
+    "mindmap": {
+      "center": "Comparison",
+      "branches": [
+        {
+          "label": "VM",
+          "children": [
+            "Own kernel",
+            "Heavy",
+            "Seconds–minutes boot"
+          ]
+        },
+        {
+          "label": "Container",
+          "children": [
+            "Shared kernel",
+            "Light",
+            "Huge ecosystem"
+          ]
+        },
+        {
+          "label": "Unikernel",
+          "children": [
+            "Hypervisor isolation",
+            "Tiny",
+            "ms boot",
+            "Specialised"
+          ]
+        },
+        {
+          "label": "MicroVM",
+          "children": [
+            "Middle ground"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision table",
+      "scenario": "Scenarios.",
+      "flow": [
+        "General microservices → containers",
+        "Legacy apps → VMs",
+        "Ultra-dense, high-isolation network functions → unikernels"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Specialisation pays only in specific niches."
+        }
+      ],
+      "code": [],
+      "outcome": "the right isolation model."
+    },
+    "summary": {
+      "points": [
+        "VMs isolate, containers share.",
+        "Unikernels combine both.",
+        "But they're specialised."
+      ]
+    },
+    "check": [
+      {
+        "q": "What isolation boundary does a unikernel use?",
+        "a": "The hypervisor (each unikernel is its own VM)."
+      }
+    ]
+  },
+  "the-benefits-speed-size-and-efficiency": {
+    "core": "Unikernels boot in milliseconds, images are kilobytes to a few megabytes, memory footprints are small, and specialisation can raise network throughput by skipping kernel/user transitions. With fewer components there's less attack surface: no shell to pop, no unused services and often an immutable image.",
+    "first_principles": {
+      "problem": "Scale-to-zero services suffer cold starts, and VM sprawl wastes memory.",
+      "truths": [
+        "Less code boots faster.",
+        "Smaller images move faster.",
+        "Removed components can't be exploited."
+      ],
+      "derivation": [
+        "**Millisecond boots** enable scale-to-zero.",
+        "**Tiny images** speed distribution.",
+        "**Small memory** increases density.",
+        "**Reduced attack surface**.",
+        "Measure benefits **per workload**."
+      ]
+    },
+    "analogy": {
+      "title": "A racing bicycle stripped of extras",
+      "story": "Lighter, faster and fewer parts to break, but no cargo rack.",
+      "mapping": [
+        [
+          "Stripped bike",
+          "Unikernel"
+        ],
+        [
+          "Speed",
+          "Boot and I/O"
+        ],
+        [
+          "No cargo rack",
+          "Missing general features"
+        ]
+      ],
+      "breaks": "Bikes don't get hacked; security benefits depend on the remaining code's quality."
+    },
+    "mindmap": {
+      "center": "Benefits",
+      "branches": [
+        {
+          "label": "Speed",
+          "children": [
+            "ms boot",
+            "Fewer transitions"
+          ]
+        },
+        {
+          "label": "Size",
+          "children": [
+            "KB–MB images"
+          ]
+        },
+        {
+          "label": "Efficiency",
+          "children": [
+            "Low memory",
+            "High density"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Small attack surface",
+            "Immutable"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Workload-dependent"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scale-to-zero function",
+      "scenario": "Numbers.",
+      "flow": [
+        "Container cold start ~300–800 ms",
+        "Unikernel boot ~5–20 ms",
+        "Requests served on demand without idle capacity"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "True scale-to-zero becomes practical."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, dense, small-surface services."
+    },
+    "summary": {
+      "points": [
+        "Fast boot.",
+        "Tiny footprint.",
+        "Less to attack."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do unikernels have a smaller attack surface?",
+        "a": "They include only the code the app needs, with no shell, unused services or general-purpose interfaces."
+      }
+    ]
+  },
+  "the-ecosystem-mirageos-and-unikraft": {
+    "core": "MirageOS is a clean-slate unikernel framework in OCaml, with type-safe, modular libraries, used for network appliances and secure services. Unikraft is a modular, POSIX-compatible unikernel kit that runs many existing apps (nginx, Redis, Python, Node) with configuration via Kraftfile and kraft CLI. Others include OSv, Nanos and HermitCore.",
+    "first_principles": {
+      "problem": "Teams want unikernel benefits without rewriting their apps in a niche language.",
+      "truths": [
+        "Compatibility drives adoption.",
+        "Clean-slate designs offer safety.",
+        "Tooling makes builds approachable."
+      ],
+      "derivation": [
+        "**MirageOS** for OCaml, type-safe network services.",
+        "**Unikraft** for POSIX apps with minimal changes.",
+        "Use **kraft** to build and run.",
+        "Target **KVM/Firecracker/Xen**.",
+        "Evaluate **maturity and community**."
+      ]
+    },
+    "analogy": {
+      "title": "Two custom-bike builders",
+      "story": "One builds from scratch in a special material; the other adapts standard parts to fit lighter frames.",
+      "mapping": [
+        [
+          "Special material builder",
+          "MirageOS"
+        ],
+        [
+          "Standard parts adapter",
+          "Unikraft"
+        ],
+        [
+          "Bike",
+          "Unikernel"
+        ]
+      ],
+      "breaks": "Bike builders serve hobbyists; unikernel projects need production tooling and support."
+    },
+    "mindmap": {
+      "center": "Ecosystem",
+      "branches": [
+        {
+          "label": "MirageOS",
+          "children": [
+            "OCaml",
+            "Clean slate",
+            "Type-safe"
+          ]
+        },
+        {
+          "label": "Unikraft",
+          "children": [
+            "POSIX-compatible",
+            "Modular",
+            "kraft CLI"
+          ]
+        },
+        {
+          "label": "Others",
+          "children": [
+            "OSv",
+            "Nanos",
+            "HermitCore"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "KVM",
+            "Firecracker",
+            "Xen"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Unikraft nginx",
+      "scenario": "kraft.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "nginx as a few-MB unikernel VM."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kraft run --plat qemu --arch x86_64 -p 8080:80 unikraft.org/nginx:latest"
+        }
+      ],
+      "outcome": "practical unikernel tooling."
+    },
+    "summary": {
+      "points": [
+        "MirageOS: clean slate.",
+        "Unikraft: compatibility.",
+        "Tooling via kraft."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which unikernel project focuses on running existing POSIX applications?",
+        "a": "Unikraft."
+      }
+    ]
+  },
+  "unikernels-in-practice-where-they-fit": {
+    "core": "Unikernels fit niches: network functions and appliances (firewalls, DNS, proxies), high-density or scale-to-zero serverless, security-critical single services, edge and IoT with tight resources, and research. They're less suitable where you need rich debugging, many dependencies, dynamic workloads or a mature operations ecosystem.",
+    "first_principles": {
+      "problem": "A team considers rewriting all microservices as unikernels.",
+      "truths": [
+        "Specialisation suits stable, focused workloads.",
+        "Operational tooling matters for most teams.",
+        "Not every benefit is needed everywhere."
+      ],
+      "derivation": [
+        "Choose **narrow, stable, performance- or security-critical** services.",
+        "Avoid **complex, frequently changing apps**.",
+        "Plan **observability** (logs over serial/network, metrics).",
+        "Integrate with **CI rebuild pipelines**.",
+        "Pilot before **broad adoption**."
+      ]
+    },
+    "analogy": {
+      "title": "Racing cars on a track versus delivery vans",
+      "story": "Racing cars win on the track; vans do daily deliveries better.",
+      "mapping": [
+        [
+          "Track",
+          "Specialised niche"
+        ],
+        [
+          "Racing car",
+          "Unikernel"
+        ],
+        [
+          "Delivery van",
+          "Container"
+        ]
+      ],
+      "breaks": "Racing cars can't be driven on roads; unikernels can serve production, but only in fitting roles."
+    },
+    "mindmap": {
+      "center": "Where They Fit",
+      "branches": [
+        {
+          "label": "Good",
+          "children": [
+            "Network functions",
+            "Serverless density",
+            "Security-critical services",
+            "Edge/IoT"
+          ]
+        },
+        {
+          "label": "Poor",
+          "children": [
+            "Complex apps",
+            "Heavy debugging needs",
+            "Frequent changes"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Observability",
+            "Rebuild pipelines"
+          ]
+        },
+        {
+          "label": "Adoption",
+          "children": [
+            "Pilot first"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Good candidate",
+      "scenario": "DNS resolver.",
+      "flow": [
+        "Stable code, network-bound, security-sensitive",
+        "Unikernel image 3 MB, boots in 10 ms",
+        "Hundreds per host",
+        "Rebuilt by CI on updates"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Strong fit for the niche."
+        }
+      ],
+      "code": [],
+      "outcome": "unikernels used where they shine."
+    },
+    "summary": {
+      "points": [
+        "Niche, not universal.",
+        "Stable focused services.",
+        "Plan operations."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name a workload well suited to unikernels.",
+        "a": "A network function such as a DNS server, proxy or firewall (also scale-to-zero serverless)."
+      }
+    ]
+  }
+}

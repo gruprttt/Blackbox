@@ -1,0 +1,537 @@
+{
+  "introduction-beyond-the-browser": {
+    "core": "WebAssembly is a portable, compact binary instruction format with a sandboxed, capability-free execution model, designed for browsers but now used server-side. Wasm modules start in microseconds to milliseconds, are tiny, run on any CPU architecture via a runtime and can't touch anything the host doesn't explicitly grant.",
+    "first_principles": {
+      "problem": "Serverless and edge platforms want stronger isolation and faster startup than containers can offer.",
+      "truths": [
+        "A small, well-defined VM is easy to sandbox.",
+        "Portable bytecode avoids per-architecture builds.",
+        "Startup cost dominates short workloads."
+      ],
+      "derivation": [
+        "Compile languages (Rust, Go, C, C#…) to **.wasm**.",
+        "Run in a **runtime** (Wasmtime, WasmEdge, Wasmer).",
+        "Grant **capabilities** explicitly.",
+        "Use for **edge, plugins, serverless**.",
+        "Mind **ecosystem maturity**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal game cartridge",
+      "story": "It runs on any console with the right slot, and can't touch the console's other games.",
+      "mapping": [
+        [
+          "Cartridge",
+          "Wasm module"
+        ],
+        [
+          "Console",
+          "Runtime"
+        ],
+        [
+          "Slot rules",
+          "Sandbox"
+        ]
+      ],
+      "breaks": "Cartridges contain hardware; Wasm modules are pure bytecode interpreted or compiled by the runtime."
+    },
+    "mindmap": {
+      "center": "WebAssembly",
+      "branches": [
+        {
+          "label": "Traits",
+          "children": [
+            "Portable",
+            "Compact",
+            "Sandboxed",
+            "Fast start"
+          ]
+        },
+        {
+          "label": "Languages",
+          "children": [
+            "Rust",
+            "Go",
+            "C/C++",
+            "C#",
+            "Python (via runtimes)"
+          ]
+        },
+        {
+          "label": "Runtimes",
+          "children": [
+            "Wasmtime",
+            "WasmEdge",
+            "Wasmer"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Edge",
+            "Plugins",
+            "Serverless"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rust to Wasm",
+      "scenario": "Build.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One binary runs on x86 and ARM hosts."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "rustup target add wasm32-wasip2\ncargo build --release --target wasm32-wasip2\nwasmtime target/wasm32-wasip2/release/hello.wasm"
+        }
+      ],
+      "outcome": "portable sandboxed compute."
+    },
+    "summary": {
+      "points": [
+        "Portable bytecode.",
+        "Sandboxed by default.",
+        "Microsecond-to-ms start."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is Wasm considered secure by default?",
+        "a": "Modules can't access host resources unless the runtime explicitly grants capabilities."
+      }
+    ]
+  },
+  "the-missing-link-wasi": {
+    "core": "Wasm itself has no I/O. WASI (WebAssembly System Interface) defines standard, capability-based APIs for files, clocks, random numbers, sockets and HTTP, so modules can do server-side work. WASI Preview 2 and the Component Model add typed interfaces (WIT) so components in different languages can compose.",
+    "first_principles": {
+      "problem": "A Wasm module can compute but can't read a file or open a socket.",
+      "truths": [
+        "Programs need system access.",
+        "Capability-based access limits authority.",
+        "Typed interfaces enable composition."
+      ],
+      "derivation": [
+        "Use **WASI** for system APIs.",
+        "Grant **pre-opened directories** and specific capabilities.",
+        "Use **WIT** interfaces for components.",
+        "Compose **components** across languages.",
+        "Track **WASI versions** (P1 vs P2)."
+      ]
+    },
+    "analogy": {
+      "title": "A visitor pass listing exactly which rooms you may enter",
+      "story": "You can't wander; doors open only if they're on your pass.",
+      "mapping": [
+        [
+          "Visitor pass",
+          "Granted capabilities"
+        ],
+        [
+          "Rooms",
+          "Directories/sockets"
+        ],
+        [
+          "Building directory",
+          "WASI interfaces"
+        ]
+      ],
+      "breaks": "Passes can be forged; WASI capabilities are enforced by the runtime."
+    },
+    "mindmap": {
+      "center": "WASI",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "System interface for Wasm"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Capability-based"
+          ]
+        },
+        {
+          "label": "APIs",
+          "children": [
+            "Filesystem",
+            "Clocks",
+            "Random",
+            "Sockets",
+            "HTTP"
+          ]
+        },
+        {
+          "label": "Evolution",
+          "children": [
+            "Preview 1",
+            "Preview 2",
+            "Component Model",
+            "WIT"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Granting a directory",
+      "scenario": "wasmtime.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Module can read /data and nothing else."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "wasmtime run --dir ./data::/data app.wasm   # only ./data visible as /data"
+        }
+      ],
+      "outcome": "useful yet constrained server-side Wasm."
+    },
+    "summary": {
+      "points": [
+        "WASI gives system access.",
+        "Capabilities, not ambient authority.",
+        "Components compose."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does WASI add to WebAssembly?",
+        "a": "Standard capability-based system interfaces like files, clocks, sockets and HTTP."
+      }
+    ]
+  },
+  "wasm-vs-containers-architecture-deep-dive": {
+    "core": "Containers package an OS userland and run native processes on a shared kernel; Wasm modules are architecture-neutral bytecode executed in a runtime sandbox. Wasm is smaller (KB–MB), starts faster (µs–ms) and is deny-by-default, but has a less mature ecosystem, limited threading and syscall support and different debugging. Containers run anything Linux can.",
+    "first_principles": {
+      "problem": "Teams wonder whether Wasm will replace containers.",
+      "truths": [
+        "Each approach optimises different things.",
+        "Ecosystem maturity matters.",
+        "They can coexist (containerd Wasm shims)."
+      ],
+      "derivation": [
+        "**Containers** for general workloads and existing apps.",
+        "**Wasm** for fast-start, high-density, untrusted or portable functions.",
+        "Run Wasm on Kubernetes via **runwasi shims/SpinKube**.",
+        "Compare **startup, size, isolation, compatibility**.",
+        "Mix both."
+      ]
+    },
+    "analogy": {
+      "title": "A furnished apartment versus a hotel capsule",
+      "story": "The apartment fits any lifestyle; the capsule is tiny, instant to check into, and limited.",
+      "mapping": [
+        [
+          "Apartment",
+          "Container"
+        ],
+        [
+          "Capsule",
+          "Wasm module"
+        ],
+        [
+          "Check-in time",
+          "Startup"
+        ]
+      ],
+      "breaks": "Capsules can't host big families; Wasm can't yet run arbitrary Linux software."
+    },
+    "mindmap": {
+      "center": "Wasm vs Containers",
+      "branches": [
+        {
+          "label": "Containers",
+          "children": [
+            "OS userland",
+            "Native",
+            "Any Linux app",
+            "Seconds start"
+          ]
+        },
+        {
+          "label": "Wasm",
+          "children": [
+            "Bytecode",
+            "Sandbox",
+            "Tiny",
+            "µs–ms start"
+          ]
+        },
+        {
+          "label": "Gaps",
+          "children": [
+            "Threads",
+            "Syscalls",
+            "Tooling"
+          ]
+        },
+        {
+          "label": "Coexist",
+          "children": [
+            "runwasi",
+            "SpinKube"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Size and startup",
+      "scenario": "Comparison.",
+      "flow": [
+        "Container: 80 MB image, ~500 ms cold start",
+        "Wasm: 2 MB module, ~1 ms instantiation",
+        "Density: thousands of modules per host"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Different tools for different jobs."
+        }
+      ],
+      "code": [],
+      "outcome": "informed choice between them."
+    },
+    "summary": {
+      "points": [
+        "Containers for breadth.",
+        "Wasm for speed and isolation.",
+        "They coexist."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name one reason Wasm won't replace containers soon.",
+        "a": "Its ecosystem is less mature, with limited support for threads, syscalls and arbitrary existing software."
+      }
+    ]
+  },
+  "wasm-on-the-edge-the-speed-advantage": {
+    "core": "Edge platforms (Cloudflare Workers, Fastly Compute, Fermyon, Akamai) run Wasm or V8 isolates at hundreds of locations. Microsecond-to-millisecond instantiation means no cold starts worth noticing, tiny memory per tenant allows massive multi-tenancy, and the sandbox safely runs customer code close to users.",
+    "first_principles": {
+      "problem": "Containers at the edge cost too much memory and have cold starts longer than the request itself.",
+      "truths": [
+        "Edge nodes have limited resources.",
+        "Requests are short-lived.",
+        "Multi-tenancy demands strong isolation."
+      ],
+      "derivation": [
+        "Use **Wasm/isolates** per request.",
+        "Keep **state external** (KV, durable objects).",
+        "Keep code **small and fast**.",
+        "Use **edge KV/caches**.",
+        "Respect **CPU time limits**."
+      ]
+    },
+    "analogy": {
+      "title": "Pop-up stalls that appear the moment a customer arrives",
+      "story": "No setup wait, and they vanish when the customer leaves.",
+      "mapping": [
+        [
+          "Pop-up stall",
+          "Wasm instance"
+        ],
+        [
+          "Customer arrives",
+          "Request"
+        ],
+        [
+          "Vanishing",
+          "Instance teardown"
+        ]
+      ],
+      "breaks": "Stalls carry stock; edge functions need external storage for state."
+    },
+    "mindmap": {
+      "center": "Wasm at the Edge",
+      "branches": [
+        {
+          "label": "Benefits",
+          "children": [
+            "No cold starts",
+            "Density",
+            "Isolation"
+          ]
+        },
+        {
+          "label": "Platforms",
+          "children": [
+            "Cloudflare",
+            "Fastly",
+            "Fermyon",
+            "Akamai"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Stateless",
+            "Edge KV",
+            "Caching"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "CPU time",
+            "Memory"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Edge auth check",
+      "scenario": "Flow.",
+      "flow": [
+        "Request hits nearest PoP",
+        "Wasm instance created in < 1 ms",
+        "Validates JWT, rewrites headers",
+        "Forwards to origin or returns 401"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Auth in ~5 ms near the user."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, safe edge compute."
+    },
+    "summary": {
+      "points": [
+        "Instant start.",
+        "Massive density.",
+        "Stateless by design."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are Wasm cold starts rarely an issue at the edge?",
+        "a": "Instantiating a Wasm module takes microseconds to milliseconds."
+      }
+    ]
+  },
+  "the-developer-experience-runtimes-and-frameworks": {
+    "core": "The Wasm developer stack: languages with strong targets (Rust first-class, Go/TinyGo, C/C++, C#, JS/Python via embedded interpreters), runtimes (Wasmtime, WasmEdge, Wasmer, WAMR), frameworks (Spin, wasmCloud) that add HTTP triggers, KV and messaging, and Kubernetes integration (SpinKube, runwasi). Tooling for debugging and profiling is improving but less mature than for containers.",
+    "first_principles": {
+      "problem": "A team tries Wasm and struggles to find which language, runtime and framework to use.",
+      "truths": [
+        "Language support varies.",
+        "Frameworks hide boilerplate.",
+        "Tooling maturity affects productivity."
+      ],
+      "derivation": [
+        "Pick **Rust** or **TinyGo** for best support.",
+        "Use **Spin/wasmCloud** for apps.",
+        "Use **Wasmtime** for embedding.",
+        "Deploy via **SpinKube** on Kubernetes.",
+        "Plan for **debugging gaps**."
+      ]
+    },
+    "analogy": {
+      "title": "An emerging city's infrastructure",
+      "story": "Main roads are excellent, side streets are still being paved.",
+      "mapping": [
+        [
+          "Main roads",
+          "Rust + Wasmtime"
+        ],
+        [
+          "Side streets",
+          "Other languages/tools"
+        ],
+        [
+          "City planners",
+          "Bytecode Alliance"
+        ]
+      ],
+      "breaks": "Cities take decades; the Wasm ecosystem moves yearly."
+    },
+    "mindmap": {
+      "center": "Wasm DX",
+      "branches": [
+        {
+          "label": "Languages",
+          "children": [
+            "Rust",
+            "TinyGo",
+            "C/C++",
+            "C#",
+            "JS/Python"
+          ]
+        },
+        {
+          "label": "Runtimes",
+          "children": [
+            "Wasmtime",
+            "WasmEdge",
+            "Wasmer",
+            "WAMR"
+          ]
+        },
+        {
+          "label": "Frameworks",
+          "children": [
+            "Spin",
+            "wasmCloud"
+          ]
+        },
+        {
+          "label": "Kubernetes",
+          "children": [
+            "SpinKube",
+            "runwasi"
+          ]
+        },
+        {
+          "label": "Gaps",
+          "children": [
+            "Debugging",
+            "Profiling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spin HTTP app",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "HTTP service as a Wasm component in minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "spin new -t http-rust hello\ncd hello && spin build && spin up\n# curl localhost:3000 → Hello from Wasm"
+        }
+      ],
+      "outcome": "a productive starting point."
+    },
+    "summary": {
+      "points": [
+        "Rust leads.",
+        "Frameworks help.",
+        "Tooling still maturing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which language currently has the most mature Wasm support?",
+        "a": "Rust."
+      }
+    ]
+  }
+}

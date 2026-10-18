@@ -1,0 +1,515 @@
+{
+  "introduction-the-cpu-trap": {
+    "core": "CPU-based autoscaling is a lagging, indirect signal: a queue worker waiting on I/O shows low CPU while thousands of messages pile up, and idle services can't scale to zero. Event-driven autoscaling scales on the actual work signal (queue depth, stream lag, request rate, cron schedules) and can drop to zero replicas when there's nothing to do.",
+    "first_principles": {
+      "problem": "A Kafka consumer group falls hours behind because HPA sees 15% CPU and doesn't scale.",
+      "truths": [
+        "CPU doesn't measure backlog.",
+        "Work signals predict needed capacity.",
+        "Idle workloads waste money."
+      ],
+      "derivation": [
+        "Identify the **true demand signal**.",
+        "Scale on **backlog/lag/rate**.",
+        "Allow **scale to zero** for event workloads.",
+        "Keep **HPA mechanics** for 1→N.",
+        "Use **KEDA** to bridge external metrics."
+      ]
+    },
+    "analogy": {
+      "title": "Staffing a checkout by queue length, not by how tired cashiers look",
+      "story": "Long queue, open more tills, however relaxed the cashiers seem.",
+      "mapping": [
+        [
+          "Cashier tiredness",
+          "CPU"
+        ],
+        [
+          "Queue length",
+          "Backlog"
+        ],
+        [
+          "Opening tills",
+          "Scaling out"
+        ]
+      ],
+      "breaks": "Queues are visible at a glance; external metrics need scalers to fetch them."
+    },
+    "mindmap": {
+      "center": "CPU Trap",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Lagging signal",
+            "I/O-bound work",
+            "No scale to zero"
+          ]
+        },
+        {
+          "label": "Better signals",
+          "children": [
+            "Queue depth",
+            "Consumer lag",
+            "RPS",
+            "Cron"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "KEDA",
+            "Event-driven scaling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lag vs CPU",
+      "scenario": "Comparison.",
+      "flow": [
+        "CPU 15% → HPA: no change",
+        "Kafka lag 2M → KEDA: scale to 30 consumers",
+        "Lag drains in 10 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Capacity tracks real work."
+        }
+      ],
+      "code": [],
+      "outcome": "right signal, right scale."
+    },
+    "summary": {
+      "points": [
+        "CPU is indirect.",
+        "Scale on work.",
+        "Allow zero."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is CPU a poor scaling signal for queue consumers?",
+        "a": "They may be I/O-bound with low CPU while backlog grows, so CPU doesn't reflect demand."
+      }
+    ]
+  },
+  "keda-architecture-the-metrics-proxy": {
+    "core": "KEDA runs an operator and a metrics API server. The operator watches ScaledObjects, handles 0↔1 activation itself (scaling Deployments to zero and back) and creates an HPA for 1↔N. The metrics server exposes external metrics fetched by 60+ scalers (Kafka, SQS, RabbitMQ, Prometheus, Redis, cron, HTTP) to that HPA.",
+    "first_principles": {
+      "problem": "HPA alone can't read SQS queue depth or scale to zero.",
+      "truths": [
+        "HPA consumes metrics APIs.",
+        "External systems need adapters.",
+        "Zero replicas means no Pods to report metrics."
+      ],
+      "derivation": [
+        "**Operator** reconciles ScaledObjects.",
+        "**Activation** (0↔1) by KEDA.",
+        "**HPA** created for 1↔N.",
+        "**Metrics server** serves external metrics.",
+        "**Scalers** query sources."
+      ]
+    },
+    "analogy": {
+      "title": "A dispatcher with a phone line to every warehouse",
+      "story": "It checks stock levels everywhere and tells the staffing manager how many workers to send.",
+      "mapping": [
+        [
+          "Dispatcher",
+          "KEDA operator"
+        ],
+        [
+          "Phone lines",
+          "Scalers"
+        ],
+        [
+          "Staffing manager",
+          "HPA"
+        ]
+      ],
+      "breaks": "Dispatchers wake staff from home; KEDA must still wait for Pods to start from zero."
+    },
+    "mindmap": {
+      "center": "KEDA Architecture",
+      "branches": [
+        {
+          "label": "Components",
+          "children": [
+            "Operator",
+            "Metrics API server",
+            "Admission webhooks"
+          ]
+        },
+        {
+          "label": "Scaling",
+          "children": [
+            "0↔1 by KEDA",
+            "1↔N by HPA"
+          ]
+        },
+        {
+          "label": "Scalers",
+          "children": [
+            "Kafka",
+            "SQS",
+            "RabbitMQ",
+            "Prometheus",
+            "Cron",
+            "Redis"
+          ]
+        },
+        {
+          "label": "Objects",
+          "children": [
+            "ScaledObject",
+            "ScaledJob",
+            "TriggerAuthentication"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What KEDA creates",
+      "scenario": "Inspection.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "KEDA-managed HPA driven by external metrics."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get scaledobject -n workers\nkubectl get hpa -n workers        # keda-hpa-orders-consumer\nkubectl get --raw /apis/external.metrics.k8s.io/v1beta1 | jq"
+        }
+      ],
+      "outcome": "architecture understood."
+    },
+    "summary": {
+      "points": [
+        "Operator + metrics server.",
+        "KEDA handles zero.",
+        "HPA handles scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which component scales a workload from 0 to 1 replicas in KEDA?",
+        "a": "The KEDA operator itself (HPA handles 1 to N)."
+      }
+    ]
+  },
+  "the-magic-of-scale-to-zero": {
+    "core": "When a trigger reports no activity (below activation threshold) for the cooldownPeriod, KEDA scales the Deployment to zero, eliminating idle cost. When events appear, KEDA activates it to one replica and HPA scales further. Trade-offs: cold-start latency, polling intervals delaying reaction, and the need for an external buffer (queue) so events aren't lost while scaled down.",
+    "first_principles": {
+      "problem": "Dozens of rarely used workers each run 2 replicas around the clock.",
+      "truths": [
+        "Idle replicas cost money.",
+        "Buffers hold work while scaled down.",
+        "Startup takes time."
+      ],
+      "derivation": [
+        "Use **minReplicaCount: 0**.",
+        "Set **activationThreshold** and **cooldownPeriod**.",
+        "Tune **pollingInterval**.",
+        "Ensure events sit in a **durable queue**.",
+        "Optimise **startup time**."
+      ]
+    },
+    "analogy": {
+      "title": "Lights on motion sensors",
+      "story": "They switch off in empty rooms and on when someone enters, with a brief delay.",
+      "mapping": [
+        [
+          "Motion sensor",
+          "Trigger"
+        ],
+        [
+          "Lights off",
+          "Zero replicas"
+        ],
+        [
+          "Brief delay",
+          "Cold start"
+        ]
+      ],
+      "breaks": "Lights react instantly; KEDA polls on an interval and Pods take seconds to start."
+    },
+    "mindmap": {
+      "center": "Scale to Zero",
+      "branches": [
+        {
+          "label": "Settings",
+          "children": [
+            "minReplicaCount 0",
+            "activationThreshold",
+            "cooldownPeriod",
+            "pollingInterval"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No idle cost"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Cold start",
+            "Polling delay"
+          ]
+        },
+        {
+          "label": "Requirement",
+          "children": [
+            "Durable buffer"
+          ]
+        },
+        {
+          "label": "HTTP",
+          "children": [
+            "KEDA HTTP add-on",
+            "Knative"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Nightly-only worker",
+      "scenario": "Effect.",
+      "flow": [
+        "23 hours: 0 replicas",
+        "Batch messages arrive → activate within 30 s",
+        "Scale to 20, drain, cool down",
+        "Back to 0"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "~95% compute savings for that worker."
+        }
+      ],
+      "code": [],
+      "outcome": "pay only for work done."
+    },
+    "summary": {
+      "points": [
+        "Zero when idle.",
+        "Buffer events.",
+        "Accept cold starts."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must scale-to-zero workloads read from a durable queue?",
+        "a": "Events must be held safely while no consumers are running."
+      }
+    ]
+  },
+  "the-custom-resource-scaledobject": {
+    "core": "A ScaledObject targets a Deployment or StatefulSet (scaleTargetRef) and defines triggers (type plus metadata like queue URL and target value), min and max replicas, polling and cooldown, fallback replicas if the scaler fails, and advanced HPA behaviour. ScaledJob instead launches Jobs per batch of events for long-running tasks.",
+    "first_principles": {
+      "problem": "A team wants consumers that scale with SQS depth, one replica per 100 messages.",
+      "truths": [
+        "Targets per replica define desired count.",
+        "Scalers can fail.",
+        "Long tasks fit Jobs better than Deployments."
+      ],
+      "derivation": [
+        "Set **scaleTargetRef**.",
+        "Define **triggers** with target values.",
+        "Set **min/maxReplicaCount**.",
+        "Add **fallback** for scaler errors.",
+        "Use **ScaledJob** for long-running work."
+      ]
+    },
+    "analogy": {
+      "title": "A rule card for the staffing manager",
+      "story": "'One worker per 100 waiting parcels, at least zero, at most 50.'",
+      "mapping": [
+        [
+          "Rule card",
+          "ScaledObject"
+        ],
+        [
+          "Parcels",
+          "Queue messages"
+        ],
+        [
+          "Per-worker target",
+          "queueLength"
+        ]
+      ],
+      "breaks": "Rule cards are read by people; ScaledObjects are reconciled continuously."
+    },
+    "mindmap": {
+      "center": "ScaledObject",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "scaleTargetRef",
+            "triggers",
+            "min/maxReplicaCount",
+            "pollingInterval",
+            "cooldownPeriod",
+            "fallback"
+          ]
+        },
+        {
+          "label": "Advanced",
+          "children": [
+            "HPA behavior",
+            "Multiple triggers"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "ScaledJob"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SQS-driven consumers",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "1,500 messages → 15 replicas; empty → 0."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: keda.sh/v1alpha1\nkind: ScaledObject\nmetadata: {name: orders-consumer, namespace: workers}\nspec:\n  scaleTargetRef: {name: orders-consumer}\n  minReplicaCount: 0\n  maxReplicaCount: 50\n  cooldownPeriod: 300\n  fallback: {failureThreshold: 3, replicas: 5}\n  triggers:\n  - type: aws-sqs-queue\n    authenticationRef: {name: aws-irsa}\n    metadata: {queueURL: https://sqs.eu-west-1.amazonaws.com/123/orders, queueLength: \"100\", awsRegion: eu-west-1}"
+        }
+      ],
+      "outcome": "declarative event-driven scaling."
+    },
+    "summary": {
+      "points": [
+        "Target + triggers.",
+        "Min/max bounds.",
+        "Fallback safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the fallback section in a ScaledObject do?",
+        "a": "Sets a fixed replica count if the scaler fails repeatedly to fetch metrics."
+      }
+    ]
+  },
+  "authentication-triggerauthentication": {
+    "core": "Scalers need credentials to read queues and metrics. TriggerAuthentication (namespaced) and ClusterTriggerAuthentication reference secrets, environment variables or pod identity providers (AWS IRSA/EKS Pod Identity, Azure Workload Identity, GCP Workload Identity) and Vault, so credentials aren't embedded in ScaledObjects.",
+    "first_principles": {
+      "problem": "Queue credentials are pasted into ScaledObject metadata in Git.",
+      "truths": [
+        "Credentials must not live in manifests.",
+        "Cloud identity avoids static keys.",
+        "Many ScaledObjects reuse the same auth."
+      ],
+      "derivation": [
+        "Create **TriggerAuthentication** referencing secrets or **podIdentity**.",
+        "Prefer **workload identity** (IRSA, Pod Identity).",
+        "Use **ClusterTriggerAuthentication** for shared auth.",
+        "Reference via **authenticationRef**.",
+        "Grant **least privilege** (read queue attributes only)."
+      ]
+    },
+    "analogy": {
+      "title": "A staff badge office",
+      "story": "Dispatchers don't carry keys; they show the badge office's authorisation when checking warehouses.",
+      "mapping": [
+        [
+          "Badge office",
+          "TriggerAuthentication"
+        ],
+        [
+          "Authorisation",
+          "Credentials/identity"
+        ],
+        [
+          "Warehouse",
+          "Queue/metrics source"
+        ]
+      ],
+      "breaks": "Badges are physical; misconfigured identity silently stops scaling."
+    },
+    "mindmap": {
+      "center": "TriggerAuthentication",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Secrets",
+            "Env",
+            "podIdentity",
+            "Vault"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Namespaced",
+            "Cluster"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "IRSA",
+            "EKS Pod Identity",
+            "Azure WI",
+            "GCP WI"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "No creds in ScaledObjects",
+            "Least privilege"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "IRSA-based auth",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No static AWS keys anywhere."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: keda.sh/v1alpha1\nkind: TriggerAuthentication\nmetadata: {name: aws-irsa, namespace: workers}\nspec:\n  podIdentity:\n    provider: aws\n    identityOwner: keda   # KEDA operator's service account role"
+        }
+      ],
+      "outcome": "secure scaler access."
+    },
+    "summary": {
+      "points": [
+        "Separate auth objects.",
+        "Prefer workload identity.",
+        "Least privilege."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use TriggerAuthentication instead of putting credentials in a ScaledObject?",
+        "a": "It keeps secrets out of manifests, enables reuse and supports workload identity."
+      }
+    ]
+  }
+}

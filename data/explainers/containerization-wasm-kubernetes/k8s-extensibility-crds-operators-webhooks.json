@@ -1,0 +1,743 @@
+{
+  "introduction-when-standard-objects-arent-enough": {
+    "core": "Built-in objects cover generic workloads, but platforms need domain concepts (Database, Certificate, KafkaTopic). Kubernetes is extensible: CRDs add new resource types, controllers/operators give them behaviour, admission webhooks enforce or mutate objects, and aggregated API servers add fully custom APIs, all using the same API machinery, RBAC and tooling.",
+    "first_principles": {
+      "problem": "Teams manage databases with scripts and wikis outside Kubernetes, losing declarative workflows.",
+      "truths": [
+        "Domains have their own concepts.",
+        "The API machinery is reusable.",
+        "Automation can encode expert knowledge."
+      ],
+      "derivation": [
+        "Define **CRDs** for domain objects.",
+        "Write **controllers** to reconcile them.",
+        "Add **webhooks** for policy and defaults.",
+        "Use **aggregated APIs** for special cases.",
+        "Reuse **kubectl, RBAC, GitOps**."
+      ]
+    },
+    "analogy": {
+      "title": "Adding new words to a shared language",
+      "story": "Once the word exists and everyone knows what to do when they hear it, it becomes part of everyday work.",
+      "mapping": [
+        [
+          "New word",
+          "CRD"
+        ],
+        [
+          "Knowing what to do",
+          "Controller"
+        ],
+        [
+          "Grammar rules",
+          "Webhooks"
+        ]
+      ],
+      "breaks": "Languages evolve slowly; CRDs can be added in seconds but need careful versioning."
+    },
+    "mindmap": {
+      "center": "Extensibility",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "CRDs"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Controllers",
+            "Operators"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Mutating webhooks",
+            "Validating webhooks",
+            "CEL policies"
+          ]
+        },
+        {
+          "label": "Advanced",
+          "children": [
+            "Aggregated APIs"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "kubectl",
+            "RBAC",
+            "GitOps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Database resource",
+      "scenario": "Concept.",
+      "flow": [
+        "kubectl apply Database 'orders' (size: small)",
+        "Operator creates StatefulSet, Service, backups",
+        "Status shows ready + endpoint"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Databases managed like any K8s object."
+        }
+      ],
+      "code": [],
+      "outcome": "domain concepts in the platform."
+    },
+    "summary": {
+      "points": [
+        "CRDs add types.",
+        "Controllers add behaviour.",
+        "Webhooks add policy."
+      ]
+    },
+    "check": [
+      {
+        "q": "What gives a CRD-defined resource its behaviour?",
+        "a": "A controller (operator) that reconciles instances of it."
+      }
+    ]
+  },
+  "custom-resource-definitions-crds-teaching-new-words": {
+    "core": "A CRD registers a new resource type (group, version, kind, scope) with an OpenAPI v3 schema for validation, optional CEL validation rules, a status subresource, additional printer columns and multiple versions with conversion. Once applied, the API server stores and serves instances like built-in objects.",
+    "first_principles": {
+      "problem": "Custom configuration lives in ConfigMaps with no schema, validation or status.",
+      "truths": [
+        "Schemas catch errors early.",
+        "Status separates observed state from spec.",
+        "APIs evolve through versions."
+      ],
+      "derivation": [
+        "Define **group/version/kind**.",
+        "Write **openAPIV3Schema** with required fields and enums.",
+        "Add **x-kubernetes-validations** (CEL).",
+        "Enable **status subresource**.",
+        "Plan **versioning and conversion webhooks**."
+      ]
+    },
+    "analogy": {
+      "title": "Registering a new form type with a government office",
+      "story": "Once the form template exists, clerks can accept, validate and file it.",
+      "mapping": [
+        [
+          "Form template",
+          "CRD schema"
+        ],
+        [
+          "Filled forms",
+          "Custom resources"
+        ],
+        [
+          "Clerk checks",
+          "Validation"
+        ]
+      ],
+      "breaks": "Forms rarely change format; CRD versions need conversion strategies."
+    },
+    "mindmap": {
+      "center": "CRDs",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "Group",
+            "Version",
+            "Kind",
+            "Scope"
+          ]
+        },
+        {
+          "label": "Validation",
+          "children": [
+            "OpenAPI schema",
+            "CEL rules"
+          ]
+        },
+        {
+          "label": "Subresources",
+          "children": [
+            "status",
+            "scale"
+          ]
+        },
+        {
+          "label": "UX",
+          "children": [
+            "Printer columns",
+            "Short names"
+          ]
+        },
+        {
+          "label": "Evolution",
+          "children": [
+            "Versions",
+            "Conversion"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Minimal CRD",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "kubectl get db works; invalid sizes rejected."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata: {name: databases.data.example.com}\nspec:\n  group: data.example.com\n  names: {kind: Database, plural: databases, shortNames: [db]}\n  scope: Namespaced\n  versions:\n  - name: v1\n    served: true\n    storage: true\n    subresources: {status: {}}\n    schema:\n      openAPIV3Schema:\n        type: object\n        properties:\n          spec:\n            type: object\n            required: [size]\n            properties:\n              size: {type: string, enum: [small, medium, large]}"
+        }
+      ],
+      "outcome": "validated domain objects."
+    },
+    "summary": {
+      "points": [
+        "New API types.",
+        "Schema validation.",
+        "Status subresource."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why enable the status subresource on a CRD?",
+        "a": "It separates user-set spec from controller-reported status and lets status be updated independently with its own RBAC."
+      }
+    ]
+  },
+  "operators-the-human-in-the-loop": {
+    "core": "An operator is a controller plus CRDs that encodes the operational knowledge of a human expert (provisioning, scaling, backups, upgrades, failover) for a specific application. Users declare intent ('PostgreSQL cluster, 3 replicas, daily backups'), and the operator performs and repairs the steps continuously.",
+    "first_principles": {
+      "problem": "Running PostgreSQL on Kubernetes requires a DBA to manually handle failover, backups and version upgrades.",
+      "truths": [
+        "Operational runbooks can be codified.",
+        "Continuous reconciliation catches drift.",
+        "Domain logic exceeds generic controllers."
+      ],
+      "derivation": [
+        "Model the app with **CRDs**.",
+        "Encode **day-2 operations** in reconcile logic.",
+        "Expose **status and conditions**.",
+        "Follow the **capability levels** (install → auto-pilot).",
+        "Prefer **mature community operators** where available."
+      ]
+    },
+    "analogy": {
+      "title": "An expert technician who never sleeps",
+      "story": "They watch the system, follow the runbook exactly and fix issues at 3 a.m.",
+      "mapping": [
+        [
+          "Technician",
+          "Operator"
+        ],
+        [
+          "Runbook",
+          "Reconcile logic"
+        ],
+        [
+          "Work order",
+          "Custom resource"
+        ]
+      ],
+      "breaks": "Technicians improvise; operators only handle scenarios they were coded for."
+    },
+    "mindmap": {
+      "center": "Operators",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "CRDs",
+            "Controller"
+          ]
+        },
+        {
+          "label": "Day-2",
+          "children": [
+            "Backups",
+            "Upgrades",
+            "Failover",
+            "Scaling"
+          ]
+        },
+        {
+          "label": "Maturity",
+          "children": [
+            "Basic install",
+            "Upgrades",
+            "Lifecycle",
+            "Insights",
+            "Auto-pilot"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "CloudNativePG",
+            "Strimzi",
+            "cert-manager",
+            "Prometheus Operator"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CloudNativePG cluster",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "HA Postgres with automated failover and backups."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\nmetadata: {name: orders-db}\nspec:\n  instances: 3\n  storage: {size: 50Gi}\n  backup:\n    barmanObjectStore: {destinationPath: s3://backups/orders, s3Credentials: {inheritFromIAMRole: true}}"
+        }
+      ],
+      "outcome": "expert operations, automated."
+    },
+    "summary": {
+      "points": [
+        "Codified expertise.",
+        "Declarative intent.",
+        "Continuous repair."
+      ]
+    },
+    "check": [
+      {
+        "q": "What distinguishes an operator from a basic controller?",
+        "a": "It encodes application-specific operational knowledge (backups, upgrades, failover) beyond generic reconciliation."
+      }
+    ]
+  },
+  "deep-dive-level-based-triggering": {
+    "core": "Kubernetes controllers are level-triggered: they react to the current state (the level) rather than individual events (edges). If a controller misses events, crashes or restarts, it simply reads the full current state and reconciles again. Events from watches only signal 'something changed, re-check this object'.",
+    "first_principles": {
+      "problem": "An event-driven script misses one 'Pod deleted' event and never recreates the Pod.",
+      "truths": [
+        "Events can be lost or duplicated.",
+        "Current state is always readable.",
+        "Re-running reconciliation is safe if idempotent."
+      ],
+      "derivation": [
+        "Treat events as **hints**, not commands.",
+        "**Re-read** current state each reconcile.",
+        "Make reconcile **idempotent**.",
+        "**Resync periodically**.",
+        "Requeue on **errors**."
+      ]
+    },
+    "analogy": {
+      "title": "Checking a thermostat's temperature instead of counting clicks",
+      "story": "You don't need to know how many times it changed, just what it is now.",
+      "mapping": [
+        [
+          "Clicks",
+          "Events (edges)"
+        ],
+        [
+          "Current temperature",
+          "Current state (level)"
+        ],
+        [
+          "Adjusting",
+          "Reconcile"
+        ]
+      ],
+      "breaks": "Thermostats measure continuously; controllers reconcile when triggered or on resync."
+    },
+    "mindmap": {
+      "center": "Level-Based",
+      "branches": [
+        {
+          "label": "Edge-triggered",
+          "children": [
+            "Act on events",
+            "Fragile to loss"
+          ]
+        },
+        {
+          "label": "Level-triggered",
+          "children": [
+            "Act on current state",
+            "Self-healing"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "Watches as hints",
+            "Work queue",
+            "Resync"
+          ]
+        },
+        {
+          "label": "Requirement",
+          "children": [
+            "Idempotency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Missed event",
+      "scenario": "Comparison.",
+      "flow": [
+        "Edge-triggered: 'delete' event lost → Pod never recreated",
+        "Level-triggered: next reconcile sees 2 of 3 Pods → creates one"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Self-correcting regardless of event loss."
+        }
+      ],
+      "code": [],
+      "outcome": "robust controllers."
+    },
+    "summary": {
+      "points": [
+        "React to state, not events.",
+        "Events are hints.",
+        "Idempotent reconcile."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are Kubernetes controllers level-triggered?",
+        "a": "So they recover from missed or duplicated events by always reconciling against current state."
+      }
+    ]
+  },
+  "building-operators-the-tech-stack": {
+    "core": "Operators are usually built in Go with controller-runtime, scaffolded by Kubebuilder or Operator SDK, which generate CRD manifests, RBAC, webhooks and a manager with informers, caches and work queues. Alternatives include Java Operator SDK, kopf (Python), Metacontroller and Crossplane compositions for infrastructure.",
+    "first_principles": {
+      "problem": "Writing informers, caches, queues and leader election from scratch is complex and error-prone.",
+      "truths": [
+        "Controller plumbing is generic.",
+        "Code generation reduces boilerplate.",
+        "Language choice affects team adoption."
+      ],
+      "derivation": [
+        "Scaffold with **Kubebuilder/Operator SDK**.",
+        "Use **controller-runtime** Manager and Reconciler.",
+        "Generate **CRDs and RBAC** from markers.",
+        "Test with **envtest**.",
+        "Consider **kopf/Java SDK/Crossplane** for other stacks."
+      ]
+    },
+    "analogy": {
+      "title": "A building kit with pre-made frames",
+      "story": "You focus on the custom rooms, not cutting every beam.",
+      "mapping": [
+        [
+          "Pre-made frames",
+          "controller-runtime"
+        ],
+        [
+          "Kit instructions",
+          "Kubebuilder scaffolding"
+        ],
+        [
+          "Custom rooms",
+          "Reconcile logic"
+        ]
+      ],
+      "breaks": "Kits fit one design; operators must handle many failure scenarios on top."
+    },
+    "mindmap": {
+      "center": "Operator Stack",
+      "branches": [
+        {
+          "label": "Go",
+          "children": [
+            "controller-runtime",
+            "Kubebuilder",
+            "Operator SDK"
+          ]
+        },
+        {
+          "label": "Others",
+          "children": [
+            "Java Operator SDK",
+            "kopf",
+            "Metacontroller",
+            "Crossplane"
+          ]
+        },
+        {
+          "label": "Generated",
+          "children": [
+            "CRDs",
+            "RBAC",
+            "Webhooks"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "envtest",
+            "kind"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scaffolding",
+      "scenario": "Kubebuilder.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Working controller skeleton in minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubebuilder init --domain example.com --repo github.com/acme/db-operator\nkubebuilder create api --group data --version v1 --kind Database\nmake manifests && make install && make run"
+        }
+      ],
+      "outcome": "productive operator development."
+    },
+    "summary": {
+      "points": [
+        "Use the frameworks.",
+        "Generate manifests.",
+        "Test with envtest."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Go library underpins Kubebuilder and Operator SDK?",
+        "a": "controller-runtime."
+      }
+    ]
+  },
+  "webhooks-intercepting-requests": {
+    "core": "Admission webhooks are HTTPS services the API server calls during admission. Mutating webhooks change objects (inject sidecars, add defaults, labels); validating webhooks accept or reject (enforce policy). Configure failurePolicy, timeouts, namespace and object selectors carefully, or a down webhook can block the whole cluster. For simple rules, prefer CEL ValidatingAdmissionPolicy.",
+    "first_principles": {
+      "problem": "A broken policy webhook with failurePolicy: Fail blocks all Pod creation cluster-wide, including its own restart.",
+      "truths": [
+        "Webhooks sit in the request path.",
+        "Outages propagate to API writes.",
+        "Simple rules don't need external services."
+      ],
+      "derivation": [
+        "Use **mutating** for defaults/injection, **validating** for policy.",
+        "Set **failurePolicy** deliberately.",
+        "Exclude **kube-system** and the webhook's own namespace.",
+        "Keep **timeouts short**, run **HA**.",
+        "Prefer **ValidatingAdmissionPolicy (CEL)** for simple checks."
+      ]
+    },
+    "analogy": {
+      "title": "Security checkpoints in a corridor",
+      "story": "Every visitor passes through; if the checkpoint closes, nobody gets through.",
+      "mapping": [
+        [
+          "Checkpoint",
+          "Webhook"
+        ],
+        [
+          "Closed checkpoint",
+          "Webhook outage"
+        ],
+        [
+          "Exempt staff corridor",
+          "Namespace exclusions"
+        ]
+      ],
+      "breaks": "Checkpoints have guards to improvise; webhooks just time out or fail."
+    },
+    "mindmap": {
+      "center": "Admission Webhooks",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Mutating",
+            "Validating"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "failurePolicy",
+            "timeoutSeconds",
+            "namespaceSelector",
+            "objectSelector"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Sidecar injection",
+            "Defaults",
+            "Policy"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "ValidatingAdmissionPolicy",
+            "Kyverno",
+            "Gatekeeper"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Cluster-wide blocking"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CEL policy instead of a webhook",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Policy enforced in-process, no external service to fail."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingAdmissionPolicy\nmetadata: {name: require-team-label}\nspec:\n  matchConstraints:\n    resourceRules: [{apiGroups: [apps], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [deployments]}]\n  validations:\n  - expression: \"has(object.metadata.labels) && 'team' in object.metadata.labels\"\n    message: \"Deployments must have a team label\""
+        }
+      ],
+      "outcome": "safe admission control."
+    },
+    "summary": {
+      "points": [
+        "Mutate or validate.",
+        "Mind failure policy.",
+        "Prefer CEL for simple rules."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why exclude a webhook's own namespace from its scope?",
+        "a": "Otherwise a failing webhook can block its own Pods from restarting, deadlocking the cluster."
+      }
+    ]
+  },
+  "aggregated-api-servers-advanced": {
+    "core": "API aggregation lets you register an extension API server behind the main kube-apiserver (via APIService objects). Requests for that group are proxied to your server, which can implement custom storage, non-CRUD semantics or computed resources, as metrics-server does for metrics.k8s.io. It's powerful but much more work than CRDs.",
+    "first_principles": {
+      "problem": "A team needs an API backed by an external database with custom query semantics that CRDs can't express.",
+      "truths": [
+        "CRDs store in etcd with standard semantics.",
+        "Some APIs need custom behaviour.",
+        "The main API server can proxy requests."
+      ],
+      "derivation": [
+        "Prefer **CRDs** for most needs.",
+        "Use **aggregation** for custom storage, subresources, computed data.",
+        "Register via **APIService**.",
+        "Handle **auth delegation**.",
+        "Run **HA**; outages break that API group."
+      ]
+    },
+    "analogy": {
+      "title": "A department store renting floor space to a specialist shop",
+      "story": "Customers enter through the main store, but the specialist runs its own counter.",
+      "mapping": [
+        [
+          "Main store",
+          "kube-apiserver"
+        ],
+        [
+          "Specialist shop",
+          "Extension API server"
+        ],
+        [
+          "Store directory",
+          "APIService"
+        ]
+      ],
+      "breaks": "Customers see different branding; aggregated APIs look identical to built-in ones."
+    },
+    "mindmap": {
+      "center": "Aggregated APIs",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "APIService",
+            "Proxying"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "metrics-server",
+            "Custom storage",
+            "Computed resources"
+          ]
+        },
+        {
+          "label": "Effort",
+          "children": [
+            "High vs CRDs"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Auth delegation",
+            "HA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "metrics-server",
+      "scenario": "Aggregated API.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Computed metrics look like native resources."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get apiservice v1beta1.metrics.k8s.io\nkubectl top pods   # served by metrics-server via aggregation"
+        }
+      ],
+      "outcome": "advanced extension when needed."
+    },
+    "summary": {
+      "points": [
+        "Proxy to custom servers.",
+        "For custom semantics.",
+        "CRDs first."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which common component uses the API aggregation layer?",
+        "a": "metrics-server (metrics.k8s.io)."
+      }
+    ]
+  }
+}

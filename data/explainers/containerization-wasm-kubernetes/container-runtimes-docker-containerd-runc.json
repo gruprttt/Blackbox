@@ -1,0 +1,641 @@
+{
+  "introduction-what-actually-runs-my-container": {
+    "core": "'Docker' is a stack: the docker CLI talks to dockerd, which delegates to containerd (a high-level runtime managing images, snapshots and container lifecycle), which uses a shim and runc (a low-level OCI runtime) to actually create namespaces and cgroups and start the process. Kubernetes talks to containerd or CRI-O through the CRI, with no Docker daemon needed.",
+    "first_principles": {
+      "problem": "Engineers panic when Kubernetes 'removes Docker' without understanding images still work.",
+      "truths": [
+        "Layers separate concerns.",
+        "Standards allow swapping components.",
+        "Kubernetes needs only CRI."
+      ],
+      "derivation": [
+        "**CLI → dockerd → containerd → shim → runc**.",
+        "Kubernetes: **kubelet → CRI → containerd/CRI-O → runc**.",
+        "Images are **OCI**, so they run anywhere.",
+        "Debug with **crictl/ctr** on nodes."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant order chain",
+      "story": "Waiter (CLI), head chef (dockerd), kitchen manager (containerd) and line cook (runc) who actually cooks.",
+      "mapping": [
+        [
+          "Waiter",
+          "docker CLI"
+        ],
+        [
+          "Kitchen manager",
+          "containerd"
+        ],
+        [
+          "Line cook",
+          "runc"
+        ]
+      ],
+      "breaks": "Kitchens need every role; Kubernetes skips the 'head chef' (dockerd) entirely."
+    },
+    "mindmap": {
+      "center": "Runtime Stack",
+      "branches": [
+        {
+          "label": "Docker",
+          "children": [
+            "CLI",
+            "dockerd"
+          ]
+        },
+        {
+          "label": "High-level",
+          "children": [
+            "containerd",
+            "CRI-O"
+          ]
+        },
+        {
+          "label": "Low-level",
+          "children": [
+            "runc",
+            "crun",
+            "gVisor",
+            "Kata"
+          ]
+        },
+        {
+          "label": "Kubernetes",
+          "children": [
+            "kubelet",
+            "CRI"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "crictl",
+            "ctr",
+            "nerdctl"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspecting on a Kubernetes node",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No docker CLI needed on nodes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "crictl ps                      # containers via CRI\ncrictl images\nctr -n k8s.io containers list   # containerd's view"
+        }
+      ],
+      "outcome": "clear picture of what runs containers."
+    },
+    "summary": {
+      "points": [
+        "Docker is a stack.",
+        "containerd + runc do the work.",
+        "Kubernetes uses CRI."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which component actually creates the container's namespaces and cgroups?",
+        "a": "The low-level OCI runtime, typically runc."
+      }
+    ]
+  },
+  "oci-speaking-the-same-language": {
+    "core": "The Open Container Initiative defines three specs: the image spec (manifests, layers, config), the runtime spec (how to run a filesystem bundle with config.json) and the distribution spec (registry API). Because Docker, Podman, BuildKit, containerd, CRI-O and registries all follow OCI, images built anywhere run anywhere.",
+    "first_principles": {
+      "problem": "Teams worry that images built with one tool won't run on another runtime or registry.",
+      "truths": [
+        "Standards enable interoperability.",
+        "Images are content-addressed artefacts.",
+        "Registries serve any OCI artefact."
+      ],
+      "derivation": [
+        "**Image spec**: manifest + config + layers (digests).",
+        "**Runtime spec**: bundle + config.json.",
+        "**Distribution spec**: push/pull API.",
+        "**Image index** for multi-arch.",
+        "Registries store **other artefacts** too (Helm charts, signatures, SBOMs)."
+      ]
+    },
+    "analogy": {
+      "title": "Standard shipping container dimensions",
+      "story": "Any ship, crane or truck can handle any container.",
+      "mapping": [
+        [
+          "Container dimensions",
+          "Image spec"
+        ],
+        [
+          "Cranes and trucks",
+          "Runtimes"
+        ],
+        [
+          "Ports",
+          "Registries"
+        ]
+      ],
+      "breaks": "Physical containers have one format; OCI also stores non-image artefacts like signatures."
+    },
+    "mindmap": {
+      "center": "OCI Specs",
+      "branches": [
+        {
+          "label": "Image",
+          "children": [
+            "Manifest",
+            "Config",
+            "Layers",
+            "Index"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "Bundle",
+            "config.json"
+          ]
+        },
+        {
+          "label": "Distribution",
+          "children": [
+            "Registry API"
+          ]
+        },
+        {
+          "label": "Artefacts",
+          "children": [
+            "Helm charts",
+            "Signatures",
+            "SBOMs"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Interoperability"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect a manifest",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See per-architecture image digests."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "crane manifest nginx:1.27 | jq '.manifests[] | {platform, digest}'"
+        }
+      ],
+      "outcome": "tool-agnostic container images."
+    },
+    "summary": {
+      "points": [
+        "Three specs.",
+        "Build anywhere, run anywhere.",
+        "Registries store artefacts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the three OCI specifications?",
+        "a": "Image, runtime and distribution."
+      }
+    ]
+  },
+  "the-standard-layer-cake": {
+    "core": "The runtime layer cake: orchestrator (Kubernetes) → CRI implementation (containerd with its CRI plugin, or CRI-O) → containerd-shim per container (keeps it running if containerd restarts, handles stdio and exit codes) → OCI runtime (runc) that sets up namespaces/cgroups and execs the process, after which runc exits.",
+    "first_principles": {
+      "problem": "Restarting containerd on a node is feared to kill all containers.",
+      "truths": [
+        "Shims decouple container lifetime from the daemon.",
+        "runc is short-lived.",
+        "Each layer has one job."
+      ],
+      "derivation": [
+        "**kubelet** asks CRI to run pods.",
+        "**containerd** pulls images, prepares snapshots.",
+        "**shim** supervises each container.",
+        "**runc** creates and starts, then exits.",
+        "**Upgrade daemons** without killing workloads."
+      ]
+    },
+    "analogy": {
+      "title": "Lighting a candle with a match",
+      "story": "The match (runc) lights it and goes out; the candle holder (shim) keeps it standing.",
+      "mapping": [
+        [
+          "Match",
+          "runc"
+        ],
+        [
+          "Candle holder",
+          "shim"
+        ],
+        [
+          "Candle",
+          "Container process"
+        ]
+      ],
+      "breaks": "Candles burn out on their own; containers run until stopped or crashed."
+    },
+    "mindmap": {
+      "center": "Layer Cake",
+      "branches": [
+        {
+          "label": "Top",
+          "children": [
+            "Kubernetes",
+            "kubelet"
+          ]
+        },
+        {
+          "label": "CRI",
+          "children": [
+            "containerd CRI plugin",
+            "CRI-O"
+          ]
+        },
+        {
+          "label": "Supervision",
+          "children": [
+            "containerd-shim"
+          ]
+        },
+        {
+          "label": "Creation",
+          "children": [
+            "runc"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Daemon restarts safe"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Process tree on a node",
+      "scenario": "ps.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Containers parented by shims, not containerd."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ps -ef --forest | grep -A2 containerd-shim\n# containerd-shim-runc-v2 -namespace k8s.io -id abc...\n#   \\_ nginx: master process"
+        }
+      ],
+      "outcome": "runtime internals understood."
+    },
+    "summary": {
+      "points": [
+        "Each layer one job.",
+        "Shims keep containers alive.",
+        "runc starts and exits."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does each container have a containerd-shim?",
+        "a": "So containers keep running and report status independently of the containerd daemon."
+      }
+    ]
+  },
+  "the-security-problem-shared-kernels": {
+    "core": "All containers on a host share one kernel. A kernel vulnerability, an over-privileged container (privileged: true, hostPath mounts, CAP_SYS_ADMIN) or a container escape can compromise the whole node and other tenants. Defence involves least privilege (non-root, dropped capabilities, read-only rootfs, seccomp, AppArmor/SELinux) and stronger isolation for untrusted code.",
+    "first_principles": {
+      "problem": "A container running as root with the Docker socket mounted lets an attacker take over the host.",
+      "truths": [
+        "The kernel is a shared attack surface.",
+        "Privileges widen the blast radius.",
+        "Untrusted code needs stronger boundaries."
+      ],
+      "derivation": [
+        "Run **non-root**, drop **ALL capabilities**.",
+        "**readOnlyRootFilesystem**.",
+        "**seccomp RuntimeDefault** and AppArmor/SELinux.",
+        "Never mount **docker.sock** or broad **hostPath**.",
+        "Use **sandboxed runtimes** for untrusted workloads."
+      ]
+    },
+    "analogy": {
+      "title": "Flats sharing one foundation",
+      "story": "Strong doors help, but a crack in the foundation affects every flat.",
+      "mapping": [
+        [
+          "Foundation",
+          "Kernel"
+        ],
+        [
+          "Flat doors",
+          "Namespaces"
+        ],
+        [
+          "Crack",
+          "Kernel exploit"
+        ]
+      ],
+      "breaks": "Foundations rarely crack; kernel CVEs appear regularly."
+    },
+    "mindmap": {
+      "center": "Shared Kernel Risk",
+      "branches": [
+        {
+          "label": "Risks",
+          "children": [
+            "Kernel CVEs",
+            "Privileged containers",
+            "Socket mounts",
+            "hostPath"
+          ]
+        },
+        {
+          "label": "Hardening",
+          "children": [
+            "Non-root",
+            "Drop caps",
+            "Read-only FS",
+            "seccomp",
+            "LSMs"
+          ]
+        },
+        {
+          "label": "Stronger isolation",
+          "children": [
+            "gVisor",
+            "Kata",
+            "Firecracker"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Pod Security Standards"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hardened securityContext",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Most escape paths closed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "securityContext:\n  runAsNonRoot: true\n  allowPrivilegeEscalation: false\n  readOnlyRootFilesystem: true\n  capabilities: {drop: [\"ALL\"]}\n  seccompProfile: {type: RuntimeDefault}"
+        }
+      ],
+      "outcome": "reduced blast radius."
+    },
+    "summary": {
+      "points": [
+        "One kernel for all.",
+        "Least privilege.",
+        "Sandbox untrusted code."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is mounting /var/run/docker.sock into a container dangerous?",
+        "a": "It gives the container control over the Docker daemon, effectively root on the host."
+      }
+    ]
+  },
+  "sandboxed-runtimes-gvisor-and-firecracker": {
+    "core": "Sandboxed runtimes add a stronger boundary than namespaces. gVisor (runsc) intercepts syscalls with a user-space kernel (Sentry), so containers rarely touch the host kernel directly. Kata Containers and Firecracker run each container or pod inside a lightweight VM with its own kernel. Both trade some performance and compatibility for isolation.",
+    "first_principles": {
+      "problem": "A SaaS platform runs customer-supplied code and can't risk a kernel escape.",
+      "truths": [
+        "Fewer host syscalls mean a smaller attack surface.",
+        "Hardware virtualisation is a strong boundary.",
+        "Isolation has overhead."
+      ],
+      "derivation": [
+        "**gVisor** for syscall-level sandboxing, low overhead startup.",
+        "**Kata/Firecracker** for VM-level isolation per pod.",
+        "Benchmark **I/O and syscall-heavy** workloads.",
+        "Check **compatibility** (some syscalls unsupported in gVisor).",
+        "Select via **RuntimeClass**."
+      ]
+    },
+    "analogy": {
+      "title": "Interpreters versus separate rooms",
+      "story": "gVisor is an interpreter relaying every request; Kata gives each guest their own soundproof room.",
+      "mapping": [
+        [
+          "Interpreter",
+          "gVisor Sentry"
+        ],
+        [
+          "Soundproof room",
+          "MicroVM"
+        ],
+        [
+          "Building",
+          "Host"
+        ]
+      ],
+      "breaks": "Interpreters are slow for long talks; gVisor overhead grows with syscall-heavy workloads."
+    },
+    "mindmap": {
+      "center": "Sandboxed Runtimes",
+      "branches": [
+        {
+          "label": "gVisor",
+          "children": [
+            "User-space kernel",
+            "Syscall interception",
+            "runsc"
+          ]
+        },
+        {
+          "label": "Kata",
+          "children": [
+            "Lightweight VM",
+            "Own kernel"
+          ]
+        },
+        {
+          "label": "Firecracker",
+          "children": [
+            "MicroVM",
+            "Lambda/Fargate"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Overhead",
+            "Compatibility"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "RuntimeClass"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing isolation",
+      "scenario": "Workloads.",
+      "flow": [
+        "Internal trusted services → runc",
+        "User code execution → gVisor",
+        "Multi-tenant untrusted with custom kernels → Kata"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Strong isolation where needed only."
+        }
+      ],
+      "code": [],
+      "outcome": "right isolation per workload."
+    },
+    "summary": {
+      "points": [
+        "gVisor intercepts syscalls.",
+        "Kata/Firecracker use VMs.",
+        "Pay overhead only for risky code."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does gVisor isolate containers?",
+        "a": "It implements the Linux syscall interface in a user-space kernel, so the container's syscalls rarely reach the host kernel."
+      }
+    ]
+  },
+  "runtimeclass-selecting-a-runtime-in-kubernetes": {
+    "core": "RuntimeClass is a cluster object naming a runtime handler configured in the node's CRI (e.g. runsc for gVisor, kata for Kata). Pods select it with runtimeClassName, and scheduling fields ensure they land on nodes that support it, with optional overhead accounting for the sandbox's extra resources.",
+    "first_principles": {
+      "problem": "Only some pods need sandboxing, but the whole cluster runs one runtime.",
+      "truths": [
+        "Nodes can host multiple runtimes.",
+        "Pods need a way to choose.",
+        "Sandboxes consume extra resources."
+      ],
+      "derivation": [
+        "Configure **handlers** in containerd/CRI-O.",
+        "Create **RuntimeClass** objects.",
+        "Set **runtimeClassName** in pod spec.",
+        "Use **scheduling.nodeSelector/tolerations** in RuntimeClass.",
+        "Declare **overhead** for accurate scheduling."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing a lane at airport security",
+      "story": "Standard lane for most travellers, an enhanced screening lane for flagged bags.",
+      "mapping": [
+        [
+          "Lanes",
+          "Runtime handlers"
+        ],
+        [
+          "Lane sign",
+          "RuntimeClass"
+        ],
+        [
+          "Ticket marking",
+          "runtimeClassName"
+        ]
+      ],
+      "breaks": "Airport lanes exist at every terminal; runtimes must be installed on specific nodes."
+    },
+    "mindmap": {
+      "center": "RuntimeClass",
+      "branches": [
+        {
+          "label": "Object",
+          "children": [
+            "handler",
+            "overhead",
+            "scheduling"
+          ]
+        },
+        {
+          "label": "Pod",
+          "children": [
+            "runtimeClassName"
+          ]
+        },
+        {
+          "label": "Handlers",
+          "children": [
+            "runc",
+            "runsc",
+            "kata"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "nodeSelector",
+            "tolerations"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "gVisor RuntimeClass",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Untrusted pod runs sandboxed on gVisor nodes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata: {name: gvisor}\nhandler: runsc\noverhead: {podFixed: {cpu: 100m, memory: 64Mi}}\nscheduling: {nodeSelector: {sandbox: gvisor}}\n---\napiVersion: v1\nkind: Pod\nmetadata: {name: untrusted}\nspec:\n  runtimeClassName: gvisor\n  containers: [{name: app, image: user/code:latest}]"
+        }
+      ],
+      "outcome": "per-pod runtime selection."
+    },
+    "summary": {
+      "points": [
+        "Name the handler.",
+        "Pods opt in.",
+        "Account for overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the 'handler' field in a RuntimeClass refer to?",
+        "a": "The runtime handler name configured in the node's CRI (e.g. runsc)."
+      }
+    ]
+  }
+}

@@ -1,0 +1,532 @@
+{
+  "introduction-the-sensitive-brain": {
+    "core": "etcd holds all Kubernetes state and is sensitive: it needs low-latency disks (fsync per write), a stable network between members, quorum to accept writes, bounded database size (default quota 2 GB, max ~8 GB recommended) and regular compaction and defragmentation. Most 'Kubernetes is slow' incidents at scale trace back to etcd.",
+    "first_principles": {
+      "problem": "API calls slow to seconds, leader elections flap and the cluster becomes unstable.",
+      "truths": [
+        "Every write is fsynced.",
+        "Consensus needs timely heartbeats.",
+        "MVCC keeps old revisions until compacted."
+      ],
+      "derivation": [
+        "Use **dedicated fast SSDs**.",
+        "Keep members **close** (low RTT).",
+        "**Compact** revisions (API server does periodically).",
+        "**Defragment** to reclaim space.",
+        "**Monitor** fsync, leader changes, db size."
+      ]
+    },
+    "analogy": {
+      "title": "The brain's memory centre",
+      "story": "Fast and precise when healthy, but sleep deprivation (slow disks) makes everything else falter.",
+      "mapping": [
+        [
+          "Memory centre",
+          "etcd"
+        ],
+        [
+          "Sleep deprivation",
+          "Slow disks/network"
+        ],
+        [
+          "Forgetting old memories",
+          "Compaction"
+        ]
+      ],
+      "breaks": "Brains self-heal overnight; etcd needs explicit maintenance."
+    },
+    "mindmap": {
+      "center": "etcd Sensitivity",
+      "branches": [
+        {
+          "label": "Needs",
+          "children": [
+            "Fast fsync",
+            "Low RTT",
+            "Quorum",
+            "Bounded size"
+          ]
+        },
+        {
+          "label": "Maintenance",
+          "children": [
+            "Compaction",
+            "Defrag",
+            "Snapshots"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "fsync latency",
+            "Leader changes",
+            "DB size"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Slow API",
+            "Timeouts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Health check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See leader, DB size and alarms per member."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "etcdctl endpoint status --cluster -w table\netcdctl endpoint health --cluster\netcdctl alarm list"
+        }
+      ],
+      "outcome": "etcd risks understood."
+    },
+    "summary": {
+      "points": [
+        "Disk latency matters.",
+        "Quorum matters.",
+        "Maintain regularly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does etcd need fast disks?",
+        "a": "Every write is fsynced to its write-ahead log before acknowledgement, so disk latency directly limits throughput and stability."
+      }
+    ]
+  },
+  "defragmentation-cleaning-up-the-holes": {
+    "core": "etcd's MVCC keeps old revisions until compaction marks them free, but the bbolt database file doesn't shrink, leaving holes. Defragmentation rewrites the file to reclaim space, blocking the member during the operation. Run it member by member (followers first, leader last) when dbSize greatly exceeds dbSizeInUse, and clear any NOSPACE alarm afterwards.",
+    "first_principles": {
+      "problem": "etcd hits its space quota, raises a NOSPACE alarm and the cluster becomes read-only.",
+      "truths": [
+        "Compaction frees logically, not physically.",
+        "Defrag blocks that member.",
+        "Quota alarms stop writes."
+      ],
+      "derivation": [
+        "Compare **dbSize vs dbSizeInUse**.",
+        "Ensure **compaction** is running.",
+        "**Defrag one member at a time**.",
+        "**Disarm alarms** after freeing space.",
+        "Consider raising **quota-backend-bytes** carefully."
+      ]
+    },
+    "analogy": {
+      "title": "Defragmenting a filing cabinet",
+      "story": "Shred old files (compaction), then reorganise drawers so the empty space is usable.",
+      "mapping": [
+        [
+          "Shredding",
+          "Compaction"
+        ],
+        [
+          "Reorganising drawers",
+          "Defragmentation"
+        ],
+        [
+          "Cabinet full sign",
+          "NOSPACE alarm"
+        ]
+      ],
+      "breaks": "Cabinets stay usable during reorganising; a defragmenting member pauses requests."
+    },
+    "mindmap": {
+      "center": "Defragmentation",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "MVCC holes",
+            "File doesn't shrink"
+          ]
+        },
+        {
+          "label": "When",
+          "children": [
+            "dbSize ≫ dbSizeInUse",
+            "Near quota"
+          ]
+        },
+        {
+          "label": "How",
+          "children": [
+            "Per member",
+            "Followers first"
+          ]
+        },
+        {
+          "label": "After",
+          "children": [
+            "alarm disarm"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "quota-backend-bytes",
+            "auto-compaction"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe defrag",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "DB from 3.8 GB to 900 MB; writes resume."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "etcdctl endpoint status -w table             # dbSize vs in-use\netcdctl --endpoints=https://etcd-2:2379 defrag\netcdctl --endpoints=https://etcd-3:2379 defrag\netcdctl --endpoints=https://etcd-1:2379 defrag   # leader last\netcdctl alarm disarm"
+        }
+      ],
+      "outcome": "space reclaimed safely."
+    },
+    "summary": {
+      "points": [
+        "Compaction then defrag.",
+        "One member at a time.",
+        "Disarm alarms."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why defragment etcd members one at a time?",
+        "a": "Defrag blocks the member; doing them sequentially keeps quorum and availability."
+      }
+    ]
+  },
+  "member-management-surgery-on-the-cluster": {
+    "core": "Replacing or adding etcd members is surgery: always keep quorum. To replace a failed member, remove it (etcdctl member remove), then add the new one (member add) and start it with initial-cluster-state=existing. Add one member at a time, prefer learners (non-voting until caught up) and never run an even number long-term.",
+    "first_principles": {
+      "problem": "An engineer adds two new members at once to a 3-node cluster before they sync, and quorum is lost.",
+      "truths": [
+        "Quorum counts all voting members.",
+        "New members must catch up.",
+        "Order of operations matters."
+      ],
+      "derivation": [
+        "**Remove** dead members first.",
+        "**Add as learner**, wait for sync, **promote**.",
+        "Start with **--initial-cluster-state=existing**.",
+        "Change **one member at a time**.",
+        "Keep **3 or 5** voters."
+      ]
+    },
+    "analogy": {
+      "title": "Replacing crew on a ship at sea",
+      "story": "Swap one sailor at a time so there are always enough hands to sail.",
+      "mapping": [
+        [
+          "Crew",
+          "Members"
+        ],
+        [
+          "Enough hands",
+          "Quorum"
+        ],
+        [
+          "Training period",
+          "Learner mode"
+        ]
+      ],
+      "breaks": "Sailors can be trained on deck; etcd learners must replicate the full data set first."
+    },
+    "mindmap": {
+      "center": "Member Management",
+      "branches": [
+        {
+          "label": "Replace",
+          "children": [
+            "member remove",
+            "member add",
+            "existing state"
+          ]
+        },
+        {
+          "label": "Learners",
+          "children": [
+            "Non-voting",
+            "Promote after sync"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "One at a time",
+            "Odd count",
+            "Quorum first"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "etcdctl member list/add/remove/promote"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Replace a failed member",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cluster back to 3 healthy voters without losing quorum."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "etcdctl member list\netcdctl member remove 8e9e05c52164694d\netcdctl member add etcd-3 --learner --peer-urls=https://10.0.3.10:2380\n# start etcd-3 with --initial-cluster-state=existing, wait until caught up\netcdctl member promote <new-id>"
+        }
+      ],
+      "outcome": "safe membership changes."
+    },
+    "summary": {
+      "points": [
+        "Protect quorum.",
+        "Learners first.",
+        "One change at a time."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the benefit of adding a new etcd member as a learner?",
+        "a": "It replicates data without voting, so it can't affect quorum until it's caught up and promoted."
+      }
+    ]
+  },
+  "disaster-recovery-snapshots": {
+    "core": "etcd snapshots (etcdctl snapshot save) capture the full keyspace at a revision. Recovery from quorum loss or corruption restores the snapshot into a new data directory on each member (etcdutl snapshot restore with new cluster settings) and restarts a fresh cluster. Back up frequently, store off-cluster, encrypt and rehearse restores. Managed control planes do this for you.",
+    "first_principles": {
+      "problem": "Two of three control-plane disks fail and there's no recent etcd snapshot.",
+      "truths": [
+        "Quorum loss can be unrecoverable without backups.",
+        "Snapshots are consistent points in time.",
+        "Untested backups fail."
+      ],
+      "derivation": [
+        "**Snapshot** on a schedule (e.g. hourly).",
+        "Store **off-cluster**, encrypted.",
+        "**Verify** with snapshot status.",
+        "**Restore** to new data dirs on all members.",
+        "**Rehearse** recovery regularly."
+      ]
+    },
+    "analogy": {
+      "title": "Saving the master ledger to a vault each hour",
+      "story": "If the office burns down, you rebuild from the last vault copy.",
+      "mapping": [
+        [
+          "Ledger",
+          "etcd data"
+        ],
+        [
+          "Vault copy",
+          "Snapshot"
+        ],
+        [
+          "Rebuilding the office",
+          "Restoring a new cluster"
+        ]
+      ],
+      "breaks": "Ledgers can be partially reconstructed; etcd restores everything to the snapshot point, losing later changes."
+    },
+    "mindmap": {
+      "center": "etcd DR",
+      "branches": [
+        {
+          "label": "Backup",
+          "children": [
+            "snapshot save",
+            "Schedule",
+            "Off-cluster",
+            "Encrypted"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "snapshot status"
+          ]
+        },
+        {
+          "label": "Restore",
+          "children": [
+            "etcdutl snapshot restore",
+            "New data dir",
+            "New cluster token"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Drills"
+          ]
+        },
+        {
+          "label": "Managed",
+          "children": [
+            "EKS/GKE/AKS handle it"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Restore",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cluster state rebuilt from the snapshot."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "etcdutl snapshot restore /backup/etcd-2026-10-18.db \\\n  --name etcd-1 --data-dir /var/lib/etcd-restored \\\n  --initial-cluster etcd-1=https://10.0.1.10:2380,etcd-2=https://10.0.2.10:2380,etcd-3=https://10.0.3.10:2380 \\\n  --initial-cluster-token restored-1 --initial-advertise-peer-urls https://10.0.1.10:2380"
+        }
+      ],
+      "outcome": "recoverable control plane."
+    },
+    "summary": {
+      "points": [
+        "Snapshot often.",
+        "Store safely.",
+        "Rehearse restores."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to changes made after the snapshot when you restore?",
+        "a": "They're lost; the cluster returns to the snapshot's state."
+      }
+    ]
+  },
+  "monitoring-etcd-health-knowing-before-it-breaks": {
+    "core": "Key etcd metrics: etcd_disk_wal_fsync_duration_seconds (p99 < 10 ms), etcd_disk_backend_commit_duration_seconds, etcd_server_leader_changes_seen_total (should be rare), etcd_server_has_leader, etcd_mvcc_db_total_size_in_bytes vs quota, peer round-trip time and proposal failures. Alert on trends before they become outages.",
+    "first_principles": {
+      "problem": "etcd problems are only noticed when the API server starts timing out.",
+      "truths": [
+        "Disk latency precedes instability.",
+        "Leader churn signals trouble.",
+        "Size grows toward a hard quota."
+      ],
+      "derivation": [
+        "Alert on **fsync p99 > 10 ms**.",
+        "Alert on **leader changes** and **no leader**.",
+        "Alert on **DB size > 80% quota**.",
+        "Watch **proposals failed/pending**.",
+        "Dashboard **peer RTT**."
+      ]
+    },
+    "analogy": {
+      "title": "Vital signs monitoring",
+      "story": "Rising temperature and irregular heartbeat warn before collapse.",
+      "mapping": [
+        [
+          "Heartbeat",
+          "Leader stability"
+        ],
+        [
+          "Blood pressure",
+          "fsync latency"
+        ],
+        [
+          "Weight",
+          "DB size"
+        ]
+      ],
+      "breaks": "Patients show symptoms; etcd often looks fine until it suddenly isn't, so alert early."
+    },
+    "mindmap": {
+      "center": "etcd Monitoring",
+      "branches": [
+        {
+          "label": "Disk",
+          "children": [
+            "wal_fsync_duration",
+            "backend_commit_duration"
+          ]
+        },
+        {
+          "label": "Consensus",
+          "children": [
+            "has_leader",
+            "leader_changes",
+            "proposals_failed"
+          ]
+        },
+        {
+          "label": "Size",
+          "children": [
+            "db_total_size",
+            "Quota"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "Peer RTT"
+          ]
+        },
+        {
+          "label": "Alerts",
+          "children": [
+            "Thresholds",
+            "Trends"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Prometheus alert",
+      "scenario": "Rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Disk issues caught before leader flapping."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- alert: EtcdHighFsyncLatency\n  expr: histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])) > 0.01\n  for: 10m\n  labels: {severity: warning}"
+        }
+      ],
+      "outcome": "proactive etcd health."
+    },
+    "summary": {
+      "points": [
+        "fsync latency first.",
+        "Leader stability.",
+        "Size vs quota."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a healthy p99 WAL fsync latency for etcd?",
+        "a": "Under about 10 ms."
+      }
+    ]
+  }
+}

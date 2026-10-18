@@ -1,0 +1,2960 @@
+{
+  "docker-internals-deep-dive": {
+    "core": "Docker containers are Linux processes isolated by namespaces and limited by cgroups, running on layered union filesystems. Building well means cache-friendly layer ordering, multi-stage builds, distroless runtimes and BuildKit features, and running well means exec-form commands and proper PID 1 signal handling.",
+    "first_principles": {
+      "problem": "Treating containers as magic leads to bloated images, slow builds, insecure layers and broken shutdowns.",
+      "truths": [
+        "Containers are processes.",
+        "Images are layers.",
+        "Signals drive lifecycle."
+      ],
+      "derivation": [
+        "**Understand** namespaces/cgroups.",
+        "**Order** layers.",
+        "**Multi-stage + distroless**.",
+        "**BuildKit** caches/secrets.",
+        "**Exec form + SIGTERM handling**."
+      ]
+    },
+    "analogy": {
+      "title": "Shipping containers built from standard panels",
+      "story": "Standard parts, minimal contents and a proper procedure for opening and closing.",
+      "mapping": [
+        [
+          "Panels",
+          "Layers"
+        ],
+        [
+          "Minimal contents",
+          "Distroless"
+        ],
+        [
+          "Opening procedure",
+          "Signal handling"
+        ]
+      ],
+      "breaks": "Steel containers isolate physically; Linux containers share a kernel."
+    },
+    "mindmap": {
+      "center": "Docker Internals",
+      "branches": [
+        {
+          "label": "Runtime",
+          "children": [
+            "Namespaces",
+            "cgroups"
+          ]
+        },
+        {
+          "label": "Images",
+          "children": [
+            "Layers",
+            "OverlayFS"
+          ]
+        },
+        {
+          "label": "Builds",
+          "children": [
+            "Multi-stage",
+            "Distroless",
+            "BuildKit"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "ENTRYPOINT/CMD",
+            "PID 1",
+            "Signals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Production-grade image",
+      "scenario": "Checklist.",
+      "flow": [
+        "Multi-stage build with BuildKit cache",
+        "Distroless nonroot final stage",
+        "Exec-form ENTRYPOINT",
+        "SIGTERM handler drains requests"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Small, secure, well-behaved images."
+        }
+      ],
+      "code": [],
+      "outcome": "containers you can trust in production."
+    },
+    "summary": {
+      "points": [
+        "It's just Linux.",
+        "Build lean.",
+        "Shut down gracefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "What two kernel features make a container?",
+        "a": "Namespaces (isolation) and cgroups (resource limits)."
+      }
+    ]
+  },
+  "container-runtimes-docker-containerd-runc": {
+    "core": "Containers run through a layered stack: Kubernetes → CRI (containerd/CRI-O) → shim → OCI runtime (runc). OCI standards make images portable. Because containers share the host kernel, harden them with least privilege, and use sandboxed runtimes (gVisor, Kata, Firecracker) selected via RuntimeClass for untrusted workloads.",
+    "first_principles": {
+      "problem": "Without understanding the runtime stack, teams misjudge portability and isolation.",
+      "truths": [
+        "Layers have single responsibilities.",
+        "Standards enable portability.",
+        "Shared kernels limit isolation."
+      ],
+      "derivation": [
+        "**Know the stack**.",
+        "**Rely on OCI**.",
+        "**Harden** containers.",
+        "**Sandbox** untrusted code.",
+        "**Select** with RuntimeClass."
+      ]
+    },
+    "analogy": {
+      "title": "A logistics chain with standard containers and secure vaults",
+      "story": "Standard boxes travel anywhere; valuables go in reinforced cases.",
+      "mapping": [
+        [
+          "Standard boxes",
+          "OCI images"
+        ],
+        [
+          "Logistics chain",
+          "Runtime stack"
+        ],
+        [
+          "Reinforced cases",
+          "Sandboxed runtimes"
+        ]
+      ],
+      "breaks": "Reinforced cases are slower to handle, just as sandboxes add overhead."
+    },
+    "mindmap": {
+      "center": "Runtime Ecosystem",
+      "branches": [
+        {
+          "label": "Stack",
+          "children": [
+            "kubelet",
+            "CRI",
+            "containerd",
+            "shim",
+            "runc"
+          ]
+        },
+        {
+          "label": "Standards",
+          "children": [
+            "OCI image/runtime/distribution"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Shared kernel",
+            "Hardening"
+          ]
+        },
+        {
+          "label": "Sandboxes",
+          "children": [
+            "gVisor",
+            "Kata",
+            "Firecracker"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "RuntimeClass"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Multi-tenant platform",
+      "scenario": "Design.",
+      "flow": [
+        "containerd with runc and runsc handlers",
+        "Default pods: hardened runc",
+        "Tenant code: RuntimeClass gvisor",
+        "Images from any OCI builder"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Standard by default, sandboxed by need."
+        }
+      ],
+      "code": [],
+      "outcome": "portable and appropriately isolated workloads."
+    },
+    "summary": {
+      "points": [
+        "Layered stack.",
+        "OCI portability.",
+        "Isolation choices."
+      ]
+    },
+    "check": [
+      {
+        "q": "What interface does the kubelet use to talk to container runtimes?",
+        "a": "The Container Runtime Interface (CRI)."
+      }
+    ]
+  },
+  "webassembly-wasm-wasi-edge": {
+    "core": "WebAssembly brings portable, sandboxed, near-instant compute beyond the browser. WASI and the Component Model add capability-based system access and composition. Wasm complements containers: tiny and fast for edge, plugins and serverless, while containers remain best for general workloads. The developer ecosystem, led by Rust, Spin and Wasmtime, is maturing quickly.",
+    "first_principles": {
+      "problem": "Some workloads need faster startup, higher density and stronger isolation than containers offer.",
+      "truths": [
+        "Small sandboxes start fast.",
+        "Capabilities limit risk.",
+        "Ecosystems take time."
+      ],
+      "derivation": [
+        "**Compile to Wasm**.",
+        "**Grant via WASI**.",
+        "**Choose** Wasm vs containers per workload.",
+        "**Deploy** at the edge or on K8s.",
+        "**Adopt** mature toolchains."
+      ]
+    },
+    "analogy": {
+      "title": "Universal cartridges for compute",
+      "story": "Plug into any machine, start instantly and can't interfere with others.",
+      "mapping": [
+        [
+          "Cartridge",
+          "Module"
+        ],
+        [
+          "Machine",
+          "Runtime"
+        ],
+        [
+          "Isolation",
+          "Sandbox"
+        ]
+      ],
+      "breaks": "Cartridges are finished products; Wasm standards are still evolving."
+    },
+    "mindmap": {
+      "center": "Wasm & WASI",
+      "branches": [
+        {
+          "label": "Core",
+          "children": [
+            "Portable",
+            "Sandboxed"
+          ]
+        },
+        {
+          "label": "WASI",
+          "children": [
+            "Capabilities",
+            "Components"
+          ]
+        },
+        {
+          "label": "Comparison",
+          "children": [
+            "vs containers"
+          ]
+        },
+        {
+          "label": "Edge",
+          "children": [
+            "Instant start"
+          ]
+        },
+        {
+          "label": "DX",
+          "children": [
+            "Rust",
+            "Spin",
+            "Wasmtime"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Plugin system",
+      "scenario": "Use case.",
+      "flow": [
+        "SaaS lets customers upload Wasm plugins",
+        "Wasmtime runs each with no filesystem/network",
+        "CPU and memory limits enforced",
+        "Plugins in any language"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Safe extensibility without containers."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, safe, portable compute."
+    },
+    "summary": {
+      "points": [
+        "Portable sandbox.",
+        "Capabilities via WASI.",
+        "Complement containers."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is WASI?",
+        "a": "The WebAssembly System Interface: standard capability-based APIs letting Wasm access system resources."
+      }
+    ]
+  },
+  "unikernels-libraryos-mirageos-unikraft": {
+    "core": "Unikernels compile an application with only the library-OS components it needs into a single-purpose VM image. They boot in milliseconds, are tiny and have minimal attack surface with hypervisor isolation, but they're specialised. MirageOS and Unikraft lead the ecosystem, and they fit network functions, dense serverless and security-critical niches.",
+    "first_principles": {
+      "problem": "General-purpose OSes waste resources and widen attack surfaces for single-purpose cloud services.",
+      "truths": [
+        "Apps use a small part of the OS.",
+        "Less code is faster and safer.",
+        "Specialisation limits flexibility."
+      ],
+      "derivation": [
+        "**LibraryOS** concept.",
+        "**Build** single-purpose images.",
+        "**Compare** with VMs and containers.",
+        "**Use** in fitting niches."
+      ]
+    },
+    "analogy": {
+      "title": "Purpose-built tools versus multi-tools",
+      "story": "A dedicated tool is lighter and better at its one job.",
+      "mapping": [
+        [
+          "Dedicated tool",
+          "Unikernel"
+        ],
+        [
+          "Multi-tool",
+          "General OS"
+        ]
+      ],
+      "breaks": "Tools don't need patching pipelines; unikernels need rebuild-and-redeploy workflows."
+    },
+    "mindmap": {
+      "center": "Unikernels",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Swiss Army knife OS"
+          ]
+        },
+        {
+          "label": "Concept",
+          "children": [
+            "LibraryOS"
+          ]
+        },
+        {
+          "label": "Comparison",
+          "children": [
+            "VMs",
+            "Containers"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Speed",
+            "Size",
+            "Security"
+          ]
+        },
+        {
+          "label": "Ecosystem",
+          "children": [
+            "MirageOS",
+            "Unikraft"
+          ]
+        },
+        {
+          "label": "Fit",
+          "children": [
+            "Niches"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Evaluating for a proxy fleet",
+      "scenario": "Steps.",
+      "flow": [
+        "Build Unikraft nginx image",
+        "Benchmark boot, memory, throughput",
+        "Add logging/metrics export",
+        "Roll out to 10% of proxies"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Pilot and measure."
+        }
+      ],
+      "code": [],
+      "outcome": "specialised efficiency where it pays."
+    },
+    "summary": {
+      "points": [
+        "Only what's needed.",
+        "Fast and small.",
+        "Niche fit."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main trade-off of unikernels?",
+        "a": "Specialisation: limited compatibility, tooling and debugging compared with general OSes and containers."
+      }
+    ]
+  },
+  "k8s-primitives-pods-services-deployments": {
+    "core": "Kubernetes' core primitives compose into most applications: Pods co-locate containers, probes report health, Services give stable discovery and load balancing, Service types control exposure, Deployments run and roll out stateless replicas, and ConfigMaps and Secrets decouple configuration from images.",
+    "first_principles": {
+      "problem": "Running containers at scale needs self-healing, discovery, safe rollouts and configuration management.",
+      "truths": [
+        "Declare and reconcile.",
+        "Pods are ephemeral.",
+        "Config differs per environment."
+      ],
+      "derivation": [
+        "**Pods + probes**.",
+        "**Services** for discovery.",
+        "**Deployments** for rollouts.",
+        "**Config/Secrets** externalised."
+      ]
+    },
+    "analogy": {
+      "title": "A self-managing restaurant chain",
+      "story": "Kitchens (Pods), a central phone line (Service), a franchise manager (Deployment) and recipe cards (ConfigMaps).",
+      "mapping": [
+        [
+          "Kitchens",
+          "Pods"
+        ],
+        [
+          "Phone line",
+          "Service"
+        ],
+        [
+          "Franchise manager",
+          "Deployment"
+        ],
+        [
+          "Recipe cards",
+          "ConfigMaps"
+        ]
+      ],
+      "breaks": "Restaurants don't rebuild themselves overnight; Kubernetes does continuously."
+    },
+    "mindmap": {
+      "center": "Primitives",
+      "branches": [
+        {
+          "label": "Pods",
+          "children": [
+            "Shared net",
+            "Probes"
+          ]
+        },
+        {
+          "label": "Services",
+          "children": [
+            "ClusterIP",
+            "LB",
+            "Ingress"
+          ]
+        },
+        {
+          "label": "Deployments",
+          "children": [
+            "ReplicaSets",
+            "Rolling updates"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "ConfigMaps",
+            "Secrets"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deploying a web API",
+      "scenario": "Full set.",
+      "flow": [
+        "Deployment with probes and preStop",
+        "ClusterIP Service + Ingress",
+        "ConfigMap for settings, ExternalSecret for DB",
+        "Rolling update with maxUnavailable 0"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Primitives combine into production apps."
+        }
+      ],
+      "code": [],
+      "outcome": "resilient, configurable services."
+    },
+    "summary": {
+      "points": [
+        "Declare state.",
+        "Probes and Services.",
+        "Rollouts and config."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which object keeps a set number of identical Pods running and manages rollouts?",
+        "a": "A Deployment (via ReplicaSets)."
+      }
+    ]
+  },
+  "k8s-workload-management-statefulsets-daemonsets-jobs": {
+    "core": "Beyond stateless Deployments, Kubernetes offers StatefulSets for stable identity and storage with ordered updates, DaemonSets for per-node agents, Jobs and CronJobs for run-to-completion and scheduled work, and PodDisruptionBudgets to keep workloads available during voluntary disruptions.",
+    "first_principles": {
+      "problem": "Using Deployments for everything breaks databases, node agents and batch jobs.",
+      "truths": [
+        "Workloads have different lifecycles.",
+        "Identity and storage matter for state.",
+        "Maintenance must preserve availability."
+      ],
+      "derivation": [
+        "**StatefulSets** for state.",
+        "**DaemonSets** per node.",
+        "**Jobs/CronJobs** for batch.",
+        "**PDBs** for maintenance."
+      ]
+    },
+    "analogy": {
+      "title": "Different employment contracts",
+      "story": "Permanent specialists, floor wardens, contractors and shift rules.",
+      "mapping": [
+        [
+          "Specialists",
+          "StatefulSet"
+        ],
+        [
+          "Floor wardens",
+          "DaemonSet"
+        ],
+        [
+          "Contractors",
+          "Jobs"
+        ],
+        [
+          "Shift rules",
+          "PDBs"
+        ]
+      ],
+      "breaks": "Contracts are negotiated; controllers enforce behaviour automatically."
+    },
+    "mindmap": {
+      "center": "Workload Management",
+      "branches": [
+        {
+          "label": "Stateful",
+          "children": [
+            "StatefulSet",
+            "Ordered",
+            "PVCs"
+          ]
+        },
+        {
+          "label": "Per node",
+          "children": [
+            "DaemonSet"
+          ]
+        },
+        {
+          "label": "Batch",
+          "children": [
+            "Job",
+            "CronJob"
+          ]
+        },
+        {
+          "label": "Availability",
+          "children": [
+            "PDB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Data platform on K8s",
+      "scenario": "Workloads.",
+      "flow": [
+        "Kafka as StatefulSet with partitioned updates",
+        "Fluent Bit DaemonSet",
+        "Nightly compaction CronJob (Forbid)",
+        "PDBs on Kafka and API"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Right controller, right guarantees."
+        }
+      ],
+      "code": [],
+      "outcome": "every workload behaves correctly."
+    },
+    "summary": {
+      "points": [
+        "Match the controller.",
+        "Protect state.",
+        "Guard availability."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which controller should run a database cluster needing stable member names?",
+        "a": "A StatefulSet."
+      }
+    ]
+  },
+  "k8s-scheduling-math-qos-preemption": {
+    "core": "Kubernetes scheduling filters and scores nodes using requests, not usage. Requests reserve and limits cap (CPU throttles, memory OOM-kills). Bin packing and node shapes decide efficiency, DRF frames multi-resource fairness, QoS classes decide eviction order, and PriorityClasses enable preemption for important work.",
+    "first_principles": {
+      "problem": "Misunderstood scheduling maths causes Pending Pods, waste, unfairness and the wrong Pods being evicted.",
+      "truths": [
+        "Requests drive placement.",
+        "Resources are multi-dimensional.",
+        "Importance must be encoded."
+      ],
+      "derivation": [
+        "**Accurate requests**.",
+        "**Sensible limits**.",
+        "**Pack and shape**.",
+        "**Fair queues**.",
+        "**QoS + priority**."
+      ]
+    },
+    "analogy": {
+      "title": "Air traffic slots and seat classes",
+      "story": "Slots allocated by declared need, efficient packing of planes, and priority boarding when it's full.",
+      "mapping": [
+        [
+          "Declared need",
+          "Requests"
+        ],
+        [
+          "Packing planes",
+          "Bin packing"
+        ],
+        [
+          "Priority boarding",
+          "PriorityClasses"
+        ]
+      ],
+      "breaks": "Passengers are counted exactly; Pod usage often diverges from requests."
+    },
+    "mindmap": {
+      "center": "Scheduling Math",
+      "branches": [
+        {
+          "label": "Scheduler",
+          "children": [
+            "Filter",
+            "Score"
+          ]
+        },
+        {
+          "label": "Resources",
+          "children": [
+            "Requests",
+            "Limits"
+          ]
+        },
+        {
+          "label": "Efficiency",
+          "children": [
+            "Bin packing"
+          ]
+        },
+        {
+          "label": "Fairness",
+          "children": [
+            "DRF"
+          ]
+        },
+        {
+          "label": "Pressure",
+          "children": [
+            "QoS",
+            "Eviction"
+          ]
+        },
+        {
+          "label": "Importance",
+          "children": [
+            "PriorityClass",
+            "Preemption"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shared production + batch cluster",
+      "scenario": "Policy.",
+      "flow": [
+        "Prod: Guaranteed, priority 100000",
+        "Batch: Burstable, priority 1000, checkpointed",
+        "Kueue queues for team fairness",
+        "MostAllocated scoring + Karpenter consolidation"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Encode importance and efficiency explicitly."
+        }
+      ],
+      "code": [],
+      "outcome": "efficient, fair, predictable scheduling."
+    },
+    "summary": {
+      "points": [
+        "Requests rule.",
+        "QoS and priority.",
+        "Pack and share fairly."
+      ]
+    },
+    "check": [
+      {
+        "q": "What resource behaviour differs between exceeding CPU and memory limits?",
+        "a": "CPU over limit is throttled; memory over limit is OOM-killed."
+      }
+    ]
+  },
+  "k8s-networking-cni-ingress-policies-dns": {
+    "core": "Kubernetes networking gives every Pod a routable IP via CNI plugins (overlay or direct routing), stable discovery via Services and CoreDNS, HTTP entry via Ingress and its successor Gateway API, and Pod-level firewalling with NetworkPolicies enforced by the CNI.",
+    "first_principles": {
+      "problem": "Distributed Pods need connectivity, discovery, external access and security in a constantly changing cluster.",
+      "truths": [
+        "Pods are ephemeral but need addresses.",
+        "Names beat IPs.",
+        "Default-allow is insecure."
+      ],
+      "derivation": [
+        "**CNI** for the flat network.",
+        "**Mode** choice and MTU.",
+        "**DNS** tuning.",
+        "**Ingress/Gateway** for entry.",
+        "**NetworkPolicies** for segmentation."
+      ]
+    },
+    "analogy": {
+      "title": "A city's addressing, phone book, front gates and internal security doors",
+      "story": "Every flat reachable, easy to look up, guarded at the entrance and locked between zones.",
+      "mapping": [
+        [
+          "Addresses",
+          "Pod IPs"
+        ],
+        [
+          "Phone book",
+          "CoreDNS"
+        ],
+        [
+          "Front gates",
+          "Ingress/Gateway"
+        ],
+        [
+          "Security doors",
+          "NetworkPolicies"
+        ]
+      ],
+      "breaks": "Cities change slowly; Pods are created and destroyed constantly."
+    },
+    "mindmap": {
+      "center": "K8s Networking",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Flat Pod network"
+          ]
+        },
+        {
+          "label": "CNI",
+          "children": [
+            "Calico",
+            "Cilium",
+            "VPC CNI"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Overlay",
+            "Direct"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "Services",
+            "CoreDNS"
+          ]
+        },
+        {
+          "label": "Entry",
+          "children": [
+            "Ingress",
+            "Gateway API"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "NetworkPolicy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Secure web app networking",
+      "scenario": "Design.",
+      "flow": [
+        "Cilium CNI with native routing",
+        "Gateway + HTTPRoutes per team",
+        "NodeLocal DNSCache",
+        "Default-deny policies + explicit allows"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Connectivity, discovery, entry and security layered."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, discoverable, secure networking."
+    },
+    "summary": {
+      "points": [
+        "Flat network via CNI.",
+        "DNS and Gateways.",
+        "Policies for least privilege."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which resource is the modern, role-oriented replacement for Ingress?",
+        "a": "The Gateway API (Gateway and Route resources)."
+      }
+    ]
+  },
+  "k8s-storage-csi-pvc-storageclass": {
+    "core": "Kubernetes storage separates supply from demand: PVCs request storage, StorageClasses provision PVs dynamically through CSI drivers (with WaitForFirstConsumer for zonal correctness), reclaim policies decide what happens on deletion, and snapshots and ephemeral volumes cover recovery and scratch needs.",
+    "first_principles": {
+      "problem": "Stateful apps on ephemeral, rescheduled Pods need persistent, correctly placed, recoverable storage.",
+      "truths": [
+        "Containers forget.",
+        "Storage is zonal or shared.",
+        "Deletion can be destructive."
+      ],
+      "derivation": [
+        "**PVC/PV** abstraction.",
+        "**StorageClasses** for automation.",
+        "**Reclaim policies** for safety.",
+        "**CSI** for integration.",
+        "**Snapshots** for recovery."
+      ]
+    },
+    "analogy": {
+      "title": "A storage rental business",
+      "story": "Request a unit, get one of the right type in the right location, decide what happens on cancellation, take inventory photos.",
+      "mapping": [
+        [
+          "Unit request",
+          "PVC"
+        ],
+        [
+          "Unit types",
+          "StorageClasses"
+        ],
+        [
+          "Cancellation policy",
+          "Reclaim policy"
+        ],
+        [
+          "Inventory photos",
+          "Snapshots"
+        ]
+      ],
+      "breaks": "Rental units are always reachable; zonal volumes only attach in their zone."
+    },
+    "mindmap": {
+      "center": "K8s Storage",
+      "branches": [
+        {
+          "label": "Abstraction",
+          "children": [
+            "PV",
+            "PVC"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "StorageClass",
+            "WaitForFirstConsumer"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Reclaim policy"
+          ]
+        },
+        {
+          "label": "Plumbing",
+          "children": [
+            "CSI"
+          ]
+        },
+        {
+          "label": "Recovery",
+          "children": [
+            "Snapshots",
+            "Clones"
+          ]
+        },
+        {
+          "label": "Scratch",
+          "children": [
+            "Ephemeral volumes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Database storage setup",
+      "scenario": "Design.",
+      "flow": [
+        "StorageClass gp3-retain with WaitForFirstConsumer",
+        "StatefulSet volumeClaimTemplates",
+        "Nightly VolumeSnapshots",
+        "Restore drill monthly"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Persistence, placement and protection together."
+        }
+      ],
+      "code": [],
+      "outcome": "reliable stateful storage."
+    },
+    "summary": {
+      "points": [
+        "Request, provision, bind.",
+        "Mind zones and deletion.",
+        "Snapshot regularly."
+      ]
+    },
+    "check": [
+      {
+        "q": "What links a PVC to the type of storage provisioned?",
+        "a": "Its storageClassName."
+      }
+    ]
+  },
+  "k8s-control-plane-components": {
+    "core": "The Kubernetes control plane is a hub-and-spoke system: the API server authenticates, authorises and admits every request and persists it in etcd (a Raft-replicated store needing quorum), controllers reconcile desired and actual state, and the scheduler binds Pods to nodes via a pluggable framework.",
+    "first_principles": {
+      "problem": "Without understanding the control plane, failures and slowdowns are mysteries.",
+      "truths": [
+        "One API is the hub.",
+        "State must be consistent and durable.",
+        "Loops converge state."
+      ],
+      "derivation": [
+        "**API server** gates and serves.",
+        "**etcd** stores with quorum.",
+        "**Controllers** reconcile.",
+        "**Scheduler** places."
+      ]
+    },
+    "analogy": {
+      "title": "A head office with reception, records, managers and dispatch",
+      "story": "Every request goes through reception; records are kept safe; managers and dispatchers act on them.",
+      "mapping": [
+        [
+          "Reception",
+          "API server"
+        ],
+        [
+          "Records",
+          "etcd"
+        ],
+        [
+          "Managers",
+          "Controllers"
+        ],
+        [
+          "Dispatch",
+          "Scheduler"
+        ]
+      ],
+      "breaks": "Offices pause at night; the control plane runs continuously."
+    },
+    "mindmap": {
+      "center": "Control Plane",
+      "branches": [
+        {
+          "label": "API server",
+          "children": [
+            "AuthN",
+            "AuthZ",
+            "Admission",
+            "Watches"
+          ]
+        },
+        {
+          "label": "etcd",
+          "children": [
+            "Raft",
+            "Quorum",
+            "Backups"
+          ]
+        },
+        {
+          "label": "Controllers",
+          "children": [
+            "Reconciliation",
+            "GC"
+          ]
+        },
+        {
+          "label": "Scheduler",
+          "children": [
+            "Framework",
+            "Profiles"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Debugging a stuck rollout",
+      "scenario": "Path.",
+      "flow": [
+        "Check API server events and admission errors",
+        "Check controller status conditions",
+        "Check scheduler FailedScheduling",
+        "Check etcd latency if everything is slow"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Know which component owns each step."
+        }
+      ],
+      "code": [],
+      "outcome": "faster control-plane troubleshooting."
+    },
+    "summary": {
+      "points": [
+        "Hub API.",
+        "Consistent store.",
+        "Loops and placement."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the three gates every API request passes?",
+        "a": "Authentication, authorisation and admission control."
+      }
+    ]
+  },
+  "k8s-extensibility-crds-operators-webhooks": {
+    "core": "Kubernetes extends through CRDs (new validated resource types), controllers and operators (level-triggered reconciliation encoding expert operations, built with controller-runtime and Kubebuilder), admission webhooks or CEL policies (mutate and validate requests) and aggregated API servers for fully custom APIs.",
+    "first_principles": {
+      "problem": "Platforms need domain-specific automation beyond built-in objects.",
+      "truths": [
+        "The API machinery is reusable.",
+        "Reconciliation must be robust.",
+        "Request-path extensions are risky."
+      ],
+      "derivation": [
+        "**CRDs** with schemas.",
+        "**Operators** for day-2.",
+        "**Level-triggered** idempotent logic.",
+        "**Webhooks/CEL** for policy.",
+        "**Aggregation** when necessary."
+      ]
+    },
+    "analogy": {
+      "title": "Expanding a city's services",
+      "story": "New service types registered, expert crews to run them and inspectors at the gates.",
+      "mapping": [
+        [
+          "New service types",
+          "CRDs"
+        ],
+        [
+          "Expert crews",
+          "Operators"
+        ],
+        [
+          "Inspectors",
+          "Admission"
+        ]
+      ],
+      "breaks": "City expansions are slow; CRDs and controllers deploy in minutes."
+    },
+    "mindmap": {
+      "center": "Extending K8s",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "CRDs"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Controllers",
+            "Operators"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Level-triggered"
+          ]
+        },
+        {
+          "label": "Tooling",
+          "children": [
+            "Kubebuilder",
+            "controller-runtime"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Webhooks",
+            "CEL"
+          ]
+        },
+        {
+          "label": "Advanced",
+          "children": [
+            "Aggregated APIs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Self-service databases",
+      "scenario": "Platform.",
+      "flow": [
+        "Database CRD with CEL validation",
+        "Operator provisions and backs up",
+        "Validating policy enforces sizes per namespace",
+        "Teams self-serve via GitOps"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Extend with the same machinery."
+        }
+      ],
+      "code": [],
+      "outcome": "a domain-aware platform."
+    },
+    "summary": {
+      "points": [
+        "Add types.",
+        "Add behaviour.",
+        "Add policy."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the simplest way to add a new resource type to Kubernetes?",
+        "a": "Create a CustomResourceDefinition (CRD)."
+      }
+    ]
+  },
+  "k8s-helm-package-manager": {
+    "core": "Helm packages Kubernetes manifests as charts: Go templates plus layered values render per-environment YAML, installed as versioned releases with upgrade and rollback. Charts are shared via repositories or OCI registries, should be vetted, and follow a standard layout with schema validation.",
+    "first_principles": {
+      "problem": "Copy-pasted YAML across environments drifts and is hard to upgrade safely.",
+      "truths": [
+        "Differences are small and parametrisable.",
+        "Releases need history.",
+        "Shared charts are third-party code."
+      ],
+      "derivation": [
+        "**Template** manifests.",
+        "**Layer** values.",
+        "**Release** with history.",
+        "**Distribute** via OCI.",
+        "**Validate** and **preview**."
+      ]
+    },
+    "analogy": {
+      "title": "A configurable product kit",
+      "story": "One kit, options per customer, a delivery log and an approved supplier list.",
+      "mapping": [
+        [
+          "Kit",
+          "Chart"
+        ],
+        [
+          "Options",
+          "Values"
+        ],
+        [
+          "Delivery log",
+          "Release history"
+        ],
+        [
+          "Suppliers",
+          "Repositories"
+        ]
+      ],
+      "breaks": "Kits are physical; charts are code executed with your cluster permissions."
+    },
+    "mindmap": {
+      "center": "Helm",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Chart",
+            "Values",
+            "Release"
+          ]
+        },
+        {
+          "label": "Templating",
+          "children": [
+            "Go templates",
+            "Sprig",
+            "Helpers"
+          ]
+        },
+        {
+          "label": "Distribution",
+          "children": [
+            "Repos",
+            "OCI",
+            "Artifact Hub"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "diff",
+            "--atomic",
+            "Schema"
+          ]
+        },
+        {
+          "label": "Layout",
+          "children": [
+            "Standard directory"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Promoting an app through environments",
+      "scenario": "Workflow.",
+      "flow": [
+        "Chart in OCI registry, version pinned",
+        "values.yaml + values-staging.yaml + values-prod.yaml in Git",
+        "helm diff in CI",
+        "--atomic upgrade per environment"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "One chart, many safe releases."
+        }
+      ],
+      "code": [],
+      "outcome": "consistent, reversible deployments."
+    },
+    "summary": {
+      "points": [
+        "Template once.",
+        "Configure per env.",
+        "Upgrade safely."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you roll back a Helm release?",
+        "a": "helm rollback <release> <revision>."
+      }
+    ]
+  },
+  "k8s-operator-development-go-kubebuilder": {
+    "core": "Operator development with Kubebuilder turns runbooks into reconcile loops: scaffold types and controllers, fetch objects by key, create or update owned children idempotently, ignore deleted parents, report conditions and observedGeneration in status, and use finalizers to clean up external resources before deletion.",
+    "first_principles": {
+      "problem": "Naive controllers churn, duplicate resources, hide state and leak external resources.",
+      "truths": [
+        "Reconcile reruns.",
+        "Deletions race.",
+        "External resources need explicit cleanup."
+      ],
+      "derivation": [
+        "**Scaffold** with Kubebuilder.",
+        "**Reconcile** idempotently.",
+        "**Handle** NotFound.",
+        "**Report** status.",
+        "**Finalize** deletions."
+      ]
+    },
+    "analogy": {
+      "title": "Automating a meticulous caretaker",
+      "story": "Checks everything each round, fixes only what's wrong, reports clearly and leaves nothing behind when the contract ends.",
+      "mapping": [
+        [
+          "Rounds",
+          "Reconciles"
+        ],
+        [
+          "Reports",
+          "Status conditions"
+        ],
+        [
+          "Leaving nothing behind",
+          "Finalizers"
+        ]
+      ],
+      "breaks": "Caretakers use judgement; operators need explicit code for every case."
+    },
+    "mindmap": {
+      "center": "Operator Development",
+      "branches": [
+        {
+          "label": "Tooling",
+          "children": [
+            "Kubebuilder",
+            "controller-runtime"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "api/",
+            "controllers",
+            "config/"
+          ]
+        },
+        {
+          "label": "Loop",
+          "children": [
+            "Get",
+            "Apply",
+            "Status",
+            "Requeue"
+          ]
+        },
+        {
+          "label": "Correctness",
+          "children": [
+            "NotFound",
+            "Idempotency"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Finalizers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Database operator milestones",
+      "scenario": "Plan.",
+      "flow": [
+        "v0.1: create StatefulSet + Service",
+        "v0.2: status conditions",
+        "v0.3: backups to S3 with finalizer cleanup",
+        "v0.4: upgrades with partitioned rollout"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Correctness first, features after."
+        }
+      ],
+      "code": [],
+      "outcome": "production-grade operators."
+    },
+    "summary": {
+      "points": [
+        "Idempotent reconcile.",
+        "Clear status.",
+        "Clean deletion."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do operators use finalizers?",
+        "a": "To run cleanup of external resources before Kubernetes removes the custom resource."
+      }
+    ]
+  },
+  "k8s-advanced-scheduling-affinity-taints-topology": {
+    "core": "Advanced scheduling gives placement control: taints and tolerations repel Pods from special nodes, node affinity attracts them to suitable nodes, Pod affinity and anti-affinity place Pods relative to each other, and topology spread constraints distribute replicas evenly across zones and hosts for high availability.",
+    "first_principles": {
+      "problem": "Naive placement wastes special capacity and concentrates failure risk.",
+      "truths": [
+        "Nodes differ.",
+        "Relationships matter.",
+        "Even spread increases resilience."
+      ],
+      "derivation": [
+        "**Taint** special nodes.",
+        "**Affinity** to attract.",
+        "**Relative** placement.",
+        "**Spread** for HA."
+      ]
+    },
+    "analogy": {
+      "title": "Event seating strategy",
+      "story": "Reserved sections, preferred areas, friends together, rivals apart and even table distribution.",
+      "mapping": [
+        [
+          "Reserved sections",
+          "Taints"
+        ],
+        [
+          "Preferred areas",
+          "Node affinity"
+        ],
+        [
+          "Friends/rivals",
+          "Pod (anti-)affinity"
+        ],
+        [
+          "Even tables",
+          "Topology spread"
+        ]
+      ],
+      "breaks": "Guests stay seated; Pods may need rescheduling (descheduler) to rebalance."
+    },
+    "mindmap": {
+      "center": "Placement Control",
+      "branches": [
+        {
+          "label": "Repel",
+          "children": [
+            "Taints"
+          ]
+        },
+        {
+          "label": "Attract",
+          "children": [
+            "Node affinity"
+          ]
+        },
+        {
+          "label": "Relative",
+          "children": [
+            "Pod affinity",
+            "Anti-affinity"
+          ]
+        },
+        {
+          "label": "Spread",
+          "children": [
+            "Topology spread"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Soft rules",
+            "PDBs",
+            "Descheduler"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Production API placement",
+      "scenario": "Design.",
+      "flow": [
+        "Avoid GPU nodes (no toleration)",
+        "Prefer spot via node affinity",
+        "Spread evenly across 3 zones",
+        "Co-locate with cache in zone"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Combine tools for cost, performance and HA."
+        }
+      ],
+      "code": [],
+      "outcome": "placement that serves the business."
+    },
+    "summary": {
+      "points": [
+        "Repel, attract, relate, spread.",
+        "Prefer soft rules.",
+        "Verify with failure tests."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which mechanism is the modern recommended way to spread replicas across zones?",
+        "a": "Topology spread constraints."
+      }
+    ]
+  },
+  "k8s-multi-cluster-federation-gitops-mesh": {
+    "core": "Multi-cluster Kubernetes contains blast radius and meets regional, scale and compliance needs. Manage fleets with federation or GitOps (hub-and-spoke or per-cluster agents), connect services across clusters with shared-trust service meshes and the MCS API, and provision clusters declaratively with Cluster API.",
+    "first_principles": {
+      "problem": "One cluster can't satisfy isolation, latency and scale needs, but many clusters create consistency and connectivity problems.",
+      "truths": [
+        "Clusters are failure domains.",
+        "Consistency needs automation.",
+        "Cross-cluster calls need trust."
+      ],
+      "derivation": [
+        "**Split** for good reasons.",
+        "**GitOps/federation** for config.",
+        "**Mesh** for connectivity.",
+        "**Cluster API** for lifecycle."
+      ]
+    },
+    "analogy": {
+      "title": "Running a chain of branch offices",
+      "story": "Standard policies, connected phone lines and a construction company that builds new branches to spec.",
+      "mapping": [
+        [
+          "Policies",
+          "GitOps"
+        ],
+        [
+          "Phone lines",
+          "Service mesh"
+        ],
+        [
+          "Construction company",
+          "Cluster API"
+        ]
+      ],
+      "breaks": "Branches open over months; clusters can be created in minutes."
+    },
+    "mindmap": {
+      "center": "Multi-Cluster",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Isolation",
+            "Latency",
+            "Scale"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Federation",
+            "GitOps"
+          ]
+        },
+        {
+          "label": "Connectivity",
+          "children": [
+            "Mesh",
+            "MCS"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Cluster API"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Global platform",
+      "scenario": "Design.",
+      "flow": [
+        "Cluster API provisions regional clusters from ClusterClass",
+        "Flux per cluster syncs from Git",
+        "Istio multi-primary with shared CA",
+        "Central observability"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Treat clusters like cattle too."
+        }
+      ],
+      "code": [],
+      "outcome": "manageable, resilient fleets."
+    },
+    "summary": {
+      "points": [
+        "Many clusters, one way.",
+        "Git-driven.",
+        "Trust across clusters."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which project manages cluster lifecycle declaratively?",
+        "a": "Cluster API."
+      }
+    ]
+  },
+  "k8s-security-oidc-rbac-pss": {
+    "core": "Kubernetes security internals: identity comes from outside (OIDC via brokers like Dex/Keycloak, short-lived service account tokens), RBAC grants additive least-privilege permissions, and Pod Security Standards (privileged, baseline, restricted) are enforced per namespace by Pod Security Admission, rolled out via warn, audit and then enforce.",
+    "first_principles": {
+      "problem": "Default clusters allow broad access and dangerous workloads.",
+      "truths": [
+        "No built-in users.",
+        "Permissions add up.",
+        "Workload specs can enable escapes."
+      ],
+      "derivation": [
+        "**OIDC** identity.",
+        "**Brokers** for any IdP.",
+        "**RBAC** least privilege.",
+        "**PSS + PSA** for workloads.",
+        "**Gradual** enforcement."
+      ]
+    },
+    "analogy": {
+      "title": "A secure campus",
+      "story": "Badges issued by HR, key rights per building and safety codes per room.",
+      "mapping": [
+        [
+          "HR badges",
+          "OIDC"
+        ],
+        [
+          "Key rights",
+          "RBAC"
+        ],
+        [
+          "Room safety codes",
+          "PSS"
+        ]
+      ],
+      "breaks": "Campuses rarely change rules; cluster security must keep pace with releases."
+    },
+    "mindmap": {
+      "center": "K8s Security",
+      "branches": [
+        {
+          "label": "AuthN",
+          "children": [
+            "OIDC",
+            "Dex/Keycloak",
+            "SA tokens"
+          ]
+        },
+        {
+          "label": "AuthZ",
+          "children": [
+            "RBAC"
+          ]
+        },
+        {
+          "label": "Workloads",
+          "children": [
+            "PSS levels",
+            "PSA modes"
+          ]
+        },
+        {
+          "label": "History",
+          "children": [
+            "PSP removed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hardening an existing cluster",
+      "scenario": "Plan.",
+      "flow": [
+        "Move humans to OIDC via Keycloak",
+        "Replace cluster-admin sharing with namespace RoleBindings",
+        "Label namespaces warn/audit restricted",
+        "Fix and enforce"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Identity, authorisation and workload policy together."
+        }
+      ],
+      "code": [],
+      "outcome": "least privilege end to end."
+    },
+    "summary": {
+      "points": [
+        "External identity.",
+        "Additive RBAC.",
+        "Enforced pod standards."
+      ]
+    },
+    "check": [
+      {
+        "q": "How are Pod Security Standards enforced in modern Kubernetes?",
+        "a": "By the built-in Pod Security Admission controller using namespace labels."
+      }
+    ]
+  },
+  "k8s-resource-tuning-requests-limits-autoscaling": {
+    "core": "Resource tuning finds the Goldilocks zone: requests that match real usage (they drive scheduling and fairness), memory limits with headroom (to avoid OOM kills), careful CPU limits (CFS throttling causes latency), QoS classes for eviction order, and non-conflicting autoscaling with HPA, VPA and node autoscalers, all driven by measured data.",
+    "first_principles": {
+      "problem": "Guessed resource values waste money and cause throttling, OOMs and evictions.",
+      "truths": [
+        "Requests reserve.",
+        "Limits enforce.",
+        "Usage varies."
+      ],
+      "derivation": [
+        "**Measure**.",
+        "**Set** requests and limits by percentile.",
+        "**Understand** throttling and OOM.",
+        "**Encode** QoS.",
+        "**Autoscale** without conflict."
+      ]
+    },
+    "analogy": {
+      "title": "Managing a restaurant's seating and staffing",
+      "story": "Book tables realistically, set fire limits, and add staff or tables as the crowd grows.",
+      "mapping": [
+        [
+          "Bookings",
+          "Requests"
+        ],
+        [
+          "Fire limits",
+          "Limits"
+        ],
+        [
+          "Adding staff",
+          "HPA"
+        ],
+        [
+          "Bigger tables",
+          "VPA"
+        ]
+      ],
+      "breaks": "Restaurants adjust nightly; clusters autoscale in seconds."
+    },
+    "mindmap": {
+      "center": "Resource Tuning",
+      "branches": [
+        {
+          "label": "Contract",
+          "children": [
+            "Requests",
+            "Limits"
+          ]
+        },
+        {
+          "label": "Failure modes",
+          "children": [
+            "Throttling",
+            "OOM",
+            "Eviction"
+          ]
+        },
+        {
+          "label": "CFS",
+          "children": [
+            "Quota",
+            "Period"
+          ]
+        },
+        {
+          "label": "QoS",
+          "children": [
+            "Guaranteed",
+            "Burstable",
+            "BestEffort"
+          ]
+        },
+        {
+          "label": "Autoscaling",
+          "children": [
+            "HPA",
+            "VPA",
+            "Nodes"
+          ]
+        },
+        {
+          "label": "Framework",
+          "children": [
+            "Percentiles",
+            "Reviews"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cluster-wide tuning programme",
+      "scenario": "Steps.",
+      "flow": [
+        "Deploy VPA in recommend mode everywhere",
+        "Goldilocks dashboard per namespace",
+        "Remove CPU limits on latency services",
+        "HPA on RPS; Karpenter for nodes"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Data-driven, continuous tuning."
+        }
+      ],
+      "code": [],
+      "outcome": "efficient, reliable workloads."
+    },
+    "summary": {
+      "points": [
+        "Measure and set.",
+        "Know the failure modes.",
+        "Autoscale wisely."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a common recommendation for CPU limits on latency-sensitive services?",
+        "a": "Avoid them or set them generously, relying on accurate requests, to prevent CFS throttling."
+      }
+    ]
+  },
+  "k8s-networking-internals-kubeproxy-cni-debug": {
+    "core": "Kubernetes networking internals: Services are virtual IPs implemented by kube-proxy (iptables, IPVS, nftables) or eBPF via DNAT and conntrack on every node; CNI plugins wire Pods with veth pairs, IPAM and routes; and debugging follows the packet hop by hop, checking DNS, endpoints, rules, routing, ports and MTU.",
+    "first_principles": {
+      "problem": "Network issues in Kubernetes seem magical without knowing the plumbing.",
+      "truths": [
+        "VIPs are rules.",
+        "Pods are plumbed by CNI.",
+        "Failures are hop-specific."
+      ],
+      "derivation": [
+        "**Understand** Service translation.",
+        "**Choose** kube-proxy mode.",
+        "**Trace** packet flow.",
+        "**Know** CNI mechanics.",
+        "**Debug** systematically."
+      ]
+    },
+    "analogy": {
+      "title": "A building's internal phone and cabling system",
+      "story": "Forwarding numbers, wired extensions and a methodical way to find the broken cable.",
+      "mapping": [
+        [
+          "Forwarding numbers",
+          "ClusterIPs"
+        ],
+        [
+          "Extensions",
+          "Pod IPs"
+        ],
+        [
+          "Cable tracing",
+          "Hop-by-hop debugging"
+        ]
+      ],
+      "breaks": "Building cabling rarely changes; Pod networking is reconfigured constantly."
+    },
+    "mindmap": {
+      "center": "Networking Internals",
+      "branches": [
+        {
+          "label": "Services",
+          "children": [
+            "VIP",
+            "DNAT",
+            "conntrack"
+          ]
+        },
+        {
+          "label": "kube-proxy",
+          "children": [
+            "iptables",
+            "IPVS",
+            "nftables",
+            "eBPF"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "DNS → DNAT → route → backend"
+          ]
+        },
+        {
+          "label": "CNI",
+          "children": [
+            "veth",
+            "IPAM",
+            "routes"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "Events",
+            "Endpoints",
+            "Ports",
+            "MTU"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Intermittent timeouts",
+      "scenario": "Diagnosis.",
+      "flow": [
+        "DNS fine, endpoints fine",
+        "Same-node OK, cross-node fails for large payloads",
+        "MTU mismatch after network change",
+        "Fix MTU → resolved"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Isolate by layer."
+        }
+      ],
+      "code": [],
+      "outcome": "confident network troubleshooting."
+    },
+    "summary": {
+      "points": [
+        "VIPs are rules.",
+        "CNI plumbs Pods.",
+        "Debug hop by hop."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which component programs Service translation rules on each node by default?",
+        "a": "kube-proxy."
+      }
+    ]
+  },
+  "etcd-operations-defrag-members-disaster-recovery": {
+    "core": "etcd is the cluster's sensitive brain: it needs fast disks, low-latency networking and quorum. Operate it with compaction and member-by-member defragmentation, careful membership changes (learners, one at a time), frequent off-cluster snapshots with rehearsed restores, and monitoring of fsync latency, leader changes and DB size.",
+    "first_principles": {
+      "problem": "etcd neglect causes slow APIs, read-only clusters or unrecoverable data loss.",
+      "truths": [
+        "Consensus is fragile under latency.",
+        "Space must be reclaimed.",
+        "Backups are the last line."
+      ],
+      "derivation": [
+        "**Fast hardware**.",
+        "**Defrag** safely.",
+        "**Change members** carefully.",
+        "**Snapshot and restore**.",
+        "**Monitor** vital signs."
+      ]
+    },
+    "analogy": {
+      "title": "Caring for a precision instrument",
+      "story": "Calibrate it, keep it clean, service parts one at a time and keep a spare.",
+      "mapping": [
+        [
+          "Calibration",
+          "Monitoring"
+        ],
+        [
+          "Cleaning",
+          "Defrag"
+        ],
+        [
+          "Servicing parts",
+          "Member changes"
+        ],
+        [
+          "Spare",
+          "Snapshots"
+        ]
+      ],
+      "breaks": "Instruments don't vote; etcd members must maintain quorum through every operation."
+    },
+    "mindmap": {
+      "center": "etcd Operations",
+      "branches": [
+        {
+          "label": "Health",
+          "children": [
+            "Disks",
+            "Network",
+            "Quorum"
+          ]
+        },
+        {
+          "label": "Space",
+          "children": [
+            "Compaction",
+            "Defrag",
+            "Quota"
+          ]
+        },
+        {
+          "label": "Membership",
+          "children": [
+            "Learners",
+            "One at a time"
+          ]
+        },
+        {
+          "label": "DR",
+          "children": [
+            "Snapshots",
+            "Restore"
+          ]
+        },
+        {
+          "label": "Monitoring",
+          "children": [
+            "fsync",
+            "Leader",
+            "Size"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Self-managed control plane runbook",
+      "scenario": "Routine.",
+      "flow": [
+        "Hourly snapshots to S3",
+        "Weekly defrag window",
+        "Alerts on fsync and DB size",
+        "Quarterly restore drill"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Routine care prevents emergencies."
+        }
+      ],
+      "code": [],
+      "outcome": "a healthy, recoverable cluster brain."
+    },
+    "summary": {
+      "points": [
+        "Fast and stable.",
+        "Maintain space.",
+        "Back up and rehearse."
+      ]
+    },
+    "check": [
+      {
+        "q": "What alarm makes etcd reject writes when it runs out of space?",
+        "a": "The NOSPACE alarm."
+      }
+    ]
+  },
+  "k8s-advanced-debugging-ephemeral-pprof-dns": {
+    "core": "When logs aren't enough, debug Kubernetes workloads live: kubectl debug attaches ephemeral toolboxes (even to distroless Pods), profilers like pprof reveal CPU and memory hot spots, DNS tracing catches ndots, loop and timeout problems, and tcpdump in the Pod's network namespace provides packet-level ground truth.",
+    "first_principles": {
+      "problem": "Minimal images and ephemeral Pods make deep debugging hard.",
+      "truths": [
+        "Evidence is fragile.",
+        "Tools can attach at runtime.",
+        "Each problem class has its tool."
+      ],
+      "derivation": [
+        "**Attach** debug containers.",
+        "**Profile** performance.",
+        "**Trace** DNS.",
+        "**Capture** packets."
+      ]
+    },
+    "analogy": {
+      "title": "A forensic investigation kit",
+      "story": "Fingerprints, scans and recordings, gathered without disturbing the scene.",
+      "mapping": [
+        [
+          "Scene",
+          "Running Pod"
+        ],
+        [
+          "Scans",
+          "Profiles"
+        ],
+        [
+          "Recordings",
+          "Packet captures"
+        ]
+      ],
+      "breaks": "Crime scenes stay still; Pods may be rescheduled any moment, so act quickly."
+    },
+    "mindmap": {
+      "center": "Advanced Debugging",
+      "branches": [
+        {
+          "label": "Access",
+          "children": [
+            "kubectl debug",
+            "Node debug"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "pprof",
+            "Continuous profiling"
+          ]
+        },
+        {
+          "label": "DNS",
+          "children": [
+            "dig",
+            "CoreDNS logs"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "tcpdump",
+            "nsenter",
+            "ksniff"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Latency regression investigation",
+      "scenario": "Flow.",
+      "flow": [
+        "Metrics: p99 doubled",
+        "pprof: hot JSON path",
+        "DNS trace: extra lookups from ndots",
+        "Fix code + ndots → resolved"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Right tool per symptom."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, evidence-based fixes."
+    },
+    "summary": {
+      "points": [
+        "Attach, don't restart.",
+        "Profile and trace.",
+        "Capture packets."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which kubectl feature lets you add a toolbox to a running Pod?",
+        "a": "Ephemeral containers via kubectl debug."
+      }
+    ]
+  },
+  "docker-compose-local-dev": {
+    "core": "Docker Compose declares a local multi-container stack in compose.yaml: services with health-ordered dependencies, name-based networking and isolation, named volumes for data and bind mounts for live code, all driven by a handful of commands. It's the fastest route to reproducible local environments.",
+    "first_principles": {
+      "problem": "Hand-run containers make local setup slow, inconsistent and fragile.",
+      "truths": [
+        "Declarative files are repeatable.",
+        "Services depend on each other.",
+        "Dev needs fast feedback and persistence."
+      ],
+      "derivation": [
+        "**Declare** services.",
+        "**Order** by health.",
+        "**Network** by name.",
+        "**Persist** and **live-reload**.",
+        "**Operate** with compose commands."
+      ]
+    },
+    "analogy": {
+      "title": "A self-assembling model kit",
+      "story": "One instruction sheet builds the whole model in the right order, every time.",
+      "mapping": [
+        [
+          "Instruction sheet",
+          "compose.yaml"
+        ],
+        [
+          "Parts",
+          "Services"
+        ],
+        [
+          "Assembly",
+          "compose up"
+        ]
+      ],
+      "breaks": "Models are built once; Compose stacks are rebuilt daily."
+    },
+    "mindmap": {
+      "center": "Compose",
+      "branches": [
+        {
+          "label": "File",
+          "children": [
+            "Services",
+            "Networks",
+            "Volumes"
+          ]
+        },
+        {
+          "label": "Ordering",
+          "children": [
+            "healthcheck",
+            "depends_on"
+          ]
+        },
+        {
+          "label": "Networking",
+          "children": [
+            "Service names",
+            "ports"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Named volumes",
+            "Bind mounts",
+            "Watch"
+          ]
+        },
+        {
+          "label": "Commands",
+          "children": [
+            "up",
+            "logs",
+            "exec",
+            "run",
+            "down"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Full local stack",
+      "scenario": "Setup.",
+      "flow": [
+        "web + api + db + redis in compose.yaml",
+        "Health-ordered startup",
+        "Bind-mounted source with hot reload",
+        "Named volumes for data"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Clone and run in minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "reproducible developer environments."
+    },
+    "summary": {
+      "points": [
+        "Declare once.",
+        "Order and network.",
+        "Persist and reload."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do Compose services find each other?",
+        "a": "By service name, through the project network's built-in DNS."
+      }
+    ]
+  },
+  "k8s-dashboarding-tooling-lens-k9s-krew": {
+    "core": "Kubernetes tooling speeds up exploration and troubleshooting: the official Dashboard (secure it carefully), Lens/Freelens as a desktop IDE, k9s for keyboard-driven terminal work, relationship views (Octant's legacy in Headlamp, kubectl tree) and Krew for kubectl plugins, while changes still flow through GitOps.",
+    "first_principles": {
+      "problem": "Raw kubectl is slow for navigation, and unsafe UIs create breaches.",
+      "truths": [
+        "Interactive views save time.",
+        "Tools inherit your permissions.",
+        "Git should remain the change path."
+      ],
+      "derivation": [
+        "**Choose** tools per workflow.",
+        "**Secure** web UIs.",
+        "**Extend** kubectl with Krew.",
+        "**Read-mostly** usage."
+      ]
+    },
+    "analogy": {
+      "title": "A mechanic's workshop of specialised tools",
+      "story": "Diagnostic screens, hand tools and accessory kits, with dangerous equipment locked.",
+      "mapping": [
+        [
+          "Diagnostic screen",
+          "Lens/Dashboard"
+        ],
+        [
+          "Hand tools",
+          "k9s"
+        ],
+        [
+          "Accessory kits",
+          "Krew plugins"
+        ]
+      ],
+      "breaks": "Workshop tools don't connect to production; these tools act on live clusters."
+    },
+    "mindmap": {
+      "center": "Tooling",
+      "branches": [
+        {
+          "label": "Web",
+          "children": [
+            "Dashboard",
+            "Headlamp"
+          ]
+        },
+        {
+          "label": "Desktop",
+          "children": [
+            "Lens",
+            "Freelens"
+          ]
+        },
+        {
+          "label": "Terminal",
+          "children": [
+            "k9s"
+          ]
+        },
+        {
+          "label": "Relationships",
+          "children": [
+            "kubectl tree",
+            "XRay"
+          ]
+        },
+        {
+          "label": "Plugins",
+          "children": [
+            "Krew"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "RBAC",
+            "Read-only",
+            "GitOps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Team tooling standard",
+      "scenario": "Setup.",
+      "flow": [
+        "k9s --readonly for on-call",
+        "Krew plugin list in onboarding",
+        "Headlamp via SSO for developers",
+        "No public dashboards"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Faster and safer together."
+        }
+      ],
+      "code": [],
+      "outcome": "productive, secure cluster access."
+    },
+    "summary": {
+      "points": [
+        "Right tool per task.",
+        "Secure UIs.",
+        "Extend kubectl."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which tool is a keyboard-driven terminal UI for Kubernetes?",
+        "a": "k9s."
+      }
+    ]
+  },
+  "k8s-virtual-clusters-vcluster-multi-tenancy": {
+    "core": "Virtual clusters give each tenant its own lightweight control plane inside a host namespace, with a syncer bridging low-level objects to the host for scheduling. They fill the gap between cheap-but-shared namespaces and isolated-but-costly dedicated clusters, ideal for dev sandboxes, CI and platform tenancy.",
+    "first_principles": {
+      "problem": "Teams need cluster-level autonomy without the cost of separate clusters.",
+      "truths": [
+        "Control planes can be virtualised.",
+        "Workloads still need real nodes.",
+        "Isolation needs vary."
+      ],
+      "derivation": [
+        "**Virtual control plane**.",
+        "**Syncer** bridges.",
+        "**Use cases**: dev, CI, tenancy.",
+        "**Compare** alternatives."
+      ]
+    },
+    "analogy": {
+      "title": "Flats inside one building",
+      "story": "Each tenant has their own front door and rules, sharing the building's structure and utilities.",
+      "mapping": [
+        [
+          "Flats",
+          "Virtual clusters"
+        ],
+        [
+          "Building",
+          "Host cluster"
+        ],
+        [
+          "Utilities",
+          "Nodes, CNI, storage"
+        ]
+      ],
+      "breaks": "Flats have physical walls; virtual clusters share kernels unless sandboxed."
+    },
+    "mindmap": {
+      "center": "vCluster",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Tenancy dilemma"
+          ]
+        },
+        {
+          "label": "Architecture",
+          "children": [
+            "Virtual API",
+            "Store",
+            "Syncer"
+          ]
+        },
+        {
+          "label": "Bridge",
+          "children": [
+            "Sync down",
+            "Status up"
+          ]
+        },
+        {
+          "label": "Use cases",
+          "children": [
+            "Dev",
+            "CI",
+            "Platform"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Namespaces",
+            "Capsule",
+            "Kamaji",
+            "Dedicated"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Internal developer platform",
+      "scenario": "Design.",
+      "flow": [
+        "Each team gets a vCluster with admin rights",
+        "Host enforces quotas and NetworkPolicies",
+        "Sleep mode after hours",
+        "Prod stays on dedicated clusters"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Autonomy without sprawl."
+        }
+      ],
+      "code": [],
+      "outcome": "affordable, autonomous tenancy."
+    },
+    "summary": {
+      "points": [
+        "Own API cheaply.",
+        "Shared nodes.",
+        "Choose by need."
+      ]
+    },
+    "check": [
+      {
+        "q": "What component copies Pods from a virtual cluster to the host cluster?",
+        "a": "The syncer."
+      }
+    ]
+  },
+  "service-mesh-internals-envoy-wasm-injection": {
+    "core": "Service mesh internals: Envoy proxies (sidecars or ambient ztunnel/waypoints) receive layered config (listeners, filters, routes, clusters, endpoints) via xDS from a control plane, process requests through ordered filter chains extensible with Wasm, are injected by mutating webhooks, intercept traffic with iptables redirection and are debugged with istioctl and response flags.",
+    "first_principles": {
+      "problem": "Meshes add powerful features but are opaque without understanding their engine room.",
+      "truths": [
+        "Proxies do the work.",
+        "Config is layered and dynamic.",
+        "Injection and redirection are mechanisms with failure modes."
+      ],
+      "derivation": [
+        "**Understand Envoy layers**.",
+        "**Order filters**.",
+        "**Extend with Wasm**.",
+        "**Know injection and redirection**.",
+        "**Debug** with tools."
+      ]
+    },
+    "analogy": {
+      "title": "The engine room of a ship",
+      "story": "Many interlocking machines, instructions from the bridge and gauges that tell you what's wrong.",
+      "mapping": [
+        [
+          "Bridge",
+          "Control plane"
+        ],
+        [
+          "Machines",
+          "Envoy layers/filters"
+        ],
+        [
+          "Gauges",
+          "istioctl/access logs"
+        ]
+      ],
+      "breaks": "Ship engines are physical; mesh config changes live in seconds."
+    },
+    "mindmap": {
+      "center": "Mesh Internals",
+      "branches": [
+        {
+          "label": "Envoy",
+          "children": [
+            "Listeners",
+            "Filters",
+            "Routes",
+            "Clusters"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "xDS"
+          ]
+        },
+        {
+          "label": "Extension",
+          "children": [
+            "Wasm",
+            "Lua",
+            "ext_authz"
+          ]
+        },
+        {
+          "label": "Injection",
+          "children": [
+            "Mutating webhook"
+          ]
+        },
+        {
+          "label": "Redirection",
+          "children": [
+            "iptables",
+            "CNI",
+            "Ambient"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "istioctl",
+            "Flags"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rolling out a mesh",
+      "scenario": "Plan.",
+      "flow": [
+        "Istio CNI to avoid NET_ADMIN init",
+        "Inject namespace by namespace",
+        "PERMISSIVE → STRICT mTLS",
+        "WasmPlugin for tenant headers"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Understand the machinery before relying on it."
+        }
+      ],
+      "code": [],
+      "outcome": "an operable service mesh."
+    },
+    "summary": {
+      "points": [
+        "Envoy layers.",
+        "Injection and redirection.",
+        "Debug with flags."
+      ]
+    },
+    "check": [
+      {
+        "q": "What injects the Envoy sidecar into Pods in Istio?",
+        "a": "A mutating admission webhook served by istiod."
+      }
+    ]
+  },
+  "k8s-keda-event-driven-autoscaling": {
+    "core": "KEDA brings event-driven autoscaling to Kubernetes: scalers read real demand signals (queue depth, lag, Prometheus queries, cron), the operator scales workloads to and from zero, a KEDA-managed HPA handles 1→N, ScaledObjects declare targets and fallbacks, and TriggerAuthentication supplies credentials securely.",
+    "first_principles": {
+      "problem": "CPU-based scaling misses backlog and can't scale idle workloads to zero.",
+      "truths": [
+        "Work signals predict capacity.",
+        "Idle cost is waste.",
+        "Credentials must be secure."
+      ],
+      "derivation": [
+        "**Scale on events**.",
+        "**Zero when idle**.",
+        "**Declare** ScaledObjects.",
+        "**Authenticate** with identity."
+      ]
+    },
+    "analogy": {
+      "title": "Smart staffing driven by the real queue",
+      "story": "Staff arrive when orders arrive and go home when the queue is empty.",
+      "mapping": [
+        [
+          "Queue",
+          "Event source"
+        ],
+        [
+          "Staff",
+          "Replicas"
+        ],
+        [
+          "Manager",
+          "KEDA + HPA"
+        ]
+      ],
+      "breaks": "Staff arrive instantly; Pods need startup time."
+    },
+    "mindmap": {
+      "center": "KEDA",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "CPU trap"
+          ]
+        },
+        {
+          "label": "Architecture",
+          "children": [
+            "Operator",
+            "Metrics server",
+            "HPA"
+          ]
+        },
+        {
+          "label": "Zero",
+          "children": [
+            "Activation",
+            "Cooldown"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "ScaledObject",
+            "ScaledJob"
+          ]
+        },
+        {
+          "label": "Auth",
+          "children": [
+            "TriggerAuthentication"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Event-driven worker fleet",
+      "scenario": "Design.",
+      "flow": [
+        "SQS-triggered consumers (0–50)",
+        "Kafka lag-triggered processors",
+        "Cron trigger for business hours APIs",
+        "IRSA-based authentication"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Scale on what actually matters."
+        }
+      ],
+      "code": [],
+      "outcome": "responsive, cost-efficient scaling."
+    },
+    "summary": {
+      "points": [
+        "Event signals.",
+        "Scale to zero.",
+        "Secure triggers."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does KEDA add beyond standard HPA?",
+        "a": "External event-based metrics via scalers and the ability to scale to and from zero."
+      }
+    ]
+  },
+  "k8s-runtime-classes-gvisor-kata": {
+    "core": "Runtime classes let clusters mix isolation levels: hardened runc for trusted workloads and sandboxed runtimes (gVisor's user-space kernel or Kata's per-Pod VMs) for untrusted code. RuntimeClass maps names to node handlers with overhead and scheduling, Pods opt in with runtimeClassName, and policies enforce it for tenants.",
+    "first_principles": {
+      "problem": "Shared-kernel containers are risky for untrusted, multi-tenant workloads.",
+      "truths": [
+        "Isolation needs vary.",
+        "Sandboxes cost performance.",
+        "Opt-in must be enforced."
+      ],
+      "derivation": [
+        "**Classify** trust.",
+        "**Choose** gVisor or Kata.",
+        "**Define** RuntimeClasses.",
+        "**Enforce** with policy.",
+        "**Dedicate** node pools."
+      ]
+    },
+    "analogy": {
+      "title": "Different security zones in a facility",
+      "story": "Open offices, badge-controlled labs and sealed cleanrooms, each for the right people.",
+      "mapping": [
+        [
+          "Open offices",
+          "runc"
+        ],
+        [
+          "Labs",
+          "gVisor"
+        ],
+        [
+          "Cleanrooms",
+          "Kata"
+        ]
+      ],
+      "breaks": "Facilities have physical walls; sandboxes are software and hardware boundaries with their own CVEs."
+    },
+    "mindmap": {
+      "center": "Runtime Classes",
+      "branches": [
+        {
+          "label": "Risk",
+          "children": [
+            "Shared kernel"
+          ]
+        },
+        {
+          "label": "Sandboxes",
+          "children": [
+            "gVisor",
+            "Kata"
+          ]
+        },
+        {
+          "label": "Selector",
+          "children": [
+            "RuntimeClass",
+            "Overhead",
+            "Scheduling"
+          ]
+        },
+        {
+          "label": "Assignment",
+          "children": [
+            "runtimeClassName",
+            "Policy enforcement"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Multi-tenant code execution platform",
+      "scenario": "Design.",
+      "flow": [
+        "Dedicated tainted gVisor node pool",
+        "RuntimeClass gvisor with overhead",
+        "Kyverno enforces for tenant namespaces",
+        "Falco monitors runtime behaviour"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Isolation by default for the untrusted."
+        }
+      ],
+      "code": [],
+      "outcome": "safe execution of untrusted code."
+    },
+    "summary": {
+      "points": [
+        "Mix isolation levels.",
+        "Select via RuntimeClass.",
+        "Enforce with policy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Pod field selects a sandboxed runtime?",
+        "a": "spec.runtimeClassName."
+      }
+    ]
+  },
+  "k8s-api-aggregation-layer": {
+    "core": "The API aggregation layer lets kube-apiserver proxy whole API groups to extension API servers registered by APIService objects, with delegated authentication (trusted front-proxy headers) and authorisation (SubjectAccessReview). metrics-server is the canonical example. Use it only when CRDs can't meet storage, computation or scale needs.",
+    "first_principles": {
+      "problem": "Some APIs need behaviour or storage beyond what CRDs in etcd provide.",
+      "truths": [
+        "CRDs have fixed semantics.",
+        "Proxying can extend the API.",
+        "Auth must remain trustworthy."
+      ],
+      "derivation": [
+        "**Identify** CRD gaps.",
+        "**Build** an extension server.",
+        "**Register** APIService.",
+        "**Delegate** auth.",
+        "**Prefer** CRDs otherwise."
+      ]
+    },
+    "analogy": {
+      "title": "Concessions inside a department store",
+      "story": "Specialist counters operate behind the store's front door, under its security.",
+      "mapping": [
+        [
+          "Store",
+          "kube-apiserver"
+        ],
+        [
+          "Concession",
+          "Extension server"
+        ],
+        [
+          "Store security",
+          "Delegated auth"
+        ]
+      ],
+      "breaks": "Concessions are visible to shoppers; aggregated APIs look native to clients."
+    },
+    "mindmap": {
+      "center": "API Aggregation",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "CRD limits"
+          ]
+        },
+        {
+          "label": "Architecture",
+          "children": [
+            "Proxy",
+            "Extension server"
+          ]
+        },
+        {
+          "label": "Example",
+          "children": [
+            "metrics-server"
+          ]
+        },
+        {
+          "label": "Glue",
+          "children": [
+            "APIService"
+          ]
+        },
+        {
+          "label": "Auth",
+          "children": [
+            "Front-proxy",
+            "SubjectAccessReview"
+          ]
+        },
+        {
+          "label": "Choice",
+          "children": [
+            "CRD first"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Custom audit search API",
+      "scenario": "Design.",
+      "flow": [
+        "Audit events stored in OpenSearch",
+        "Extension server serves audit.example.com/v1 queries",
+        "APIService with cert-manager CA",
+        "RBAC via SubjectAccessReview"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Native UX, custom backend."
+        }
+      ],
+      "code": [],
+      "outcome": "powerful extensions when justified."
+    },
+    "summary": {
+      "points": [
+        "Proxy custom APIs.",
+        "Delegate auth.",
+        "CRDs first."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which object registers an aggregated API with kube-apiserver?",
+        "a": "An APIService."
+      }
+    ]
+  }
+}

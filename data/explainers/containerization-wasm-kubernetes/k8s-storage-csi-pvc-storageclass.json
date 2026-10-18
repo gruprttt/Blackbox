@@ -1,0 +1,616 @@
+{
+  "introduction-the-problem-with-ephemeral-containers": {
+    "core": "A container's writable layer disappears when the container is replaced, and Pods move between nodes. Persistent data needs storage whose lifecycle is independent of Pods: Kubernetes models it with PersistentVolumes (the storage) and PersistentVolumeClaims (a request for it), provisioned through StorageClasses and CSI drivers.",
+    "first_principles": {
+      "problem": "A database Pod restarts on another node and comes back empty.",
+      "truths": [
+        "Container filesystems are ephemeral.",
+        "Pods are rescheduled.",
+        "Storage must outlive Pods."
+      ],
+      "derivation": [
+        "Use **PVCs** for persistent data.",
+        "Back them with **PVs** from **StorageClasses**.",
+        "Use **CSI drivers** for real storage systems.",
+        "Use **emptyDir** only for scratch.",
+        "Back up with **snapshots**."
+      ]
+    },
+    "analogy": {
+      "title": "Hotel rooms versus a storage unit",
+      "story": "Your stuff in the hotel room is cleared at checkout; the storage unit keeps it wherever you stay next.",
+      "mapping": [
+        [
+          "Hotel room",
+          "Container layer"
+        ],
+        [
+          "Storage unit",
+          "Persistent volume"
+        ],
+        [
+          "Rental agreement",
+          "PVC"
+        ]
+      ],
+      "breaks": "Storage units are reachable from anywhere in town; many volumes are tied to one zone."
+    },
+    "mindmap": {
+      "center": "Persistent Storage",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Ephemeral layers",
+            "Rescheduling"
+          ]
+        },
+        {
+          "label": "Objects",
+          "children": [
+            "PV",
+            "PVC",
+            "StorageClass"
+          ]
+        },
+        {
+          "label": "Plumbing",
+          "children": [
+            "CSI"
+          ]
+        },
+        {
+          "label": "Scratch",
+          "children": [
+            "emptyDir"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "Snapshots"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Data loss vs persistence",
+      "scenario": "Comparison.",
+      "flow": [
+        "Without PVC: data in container layer → lost on restart",
+        "With PVC: volume reattached → data intact"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "State survives Pod churn."
+        }
+      ],
+      "code": [],
+      "outcome": "durable data for stateful apps."
+    },
+    "summary": {
+      "points": [
+        "Containers forget.",
+        "PVCs remember.",
+        "CSI connects storage."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should a database Pod store its data in Kubernetes?",
+        "a": "On a PersistentVolume via a PersistentVolumeClaim, not in the container's writable layer."
+      }
+    ]
+  },
+  "the-dynamic-duo-pv-and-pvc": {
+    "core": "A PersistentVolume is a cluster resource representing actual storage (size, access modes, backend). A PersistentVolumeClaim is a namespaced request (size, access mode, StorageClass). The control plane binds a PVC to a matching PV one-to-one, and Pods mount the PVC. Access modes are ReadWriteOnce, ReadOnlyMany, ReadWriteMany and ReadWriteOncePod.",
+    "first_principles": {
+      "problem": "Developers shouldn't need to know which disk or NFS share backs their volume.",
+      "truths": [
+        "Supply and demand can be separated.",
+        "Binding must match requirements.",
+        "Access modes depend on the backend."
+      ],
+      "derivation": [
+        "**PV**: what exists (admin or dynamic).",
+        "**PVC**: what's needed (developer).",
+        "**Binding**: one-to-one.",
+        "Pick the right **access mode**.",
+        "Pods reference **PVCs**, not PVs."
+      ]
+    },
+    "analogy": {
+      "title": "A car rental desk",
+      "story": "You request 'a large estate car'; the desk assigns a specific car from the fleet.",
+      "mapping": [
+        [
+          "Request form",
+          "PVC"
+        ],
+        [
+          "Specific car",
+          "PV"
+        ],
+        [
+          "Assignment",
+          "Binding"
+        ]
+      ],
+      "breaks": "Rental cars are returned to a shared pool; PV reuse depends on the reclaim policy."
+    },
+    "mindmap": {
+      "center": "PV & PVC",
+      "branches": [
+        {
+          "label": "PV",
+          "children": [
+            "Cluster-scoped",
+            "Real storage"
+          ]
+        },
+        {
+          "label": "PVC",
+          "children": [
+            "Namespaced",
+            "Request"
+          ]
+        },
+        {
+          "label": "Binding",
+          "children": [
+            "One-to-one",
+            "Match size/mode/class"
+          ]
+        },
+        {
+          "label": "Access modes",
+          "children": [
+            "RWO",
+            "ROX",
+            "RWX",
+            "RWOP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A claim",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A 100 GiB gp3 volume is provisioned and bound."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata: {name: data}\nspec:\n  accessModes: [ReadWriteOnce]\n  storageClassName: gp3\n  resources: {requests: {storage: 100Gi}}"
+        }
+      ],
+      "outcome": "storage abstracted from developers."
+    },
+    "summary": {
+      "points": [
+        "PV supplies.",
+        "PVC requests.",
+        "Bind one-to-one."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which access mode lets many nodes mount a volume read-write?",
+        "a": "ReadWriteMany (RWX), e.g. with NFS/EFS."
+      }
+    ]
+  },
+  "storageclasses-automating-the-magic": {
+    "core": "A StorageClass describes a type of storage (CSI provisioner, parameters such as volume type and IOPS, reclaim policy, expansion support, volumeBindingMode). PVCs naming a class trigger dynamic provisioning. WaitForFirstConsumer delays creation until a Pod is scheduled, so zonal volumes land in the Pod's zone.",
+    "first_principles": {
+      "problem": "Volumes are created in zone a while Pods are scheduled in zone b, leaving them unmountable.",
+      "truths": [
+        "Admins shouldn't pre-create every volume.",
+        "Zonal storage must match Pod placement.",
+        "Different apps need different performance."
+      ],
+      "derivation": [
+        "Define classes per **tier** (gp3, io2, efs).",
+        "Set **volumeBindingMode: WaitForFirstConsumer**.",
+        "Enable **allowVolumeExpansion**.",
+        "Choose **reclaimPolicy**.",
+        "Mark a **default** class."
+      ]
+    },
+    "analogy": {
+      "title": "A menu of storage options with a kitchen that cooks on order",
+      "story": "Order 'fast SSD, 50 GB' and it's made fresh, delivered to your table's location.",
+      "mapping": [
+        [
+          "Menu item",
+          "StorageClass"
+        ],
+        [
+          "Order",
+          "PVC"
+        ],
+        [
+          "Kitchen",
+          "CSI provisioner"
+        ]
+      ],
+      "breaks": "Kitchens serve any table; zonal volumes can only serve Pods in the same zone."
+    },
+    "mindmap": {
+      "center": "StorageClasses",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "provisioner",
+            "parameters",
+            "reclaimPolicy",
+            "allowVolumeExpansion",
+            "volumeBindingMode"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Immediate",
+            "WaitForFirstConsumer"
+          ]
+        },
+        {
+          "label": "Tiers",
+          "children": [
+            "gp3",
+            "io2",
+            "efs"
+          ]
+        },
+        {
+          "label": "Default",
+          "children": [
+            "Annotation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "gp3 StorageClass",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Encrypted gp3 volumes in the Pod's zone, expandable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata: {name: gp3}\nprovisioner: ebs.csi.aws.com\nparameters: {type: gp3, iops: \"6000\", throughput: \"250\", encrypted: \"true\"}\nvolumeBindingMode: WaitForFirstConsumer\nallowVolumeExpansion: true\nreclaimPolicy: Delete"
+        }
+      ],
+      "outcome": "self-service, correctly placed storage."
+    },
+    "summary": {
+      "points": [
+        "Dynamic provisioning.",
+        "Wait for first consumer.",
+        "Classes per tier."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use WaitForFirstConsumer?",
+        "a": "So the volume is created in the zone where the Pod is scheduled, avoiding cross-zone mount failures."
+      }
+    ]
+  },
+  "reclaim-policies-what-happens-when-you-delete": {
+    "core": "When a PVC is deleted, the bound PV's reclaimPolicy decides its fate: Delete removes the PV and the backing storage (the default for dynamic provisioning), Retain keeps the PV and data for manual recovery or reuse. StatefulSet PVC retention policies separately control whether PVCs are deleted on scale-down or StatefulSet deletion.",
+    "first_principles": {
+      "problem": "Deleting a namespace wipes a production database volume because the class used Delete.",
+      "truths": [
+        "Deletion can cascade to real storage.",
+        "Some data must survive mistakes.",
+        "Retained volumes need cleanup."
+      ],
+      "derivation": [
+        "Use **Retain** for critical data classes.",
+        "**Delete** for disposable data.",
+        "Patch existing PVs' **reclaimPolicy** when needed.",
+        "Set **StatefulSet persistentVolumeClaimRetentionPolicy**.",
+        "Keep **snapshots/backups** regardless."
+      ]
+    },
+    "analogy": {
+      "title": "Cancelling a storage unit lease",
+      "story": "Either the contents are thrown away, or the unit is locked and kept for you to collect.",
+      "mapping": [
+        [
+          "Thrown away",
+          "Delete"
+        ],
+        [
+          "Locked and kept",
+          "Retain"
+        ],
+        [
+          "Lease",
+          "PVC"
+        ]
+      ],
+      "breaks": "Storage firms call you first; Kubernetes deletes instantly with Delete."
+    },
+    "mindmap": {
+      "center": "Reclaim Policies",
+      "branches": [
+        {
+          "label": "Delete",
+          "children": [
+            "Removes storage",
+            "Default dynamic"
+          ]
+        },
+        {
+          "label": "Retain",
+          "children": [
+            "Keeps PV and data",
+            "Manual cleanup"
+          ]
+        },
+        {
+          "label": "StatefulSets",
+          "children": [
+            "whenDeleted",
+            "whenScaled"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Backups",
+            "Snapshots"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Protect an existing volume",
+      "scenario": "kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Deleting the PVC no longer destroys the disk."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl patch pv pvc-1234 -p '{\"spec\":{\"persistentVolumeReclaimPolicy\":\"Retain\"}}'"
+        }
+      ],
+      "outcome": "accidental deletion survivable."
+    },
+    "summary": {
+      "points": [
+        "Delete destroys data.",
+        "Retain keeps it.",
+        "Backups anyway."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the default reclaim policy for dynamically provisioned volumes?",
+        "a": "Delete (inherited from the StorageClass default)."
+      }
+    ]
+  },
+  "the-plumbing-container-storage-interface-csi": {
+    "core": "CSI is the standard interface between Kubernetes and storage systems. A CSI driver has a controller component (create, delete, attach, snapshot, expand volumes via the storage API) and a node component (DaemonSet that stages and mounts volumes on nodes). Sidecars (external-provisioner, attacher, resizer, snapshotter) translate Kubernetes objects into CSI calls.",
+    "first_principles": {
+      "problem": "Storage vendors once had to ship code inside Kubernetes itself (in-tree drivers), slowing everyone down.",
+      "truths": [
+        "Storage backends vary widely.",
+        "A standard API decouples releases.",
+        "Mounting happens on the node."
+      ],
+      "derivation": [
+        "**Controller plugin**: CreateVolume, ControllerPublish.",
+        "**Node plugin**: NodeStage, NodePublish (mount).",
+        "**Sidecars** watch PVCs/VolumeAttachments.",
+        "Install via **Helm/add-ons**.",
+        "Debug via **driver logs and VolumeAttachment** objects."
+      ]
+    },
+    "analogy": {
+      "title": "Universal plugs and adapters",
+      "story": "Any appliance (storage) works with any socket (Kubernetes) through a standard adapter.",
+      "mapping": [
+        [
+          "Appliance",
+          "Storage system"
+        ],
+        [
+          "Socket",
+          "Kubernetes"
+        ],
+        [
+          "Adapter",
+          "CSI driver"
+        ]
+      ],
+      "breaks": "Plugs are passive; CSI drivers run active controllers and node agents."
+    },
+    "mindmap": {
+      "center": "CSI",
+      "branches": [
+        {
+          "label": "Components",
+          "children": [
+            "Controller plugin",
+            "Node plugin"
+          ]
+        },
+        {
+          "label": "Sidecars",
+          "children": [
+            "provisioner",
+            "attacher",
+            "resizer",
+            "snapshotter"
+          ]
+        },
+        {
+          "label": "Operations",
+          "children": [
+            "Create",
+            "Attach",
+            "Stage",
+            "Publish",
+            "Expand",
+            "Snapshot"
+          ]
+        },
+        {
+          "label": "Drivers",
+          "children": [
+            "EBS",
+            "EFS",
+            "Ceph",
+            "Portworx"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stuck volume debugging",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Attach timeout: volume still attached to old node."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get volumeattachments\nkubectl logs -n kube-system deploy/ebs-csi-controller -c csi-attacher\nkubectl logs -n kube-system ds/ebs-csi-node -c ebs-plugin"
+        }
+      ],
+      "outcome": "storage plumbing understood."
+    },
+    "summary": {
+      "points": [
+        "Standard storage API.",
+        "Controller + node plugins.",
+        "Sidecars translate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which CSI component mounts the volume on the node?",
+        "a": "The node plugin (via NodeStage/NodePublish), usually a DaemonSet."
+      }
+    ]
+  },
+  "volume-snapshots-and-ephemeral-volumes": {
+    "core": "VolumeSnapshots (with VolumeSnapshotClass and CSI snapshotter) capture point-in-time copies of PVCs, and new PVCs can be restored from them (dataSource), or cloned from existing PVCs. Ephemeral volumes cover Pod-lifetime needs: emptyDir (optionally memory-backed), generic ephemeral volumes (a per-Pod PVC deleted with the Pod) and CSI ephemeral volumes.",
+    "first_principles": {
+      "problem": "A team needs consistent backups of database volumes and fast scratch space for batch jobs.",
+      "truths": [
+        "Point-in-time copies enable recovery.",
+        "Some data only lives as long as the Pod.",
+        "Scratch can need real disk performance."
+      ],
+      "derivation": [
+        "Create **VolumeSnapshotClass**.",
+        "Take **VolumeSnapshot** of a PVC.",
+        "Restore via **PVC dataSource**.",
+        "Use **emptyDir** for scratch, **medium: Memory** for tmpfs.",
+        "Use **generic ephemeral volumes** for large per-Pod scratch."
+      ]
+    },
+    "analogy": {
+      "title": "Photos of a whiteboard and disposable notepads",
+      "story": "Snapshots preserve the board; notepads are thrown away after the meeting.",
+      "mapping": [
+        [
+          "Whiteboard photo",
+          "VolumeSnapshot"
+        ],
+        [
+          "Disposable notepad",
+          "Ephemeral volume"
+        ]
+      ],
+      "breaks": "Photos capture instantly; crash-consistent snapshots may need app quiescing for consistency."
+    },
+    "mindmap": {
+      "center": "Snapshots & Ephemeral",
+      "branches": [
+        {
+          "label": "Snapshots",
+          "children": [
+            "VolumeSnapshotClass",
+            "VolumeSnapshot",
+            "Restore via dataSource",
+            "Clones"
+          ]
+        },
+        {
+          "label": "Ephemeral",
+          "children": [
+            "emptyDir",
+            "Memory medium",
+            "Generic ephemeral",
+            "CSI ephemeral"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "App consistency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Snapshot and restore",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Restored copy for testing or recovery."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: snapshot.storage.k8s.io/v1\nkind: VolumeSnapshot\nmetadata: {name: db-snap}\nspec:\n  volumeSnapshotClassName: ebs-snap\n  source: {persistentVolumeClaimName: data-db-0}\n---\napiVersion: v1\nkind: PersistentVolumeClaim\nmetadata: {name: db-restore}\nspec:\n  storageClassName: gp3\n  dataSource: {name: db-snap, kind: VolumeSnapshot, apiGroup: snapshot.storage.k8s.io}\n  accessModes: [ReadWriteOnce]\n  resources: {requests: {storage: 100Gi}}"
+        }
+      ],
+      "outcome": "recoverable and flexible storage."
+    },
+    "summary": {
+      "points": [
+        "Snapshot and restore.",
+        "Ephemeral for scratch.",
+        "Mind consistency."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you restore a PVC from a VolumeSnapshot?",
+        "a": "Create a new PVC with dataSource pointing to the VolumeSnapshot."
+      }
+    ]
+  }
+}

@@ -1,0 +1,770 @@
+{
+  "introduction-the-security-layers": {
+    "core": "Kubernetes security is layered: authentication (who), authorisation via RBAC (what), admission policies including Pod Security Standards (which objects are allowed), runtime security (seccomp, capabilities, sandboxing), network policies, secrets protection and supply-chain controls. Weakness in any layer can be exploited, so all must be configured.",
+    "first_principles": {
+      "problem": "A cluster with strong RBAC still allows privileged Pods that escape to the node.",
+      "truths": [
+        "Each layer answers a different question.",
+        "Defaults are permissive.",
+        "Attackers chain small weaknesses."
+      ],
+      "derivation": [
+        "**OIDC** for human identity.",
+        "**RBAC** least privilege.",
+        "**Pod Security Admission** for workload safety.",
+        "**NetworkPolicies** for traffic.",
+        "**Image signing/scanning** for supply chain."
+      ]
+    },
+    "analogy": {
+      "title": "Layers of airport security",
+      "story": "ID checks, boarding passes, baggage screening and cabin rules.",
+      "mapping": [
+        [
+          "ID check",
+          "Authentication"
+        ],
+        [
+          "Boarding pass",
+          "RBAC"
+        ],
+        [
+          "Baggage screening",
+          "Admission/PSS"
+        ],
+        [
+          "Cabin rules",
+          "Runtime security"
+        ]
+      ],
+      "breaks": "Airports screen everyone the same way; Kubernetes layers must be configured per cluster."
+    },
+    "mindmap": {
+      "center": "Security Layers",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "OIDC",
+            "Service accounts"
+          ]
+        },
+        {
+          "label": "Authorisation",
+          "children": [
+            "RBAC"
+          ]
+        },
+        {
+          "label": "Admission",
+          "children": [
+            "PSA",
+            "Policies"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "seccomp",
+            "Capabilities",
+            "Sandboxes"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "NetworkPolicies"
+          ]
+        },
+        {
+          "label": "Supply chain",
+          "children": [
+            "Signing",
+            "Scanning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Security baseline",
+      "scenario": "Checklist.",
+      "flow": [
+        "OIDC login via corporate IdP",
+        "Namespace-scoped RBAC roles",
+        "PSA 'restricted' enforced",
+        "Default-deny NetworkPolicies",
+        "Signed images only"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No single layer carries all the weight."
+        }
+      ],
+      "code": [],
+      "outcome": "defence in depth."
+    },
+    "summary": {
+      "points": [
+        "Many layers.",
+        "Defaults are open.",
+        "Configure all of them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why isn't strong RBAC enough to secure a cluster?",
+        "a": "It controls API actions but not what workloads do at runtime, such as privileged containers escaping to the node."
+      }
+    ]
+  },
+  "authentication-the-missing-user-database": {
+    "core": "Kubernetes has no user database. Humans authenticate via X.509 client certificates, OIDC tokens from an identity provider or webhook token authenticators; workloads use service account tokens (projected, short-lived, audience-bound). The API server extracts username and groups from the credential and passes them to authorisation.",
+    "first_principles": {
+      "problem": "Teams share an admin kubeconfig with a long-lived client certificate that can't be revoked.",
+      "truths": [
+        "Certificates are hard to revoke.",
+        "Corporate identity lives in an IdP.",
+        "Groups simplify authorisation."
+      ],
+      "derivation": [
+        "Configure **OIDC** (issuer, client ID, username/groups claims).",
+        "Use **kubelogin** (oidc-login) for kubectl.",
+        "Avoid **client certs** for humans.",
+        "Use **projected SA tokens** for workloads.",
+        "Map **IdP groups** to RBAC."
+      ]
+    },
+    "analogy": {
+      "title": "A building that accepts an external ID card system",
+      "story": "It doesn't keep its own staff list; it trusts badges issued by HR.",
+      "mapping": [
+        [
+          "HR badges",
+          "OIDC tokens"
+        ],
+        [
+          "Building",
+          "API server"
+        ],
+        [
+          "Department on badge",
+          "Groups claim"
+        ]
+      ],
+      "breaks": "Badges are checked on entry; OIDC tokens expire and must be refreshed."
+    },
+    "mindmap": {
+      "center": "Authentication",
+      "branches": [
+        {
+          "label": "Humans",
+          "children": [
+            "OIDC",
+            "X.509 (avoid)",
+            "Webhook"
+          ]
+        },
+        {
+          "label": "Workloads",
+          "children": [
+            "Service account tokens",
+            "Projected",
+            "Audience-bound"
+          ]
+        },
+        {
+          "label": "Claims",
+          "children": [
+            "username",
+            "groups"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "kubelogin"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "EKS IAM",
+            "GKE IAM",
+            "Azure AD"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "API server OIDC flags",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Users log in with corporate SSO; groups drive RBAC."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "--oidc-issuer-url=https://login.example.com\n--oidc-client-id=kubernetes\n--oidc-username-claim=email\n--oidc-groups-claim=groups"
+        }
+      ],
+      "outcome": "revocable, auditable identity."
+    },
+    "summary": {
+      "points": [
+        "No built-in users.",
+        "OIDC for humans.",
+        "Short-lived SA tokens."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why avoid client certificates for human users?",
+        "a": "Kubernetes can't easily revoke them, and they're often long-lived."
+      }
+    ]
+  },
+  "identity-brokers-dex-and-keycloak": {
+    "core": "Identity brokers such as Dex and Keycloak sit between Kubernetes (and other tools) and upstream identity sources (LDAP, Active Directory, SAML, GitHub, Google), issuing standard OIDC tokens with group claims. This gives one login for clusters, dashboards and GitOps tools, even when upstream IdPs don't speak OIDC.",
+    "first_principles": {
+      "problem": "The company uses LDAP and SAML, but the Kubernetes API server only understands OIDC.",
+      "truths": [
+        "Upstream IdPs vary.",
+        "Kubernetes wants OIDC.",
+        "Many tools benefit from one login."
+      ],
+      "derivation": [
+        "Deploy **Dex** (lightweight) or **Keycloak** (full IAM).",
+        "Configure **connectors** to LDAP/SAML/GitHub.",
+        "Issue **OIDC tokens** with groups.",
+        "Point **API server OIDC** at the broker.",
+        "Use for **Argo CD, Grafana** too."
+      ]
+    },
+    "analogy": {
+      "title": "A translator at a border crossing",
+      "story": "Travellers arrive with documents in many languages; the translator issues a standard local pass.",
+      "mapping": [
+        [
+          "Foreign documents",
+          "LDAP/SAML identities"
+        ],
+        [
+          "Translator",
+          "Dex/Keycloak"
+        ],
+        [
+          "Local pass",
+          "OIDC token"
+        ]
+      ],
+      "breaks": "Translators can be tricked; brokers must be highly available and secured since they gate all access."
+    },
+    "mindmap": {
+      "center": "Identity Brokers",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "Dex",
+            "Keycloak"
+          ]
+        },
+        {
+          "label": "Upstreams",
+          "children": [
+            "LDAP",
+            "AD",
+            "SAML",
+            "GitHub",
+            "Google"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "OIDC tokens",
+            "Group claims"
+          ]
+        },
+        {
+          "label": "Consumers",
+          "children": [
+            "kube-apiserver",
+            "Argo CD",
+            "Grafana"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "HA",
+            "Security"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dex LDAP connector",
+      "scenario": "Config snippet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "LDAP users log into Kubernetes with group claims."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "connectors:\n- type: ldap\n  id: corp-ldap\n  name: Corporate LDAP\n  config:\n    host: ldap.corp.example.com:636\n    userSearch: {baseDN: ou=people,dc=corp,dc=example,dc=com, username: uid, idAttr: uid, emailAttr: mail}\n    groupSearch: {baseDN: ou=groups,dc=corp,dc=example,dc=com, userMatchers: [{userAttr: DN, groupAttr: member}], nameAttr: cn}"
+        }
+      ],
+      "outcome": "unified SSO for the platform."
+    },
+    "summary": {
+      "points": [
+        "Bridge any IdP to OIDC.",
+        "One login for tools.",
+        "Run it highly available."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem do Dex and Keycloak solve for Kubernetes?",
+        "a": "They translate identities from LDAP, SAML and other IdPs into OIDC tokens the API server accepts."
+      }
+    ]
+  },
+  "rbac-evaluation-logic": {
+    "core": "RBAC is additive and deny-by-default: Roles (namespaced) and ClusterRoles (cluster-wide or reusable) list allowed verbs on resources; RoleBindings and ClusterRoleBindings grant them to users, groups or service accounts. A request is allowed if any binding grants it, and there are no deny rules. Watch for escalation verbs (bind, escalate, impersonate) and wildcard permissions.",
+    "first_principles": {
+      "problem": "A developer is granted 'edit' cluster-wide and can read every namespace's Secrets.",
+      "truths": [
+        "Permissions only add up.",
+        "Scope depends on binding type.",
+        "Some verbs enable privilege escalation."
+      ],
+      "derivation": [
+        "Prefer **RoleBindings** in namespaces.",
+        "Use **ClusterRoles** as reusable templates bound per namespace.",
+        "Avoid **wildcards** and Secret read broadly.",
+        "Guard **bind/escalate/impersonate**.",
+        "Audit with **kubectl auth can-i** and rbac-tools."
+      ]
+    },
+    "analogy": {
+      "title": "Keys on a keyring",
+      "story": "You can open any door any of your keys fits; there's no 'anti-key'.",
+      "mapping": [
+        [
+          "Keys",
+          "Role rules"
+        ],
+        [
+          "Giving keys",
+          "Bindings"
+        ],
+        [
+          "No anti-key",
+          "No deny rules"
+        ]
+      ],
+      "breaks": "Keys are physical; RBAC permissions can be granted to whole groups at once."
+    },
+    "mindmap": {
+      "center": "RBAC",
+      "branches": [
+        {
+          "label": "Objects",
+          "children": [
+            "Role",
+            "ClusterRole",
+            "RoleBinding",
+            "ClusterRoleBinding"
+          ]
+        },
+        {
+          "label": "Subjects",
+          "children": [
+            "Users",
+            "Groups",
+            "ServiceAccounts"
+          ]
+        },
+        {
+          "label": "Logic",
+          "children": [
+            "Additive",
+            "Default deny",
+            "No deny rules"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Wildcards",
+            "Secrets read",
+            "bind/escalate/impersonate"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "kubectl auth can-i"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Namespace-scoped edit",
+      "scenario": "YAML + check.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Edit rights only in team-a."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata: {name: team-a-edit, namespace: team-a}\nroleRef: {kind: ClusterRole, name: edit, apiGroup: rbac.authorization.k8s.io}\nsubjects: [{kind: Group, name: team-a, apiGroup: rbac.authorization.k8s.io}]\n# kubectl auth can-i get secrets -n team-b --as=alice --as-group=team-a  → no"
+        }
+      ],
+      "outcome": "least-privilege access."
+    },
+    "summary": {
+      "points": [
+        "Additive, no deny.",
+        "Bind per namespace.",
+        "Guard escalation verbs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can RBAC express an explicit deny?",
+        "a": "No; RBAC is purely additive and anything not granted is denied."
+      }
+    ]
+  },
+  "pod-security-the-evolution-from-psp-to-pss": {
+    "core": "PodSecurityPolicy (removed in 1.25) was confusing: policies applied via RBAC 'use' permissions, and ordering and mutation surprised users. It was replaced by Pod Security Standards (three fixed profiles: privileged, baseline, restricted) enforced by the built-in Pod Security Admission controller via namespace labels, with richer custom policy left to Kyverno, Gatekeeper or CEL ValidatingAdmissionPolicy.",
+    "first_principles": {
+      "problem": "Clusters upgraded past 1.25 lost PSP enforcement, and teams didn't replace it.",
+      "truths": [
+        "Complex mechanisms get misconfigured.",
+        "Most clusters need the same few profiles.",
+        "Custom policies still matter."
+      ],
+      "derivation": [
+        "Adopt **PSS profiles**.",
+        "Enforce with **PSA namespace labels**.",
+        "Use **Kyverno/Gatekeeper/CEL** for custom rules.",
+        "Migrate PSP intent **before** upgrading.",
+        "Audit with **warn/audit** modes first."
+      ]
+    },
+    "analogy": {
+      "title": "Replacing a confusing rulebook with three clear dress codes",
+      "story": "Casual, business and formal, applied per room.",
+      "mapping": [
+        [
+          "Old rulebook",
+          "PSP"
+        ],
+        [
+          "Dress codes",
+          "PSS profiles"
+        ],
+        [
+          "Room signs",
+          "Namespace labels"
+        ]
+      ],
+      "breaks": "Dress codes don't cover every situation; custom policy engines fill the gaps."
+    },
+    "mindmap": {
+      "center": "PSP → PSS",
+      "branches": [
+        {
+          "label": "PSP",
+          "children": [
+            "Removed 1.25",
+            "RBAC-bound",
+            "Confusing"
+          ]
+        },
+        {
+          "label": "PSS",
+          "children": [
+            "privileged",
+            "baseline",
+            "restricted"
+          ]
+        },
+        {
+          "label": "PSA",
+          "children": [
+            "Built-in",
+            "Namespace labels"
+          ]
+        },
+        {
+          "label": "Custom",
+          "children": [
+            "Kyverno",
+            "Gatekeeper",
+            "CEL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Migration path",
+      "scenario": "Steps.",
+      "flow": [
+        "Map PSP rules to PSS levels",
+        "Label namespaces audit=restricted, warn=restricted",
+        "Fix violations",
+        "Switch to enforce=restricted"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Workload safety without PSP."
+        }
+      ],
+      "code": [],
+      "outcome": "modern pod security."
+    },
+    "summary": {
+      "points": [
+        "PSP is gone.",
+        "PSS + PSA built in.",
+        "Custom engines for more."
+      ]
+    },
+    "check": [
+      {
+        "q": "What replaced PodSecurityPolicy?",
+        "a": "Pod Security Standards enforced by Pod Security Admission (plus policy engines for custom rules)."
+      }
+    ]
+  },
+  "pod-security-standards-pss-levels": {
+    "core": "Privileged is unrestricted (for system components). Baseline blocks known privilege escalations: no privileged containers, host namespaces, hostPath, host ports or dangerous capabilities. Restricted adds hardening best practices: runAsNonRoot, drop ALL capabilities, no privilege escalation, seccomp RuntimeDefault and restricted volume types.",
+    "first_principles": {
+      "problem": "Teams don't know what 'secure enough' means for a Pod spec.",
+      "truths": [
+        "Different workloads need different trust.",
+        "Known escalation paths can be blocked.",
+        "Hardening reduces exploit impact."
+      ],
+      "derivation": [
+        "**Privileged** only for system namespaces.",
+        "**Baseline** as a minimum everywhere.",
+        "**Restricted** for application namespaces.",
+        "Fix Pods to meet **restricted** (securityContext).",
+        "Pin **versions** of the standard."
+      ]
+    },
+    "analogy": {
+      "title": "Building safety ratings",
+      "story": "Plant rooms (privileged), standard offices (baseline) and clean rooms (restricted).",
+      "mapping": [
+        [
+          "Plant room",
+          "Privileged"
+        ],
+        [
+          "Office",
+          "Baseline"
+        ],
+        [
+          "Clean room",
+          "Restricted"
+        ]
+      ],
+      "breaks": "Ratings rarely change; PSS versions evolve with Kubernetes releases."
+    },
+    "mindmap": {
+      "center": "PSS Levels",
+      "branches": [
+        {
+          "label": "Privileged",
+          "children": [
+            "No restrictions",
+            "System components"
+          ]
+        },
+        {
+          "label": "Baseline",
+          "children": [
+            "No privileged",
+            "No host namespaces",
+            "No hostPath",
+            "Limited caps"
+          ]
+        },
+        {
+          "label": "Restricted",
+          "children": [
+            "runAsNonRoot",
+            "Drop ALL",
+            "No escalation",
+            "seccomp RuntimeDefault",
+            "Volume types"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Restricted-compliant container",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Pod admitted under restricted."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "securityContext:\n  runAsNonRoot: true\n  allowPrivilegeEscalation: false\n  capabilities: {drop: [\"ALL\"]}\n  seccompProfile: {type: RuntimeDefault}"
+        }
+      ],
+      "outcome": "clear security targets."
+    },
+    "summary": {
+      "points": [
+        "Three levels.",
+        "Baseline minimum.",
+        "Restricted for apps."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which PSS level requires runAsNonRoot and dropping all capabilities?",
+        "a": "Restricted."
+      }
+    ]
+  },
+  "pod-security-admission-psa-modes": {
+    "core": "Pod Security Admission applies PSS levels per namespace via labels for three modes: enforce (reject violating Pods), audit (record violations in audit logs) and warn (return warnings to the user). Each mode can pin a version. Roll out by warning and auditing first, then enforcing, and exempt only specific users, runtime classes or namespaces when unavoidable.",
+    "first_principles": {
+      "problem": "Enforcing restricted immediately breaks dozens of existing deployments.",
+      "truths": [
+        "Visibility should precede enforcement.",
+        "Different modes serve different audiences.",
+        "Exemptions should be rare."
+      ],
+      "derivation": [
+        "Label **warn** and **audit** first.",
+        "Fix **violations**.",
+        "Then **enforce**.",
+        "Pin **-version** labels.",
+        "Configure **exemptions** sparingly in the admission config."
+      ]
+    },
+    "analogy": {
+      "title": "Introducing a new traffic rule",
+      "story": "Warning notices first, then logging offenders, then issuing fines.",
+      "mapping": [
+        [
+          "Warnings",
+          "warn mode"
+        ],
+        [
+          "Logging",
+          "audit mode"
+        ],
+        [
+          "Fines",
+          "enforce mode"
+        ]
+      ],
+      "breaks": "Drivers can contest fines; enforced PSA rejections are immediate."
+    },
+    "mindmap": {
+      "center": "PSA Modes",
+      "branches": [
+        {
+          "label": "enforce",
+          "children": [
+            "Reject"
+          ]
+        },
+        {
+          "label": "audit",
+          "children": [
+            "Audit log"
+          ]
+        },
+        {
+          "label": "warn",
+          "children": [
+            "User warning"
+          ]
+        },
+        {
+          "label": "Labels",
+          "children": [
+            "pod-security.kubernetes.io/<mode>",
+            "-version"
+          ]
+        },
+        {
+          "label": "Rollout",
+          "children": [
+            "Warn/audit → enforce"
+          ]
+        },
+        {
+          "label": "Exemptions",
+          "children": [
+            "Users",
+            "RuntimeClasses",
+            "Namespaces"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Namespace labels",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Baseline enforced; restricted violations visible before enforcing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: shop\n  labels:\n    pod-security.kubernetes.io/enforce: baseline\n    pod-security.kubernetes.io/warn: restricted\n    pod-security.kubernetes.io/audit: restricted"
+        }
+      ],
+      "outcome": "safe, gradual hardening."
+    },
+    "summary": {
+      "points": [
+        "Three modes.",
+        "Warn and audit first.",
+        "Then enforce."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which PSA mode returns warnings to kubectl users without blocking?",
+        "a": "warn."
+      }
+    ]
+  }
+}

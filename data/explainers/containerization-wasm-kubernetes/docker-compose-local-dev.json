@@ -1,0 +1,537 @@
+{
+  "introduction-escaping-the-cli-jungle": {
+    "core": "Running a multi-container app with docker run means long, error-prone commands for each container, network and volume. Docker Compose declares services, networks and volumes in one compose.yaml and manages them together (up, down, logs), making local development and integration testing reproducible.",
+    "first_principles": {
+      "problem": "New developers spend a day running ten docker run commands with the right flags to start the app locally.",
+      "truths": [
+        "Multi-container apps have many settings.",
+        "Declarative files are repeatable.",
+        "Local environments should match each other."
+      ],
+      "derivation": [
+        "Declare **services** in compose.yaml.",
+        "Define **networks and volumes**.",
+        "Start with **docker compose up**.",
+        "Share via **Git**.",
+        "Use **profiles/overrides** for variants."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe for a whole meal instead of separate instructions",
+      "story": "One card says what to cook, in what order and how to serve it together.",
+      "mapping": [
+        [
+          "Meal recipe",
+          "compose.yaml"
+        ],
+        [
+          "Dishes",
+          "Services"
+        ],
+        [
+          "Serving together",
+          "compose up"
+        ]
+      ],
+      "breaks": "Meals are eaten once; compose environments start and stop repeatedly."
+    },
+    "mindmap": {
+      "center": "Docker Compose",
+      "branches": [
+        {
+          "label": "File",
+          "children": [
+            "compose.yaml"
+          ]
+        },
+        {
+          "label": "Objects",
+          "children": [
+            "Services",
+            "Networks",
+            "Volumes"
+          ]
+        },
+        {
+          "label": "Commands",
+          "children": [
+            "up",
+            "down",
+            "logs",
+            "exec"
+          ]
+        },
+        {
+          "label": "Variants",
+          "children": [
+            "Profiles",
+            "Override files"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Local dev",
+            "Integration tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before and after",
+      "scenario": "Onboarding.",
+      "flow": [
+        "Before: 10 docker run commands in a wiki",
+        "After: git clone && docker compose up",
+        "Running in 2 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reproducible local stack."
+        }
+      ],
+      "code": [],
+      "outcome": "one-command local environments."
+    },
+    "summary": {
+      "points": [
+        "Declare the stack.",
+        "One command.",
+        "Share in Git."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main benefit of Docker Compose over docker run?",
+        "a": "It declares a multi-container setup in one file and manages it with single commands."
+      }
+    ]
+  },
+  "the-compose-file-structure": {
+    "core": "A compose.yaml has top-level services (image or build, ports, environment, env_file, depends_on with health conditions, healthcheck, command, deploy resources), networks and volumes. Variables interpolate from .env, and multiple files merge (compose.yaml + compose.override.yaml) for local tweaks.",
+    "first_principles": {
+      "problem": "The API starts before the database is ready and crashes on boot.",
+      "truths": [
+        "Services have dependencies.",
+        "Readiness differs from started.",
+        "Config varies by developer."
+      ],
+      "derivation": [
+        "Use **build** or **image** per service.",
+        "Add **healthcheck** to dependencies.",
+        "Use **depends_on: condition: service_healthy**.",
+        "Use **.env** for variables.",
+        "Use **override files** for local changes."
+      ]
+    },
+    "analogy": {
+      "title": "A theatre production's cue sheet",
+      "story": "Actors enter only when their cue (the healthy dependency) happens.",
+      "mapping": [
+        [
+          "Actors",
+          "Services"
+        ],
+        [
+          "Cues",
+          "depends_on conditions"
+        ],
+        [
+          "Stage directions",
+          "Service config"
+        ]
+      ],
+      "breaks": "Actors can improvise; containers need explicit health checks to know when to start."
+    },
+    "mindmap": {
+      "center": "Compose File",
+      "branches": [
+        {
+          "label": "Services",
+          "children": [
+            "image/build",
+            "ports",
+            "environment",
+            "healthcheck",
+            "depends_on"
+          ]
+        },
+        {
+          "label": "Top-level",
+          "children": [
+            "networks",
+            "volumes"
+          ]
+        },
+        {
+          "label": "Variables",
+          "children": [
+            ".env",
+            "Interpolation"
+          ]
+        },
+        {
+          "label": "Merging",
+          "children": [
+            "compose.override.yaml",
+            "-f files"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "API with healthy DB dependency",
+      "scenario": "compose.yaml.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "API starts only after Postgres is ready."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "services:\n  db:\n    image: postgres:16\n    environment: {POSTGRES_PASSWORD: dev}\n    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U postgres\"]\n      interval: 5s\n      retries: 10\n  api:\n    build: .\n    ports: [\"8080:8080\"]\n    environment: {DATABASE_URL: postgres://postgres:dev@db:5432/postgres}\n    depends_on:\n      db: {condition: service_healthy}"
+        }
+      ],
+      "outcome": "correctly ordered local stack."
+    },
+    "summary": {
+      "points": [
+        "Services, networks, volumes.",
+        "Health-based ordering.",
+        "Overrides for local tweaks."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you make a service wait until another is ready in Compose?",
+        "a": "Add a healthcheck to the dependency and use depends_on with condition: service_healthy."
+      }
+    ]
+  },
+  "networking-in-compose": {
+    "core": "Compose creates a default network per project; services reach each other by service name via Docker's embedded DNS (db:5432), without publishing ports. ports publishes to the host for your browser or tools. Custom networks isolate groups (frontend/backend), and aliases or external networks connect to other projects.",
+    "first_principles": {
+      "problem": "Developers use localhost inside containers to reach the database and get connection refused.",
+      "truths": [
+        "Each container has its own localhost.",
+        "Service names resolve on the project network.",
+        "Publishing is only for host access."
+      ],
+      "derivation": [
+        "Use **service names** for container-to-container.",
+        "Use **ports** only for host access.",
+        "Create **custom networks** for isolation.",
+        "Use **external networks** across projects.",
+        "Use **host.docker.internal** to reach host services."
+      ]
+    },
+    "analogy": {
+      "title": "An office intranet with named desks",
+      "story": "Colleagues reach each other by name internally; only the reception number is public.",
+      "mapping": [
+        [
+          "Desk names",
+          "Service names"
+        ],
+        [
+          "Intranet",
+          "Project network"
+        ],
+        [
+          "Public reception number",
+          "Published port"
+        ]
+      ],
+      "breaks": "Office phones work from anywhere; containers only resolve names on networks they've joined."
+    },
+    "mindmap": {
+      "center": "Compose Networking",
+      "branches": [
+        {
+          "label": "Default",
+          "children": [
+            "Project network",
+            "DNS by service name"
+          ]
+        },
+        {
+          "label": "Host access",
+          "children": [
+            "ports"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Custom networks"
+          ]
+        },
+        {
+          "label": "Cross-project",
+          "children": [
+            "External networks"
+          ]
+        },
+        {
+          "label": "Host",
+          "children": [
+            "host.docker.internal"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Frontend/backend isolation",
+      "scenario": "compose.yaml.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "web can't reach db directly; api bridges both."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "services:\n  web: {build: ./web, ports: [\"3000:3000\"], networks: [frontend]}\n  api: {build: ./api, networks: [frontend, backend]}\n  db:  {image: postgres:16, networks: [backend]}\nnetworks:\n  frontend: {}\n  backend: {}"
+        }
+      ],
+      "outcome": "realistic local network topology."
+    },
+    "summary": {
+      "points": [
+        "Name-based discovery.",
+        "Ports only for host.",
+        "Networks isolate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't 'localhost' work to reach another Compose service?",
+        "a": "Each container has its own network namespace; localhost refers to itself, so use the service name."
+      }
+    ]
+  },
+  "volumes-persistent-storage-and-live-reloading": {
+    "core": "Named volumes persist data (database files) across container recreation and are managed by Docker. Bind mounts map host directories into containers, enabling live code reloading during development. Compose Watch can sync or rebuild on file changes. Take care with node_modules and file permissions when bind-mounting.",
+    "first_principles": {
+      "problem": "Every docker compose down wipes the dev database, and code changes require rebuilding the image.",
+      "truths": [
+        "Container filesystems are ephemeral.",
+        "Host files can be shared into containers.",
+        "Some dependencies shouldn't be overwritten by host files."
+      ],
+      "derivation": [
+        "**Named volumes** for data.",
+        "**Bind mounts** for source code.",
+        "**Anonymous volume** to protect node_modules.",
+        "**Compose Watch** (sync/rebuild).",
+        "**down -v** only when you want a reset."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet that stays in the office versus a shared folder from home",
+      "story": "The cabinet keeps records between staff changes; the shared folder shows edits instantly.",
+      "mapping": [
+        [
+          "Cabinet",
+          "Named volume"
+        ],
+        [
+          "Shared folder",
+          "Bind mount"
+        ],
+        [
+          "Instant edits",
+          "Live reload"
+        ]
+      ],
+      "breaks": "Shared folders sync both ways; bind mounts can overwrite container directories unexpectedly."
+    },
+    "mindmap": {
+      "center": "Compose Volumes",
+      "branches": [
+        {
+          "label": "Named",
+          "children": [
+            "Persistent data",
+            "Docker-managed"
+          ]
+        },
+        {
+          "label": "Bind mounts",
+          "children": [
+            "Live code",
+            "Host paths"
+          ]
+        },
+        {
+          "label": "Tricks",
+          "children": [
+            "Anonymous node_modules volume",
+            "Compose Watch"
+          ]
+        },
+        {
+          "label": "Cleanup",
+          "children": [
+            "down -v"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Permissions",
+            "Performance on macOS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dev setup",
+      "scenario": "compose.yaml.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Edits reload instantly; DB survives restarts."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "services:\n  api:\n    build: .\n    command: npm run dev\n    volumes:\n      - ./src:/app/src\n      - /app/node_modules\n  db:\n    image: postgres:16\n    volumes: [pgdata:/var/lib/postgresql/data]\nvolumes:\n  pgdata: {}"
+        }
+      ],
+      "outcome": "fast feedback with persistent data."
+    },
+    "summary": {
+      "points": [
+        "Named for data.",
+        "Bind for code.",
+        "Protect dependencies."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'docker compose down -v' do that plain 'down' doesn't?",
+        "a": "It also removes named volumes, deleting persisted data."
+      }
+    ]
+  },
+  "essential-compose-commands": {
+    "core": "Core commands: docker compose up -d (start), up --build (rebuild), down (stop and remove), ps, logs -f service, exec service sh (shell in a running container), run --rm service cmd (one-off tasks), config (render merged config), pull, restart and watch. Profiles (--profile) enable optional services.",
+    "first_principles": {
+      "problem": "Developers rebuild everything for every change and can't see why a service exited.",
+      "truths": [
+        "Different tasks need different commands.",
+        "Logs explain failures.",
+        "One-off tasks shouldn't leave containers behind."
+      ],
+      "derivation": [
+        "**up -d / down**.",
+        "**logs -f** and **ps**.",
+        "**exec** for running containers; **run --rm** for one-offs.",
+        "**config** to debug merged files.",
+        "**--profile** for optional tools."
+      ]
+    },
+    "analogy": {
+      "title": "A TV remote for your whole stack",
+      "story": "Power, volume, channel and info buttons for every container at once.",
+      "mapping": [
+        [
+          "Power",
+          "up/down"
+        ],
+        [
+          "Info",
+          "ps/logs"
+        ],
+        [
+          "Channel",
+          "exec/run"
+        ]
+      ],
+      "breaks": "Remotes don't rebuild TVs; up --build does rebuild images."
+    },
+    "mindmap": {
+      "center": "Compose Commands",
+      "branches": [
+        {
+          "label": "Lifecycle",
+          "children": [
+            "up",
+            "down",
+            "restart"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "ps",
+            "logs",
+            "config"
+          ]
+        },
+        {
+          "label": "Interact",
+          "children": [
+            "exec",
+            "run --rm"
+          ]
+        },
+        {
+          "label": "Build",
+          "children": [
+            "up --build",
+            "build",
+            "pull"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "--profile",
+            "watch"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Daily workflow",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Efficient local iteration."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "docker compose up -d --build\ndocker compose logs -f api\ndocker compose exec api sh\ndocker compose run --rm api npm run migrate\ndocker compose --profile tools up -d pgadmin\ndocker compose down"
+        }
+      ],
+      "outcome": "fluent Compose usage."
+    },
+    "summary": {
+      "points": [
+        "up/down lifecycle.",
+        "logs and exec.",
+        "run --rm for one-offs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between 'compose exec' and 'compose run'?",
+        "a": "exec runs a command in an existing running container; run starts a new container for a one-off command."
+      }
+    ]
+  }
+}

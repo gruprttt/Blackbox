@@ -1,0 +1,540 @@
+{
+  "introduction-beyond-random-placement": {
+    "core": "By default the scheduler places Pods wherever they fit. Production needs control: keep workloads off special nodes (taints), attract them to suitable nodes (node affinity), co-locate or separate Pods relative to each other (Pod affinity/anti-affinity) and spread replicas evenly across zones and nodes (topology spread constraints).",
+    "first_principles": {
+      "problem": "All three replicas of a service land on the same node, and a single node failure takes it down.",
+      "truths": [
+        "Placement affects availability.",
+        "Some nodes are special.",
+        "Related Pods may need proximity or distance."
+      ],
+      "derivation": [
+        "**Taints/tolerations** to repel.",
+        "**Node affinity** to attract.",
+        "**Pod (anti-)affinity** for relative placement.",
+        "**Topology spread** for even distribution.",
+        "Prefer **soft** rules unless strictly needed."
+      ]
+    },
+    "analogy": {
+      "title": "Seating plans at a wedding",
+      "story": "VIP tables, guests who must sit together, rivals kept apart and families spread across tables.",
+      "mapping": [
+        [
+          "VIP tables",
+          "Tainted nodes"
+        ],
+        [
+          "Sit together",
+          "Pod affinity"
+        ],
+        [
+          "Keep apart",
+          "Anti-affinity"
+        ],
+        [
+          "Spread out",
+          "Topology spread"
+        ]
+      ],
+      "breaks": "Wedding planners reshuffle easily; scheduled Pods stay put until rescheduled."
+    },
+    "mindmap": {
+      "center": "Advanced Scheduling",
+      "branches": [
+        {
+          "label": "Repel",
+          "children": [
+            "Taints",
+            "Tolerations"
+          ]
+        },
+        {
+          "label": "Attract",
+          "children": [
+            "Node affinity",
+            "nodeSelector"
+          ]
+        },
+        {
+          "label": "Relative",
+          "children": [
+            "Pod affinity",
+            "Anti-affinity"
+          ]
+        },
+        {
+          "label": "Spread",
+          "children": [
+            "Topology spread constraints"
+          ]
+        },
+        {
+          "label": "Strength",
+          "children": [
+            "Required",
+            "Preferred"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Problem and fix",
+      "scenario": "Placement.",
+      "flow": [
+        "Default: 3 replicas on node-1",
+        "Add topology spread across zones and hosts",
+        "Result: one replica per zone"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Survives node and zone failures."
+        }
+      ],
+      "code": [],
+      "outcome": "intentional placement."
+    },
+    "summary": {
+      "points": [
+        "Default placement is naive.",
+        "Four tools.",
+        "Soft over hard."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which mechanism keeps general Pods off GPU nodes?",
+        "a": "Taints on the GPU nodes (with tolerations only on GPU workloads)."
+      }
+    ]
+  },
+  "taints-and-tolerations-the-bouncer": {
+    "core": "A taint (key=value:effect) on a node repels Pods that don't tolerate it. Effects: NoSchedule (don't place new Pods), PreferNoSchedule (avoid if possible) and NoExecute (also evict running Pods, optionally after tolerationSeconds). Tolerations allow but don't force placement, so combine with node affinity to dedicate nodes.",
+    "first_principles": {
+      "problem": "Expensive GPU nodes fill with ordinary web Pods, leaving ML jobs Pending.",
+      "truths": [
+        "Nodes can refuse Pods.",
+        "Tolerating isn't the same as attracting.",
+        "Node conditions taint nodes automatically."
+      ],
+      "derivation": [
+        "**Taint** special nodes (gpu=true:NoSchedule).",
+        "Add **tolerations** to allowed Pods.",
+        "Add **node affinity** so they go there.",
+        "Understand **NoExecute** evictions (not-ready, unreachable).",
+        "Use **tolerationSeconds** for graceful handling."
+      ]
+    },
+    "analogy": {
+      "title": "A members-only club bouncer",
+      "story": "Without a membership card you're turned away, but having a card doesn't force you to go in.",
+      "mapping": [
+        [
+          "Bouncer",
+          "Taint"
+        ],
+        [
+          "Membership card",
+          "Toleration"
+        ],
+        [
+          "Directions to the club",
+          "Node affinity"
+        ]
+      ],
+      "breaks": "Bouncers can be persuaded; taints are absolute for their effect."
+    },
+    "mindmap": {
+      "center": "Taints & Tolerations",
+      "branches": [
+        {
+          "label": "Effects",
+          "children": [
+            "NoSchedule",
+            "PreferNoSchedule",
+            "NoExecute"
+          ]
+        },
+        {
+          "label": "Toleration",
+          "children": [
+            "key",
+            "operator",
+            "value",
+            "effect",
+            "tolerationSeconds"
+          ]
+        },
+        {
+          "label": "Built-in",
+          "children": [
+            "not-ready",
+            "unreachable",
+            "control-plane"
+          ]
+        },
+        {
+          "label": "Pair with",
+          "children": [
+            "Node affinity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dedicated GPU nodes",
+      "scenario": "Commands + YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only ML Pods use GPU nodes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl taint nodes gpu-node-1 gpu=true:NoSchedule\n# Pod spec:\n# tolerations: [{key: gpu, operator: Equal, value: \"true\", effect: NoSchedule}]\n# affinity.nodeAffinity requires node label accelerator=nvidia"
+        }
+      ],
+      "outcome": "protected special capacity."
+    },
+    "summary": {
+      "points": [
+        "Taints repel.",
+        "Tolerations permit.",
+        "Affinity attracts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the NoExecute taint effect do to running Pods?",
+        "a": "Evicts Pods that don't tolerate it (after tolerationSeconds if specified)."
+      }
+    ]
+  },
+  "node-affinity-the-magnet": {
+    "core": "Node affinity attracts Pods to nodes by labels using expressions (In, NotIn, Exists, Gt, Lt). requiredDuringSchedulingIgnoredDuringExecution is a hard rule; preferredDuringScheduling... adds weighted preferences. It's a richer version of nodeSelector and works with well-known labels like topology.kubernetes.io/zone, kubernetes.io/arch and node.kubernetes.io/instance-type.",
+    "first_principles": {
+      "problem": "An ARM-incompatible image gets scheduled onto Graviton nodes and crashes.",
+      "truths": [
+        "Nodes carry descriptive labels.",
+        "Some requirements are mandatory, others preferences.",
+        "Rules apply only at scheduling time."
+      ],
+      "derivation": [
+        "Use **required** for hard constraints (arch, GPU).",
+        "Use **preferred** with weights for soft goals (spot, zone).",
+        "Use **well-known labels**.",
+        "Remember **IgnoredDuringExecution**: label changes don't evict.",
+        "Combine with **taints** for dedication."
+      ]
+    },
+    "analogy": {
+      "title": "A magnet pulling iron filings to certain areas",
+      "story": "Strong magnets are mandatory zones; weak ones just nudge.",
+      "mapping": [
+        [
+          "Strong magnet",
+          "Required affinity"
+        ],
+        [
+          "Weak magnet",
+          "Preferred affinity"
+        ],
+        [
+          "Iron filings",
+          "Pods"
+        ]
+      ],
+      "breaks": "Magnets keep pulling; affinity only applies when the Pod is scheduled."
+    },
+    "mindmap": {
+      "center": "Node Affinity",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Required",
+            "Preferred (weighted)"
+          ]
+        },
+        {
+          "label": "Operators",
+          "children": [
+            "In",
+            "NotIn",
+            "Exists",
+            "DoesNotExist",
+            "Gt",
+            "Lt"
+          ]
+        },
+        {
+          "label": "Labels",
+          "children": [
+            "zone",
+            "arch",
+            "instance-type",
+            "custom"
+          ]
+        },
+        {
+          "label": "Note",
+          "children": [
+            "IgnoredDuringExecution"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Require amd64, prefer spot",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Never ARM; spot when available."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "affinity:\n  nodeAffinity:\n    requiredDuringSchedulingIgnoredDuringExecution:\n      nodeSelectorTerms:\n      - matchExpressions: [{key: kubernetes.io/arch, operator: In, values: [amd64]}]\n    preferredDuringSchedulingIgnoredDuringExecution:\n    - weight: 50\n      preference:\n        matchExpressions: [{key: karpenter.sh/capacity-type, operator: In, values: [spot]}]"
+        }
+      ],
+      "outcome": "Pods on suitable nodes."
+    },
+    "summary": {
+      "points": [
+        "Label-based attraction.",
+        "Hard vs soft.",
+        "Scheduling-time only."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'IgnoredDuringExecution' mean in node affinity?",
+        "a": "If node labels change after scheduling, already-running Pods aren't evicted."
+      }
+    ]
+  },
+  "pod-affinity-and-anti-affinity-relative-placement": {
+    "core": "Pod affinity places Pods near Pods matching a label selector within a topology domain (same node, same zone), for example a cache next to its app for latency. Pod anti-affinity keeps them apart, such as replicas on different nodes. Required anti-affinity is expensive at scale and can leave Pods Pending; topology spread is often a better tool.",
+    "first_principles": {
+      "problem": "A latency-sensitive app and its cache land in different zones, adding cross-zone hops and cost.",
+      "truths": [
+        "Proximity reduces latency.",
+        "Separation improves resilience.",
+        "Inter-Pod rules are costly to compute."
+      ],
+      "derivation": [
+        "**Affinity** to co-locate (topologyKey: zone/hostname).",
+        "**Anti-affinity** to separate replicas.",
+        "Prefer **preferred** rules.",
+        "Use **topologyKey** carefully.",
+        "Consider **topology spread** for HA."
+      ]
+    },
+    "analogy": {
+      "title": "Seating friends together and rivals apart",
+      "story": "Friends at the same table, rivals at different tables.",
+      "mapping": [
+        [
+          "Friends together",
+          "Pod affinity"
+        ],
+        [
+          "Rivals apart",
+          "Anti-affinity"
+        ],
+        [
+          "Table/room",
+          "topologyKey"
+        ]
+      ],
+      "breaks": "Seating is done once; scheduler must evaluate rules against every existing Pod, which is costly."
+    },
+    "mindmap": {
+      "center": "Pod (Anti-)Affinity",
+      "branches": [
+        {
+          "label": "Affinity",
+          "children": [
+            "Co-locate",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Anti-affinity",
+          "children": [
+            "Separate",
+            "HA"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "topologyKey hostname",
+            "zone"
+          ]
+        },
+        {
+          "label": "Strength",
+          "children": [
+            "Required",
+            "Preferred"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Scheduling overhead"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "Topology spread"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cache near app, replicas apart",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cache in api's zone, one cache per node."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "affinity:\n  podAffinity:\n    preferredDuringSchedulingIgnoredDuringExecution:\n    - weight: 100\n      podAffinityTerm:\n        labelSelector: {matchLabels: {app: api}}\n        topologyKey: topology.kubernetes.io/zone\n  podAntiAffinity:\n    preferredDuringSchedulingIgnoredDuringExecution:\n    - weight: 100\n      podAffinityTerm:\n        labelSelector: {matchLabels: {app: cache}}\n        topologyKey: kubernetes.io/hostname"
+        }
+      ],
+      "outcome": "relative placement achieved."
+    },
+    "summary": {
+      "points": [
+        "Affinity co-locates.",
+        "Anti-affinity separates.",
+        "Prefer soft rules."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does topologyKey define in Pod affinity?",
+        "a": "The domain (e.g. node or zone) within which Pods are considered co-located."
+      }
+    ]
+  },
+  "topology-spread-constraints-the-modern-ha": {
+    "core": "Topology spread constraints distribute matching Pods evenly across domains (zones, nodes) with maxSkew (allowed imbalance), topologyKey, whenUnsatisfiable (DoNotSchedule or ScheduleAnyway), minDomains and nodeAffinityPolicy. They're the modern, efficient way to get high availability, better than anti-affinity for more replicas than domains.",
+    "first_principles": {
+      "problem": "Anti-affinity can't place 9 replicas across 3 zones and leaves Pods Pending.",
+      "truths": [
+        "Even spread maximises resilience.",
+        "Some imbalance is acceptable.",
+        "Hard rules can block scheduling."
+      ],
+      "derivation": [
+        "Spread across **zones** (maxSkew 1).",
+        "Spread across **hosts** (ScheduleAnyway).",
+        "Set **minDomains** to force multi-zone.",
+        "Use **labelSelector** matching the workload.",
+        "Combine with **PDBs**; rebalance with descheduler."
+      ]
+    },
+    "analogy": {
+      "title": "Dealing cards evenly to players",
+      "story": "No player gets more than one card more than any other.",
+      "mapping": [
+        [
+          "Players",
+          "Zones/nodes"
+        ],
+        [
+          "Cards",
+          "Pods"
+        ],
+        [
+          "One-card difference",
+          "maxSkew 1"
+        ]
+      ],
+      "breaks": "Cards are dealt once; spread is only enforced at scheduling, so imbalance can creep in later."
+    },
+    "mindmap": {
+      "center": "Topology Spread",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "maxSkew",
+            "topologyKey",
+            "whenUnsatisfiable",
+            "labelSelector",
+            "minDomains"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "DoNotSchedule",
+            "ScheduleAnyway"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Zone HA",
+            "Node spread"
+          ]
+        },
+        {
+          "label": "Maintenance",
+          "children": [
+            "Descheduler",
+            "PDB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Zone and host spread",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "9 replicas → 3 per zone, spread across hosts."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "topologySpreadConstraints:\n- maxSkew: 1\n  topologyKey: topology.kubernetes.io/zone\n  whenUnsatisfiable: DoNotSchedule\n  labelSelector: {matchLabels: {app: api}}\n- maxSkew: 1\n  topologyKey: kubernetes.io/hostname\n  whenUnsatisfiable: ScheduleAnyway\n  labelSelector: {matchLabels: {app: api}}"
+        }
+      ],
+      "outcome": "even, resilient distribution."
+    },
+    "summary": {
+      "points": [
+        "Even spread with maxSkew.",
+        "Hard for zones, soft for hosts.",
+        "Better than anti-affinity at scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does maxSkew: 1 mean?",
+        "a": "The number of matching Pods in any two domains may differ by at most one."
+      }
+    ]
+  }
+}

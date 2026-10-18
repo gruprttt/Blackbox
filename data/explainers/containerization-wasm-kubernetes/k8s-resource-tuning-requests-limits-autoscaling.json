@@ -1,0 +1,742 @@
+{
+  "introduction-the-price-of-performance": {
+    "core": "Resource settings drive both cost and reliability: requests too high waste nodes, too low cause noisy neighbours and evictions; limits too low throttle or kill Pods. The goal is the 'Goldilocks zone', with requests matching real usage, sensible limits and autoscaling to follow demand.",
+    "first_principles": {
+      "problem": "A cluster runs at 25% real utilisation yet Pods are throttled and OOM-killed.",
+      "truths": [
+        "Scheduling uses requests.",
+        "Limits enforce ceilings.",
+        "Usage varies over time."
+      ],
+      "derivation": [
+        "**Measure** actual usage (P50/P95/P99).",
+        "Set **requests** near typical usage.",
+        "Set **memory limits** with headroom.",
+        "Be careful with **CPU limits**.",
+        "**Autoscale** replicas and nodes."
+      ]
+    },
+    "analogy": {
+      "title": "Booking restaurant tables",
+      "story": "Book for 10 when 4 come and you waste seats; book for 2 when 6 come and people stand.",
+      "mapping": [
+        [
+          "Booked seats",
+          "Requests"
+        ],
+        [
+          "Max capacity",
+          "Limits"
+        ],
+        [
+          "Guests",
+          "Actual usage"
+        ]
+      ],
+      "breaks": "Restaurants can add chairs; nodes can't stretch beyond their capacity."
+    },
+    "mindmap": {
+      "center": "Resource Tuning",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Usage metrics",
+            "Percentiles"
+          ]
+        },
+        {
+          "label": "Settings",
+          "children": [
+            "Requests",
+            "Limits"
+          ]
+        },
+        {
+          "label": "Failure modes",
+          "children": [
+            "Waste",
+            "Throttling",
+            "OOM",
+            "Eviction"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "HPA",
+            "VPA",
+            "Node autoscaling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tuning outcome",
+      "scenario": "Before/after.",
+      "flow": [
+        "Requests 2 CPU, usage 0.3 CPU",
+        "Lower to 400m, keep memory limit",
+        "Nodes 60 → 35",
+        "No more throttling"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cheaper and more reliable."
+        }
+      ],
+      "code": [],
+      "outcome": "Goldilocks resources."
+    },
+    "summary": {
+      "points": [
+        "Measure first.",
+        "Requests ≈ usage.",
+        "Autoscale."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the cost of setting requests far above real usage?",
+        "a": "Wasted node capacity, since the scheduler reserves resources that aren't used."
+      }
+    ]
+  },
+  "requests-vs-limits-the-contract": {
+    "core": "Requests are the guaranteed amount used for scheduling and fair sharing under contention; limits are hard caps enforced by the kernel (cgroups). CPU requests set cpu.weight shares and CPU limits set CFS quota. Memory requests influence eviction ranking and memory limits set memory.max for OOM kills.",
+    "first_principles": {
+      "problem": "Engineers assume a Pod can't use more than its request, or that requests cap usage.",
+      "truths": [
+        "Requests are minimums, not maximums.",
+        "Limits are ceilings.",
+        "Both map to cgroup settings."
+      ],
+      "derivation": [
+        "**CPU request** → cpu.weight (share under contention).",
+        "**CPU limit** → cpu.max quota (throttling).",
+        "**Memory request** → eviction priority.",
+        "**Memory limit** → memory.max (OOM).",
+        "**Burst** between request and limit."
+      ]
+    },
+    "analogy": {
+      "title": "A guaranteed salary plus an overtime cap",
+      "story": "You always get the base, may earn more when there's work, but never beyond the cap.",
+      "mapping": [
+        [
+          "Base salary",
+          "Request"
+        ],
+        [
+          "Overtime",
+          "Burst usage"
+        ],
+        [
+          "Cap",
+          "Limit"
+        ]
+      ],
+      "breaks": "Salaries don't get killed for exceeding caps; memory over the limit does."
+    },
+    "mindmap": {
+      "center": "The Contract",
+      "branches": [
+        {
+          "label": "CPU",
+          "children": [
+            "Request → weight",
+            "Limit → quota"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "Request → eviction",
+            "Limit → OOM"
+          ]
+        },
+        {
+          "label": "Burst",
+          "children": [
+            "Between request and limit"
+          ]
+        },
+        {
+          "label": "cgroups",
+          "children": [
+            "cpu.weight",
+            "cpu.max",
+            "memory.max"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspecting cgroups",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See exactly how settings are enforced."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat /sys/fs/cgroup/kubepods.slice/.../cpu.weight\ncat /sys/fs/cgroup/kubepods.slice/.../cpu.max     # e.g. '50000 100000' = 0.5 CPU\ncat /sys/fs/cgroup/kubepods.slice/.../memory.max"
+        }
+      ],
+      "outcome": "clear contract semantics."
+    },
+    "summary": {
+      "points": [
+        "Requests guarantee.",
+        "Limits cap.",
+        "cgroups enforce."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can a container use more CPU than its request?",
+        "a": "Yes, it can burst up to its limit (or node capacity if no limit) when CPU is available."
+      }
+    ]
+  },
+  "the-consequences-of-hitting-limits": {
+    "core": "Hitting a CPU limit throttles the container: it waits until the next CFS period, adding latency but no crash. Hitting a memory limit triggers an OOM kill (exit code 137, OOMKilled), followed by restarts and possibly CrashLoopBackOff. Node-level memory pressure evicts Pods by QoS and usage over request.",
+    "first_principles": {
+      "problem": "A service's p99 latency spikes every few seconds, and nobody connects it to CPU throttling.",
+      "truths": [
+        "CPU is compressible.",
+        "Memory isn't.",
+        "Nodes protect themselves by eviction."
+      ],
+      "derivation": [
+        "Watch **container_cpu_cfs_throttled_periods_total**.",
+        "Watch **OOMKilled** reasons and restarts.",
+        "Check **node pressure** conditions and evictions.",
+        "Raise **limits** or optimise the app.",
+        "Fix **memory leaks** rather than endlessly raising limits."
+      ]
+    },
+    "analogy": {
+      "title": "A speed governor versus a fuse",
+      "story": "The governor slows you down; the fuse cuts the power entirely.",
+      "mapping": [
+        [
+          "Speed governor",
+          "CPU throttling"
+        ],
+        [
+          "Fuse",
+          "Memory OOM kill"
+        ],
+        [
+          "Building power cut",
+          "Node eviction"
+        ]
+      ],
+      "breaks": "Fuses can be reset manually; OOM-killed containers restart automatically, maybe in a loop."
+    },
+    "mindmap": {
+      "center": "Hitting Limits",
+      "branches": [
+        {
+          "label": "CPU",
+          "children": [
+            "Throttling",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "OOMKilled",
+            "Exit 137",
+            "CrashLoopBackOff"
+          ]
+        },
+        {
+          "label": "Node",
+          "children": [
+            "Pressure",
+            "Eviction"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Throttled periods",
+            "Restart counts",
+            "Events"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnosing an OOM",
+      "scenario": "kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Heap leak fixed; limit set with 25% headroom."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl get pod api-0 -o jsonpath='{.status.containerStatuses[0].lastState.terminated}'\n# {\"exitCode\":137,\"reason\":\"OOMKilled\",...}"
+        }
+      ],
+      "outcome": "limit symptoms recognised."
+    },
+    "summary": {
+      "points": [
+        "CPU throttles.",
+        "Memory kills.",
+        "Nodes evict."
+      ]
+    },
+    "check": [
+      {
+        "q": "What exit code indicates a container was OOM-killed?",
+        "a": "137 (SIGKILL), with reason OOMKilled."
+      }
+    ]
+  },
+  "deep-dive-cfs-quota-and-cpu-throttling": {
+    "core": "CPU limits use CFS bandwidth control: a quota of CPU time per period (default 100 ms). A 0.5-CPU limit allows 50 ms per period across all threads, so a multi-threaded app can burn its quota in 10 ms and then stall for 90 ms, causing latency spikes even when average usage is low. Many teams drop CPU limits for latency-sensitive services and rely on requests.",
+    "first_principles": {
+      "problem": "A 4-thread service with a 1-CPU limit shows 30% average CPU but frequent 80 ms stalls.",
+      "truths": [
+        "Quota is shared by all threads.",
+        "Periods are short.",
+        "Averages hide bursts."
+      ],
+      "derivation": [
+        "Check **throttling ratio** (throttled/total periods).",
+        "**Remove or raise CPU limits** for latency-sensitive apps.",
+        "Match **thread pools** to CPU allocation (GOMAXPROCS, JVM settings).",
+        "Use **Guaranteed + static CPU manager** for exclusive cores.",
+        "Keep **requests** accurate for fairness."
+      ]
+    },
+    "analogy": {
+      "title": "A phone plan with minutes per hour",
+      "story": "Use them all in the first ten minutes and you can't call for the rest of the hour.",
+      "mapping": [
+        [
+          "Minutes per hour",
+          "Quota per period"
+        ],
+        [
+          "Talking fast with many phones",
+          "Multi-threaded bursts"
+        ],
+        [
+          "No calls",
+          "Throttled"
+        ]
+      ],
+      "breaks": "Phone plans reset hourly; CFS resets every 100 ms, so stalls are short but frequent."
+    },
+    "mindmap": {
+      "center": "CFS Throttling",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Quota",
+            "Period 100 ms",
+            "All threads share"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Latency spikes",
+            "Low average CPU"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "cfs_throttled_periods",
+            "Throttle ratio"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Remove/raise limits",
+            "Tune thread counts",
+            "Static CPU manager"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Throttle maths",
+      "scenario": "1 CPU limit, 4 threads.",
+      "flow": [
+        "Quota 100 ms per 100 ms period",
+        "4 threads busy → quota used in 25 ms",
+        "Stall 75 ms until next period",
+        "p99 latency suffers"
+      ],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Remove CPU limit; set GOMAXPROCS from request."
+        }
+      ],
+      "code": [],
+      "outcome": "smooth latency."
+    },
+    "summary": {
+      "points": [
+        "Quota per period.",
+        "Threads burn it fast.",
+        "Rethink CPU limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a container be throttled while its average CPU usage is low?",
+        "a": "Multi-threaded bursts can consume the per-period quota quickly, causing stalls until the next period."
+      }
+    ]
+  },
+  "quality-of-service-classes-how-kubernetes-prioritizes-eviction": {
+    "core": "QoS classes rank Pods for eviction under node pressure. Guaranteed (requests = limits for CPU and memory) are evicted last, Burstable in order of usage above requests, and BestEffort (no settings) first. The kubelet's eviction thresholds (memory.available, nodefs.available) trigger eviction before the kernel OOM killer acts.",
+    "first_principles": {
+      "problem": "Critical Pods get evicted first because they have no requests set.",
+      "truths": [
+        "Pressure requires sacrifices.",
+        "Settings imply importance.",
+        "Kubelet eviction precedes kernel OOM."
+      ],
+      "derivation": [
+        "Make critical Pods **Guaranteed**.",
+        "Give others accurate **requests** (Burstable).",
+        "Avoid **BestEffort** in production.",
+        "Tune **kubelet eviction thresholds** and **reserved resources**.",
+        "Combine with **PriorityClass**."
+      ]
+    },
+    "analogy": {
+      "title": "Lifeboat boarding order",
+      "story": "Crew essential to the ship stay, passengers with tickets next, stowaways first off.",
+      "mapping": [
+        [
+          "Essential crew",
+          "Guaranteed"
+        ],
+        [
+          "Ticketed passengers",
+          "Burstable"
+        ],
+        [
+          "Stowaways",
+          "BestEffort"
+        ]
+      ],
+      "breaks": "Lifeboats are rare; evictions happen routinely on busy nodes."
+    },
+    "mindmap": {
+      "center": "QoS & Eviction",
+      "branches": [
+        {
+          "label": "Classes",
+          "children": [
+            "Guaranteed",
+            "Burstable",
+            "BestEffort"
+          ]
+        },
+        {
+          "label": "Order",
+          "children": [
+            "BestEffort",
+            "Burstable over request",
+            "Guaranteed"
+          ]
+        },
+        {
+          "label": "Kubelet",
+          "children": [
+            "Eviction thresholds",
+            "system-reserved",
+            "kube-reserved"
+          ]
+        },
+        {
+          "label": "Pair",
+          "children": [
+            "PriorityClass"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Kubelet config",
+      "scenario": "Thresholds.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Nodes evict gracefully before system processes starve."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "evictionHard: {memory.available: \"500Mi\", nodefs.available: \"10%\"}\nsystemReserved: {cpu: 500m, memory: 1Gi}\nkubeReserved: {cpu: 500m, memory: 1Gi}"
+        }
+      ],
+      "outcome": "predictable behaviour under pressure."
+    },
+    "summary": {
+      "points": [
+        "QoS sets eviction order.",
+        "Critical = Guaranteed.",
+        "Reserve system resources."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why reserve resources for system and kube daemons on nodes?",
+        "a": "So kubelet, the runtime and OS processes aren't starved by Pods, keeping the node healthy."
+      }
+    ]
+  },
+  "autoscaling-wars-vpa-vs-hpa": {
+    "core": "HPA scales the number of replicas based on metrics (CPU or memory utilisation relative to requests, custom or external metrics). VPA recommends or applies per-Pod request changes (vertical sizing), historically by restarting Pods, with in-place resize emerging. Don't let both act on the same CPU/memory metric; common combos are VPA in recommendation mode plus HPA, or HPA on custom metrics plus VPA on resources.",
+    "first_principles": {
+      "problem": "HPA and VPA fight: VPA raises requests, lowering utilisation, so HPA scales in, and the loop oscillates.",
+      "truths": [
+        "Horizontal and vertical scaling solve different problems.",
+        "Utilisation is relative to requests.",
+        "Controllers can conflict."
+      ],
+      "derivation": [
+        "**HPA** for stateless, load-driven scaling.",
+        "**VPA** for right-sizing (often recommendation mode).",
+        "Avoid **both on CPU/memory**.",
+        "Use **custom metrics** (RPS, queue depth) for HPA.",
+        "Add **node autoscaling** (Karpenter/CAS)."
+      ]
+    },
+    "analogy": {
+      "title": "Hiring more staff versus giving staff bigger desks",
+      "story": "More staff handles more customers; bigger desks help each person work better. Doing both by the same measure confuses things.",
+      "mapping": [
+        [
+          "More staff",
+          "HPA replicas"
+        ],
+        [
+          "Bigger desks",
+          "VPA requests"
+        ],
+        [
+          "Same measure",
+          "Conflicting metric"
+        ]
+      ],
+      "breaks": "Hiring takes weeks; Pods scale in seconds, so feedback loops can oscillate quickly."
+    },
+    "mindmap": {
+      "center": "HPA vs VPA",
+      "branches": [
+        {
+          "label": "HPA",
+          "children": [
+            "Replicas",
+            "CPU/memory/custom/external metrics",
+            "Behavior policies"
+          ]
+        },
+        {
+          "label": "VPA",
+          "children": [
+            "Requests",
+            "Off/Initial/Recreate/InPlace",
+            "Recommendations"
+          ]
+        },
+        {
+          "label": "Conflicts",
+          "children": [
+            "Same resource metric"
+          ]
+        },
+        {
+          "label": "Combos",
+          "children": [
+            "VPA recommend + HPA",
+            "HPA custom + VPA"
+          ]
+        },
+        {
+          "label": "Nodes",
+          "children": [
+            "Karpenter",
+            "CAS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "HPA with behaviour",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Pair",
+          "detail": "VPA in Off mode gives request recommendations."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata: {name: api}\nspec:\n  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api}\n  minReplicas: 3\n  maxReplicas: 50\n  metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}}]\n  behavior:\n    scaleDown: {stabilizationWindowSeconds: 300, policies: [{type: Percent, value: 20, periodSeconds: 60}]}"
+        }
+      ],
+      "outcome": "non-conflicting autoscaling."
+    },
+    "summary": {
+      "points": [
+        "HPA scales out.",
+        "VPA right-sizes.",
+        "Don't fight on one metric."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shouldn't HPA and VPA both act on CPU utilisation?",
+        "a": "VPA changing requests alters the utilisation HPA uses, causing conflicting, oscillating decisions."
+      }
+    ]
+  },
+  "setting-the-right-values-a-practical-framework": {
+    "core": "A practical framework: observe usage over representative periods (including peaks), set CPU requests near P90 usage, memory requests near P99 with limits ~20–30% higher, generally avoid CPU limits for latency-sensitive services (or set them generously), load-test, use VPA recommendations and tools like Goldilocks or Kubecost, enforce defaults with LimitRanges and review regularly.",
+    "first_principles": {
+      "problem": "Teams guess resource values once and never revisit them.",
+      "truths": [
+        "Usage patterns change.",
+        "Data beats guesses.",
+        "Defaults protect against omissions."
+      ],
+      "derivation": [
+        "**Observe** P50/P90/P99 over weeks.",
+        "**CPU request** ≈ P90; **limit** optional.",
+        "**Memory request** ≈ P99; **limit** = request + 20–30%.",
+        "**Load test** peaks.",
+        "**LimitRange** defaults and **quarterly reviews**."
+      ]
+    },
+    "analogy": {
+      "title": "Tailoring a suit from measurements, then refitting",
+      "story": "Measure properly, allow some room and adjust as you change.",
+      "mapping": [
+        [
+          "Measurements",
+          "Usage percentiles"
+        ],
+        [
+          "Room to move",
+          "Headroom"
+        ],
+        [
+          "Refitting",
+          "Periodic review"
+        ]
+      ],
+      "breaks": "People change slowly; workloads change with every release."
+    },
+    "mindmap": {
+      "center": "Practical Framework",
+      "branches": [
+        {
+          "label": "Observe",
+          "children": [
+            "Percentiles",
+            "Peaks",
+            "Weeks of data"
+          ]
+        },
+        {
+          "label": "CPU",
+          "children": [
+            "Request ≈ P90",
+            "Limit optional"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "Request ≈ P99",
+            "Limit +20–30%"
+          ]
+        },
+        {
+          "label": "Validate",
+          "children": [
+            "Load tests"
+          ]
+        },
+        {
+          "label": "Govern",
+          "children": [
+            "LimitRange",
+            "ResourceQuota",
+            "Reviews"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "VPA",
+            "Goldilocks",
+            "Kubecost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Applying the framework",
+      "scenario": "One service.",
+      "flow": [
+        "P90 CPU 300m, P99 memory 700Mi",
+        "Requests: cpu 300m, memory 768Mi",
+        "Limits: memory 960Mi, no CPU limit",
+        "Load test at 2× peak: stable"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Efficient and safe settings backed by data."
+        }
+      ],
+      "code": [],
+      "outcome": "repeatable resource tuning."
+    },
+    "summary": {
+      "points": [
+        "Measure percentiles.",
+        "Headroom for memory.",
+        "Review regularly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why set memory limits somewhat above requests?",
+        "a": "To allow occasional spikes without OOM kills while still capping runaway usage."
+      }
+    ]
+  }
+}
