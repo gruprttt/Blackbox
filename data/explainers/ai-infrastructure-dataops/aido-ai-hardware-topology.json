@@ -1,0 +1,717 @@
+{
+  "introduction-its-not-about-the-flops": {
+    "core": "Modern AI performance is often limited by moving data rather than raw compute: memory bandwidth (HBM), GPU-to-GPU links (NVLink) and node-to-node networks (InfiniBand/RoCE). The topology, the 'plumbing', decides how fast models train and serve.",
+    "first_principles": {
+      "problem": "A cluster with the fastest GPUs trains slowly because gradients crawl across a slow network.",
+      "truths": [
+        "Compute has outpaced memory and network bandwidth.",
+        "Distributed training is communication-heavy.",
+        "Bottlenecks move to the slowest link."
+      ],
+      "derivation": [
+        "Understand **HBM** bandwidth.",
+        "Classify workloads as **memory-bound vs compute-bound**.",
+        "Use **NVLink/NVSwitch** inside nodes and **InfiniBand/RoCE** between them.",
+        "Optimise **all-reduce** with **GPUDirect RDMA**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory with fast workers and a slow conveyor belt",
+      "story": "The fastest workers in the world still wait if the belt brings parts slowly.",
+      "mapping": [
+        [
+          "Workers",
+          "GPU cores"
+        ],
+        [
+          "Conveyor belt",
+          "Memory/interconnect"
+        ],
+        [
+          "Waiting",
+          "Idle compute"
+        ]
+      ],
+      "breaks": "Some workloads are genuinely compute-bound, where more FLOPS do help."
+    },
+    "mindmap": {
+      "center": "AI Hardware Topology",
+      "branches": [
+        {
+          "label": "Bottleneck",
+          "children": [
+            "Data movement"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "HBM"
+          ]
+        },
+        {
+          "label": "Intra-node",
+          "children": [
+            "NVLink",
+            "NVSwitch"
+          ]
+        },
+        {
+          "label": "Inter-node",
+          "children": [
+            "InfiniBand",
+            "RoCE"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "All-reduce",
+            "GPUDirect RDMA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same GPUs, different interconnects",
+      "scenario": "Training time.",
+      "flow": [
+        "8 nodes × 8 GPUs over 25 Gb Ethernet: 10 days",
+        "Same GPUs over 400 Gb InfiniBand: 3 days"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The network decided the speed."
+        }
+      ],
+      "code": [],
+      "outcome": "you can see topology as performance."
+    },
+    "summary": {
+      "points": [
+        "Bandwidth often limits.",
+        "Plumbing matters.",
+        "Find the slowest link."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can AI training be bottlenecked by networks rather than GPUs?",
+        "a": "Distributed training exchanges huge amounts of data (gradients), so slow links leave fast GPUs waiting."
+      }
+    ]
+  },
+  "hbm-high-bandwidth-memory-the-firehose": {
+    "core": "GPUs use HBM: memory stacked vertically next to the GPU die on an interposer, with very wide buses giving terabytes per second (H100 ~3.35 TB/s) versus about 100 GB/s for DDR. It feeds thousands of cores but is limited in capacity and expensive.",
+    "first_principles": {
+      "problem": "Ordinary DDR RAM can't supply data fast enough to keep thousands of GPU cores busy.",
+      "truths": [
+        "Wide, short connections give high bandwidth.",
+        "Stacking memory saves space and distance.",
+        "Capacity and cost trade against bandwidth."
+      ],
+      "derivation": [
+        "**Stack** DRAM dies (3D) beside the GPU.",
+        "**Wide bus** (thousands of bits).",
+        "Bandwidth in **TB/s**.",
+        "Capacity **limited** (80–192 GB per GPU)."
+      ]
+    },
+    "analogy": {
+      "title": "A firehose vs. a garden hose",
+      "story": "Both carry water, but the firehose delivers vastly more per second.",
+      "mapping": [
+        [
+          "Garden hose",
+          "DDR"
+        ],
+        [
+          "Firehose",
+          "HBM"
+        ],
+        [
+          "Water",
+          "Data"
+        ]
+      ],
+      "breaks": "Even HBM can be the bottleneck for memory-bound work like LLM decoding."
+    },
+    "mindmap": {
+      "center": "HBM",
+      "branches": [
+        {
+          "label": "Design",
+          "children": [
+            "3D-stacked",
+            "On-package",
+            "Wide bus"
+          ]
+        },
+        {
+          "label": "Bandwidth",
+          "children": [
+            "TB/s"
+          ]
+        },
+        {
+          "label": "vs DDR",
+          "children": [
+            "~30x faster"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Capacity",
+            "Cost"
+          ]
+        },
+        {
+          "label": "Generations",
+          "children": [
+            "HBM2e",
+            "HBM3",
+            "HBM3e"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bandwidth comparison",
+      "scenario": "Rough figures.",
+      "flow": [
+        "DDR5 server: ~0.3 TB/s per socket",
+        "A100 HBM2e: ~2 TB/s",
+        "H100 HBM3: ~3.35 TB/s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "GPU cores can actually be fed."
+        }
+      ],
+      "code": [],
+      "outcome": "you understand why GPU memory is special."
+    },
+    "summary": {
+      "points": [
+        "Stacked and wide.",
+        "TB/s bandwidth.",
+        "Limited capacity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do GPUs use HBM instead of standard DDR memory?",
+        "a": "HBM provides much higher bandwidth (TB/s) to feed thousands of parallel cores."
+      }
+    ]
+  },
+  "the-hbm-bottleneck-memory-bound-vs-compute-bound-workloads": {
+    "core": "Arithmetic intensity (FLOPs per byte moved) decides the bottleneck. Compute-bound work (large matrix multiplies in training) uses many FLOPs per byte; memory-bound work (LLM token decoding, small batches) moves lots of data for few FLOPs, so bandwidth limits it. The roofline model visualises this.",
+    "first_principles": {
+      "problem": "Teams buy GPUs with more FLOPS for LLM inference, which is actually limited by memory bandwidth.",
+      "truths": [
+        "Each operation needs data movement.",
+        "Low reuse of data means bandwidth limits speed.",
+        "Batching raises arithmetic intensity."
+      ],
+      "derivation": [
+        "Compute the **arithmetic intensity** = FLOPs / bytes.",
+        "Use the **roofline**: below the ridge → memory-bound.",
+        "**Decode** (batch 1) is memory-bound; **training** matmuls are compute-bound.",
+        "Raise intensity with **batching**, **quantisation** and kernel fusion."
+      ]
+    },
+    "analogy": {
+      "title": "A chef chopping vs. fetching",
+      "story": "If each dish needs one quick chop but a long walk to the fridge, the walking (memory) limits speed, not the chopping.",
+      "mapping": [
+        [
+          "Chopping",
+          "FLOPs"
+        ],
+        [
+          "Walking to the fridge",
+          "Memory access"
+        ],
+        [
+          "Carrying more per trip",
+          "Batching"
+        ]
+      ],
+      "breaks": "Real workloads mix phases (LLM prefill is compute-bound, decode memory-bound)."
+    },
+    "mindmap": {
+      "center": "Memory vs Compute Bound",
+      "branches": [
+        {
+          "label": "Metric",
+          "children": [
+            "Arithmetic intensity"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Roofline"
+          ]
+        },
+        {
+          "label": "Memory-bound",
+          "children": [
+            "Decode",
+            "Small batches"
+          ]
+        },
+        {
+          "label": "Compute-bound",
+          "children": [
+            "Training matmuls",
+            "Prefill"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Batching",
+            "Quantisation",
+            "Fusion"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "LLM inference phases",
+      "scenario": "Different bottlenecks.",
+      "flow": [
+        "Prefill (process prompt): big matmuls → compute-bound",
+        "Decode (one token at a time): reload weights each step → memory-bound",
+        "Batch many requests → decode becomes more efficient"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Optimise the bottleneck that actually applies."
+        }
+      ],
+      "code": [],
+      "outcome": "hardware decisions based on workload type."
+    },
+    "summary": {
+      "points": [
+        "FLOPs per byte.",
+        "The roofline.",
+        "Batch to raise intensity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is LLM token decoding typically memory-bound?",
+        "a": "Each new token requires reading the model weights from memory for relatively little computation, so bandwidth limits speed."
+      }
+    ]
+  },
+  "topology-level-1-nvlink-and-nvswitch-intra-node": {
+    "core": "Inside a server, GPUs communicate over NVLink (direct GPU-to-GPU links, around 900 GB/s on H100) rather than PCIe (~64 GB/s). NVSwitch connects all GPUs at full bandwidth, letting 8 GPUs behave almost like one big GPU for tensor parallelism.",
+    "first_principles": {
+      "problem": "A model split across 8 GPUs over PCIe spends most of its time waiting for inter-GPU transfers.",
+      "truths": [
+        "PCIe bandwidth is limited and shared.",
+        "Tensor parallelism communicates every layer.",
+        "Direct links avoid the CPU."
+      ],
+      "derivation": [
+        "**NVLink**: high-bandwidth direct GPU links.",
+        "**NVSwitch**: all-to-all at full bandwidth inside the node.",
+        "Keep **tensor parallelism inside a node** (NVLink domain).",
+        "Check with **`nvidia-smi topo -m`** (NV# links)."
+      ]
+    },
+    "analogy": {
+      "title": "Coworkers at one table vs. across town",
+      "story": "Passing notes across a table is instant; mailing them across town is slow.",
+      "mapping": [
+        [
+          "Same table",
+          "NVLink"
+        ],
+        [
+          "Across town",
+          "PCIe/network"
+        ],
+        [
+          "Table organiser",
+          "NVSwitch"
+        ]
+      ],
+      "breaks": "NVLink domains are limited in size (typically 8 GPUs, larger in GB200 NVL72), so beyond that you need networks."
+    },
+    "mindmap": {
+      "center": "NVLink & NVSwitch",
+      "branches": [
+        {
+          "label": "NVLink",
+          "children": [
+            "Direct GPU links",
+            "~900 GB/s (H100)"
+          ]
+        },
+        {
+          "label": "NVSwitch",
+          "children": [
+            "All-to-all",
+            "Full bandwidth"
+          ]
+        },
+        {
+          "label": "vs PCIe",
+          "children": [
+            "~10x faster"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Tensor parallelism in-node"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Placement for tensor parallelism",
+      "scenario": "Rule.",
+      "flow": [
+        "TP=8 within one NVSwitch node",
+        "Pipeline/data parallel across nodes",
+        "Avoid TP across network"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The most chatty communication stays on the fastest links."
+        }
+      ],
+      "code": [],
+      "outcome": "intra-node communication optimised."
+    },
+    "summary": {
+      "points": [
+        "NVLink is fast.",
+        "NVSwitch connects all GPUs.",
+        "Keep TP in-node."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should tensor parallelism stay within one NVLink/NVSwitch node?",
+        "a": "It communicates at every layer, needing the very high bandwidth that only intra-node GPU links provide."
+      }
+    ]
+  },
+  "topology-level-2-ethernet-vs-infiniband-inter-node": {
+    "core": "Across nodes, AI clusters use InfiniBand (low latency, RDMA-native, lossless, the HPC standard) or high-speed Ethernet with RoCE (RDMA over converged Ethernet, which needs lossless configuration). Per-GPU bandwidth (400–800 Gb/s) and topology (fat-tree, rail-optimised) determine scaling.",
+    "first_principles": {
+      "problem": "Standard data-centre Ethernet with TCP adds latency and CPU overhead that cripples multi-node training.",
+      "truths": [
+        "Distributed training needs high bandwidth and low latency.",
+        "Packet loss hurts RDMA performance.",
+        "Network topology affects congestion."
+      ],
+      "derivation": [
+        "**InfiniBand**: RDMA built in, credit-based lossless flow.",
+        "**RoCEv2**: RDMA over Ethernet with PFC/ECN tuning.",
+        "Give **one NIC per GPU** (rail-optimised).",
+        "Use a **non-blocking fat-tree** topology."
+      ]
+    },
+    "analogy": {
+      "title": "A dedicated express rail line vs. city streets",
+      "story": "Express rail (InfiniBand) moves freight without traffic lights; city streets (plain Ethernet) have congestion and stops.",
+      "mapping": [
+        [
+          "Express rail",
+          "InfiniBand"
+        ],
+        [
+          "Upgraded highway",
+          "RoCE Ethernet"
+        ],
+        [
+          "City streets",
+          "TCP Ethernet"
+        ]
+      ],
+      "breaks": "InfiniBand is costly and specialised, while Ethernet (Ultra Ethernet) is catching up."
+    },
+    "mindmap": {
+      "center": "Inter-Node Networking",
+      "branches": [
+        {
+          "label": "InfiniBand",
+          "children": [
+            "RDMA native",
+            "Lossless",
+            "Low latency"
+          ]
+        },
+        {
+          "label": "RoCE",
+          "children": [
+            "RDMA over Ethernet",
+            "PFC/ECN"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "1 NIC/GPU",
+            "Fat-tree",
+            "Rail-optimised"
+          ]
+        },
+        {
+          "label": "Speeds",
+          "children": [
+            "400-800 Gb/s"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cluster network design",
+      "scenario": "64 GPUs.",
+      "flow": [
+        "8 nodes × 8 GPUs",
+        "8× 400 Gb NICs per node (one per GPU)",
+        "Rail-optimised leaf switches",
+        "Non-blocking spine"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Near-linear scaling for data parallelism."
+        }
+      ],
+      "code": [],
+      "outcome": "multi-node training that scales."
+    },
+    "summary": {
+      "points": [
+        "RDMA networks.",
+        "One NIC per GPU.",
+        "Non-blocking topology."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does RoCE stand for, and why does it matter?",
+        "a": "RDMA over Converged Ethernet, which brings low-latency, CPU-bypassing RDMA to Ethernet networks for AI clusters."
+      }
+    ]
+  },
+  "the-all-reduce-operation-why-network-topology-determines-training-speed": {
+    "core": "In data-parallel training every GPU computes gradients on its own batch, then all GPUs must average them (all-reduce) before the next step. Ring and tree all-reduce algorithms (NCCL) move about 2× the gradient size per GPU per step, so network bandwidth directly limits step time.",
+    "first_principles": {
+      "problem": "Adding more GPUs doesn't speed up training because the gradient synchronisation takes longer than the computation.",
+      "truths": [
+        "Every step needs synchronised gradients.",
+        "Communication volume scales with model size.",
+        "The slowest link bounds the collective."
+      ],
+      "derivation": [
+        "**Compute** gradients locally.",
+        "**All-reduce** = reduce-scatter + all-gather (ring algorithm).",
+        "**Overlap** communication with backward computation.",
+        "Use **NCCL**, topology-aware, and **gradient compression/bucketing**."
+      ]
+    },
+    "analogy": {
+      "title": "A synchronised dance",
+      "story": "Every dancer must finish their move and sync with all others before the next beat, so the slowest pass sets the tempo.",
+      "mapping": [
+        [
+          "Dancers",
+          "GPUs"
+        ],
+        [
+          "Syncing moves",
+          "All-reduce"
+        ],
+        [
+          "Tempo",
+          "Step time"
+        ]
+      ],
+      "breaks": "Very large models use other parallelisms (tensor, pipeline, ZeRO) with different communication patterns."
+    },
+    "mindmap": {
+      "center": "All-Reduce",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Average gradients"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "Ring",
+            "Tree"
+          ]
+        },
+        {
+          "label": "Library",
+          "children": [
+            "NCCL"
+          ]
+        },
+        {
+          "label": "Optimisations",
+          "children": [
+            "Overlap",
+            "Bucketing",
+            "Compression"
+          ]
+        },
+        {
+          "label": "Bound",
+          "children": [
+            "Network bandwidth"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Communication time estimate",
+      "scenario": "Back-of-envelope.",
+      "flow": [
+        "Gradients: 7B params × 2 bytes = 14 GB",
+        "Ring all-reduce ≈ 2 × 14 GB per GPU",
+        "At 50 GB/s → ~0.56 s per step",
+        "At 400 Gb/s (~50 GB/s) vs 25 Gb/s (~3 GB/s): 16x difference"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The network choice decides scaling efficiency."
+        }
+      ],
+      "code": [],
+      "outcome": "you understand why topology drives training speed."
+    },
+    "summary": {
+      "points": [
+        "Sync every step.",
+        "Ring/tree algorithms.",
+        "Overlap and optimise."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does all-reduce do in data-parallel training?",
+        "a": "It combines (averages) gradients from all GPUs so every replica applies the same update."
+      }
+    ]
+  },
+  "gpu-direct-rdma-eliminating-the-cpu-from-the-data-path": {
+    "core": "Normally GPU-to-remote-GPU data goes GPU → CPU memory → NIC → network → NIC → CPU memory → GPU. GPUDirect RDMA lets the NIC read and write GPU memory directly, removing extra copies and CPU involvement, which cuts latency and frees the CPU.",
+    "first_principles": {
+      "problem": "Extra copies through host memory add latency and saturate CPU and memory bandwidth during training.",
+      "truths": [
+        "Each copy costs time and bandwidth.",
+        "RDMA NICs can access memory directly.",
+        "PCIe topology affects peer-to-peer paths."
+      ],
+      "derivation": [
+        "Enable **GPUDirect RDMA** (nvidia-peermem, RDMA NICs).",
+        "Place **NIC and GPU** on the same PCIe switch/NUMA node.",
+        "Use **NCCL** with the IB/RoCE transport.",
+        "Verify with **NCCL tests**."
+      ]
+    },
+    "analogy": {
+      "title": "Direct delivery vs. a sorting office",
+      "story": "Instead of routing every parcel through a central sorting office, couriers deliver door to door.",
+      "mapping": [
+        [
+          "Sorting office",
+          "CPU/host memory"
+        ],
+        [
+          "Door-to-door courier",
+          "GPUDirect RDMA"
+        ],
+        [
+          "Parcels",
+          "Tensors"
+        ]
+      ],
+      "breaks": "It needs compatible hardware, drivers and topology, and misconfiguration silently falls back to the slow path."
+    },
+    "mindmap": {
+      "center": "GPUDirect RDMA",
+      "branches": [
+        {
+          "label": "Slow path",
+          "children": [
+            "GPU → host → NIC"
+          ]
+        },
+        {
+          "label": "Fast path",
+          "children": [
+            "NIC ↔ GPU memory"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "RDMA NIC",
+            "nvidia-peermem",
+            "Topology alignment"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "nccl-tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verifying the fast path",
+      "scenario": "NCCL test.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms tensors bypass host memory."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "NCCL_DEBUG=INFO all_reduce_perf -b 1G -e 4G -g 8\n# look for: NET/IB ... GPU Direct RDMA enabled"
+        }
+      ],
+      "outcome": "the shortest data path between GPUs."
+    },
+    "summary": {
+      "points": [
+        "Skip the CPU.",
+        "Align the topology.",
+        "Verify it's enabled."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does GPUDirect RDMA eliminate from the data path?",
+        "a": "Copies through CPU host memory, letting the NIC access GPU memory directly."
+      }
+    ]
+  }
+}

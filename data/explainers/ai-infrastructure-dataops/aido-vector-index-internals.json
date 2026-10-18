@@ -1,0 +1,495 @@
+{
+  "introduction-the-curse-of-dimensionality": {
+    "core": "Exact nearest-neighbour search compares the query against every vector, which is O(N·d) and too slow at a billion vectors. In high dimensions, space-partitioning tricks like k-d trees collapse, so we trade a little accuracy (recall) for huge speed with Approximate Nearest Neighbour (ANN) indexes.",
+    "first_principles": {
+      "problem": "A brute-force scan of 1B × 1,536-dim vectors takes seconds per query, but users expect under 50 ms.",
+      "truths": [
+        "Distance computations scale with N and d.",
+        "In high dimensions, distances concentrate and trees stop pruning.",
+        "Most applications accept 95–99% recall."
+      ],
+      "derivation": [
+        "Give up **exactness** for speed (ANN).",
+        "**Navigate** a graph (HNSW) or **partition** space (IVF).",
+        "**Compress** vectors to fit memory (PQ).",
+        "Measure **recall@k** against brute force."
+      ]
+    },
+    "analogy": {
+      "title": "Finding the most similar book in a billion-book library",
+      "story": "Reading every book is exact but takes forever. A good librarian walks you to the right shelf and is almost always right.",
+      "mapping": [
+        [
+          "Reading every book",
+          "Brute-force scan"
+        ],
+        [
+          "Librarian's shortcut",
+          "ANN index"
+        ],
+        [
+          "Almost always right",
+          "Recall < 100%"
+        ]
+      ],
+      "breaks": "A librarian never says 'here's 97% of the right answer'; ANN recall is a statistical, tunable trade-off."
+    },
+    "mindmap": {
+      "center": "Curse of Dimensionality",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "O(N·d) scan",
+            "Trees fail in high-d"
+          ]
+        },
+        {
+          "label": "Answer",
+          "children": [
+            "ANN",
+            "Recall vs speed"
+          ]
+        },
+        {
+          "label": "Families",
+          "children": [
+            "Graph (HNSW)",
+            "Partition (IVF)",
+            "Compress (PQ)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Brute force vs ANN",
+      "scenario": "Same 10M-vector corpus.",
+      "flow": [
+        "Flat scan: 400 ms, recall 100%",
+        "HNSW: 2 ms, recall 98%",
+        "Accept 2% miss for 200× speed"
+      ],
+      "steps": [
+        {
+          "label": "Decision",
+          "detail": "Tune the index until recall meets the product's tolerance."
+        }
+      ],
+      "code": [],
+      "outcome": "search fast enough for real-time use."
+    },
+    "summary": {
+      "points": [
+        "Exact search doesn't scale.",
+        "ANN trades recall for speed.",
+        "Always measure recall."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do k-d trees fail for embeddings?",
+        "a": "In high dimensions distances concentrate, so the tree can't prune branches and degrades to scanning almost everything."
+      }
+    ]
+  },
+  "hnsw-hierarchical-navigable-small-world": {
+    "core": "HNSW builds a multi-layer proximity graph: sparse upper layers act as express highways for long jumps, and the dense bottom layer holds every vector for fine local search. A query greedily walks from the top layer down, so lookups take roughly logarithmic time.",
+    "first_principles": {
+      "problem": "We need sub-millisecond search with high recall, and a flat graph needs too many hops.",
+      "truths": [
+        "Small-world graphs have short paths between any two nodes.",
+        "Greedy search follows the closest neighbour.",
+        "Hierarchy cuts the number of hops."
+      ],
+      "derivation": [
+        "Each vector gets a **random max layer** (exponentially fewer at the top).",
+        "Connect to **M nearest neighbours** per layer.",
+        "Search: **greedy descent** layer by layer.",
+        "Tune **efConstruction** (build quality) and **efSearch** (query recall)."
+      ]
+    },
+    "analogy": {
+      "title": "Travelling by motorway, then main road, then side street",
+      "story": "You take the motorway to the right region, exit to a main road, and finish on side streets.",
+      "mapping": [
+        [
+          "Motorway",
+          "Top layer"
+        ],
+        [
+          "Side streets",
+          "Layer 0"
+        ],
+        [
+          "Exiting closer each time",
+          "Greedy descent"
+        ]
+      ],
+      "breaks": "Real roads are fixed, while HNSW graphs are memory-hungry and deletions leave holes that degrade quality."
+    },
+    "mindmap": {
+      "center": "HNSW",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Layers",
+            "Proximity graph"
+          ]
+        },
+        {
+          "label": "Build",
+          "children": [
+            "M links",
+            "efConstruction"
+          ]
+        },
+        {
+          "label": "Search",
+          "children": [
+            "Greedy descent",
+            "efSearch"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "High RAM",
+            "Slow deletes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tuning efSearch",
+      "scenario": "One HNSW index.",
+      "flow": [
+        "efSearch=16 → recall 0.90, 0.4 ms",
+        "efSearch=64 → 0.97, 1.1 ms",
+        "efSearch=256 → 0.995, 3.8 ms"
+      ],
+      "steps": [
+        {
+          "label": "Pick",
+          "detail": "64 meets a 0.95 recall target with low latency."
+        }
+      ],
+      "code": [],
+      "outcome": "a recall/latency point chosen by measurement."
+    },
+    "summary": {
+      "points": [
+        "Layers of graphs.",
+        "Greedy top-down search.",
+        "ef controls recall."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does efSearch control?",
+        "a": "The size of the candidate list during search: higher means better recall but slower queries."
+      }
+    ]
+  },
+  "ivf-inverted-file-index-the-clustering-part": {
+    "core": "IVF clusters vectors with k-means into nlist cells. At query time it finds the nprobe closest centroids and scans only those cells, cutting work by roughly nlist/nprobe.",
+    "first_principles": {
+      "problem": "Scanning all 100M vectors per query is too slow, but most of them are nowhere near the query.",
+      "truths": [
+        "Similar vectors cluster together.",
+        "The nearest neighbours are probably in nearby clusters.",
+        "Scanning a few clusters is cheap."
+      ],
+      "derivation": [
+        "**Train** k-means centroids (nlist ≈ √N).",
+        "**Assign** each vector to its nearest centroid (inverted lists).",
+        "**Query**: pick the nprobe nearest centroids and scan their lists.",
+        "Raise **nprobe** to improve recall at cluster edges."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet with labelled drawers",
+      "story": "You only open the drawer or two whose label best matches what you're looking for.",
+      "mapping": [
+        [
+          "Drawers",
+          "Clusters"
+        ],
+        [
+          "Labels",
+          "Centroids"
+        ],
+        [
+          "Opening two drawers",
+          "nprobe=2"
+        ]
+      ],
+      "breaks": "An item near a drawer boundary may be filed next door, which is why nprobe > 1 matters."
+    },
+    "mindmap": {
+      "center": "IVF",
+      "branches": [
+        {
+          "label": "Build",
+          "children": [
+            "k-means",
+            "nlist cells"
+          ]
+        },
+        {
+          "label": "Query",
+          "children": [
+            "Nearest centroids",
+            "nprobe scan"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "nprobe ↑ recall ↑",
+            "Speed ↓"
+          ]
+        },
+        {
+          "label": "Pairs with",
+          "children": [
+            "PQ compression"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tuning nprobe",
+      "scenario": "nlist=4096 on 16M vectors.",
+      "flow": [
+        "nprobe=1 → recall 0.6",
+        "nprobe=16 → 0.92",
+        "nprobe=64 → 0.98"
+      ],
+      "steps": [
+        {
+          "label": "Insight",
+          "detail": "Boundary effects mean you must probe several cells."
+        }
+      ],
+      "code": [],
+      "outcome": "search touching ~1% of the data."
+    },
+    "summary": {
+      "points": [
+        "Cluster, then scan a few cells.",
+        "nprobe tunes recall.",
+        "Needs training data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is nprobe=1 often low-recall?",
+        "a": "True neighbours near cluster boundaries are assigned to adjacent cells that aren't scanned."
+      }
+    ]
+  },
+  "pq-product-quantization-the-compression-part": {
+    "core": "Product Quantization splits each vector into m sub-vectors and replaces each with the ID of its nearest centroid from a 256-entry codebook. A 6 KB float vector becomes m bytes (e.g. 64 B), and distances are computed quickly from lookup tables.",
+    "first_principles": {
+      "problem": "1B vectors × 1,536 dims × 4 bytes ≈ 6 TB, which won't fit in RAM.",
+      "truths": [
+        "Memory, not compute, limits large indexes.",
+        "Sub-spaces can be quantized independently.",
+        "Approximate distances are good enough for ranking."
+      ],
+      "derivation": [
+        "**Split** d dims into m chunks.",
+        "**Train** 256 centroids per chunk.",
+        "**Encode**: one byte per chunk.",
+        "**Asymmetric distance**: a precomputed query-to-centroid table, summed per code.",
+        "**Re-rank** the top candidates with full vectors if needed."
+      ]
+    },
+    "analogy": {
+      "title": "Describing a face by picking from catalogues of eyes, noses and mouths",
+      "story": "'Eyes #41, nose #7, mouth #200' is tiny to store and close enough to recognise someone.",
+      "mapping": [
+        [
+          "Feature catalogues",
+          "Codebooks"
+        ],
+        [
+          "Picking #41",
+          "Sub-vector code"
+        ],
+        [
+          "Close enough",
+          "Approximate distance"
+        ]
+      ],
+      "breaks": "Compression loses detail, so recall drops; re-ranking with original vectors recovers it."
+    },
+    "mindmap": {
+      "center": "Product Quantization",
+      "branches": [
+        {
+          "label": "Encode",
+          "children": [
+            "Split m chunks",
+            "256 centroids each",
+            "1 byte per chunk"
+          ]
+        },
+        {
+          "label": "Search",
+          "children": [
+            "Lookup tables",
+            "ADC"
+          ]
+        },
+        {
+          "label": "Savings",
+          "children": [
+            "~100× memory"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Recall loss",
+            "Re-rank"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing a PQ index",
+      "scenario": "1B × 1,536-dim vectors.",
+      "flow": [
+        "Raw: 6 TB",
+        "PQ m=64: 64 GB",
+        "Fits on one large node"
+      ],
+      "steps": [
+        {
+          "label": "Re-rank",
+          "detail": "Fetch full vectors for the top 100 to restore precision."
+        }
+      ],
+      "code": [],
+      "outcome": "billion-scale search in RAM."
+    },
+    "summary": {
+      "points": [
+        "Split, codebook, encode.",
+        "~100× smaller.",
+        "Re-rank for precision."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many bytes does a PQ code use with m=64 and 256 centroids?",
+        "a": "64 bytes: one byte (256 options) per sub-vector."
+      }
+    ]
+  },
+  "the-great-trade-off-hnsw-vs-ivf-pq": {
+    "core": "HNSW gives the best recall and latency but needs all full vectors plus graph links in RAM. IVF-PQ is far more memory-efficient and scales to billions but has lower recall unless you re-rank. Choose by dataset size, memory budget, recall target and update pattern.",
+    "first_principles": {
+      "problem": "A team defaults to HNSW for 2B vectors and needs 15 TB of RAM.",
+      "truths": [
+        "RAM is the dominant cost at scale.",
+        "Recall requirements vary by application.",
+        "Update patterns affect index choice."
+      ],
+      "derivation": [
+        "**< ~10M vectors, latency-critical** → HNSW.",
+        "**Billions, memory-bound** → IVF-PQ (+ re-rank).",
+        "**Hybrid**: IVF with HNSW over centroids, or HNSW+PQ.",
+        "**Benchmark** on your own data (ann-benchmarks style)."
+      ]
+    },
+    "analogy": {
+      "title": "A sports car versus a freight train",
+      "story": "The sports car is fastest for a few passengers; the freight train moves enormous loads cheaply.",
+      "mapping": [
+        [
+          "Sports car",
+          "HNSW"
+        ],
+        [
+          "Freight train",
+          "IVF-PQ"
+        ],
+        [
+          "Load size",
+          "Dataset size"
+        ]
+      ],
+      "breaks": "You can combine index types (e.g. HNSW over IVF centroids), which you can't do with vehicles."
+    },
+    "mindmap": {
+      "center": "HNSW vs IVF-PQ",
+      "branches": [
+        {
+          "label": "HNSW",
+          "children": [
+            "Best recall",
+            "High RAM",
+            "Fast"
+          ]
+        },
+        {
+          "label": "IVF-PQ",
+          "children": [
+            "Low RAM",
+            "Billions",
+            "Lower recall"
+          ]
+        },
+        {
+          "label": "Decide by",
+          "children": [
+            "Size",
+            "Budget",
+            "Recall",
+            "Updates"
+          ]
+        },
+        {
+          "label": "Hybrids",
+          "children": [
+            "IVF-HNSW",
+            "HNSW+PQ"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing for two products",
+      "scenario": "Different scales.",
+      "flow": [
+        "5M docs RAG, p99 < 10 ms → HNSW",
+        "2B image embeddings → IVF-PQ + re-rank",
+        "Both benchmarked on real queries"
+      ],
+      "steps": [
+        {
+          "label": "Rule",
+          "detail": "Let memory cost and recall target decide."
+        }
+      ],
+      "code": [],
+      "outcome": "an index that fits both budget and accuracy."
+    },
+    "summary": {
+      "points": [
+        "HNSW: speed and recall.",
+        "IVF-PQ: scale and memory.",
+        "Benchmark on your own data."
+      ]
+    },
+    "check": [
+      {
+        "q": "When does IVF-PQ beat HNSW?",
+        "a": "At billion scale where RAM cost dominates, since PQ compresses vectors ~100× while HNSW needs full vectors plus graph links."
+      }
+    ]
+  }
+}

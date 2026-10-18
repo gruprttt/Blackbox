@@ -1,0 +1,519 @@
+{
+  "introduction-the-high-cost-of-intelligence": {
+    "core": "GPUs dominate AI costs (tens of thousands of dollars each, or several dollars per hour), yet they often sit idle or underused. Optimisation means sharing GPUs (MIG), using spot capacity with checkpoints, and removing hidden bottlenecks like NUMA misplacement.",
+    "first_principles": {
+      "problem": "A team rents eight A100s that average 25% utilisation, wasting most of a six-figure annual bill.",
+      "truths": [
+        "GPUs are scarce and expensive.",
+        "Many workloads don't need a whole GPU.",
+        "Data movement can starve GPUs."
+      ],
+      "derivation": [
+        "**Share** GPUs with MIG or time-slicing.",
+        "**Use spot** for fault-tolerant training.",
+        "**Checkpoint** to survive eviction.",
+        "**Pin** CPU, memory and NIC to the right NUMA node."
+      ]
+    },
+    "analogy": {
+      "title": "An expensive industrial machine sitting idle",
+      "story": "You'd share it between teams, run it on cheap night shifts, and make sure materials arrive fast enough.",
+      "mapping": [
+        [
+          "Industrial machine",
+          "GPU"
+        ],
+        [
+          "Sharing",
+          "MIG"
+        ],
+        [
+          "Night shifts",
+          "Spot"
+        ],
+        [
+          "Materials",
+          "Data feeding"
+        ]
+      ],
+      "breaks": "Utilisation metrics can mislead, since 100% 'busy' may still be memory-bound."
+    },
+    "mindmap": {
+      "center": "Compute Optimization",
+      "branches": [
+        {
+          "label": "Cost",
+          "children": [
+            "GPU price",
+            "Idle time"
+          ]
+        },
+        {
+          "label": "Levers",
+          "children": [
+            "MIG sharing",
+            "Spot + checkpoints",
+            "NUMA affinity"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "GPU utilisation",
+            "SM occupancy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A utilisation audit",
+      "scenario": "Findings.",
+      "flow": [
+        "8 GPUs avg 25% used",
+        "Inference jobs need 1/7 GPU each → MIG",
+        "Training moved to spot with checkpoints",
+        "Cost −55%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The same output for half the spend."
+        }
+      ],
+      "code": [],
+      "outcome": "GPU spend aligned with real use."
+    },
+    "summary": {
+      "points": [
+        "GPUs are expensive.",
+        "Share them.",
+        "Keep them fed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is GPU utilisation a key AI cost lever?",
+        "a": "GPUs are very expensive and often underused, so raising utilisation directly cuts cost per workload."
+      }
+    ]
+  },
+  "gpu-slicing-with-mig-the-pizza-oven-problem": {
+    "core": "Multi-Instance GPU (MIG, on A100/H100) partitions one physical GPU into up to seven isolated instances with dedicated memory and compute, so small inference or dev workloads share a big GPU safely. Time-slicing shares without isolation.",
+    "first_principles": {
+      "problem": "A small model needing 5 GB of VRAM occupies an entire 80 GB GPU.",
+      "truths": [
+        "Many workloads are much smaller than one GPU.",
+        "Isolation prevents noisy neighbours.",
+        "Kubernetes can schedule fractional GPUs."
+      ],
+      "derivation": [
+        "**MIG profiles**: e.g. 1g.10gb, 3g.40gb.",
+        "**Hardware isolation**: separate memory and SMs.",
+        "**Time-slicing**: oversubscribe without isolation (dev and test).",
+        "**Schedule** with the NVIDIA device plugin (nvidia.com/mig-1g.10gb)."
+      ]
+    },
+    "analogy": {
+      "title": "A giant pizza oven baking several pizzas at once",
+      "story": "Instead of one small pizza in a huge oven, divide the oven into separate trays.",
+      "mapping": [
+        [
+          "Oven",
+          "GPU"
+        ],
+        [
+          "Trays",
+          "MIG instances"
+        ],
+        [
+          "Separate trays",
+          "Isolation"
+        ]
+      ],
+      "breaks": "MIG partitions are fixed-size, so resizing needs reconfiguration, and not all GPUs support it."
+    },
+    "mindmap": {
+      "center": "MIG",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Partition GPU",
+            "Up to 7 instances"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "Memory",
+            "Compute"
+          ]
+        },
+        {
+          "label": "Alt",
+          "children": [
+            "Time-slicing",
+            "MPS"
+          ]
+        },
+        {
+          "label": "K8s",
+          "children": [
+            "Device plugin",
+            "MIG resources"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Fixed sizes",
+            "A100/H100+"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Requesting a MIG slice in Kubernetes",
+      "scenario": "Pod spec.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Seven small inference services on one A100."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "resources:\n  limits:\n    nvidia.com/mig-1g.10gb: 1"
+        }
+      ],
+      "outcome": "big GPUs shared efficiently."
+    },
+    "summary": {
+      "points": [
+        "Slice large GPUs.",
+        "Isolated instances.",
+        "Schedule fractions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key difference between MIG and time-slicing?",
+        "a": "MIG gives hardware-isolated memory and compute partitions; time-slicing shares the GPU in turns without isolation."
+      }
+    ]
+  },
+  "training-on-a-budget-spot-instances": {
+    "core": "Spot (preemptible) GPU instances cost 60–90% less but can be reclaimed with little notice. Training jobs that checkpoint frequently and restart automatically can tolerate this and cut training costs dramatically.",
+    "first_principles": {
+      "problem": "A week-long training run on on-demand GPUs costs tens of thousands of dollars.",
+      "truths": [
+        "Clouds sell spare capacity cheaply.",
+        "Training is resumable if state is saved.",
+        "Interruptions are statistically predictable."
+      ],
+      "derivation": [
+        "Run training on **spot/preemptible** GPUs.",
+        "**Checkpoint** regularly.",
+        "**Auto-restart** on a new instance (managed spot training, Kubernetes Jobs).",
+        "**Diversify** instance types and zones."
+      ]
+    },
+    "analogy": {
+      "title": "The cloud's clearance aisle",
+      "story": "Steep discounts on capacity that might disappear, which is great if you can come back later.",
+      "mapping": [
+        [
+          "Clearance aisle",
+          "Spot market"
+        ],
+        [
+          "Item might vanish",
+          "Instance reclaimed"
+        ],
+        [
+          "Coming back later",
+          "Resuming from checkpoint"
+        ]
+      ],
+      "breaks": "Multi-node synchronous training is more fragile: one eviction stalls all nodes."
+    },
+    "mindmap": {
+      "center": "Spot Training",
+      "branches": [
+        {
+          "label": "Savings",
+          "children": [
+            "60-90%"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Eviction"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Checkpointing",
+            "Auto-restart"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "SageMaker managed spot",
+            "K8s Jobs",
+            "SkyPilot"
+          ]
+        },
+        {
+          "label": "Tip",
+          "children": [
+            "Diversify"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spot training savings",
+      "scenario": "Numbers.",
+      "flow": [
+        "8× GPU on-demand: $30/hr × 100h = $3,000",
+        "Spot: $9/hr × 110h (with restarts) = $990",
+        "~67% saved"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Many more experiments for the same budget."
+        }
+      ],
+      "code": [],
+      "outcome": "cheap, interruption-tolerant training."
+    },
+    "summary": {
+      "points": [
+        "Big discounts.",
+        "Must checkpoint.",
+        "Auto-restart."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes training workloads suitable for spot instances?",
+        "a": "They can checkpoint state and resume after interruption, so evictions only lose a little progress."
+      }
+    ]
+  },
+  "the-art-of-checkpointing-surviving-the-eviction": {
+    "core": "Checkpointing periodically saves model weights, optimizer state, the learning-rate scheduler, RNG state and the data position to durable storage, so training resumes exactly where it left off after an eviction or crash.",
+    "first_principles": {
+      "problem": "A spot eviction at hour 47 of a 48-hour run without checkpoints loses everything.",
+      "truths": [
+        "Interruptions will happen.",
+        "Full state is needed for exact resumption.",
+        "Checkpoint frequency trades I/O cost against lost work."
+      ],
+      "derivation": [
+        "Save **model + optimizer + scheduler + step + RNG + data loader position**.",
+        "Write to **durable storage** (S3/GCS), atomically.",
+        "Pick the **frequency** (e.g. every 15–30 minutes).",
+        "On start, **load the latest** checkpoint if one exists; handle the **eviction notice** with a final save."
+      ]
+    },
+    "analogy": {
+      "title": "Saving a video game",
+      "story": "Save at checkpoints so dying doesn't send you back to the start.",
+      "mapping": [
+        [
+          "Save point",
+          "Checkpoint"
+        ],
+        [
+          "Game over",
+          "Eviction"
+        ],
+        [
+          "Continue",
+          "Resume training"
+        ]
+      ],
+      "breaks": "Large model checkpoints (hundreds of GB) take time, so use async or sharded checkpointing."
+    },
+    "mindmap": {
+      "center": "Checkpointing",
+      "branches": [
+        {
+          "label": "Save",
+          "children": [
+            "Weights",
+            "Optimizer",
+            "Scheduler",
+            "Step",
+            "RNG",
+            "Data position"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "S3/GCS",
+            "Atomic writes"
+          ]
+        },
+        {
+          "label": "When",
+          "children": [
+            "Interval",
+            "On eviction notice"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Async",
+            "Sharded"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Resume logic",
+      "scenario": "PyTorch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "At most 15 minutes lost per eviction."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "ckpt = latest_checkpoint(\"s3://runs/exp42/\")\nif ckpt:\n    state = torch.load(ckpt)\n    model.load_state_dict(state[\"model\"]); opt.load_state_dict(state[\"opt\"]); step = state[\"step\"]\n# ... every N steps:\ntorch.save({\"model\": model.state_dict(), \"opt\": opt.state_dict(), \"step\": step}, tmp); upload_atomic(tmp)"
+        }
+      ],
+      "outcome": "training that survives interruptions."
+    },
+    "summary": {
+      "points": [
+        "Save the full state.",
+        "Durable and atomic.",
+        "Resume automatically."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why save optimizer state, not just model weights, in a checkpoint?",
+        "a": "Optimizers like Adam keep per-parameter state, and losing it changes training dynamics after resuming."
+      }
+    ]
+  },
+  "the-hidden-bottleneck-numa-and-cpu-gpu-affinity": {
+    "core": "Multi-socket servers have NUMA: each CPU socket has local memory and PCIe lanes to specific GPUs and NICs. If a data-loading process runs on the 'far' socket, data crosses the slow inter-socket link, so pin processes to the NUMA node closest to their GPU.",
+    "first_principles": {
+      "problem": "GPUs sit at 50% utilisation because data loaders on the wrong CPU socket feed them over a slow cross-socket link.",
+      "truths": [
+        "Memory access speed depends on locality.",
+        "GPUs attach to specific sockets.",
+        "Default scheduling ignores topology."
+      ],
+      "derivation": [
+        "Inspect the topology: **`nvidia-smi topo -m`**, **`lstopo`**.",
+        "**Pin** data-loader processes to the local NUMA node (numactl, taskset).",
+        "Use the **Kubernetes topology manager** (single-numa-node policy).",
+        "**Align** NICs for RDMA as well."
+      ]
+    },
+    "analogy": {
+      "title": "Two kitchens sharing one pantry corridor",
+      "story": "A chef fetching ingredients from the far kitchen's pantry wastes time walking the corridor.",
+      "mapping": [
+        [
+          "Kitchens",
+          "CPU sockets"
+        ],
+        [
+          "Local pantry",
+          "Local memory"
+        ],
+        [
+          "Corridor",
+          "Inter-socket link"
+        ],
+        [
+          "Chef",
+          "Data loader"
+        ]
+      ],
+      "breaks": "Smaller single-socket machines don't have this problem."
+    },
+    "mindmap": {
+      "center": "NUMA Affinity",
+      "branches": [
+        {
+          "label": "Concept",
+          "children": [
+            "Local vs remote memory",
+            "PCIe locality"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "nvidia-smi topo -m",
+            "lstopo"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "numactl",
+            "taskset",
+            "K8s topology manager"
+          ]
+        },
+        {
+          "label": "Also",
+          "children": [
+            "NIC alignment"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pinning a data loader",
+      "scenario": "numactl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "GPU utilisation jumps from 50% to 90%."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nvidia-smi topo -m          # GPU0 has CPU affinity 0-31, NUMA node 0\nnumactl --cpunodebind=0 --membind=0 python train.py --gpu 0"
+        }
+      ],
+      "outcome": "hardware topology used correctly."
+    },
+    "summary": {
+      "points": [
+        "Locality matters.",
+        "Inspect the topology.",
+        "Pin the processes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is NUMA, and why does it affect GPU training?",
+        "a": "Non-Uniform Memory Access means each CPU socket has local memory and devices; running data loaders on the far socket slows data delivery to GPUs."
+      }
+    ]
+  }
+}

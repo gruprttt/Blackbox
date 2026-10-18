@@ -1,0 +1,499 @@
+{
+  "introduction-repl-on-steroids": {
+    "core": "A notebook is an interactive REPL saved as a document: code cells, outputs, charts and prose live together. That makes notebooks ideal for exploration and communication, because you see the result of each step immediately.",
+    "first_principles": {
+      "problem": "Data exploration with edit-run-print scripts is slow and leaves no readable record.",
+      "truths": [
+        "Exploration is iterative.",
+        "Seeing intermediate results guides the next step.",
+        "Results need explanation to be shared."
+      ],
+      "derivation": [
+        "Split work into **cells**.",
+        "Keep **state** in memory between cells.",
+        "Render **rich outputs** (tables, plots).",
+        "Mix in **markdown** narrative."
+      ]
+    },
+    "analogy": {
+      "title": "A scientist's lab notebook",
+      "story": "Hypothesis, procedure, observations and conclusions recorded together as you go.",
+      "mapping": [
+        [
+          "Procedure",
+          "Code cells"
+        ],
+        [
+          "Observations",
+          "Outputs"
+        ],
+        [
+          "Notes",
+          "Markdown"
+        ]
+      ],
+      "breaks": "A lab notebook is written in order; notebook cells can be re-run out of order."
+    },
+    "mindmap": {
+      "center": "Notebooks",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "Code cells",
+            "Outputs",
+            "Markdown"
+          ]
+        },
+        {
+          "label": "Strengths",
+          "children": [
+            "Fast iteration",
+            "Visual",
+            "Shareable"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Jupyter",
+            "Colab",
+            "VS Code"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Hidden state"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A first exploration",
+      "scenario": "Loading a CSV.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Summary table rendered instantly under the cell."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import pandas as pd\ndf = pd.read_csv('events.csv')\ndf.describe()"
+        }
+      ],
+      "outcome": "fast feedback while exploring."
+    },
+    "summary": {
+      "points": [
+        "Interactive REPL plus document.",
+        "Great for exploration.",
+        "Rich outputs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are notebooks good for exploration?",
+        "a": "Each cell's result is visible immediately and state persists, so you iterate quickly."
+      }
+    ]
+  },
+  "architecture-the-frontend-and-the-kernel": {
+    "core": "Jupyter is client-server: the browser frontend sends cell code over a WebSocket to a kernel process, which executes it and returns outputs using the Jupyter messaging protocol (over ZeroMQ). The kernel can run anywhere, including a remote GPU box or Colab VM.",
+    "first_principles": {
+      "problem": "People assume code runs in the browser and are confused when the kernel dies or runs remotely.",
+      "truths": [
+        "The browser only renders.",
+        "A kernel is a separate process holding state.",
+        "The protocol decouples UI and execution."
+      ],
+      "derivation": [
+        "**Frontend** (JupyterLab, Colab, VS Code) sends execute requests.",
+        "**Server** routes to kernels.",
+        "**Kernel** (ipykernel) runs code and holds variables.",
+        "Kernels for **many languages**."
+      ]
+    },
+    "analogy": {
+      "title": "A remote control and a TV",
+      "story": "The remote sends commands; the TV does the work and shows the result.",
+      "mapping": [
+        [
+          "Remote",
+          "Browser frontend"
+        ],
+        [
+          "TV",
+          "Kernel"
+        ],
+        [
+          "Signals",
+          "Messaging protocol"
+        ]
+      ],
+      "breaks": "Turning off the TV keeps nothing; restarting a kernel wipes all in-memory variables."
+    },
+    "mindmap": {
+      "center": "Jupyter Architecture",
+      "branches": [
+        {
+          "label": "Frontend",
+          "children": [
+            "JupyterLab",
+            "Colab",
+            "VS Code"
+          ]
+        },
+        {
+          "label": "Server",
+          "children": [
+            "Routing",
+            "Auth"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "Executes code",
+            "Holds state"
+          ]
+        },
+        {
+          "label": "Protocol",
+          "children": [
+            "WebSocket",
+            "ZeroMQ"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Running a kernel on a GPU server",
+      "scenario": "Local browser, remote compute.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Browser locally, code executes on the GPU machine."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ssh -L 8888:localhost:8888 gpu-box 'jupyter lab --no-browser --port 8888'"
+        }
+      ],
+      "outcome": "UI and compute decoupled."
+    },
+    "summary": {
+      "points": [
+        "Browser renders.",
+        "Kernel executes.",
+        "They can be on different machines."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to variables when the kernel restarts?",
+        "a": "They're lost, because state lives in the kernel process's memory."
+      }
+    ]
+  },
+  "the-hidden-trap-hidden-state": {
+    "core": "Because cells can run in any order and state persists, a notebook's on-screen code can differ from what actually produced its outputs. Deleted cells, re-runs and out-of-order execution create hidden state that makes results irreproducible.",
+    "first_principles": {
+      "problem": "A notebook works for its author but fails top-to-bottom for everyone else.",
+      "truths": [
+        "Kernel state reflects execution history, not the page.",
+        "Deleted cells' variables still exist.",
+        "Reproducibility requires linear execution."
+      ],
+      "derivation": [
+        "**Restart and Run All** before sharing.",
+        "Watch **execution counts** for order.",
+        "Avoid **mutating** variables across cells.",
+        "Use tools like **nbval** or papermill in CI."
+      ]
+    },
+    "analogy": {
+      "title": "A whiteboard where someone erased steps but kept the answer",
+      "story": "The final answer is there, but the visible working no longer produces it.",
+      "mapping": [
+        [
+          "Erased steps",
+          "Deleted cells"
+        ],
+        [
+          "Answer",
+          "Output"
+        ],
+        [
+          "Visible working",
+          "Current code"
+        ]
+      ],
+      "breaks": "On a whiteboard you know something was erased; in a notebook nothing tells you."
+    },
+    "mindmap": {
+      "center": "Hidden State",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Out-of-order runs",
+            "Deleted cells",
+            "Mutation"
+          ]
+        },
+        {
+          "label": "Symptom",
+          "children": [
+            "Works only for author"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Restart & Run All",
+            "nbval in CI",
+            "Pure cells"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The phantom variable",
+      "scenario": "A deleted cell.",
+      "flow": [
+        "Cell 3 defined threshold = 0.7, then was deleted",
+        "Cell 5 still uses threshold → works",
+        "Colleague runs fresh → NameError"
+      ],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Restart & Run All before committing."
+        }
+      ],
+      "code": [],
+      "outcome": "notebooks that run for everyone."
+    },
+    "summary": {
+      "points": [
+        "State ≠ visible code.",
+        "Restart & Run All.",
+        "Test notebooks in CI."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the simplest check for hidden state?",
+        "a": "Restart the kernel and run all cells top to bottom."
+      }
+    ]
+  },
+  "visualizing-for-debugging-matplotlib-seaborn": {
+    "core": "Plots expose what summary statistics hide: skew, outliers, missing data, label imbalance and leakage. Quick histograms, scatter plots and heatmaps with Matplotlib and Seaborn are debugging tools for datasets and models.",
+    "first_principles": {
+      "problem": "Mean and standard deviation look fine, yet the model trains badly because of a hidden data issue.",
+      "truths": [
+        "Different distributions can share the same summary statistics (Anscombe's quartet).",
+        "Humans spot patterns visually.",
+        "Data bugs are silent."
+      ],
+      "derivation": [
+        "**Histogram** each feature.",
+        "**Scatter/pair plots** for relationships.",
+        "**Heatmap** correlations and missingness.",
+        "Plot **loss curves** and confusion matrices."
+      ]
+    },
+    "analogy": {
+      "title": "An X-ray versus a weight reading",
+      "story": "The scale says the patient's weight is normal; the X-ray shows the broken bone.",
+      "mapping": [
+        [
+          "Weight",
+          "Summary statistics"
+        ],
+        [
+          "X-ray",
+          "Plots"
+        ],
+        [
+          "Broken bone",
+          "Data bug"
+        ]
+      ],
+      "breaks": "An X-ray shows one body; plots can mislead with bad bins or scales."
+    },
+    "mindmap": {
+      "center": "Visual Debugging",
+      "branches": [
+        {
+          "label": "Plots",
+          "children": [
+            "Histogram",
+            "Scatter/pair",
+            "Heatmap",
+            "Loss curves"
+          ]
+        },
+        {
+          "label": "Reveals",
+          "children": [
+            "Outliers",
+            "Skew",
+            "Missing data",
+            "Leakage"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Matplotlib",
+            "Seaborn"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Finding a sentinel value",
+      "scenario": "Age column.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "A spike at 999 is a 'missing' placeholder skewing the mean."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import seaborn as sns\nsns.histplot(df['age'], bins=50)"
+        }
+      ],
+      "outcome": "a data bug caught before training."
+    },
+    "summary": {
+      "points": [
+        "Plot before modelling.",
+        "Stats hide shape.",
+        "Visualise model behaviour too."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Anscombe's quartet demonstrate?",
+        "a": "Datasets with identical summary statistics can have completely different shapes, so you must plot them."
+      }
+    ]
+  },
+  "notebooks-in-production-when-to-graduate-to-scripts": {
+    "core": "Notebooks suit exploration but are weak for production: hidden state, poor diffs, hard testing and no modular imports. Graduate stable logic into version-controlled modules with tests, and keep notebooks as thin callers or reports (or run them via papermill when necessary).",
+    "first_principles": {
+      "problem": "A training pipeline lives in a 300-cell notebook that nobody can review, test or schedule reliably.",
+      "truths": [
+        "Production code needs tests and review.",
+        "JSON notebooks diff poorly.",
+        "Modules can be imported and reused."
+      ],
+      "derivation": [
+        "**Extract** functions to .py modules.",
+        "**Test** with pytest.",
+        "**Orchestrate** with Airflow, Kubeflow or similar.",
+        "Use **jupytext** or nbdime for diffs.",
+        "**Parameterise** with papermill if notebooks must run."
+      ]
+    },
+    "analogy": {
+      "title": "A sketchbook versus blueprints",
+      "story": "Architects sketch freely, then produce precise, reviewed blueprints for the builders.",
+      "mapping": [
+        [
+          "Sketchbook",
+          "Notebook"
+        ],
+        [
+          "Blueprints",
+          "Modules + tests"
+        ],
+        [
+          "Builders",
+          "Production pipeline"
+        ]
+      ],
+      "breaks": "Sketches are discarded; good notebooks stay as documentation and reports."
+    },
+    "mindmap": {
+      "center": "Graduation",
+      "branches": [
+        {
+          "label": "Notebook weak at",
+          "children": [
+            "Testing",
+            "Diffs",
+            "Hidden state"
+          ]
+        },
+        {
+          "label": "Move to",
+          "children": [
+            "Modules",
+            "pytest",
+            "Orchestrator"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "jupytext",
+            "nbdime",
+            "papermill"
+          ]
+        },
+        {
+          "label": "Keep notebooks for",
+          "children": [
+            "Exploration",
+            "Reports"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Refactoring a feature pipeline",
+      "scenario": "From notebook to package.",
+      "flow": [
+        "Notebook cells → features.py functions",
+        "Unit tests for each function",
+        "Airflow DAG calls the module",
+        "Notebook imports features for analysis"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reviewable, testable, schedulable code."
+        }
+      ],
+      "code": [],
+      "outcome": "exploration speed without production fragility."
+    },
+    "summary": {
+      "points": [
+        "Explore in notebooks.",
+        "Ship modules.",
+        "Test and orchestrate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name two reasons notebooks are poor for production.",
+        "a": "Hidden state makes them irreproducible, and JSON format makes review and testing hard."
+      }
+    ]
+  }
+}

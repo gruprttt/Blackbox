@@ -1,0 +1,501 @@
+{
+  "introduction-the-plumbing-problem-in-ml": {
+    "core": "Features are model inputs derived from raw data (for example 'average spend over 30 days'). Teams repeatedly re-implement them for training and serving, inconsistently. A feature store centralises feature definitions, computation, storage and serving.",
+    "first_principles": {
+      "problem": "Five teams each compute 'user spend last 30 days' differently, and the online and offline versions don't match.",
+      "truths": [
+        "Features are reused across models.",
+        "Training and serving need the same logic.",
+        "Historical and real-time access patterns differ."
+      ],
+      "derivation": [
+        "**Define** features once.",
+        "Avoid **training-serving skew**.",
+        "Run **dual stores** (offline and online).",
+        "Guarantee **point-in-time correctness**; enable **reuse** with a registry."
+      ]
+    },
+    "analogy": {
+      "title": "A central kitchen preparing ingredients",
+      "story": "Instead of each restaurant chopping its own onions differently, one kitchen prepares standard ingredients for all.",
+      "mapping": [
+        [
+          "Raw produce",
+          "Raw data"
+        ],
+        [
+          "Prepared ingredients",
+          "Features"
+        ],
+        [
+          "Restaurants",
+          "Models"
+        ]
+      ],
+      "breaks": "Small teams with few models may not need a full feature store."
+    },
+    "mindmap": {
+      "center": "Feature Stores",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Duplicate logic",
+            "Skew"
+          ]
+        },
+        {
+          "label": "Components",
+          "children": [
+            "Definitions",
+            "Offline store",
+            "Online store",
+            "Registry"
+          ]
+        },
+        {
+          "label": "Guarantees",
+          "children": [
+            "Consistency",
+            "Point-in-time"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Feast",
+            "Tecton",
+            "Databricks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fraud features",
+      "scenario": "Raw → features.",
+      "flow": [
+        "Raw: transaction stream",
+        "Feature: txn_count_1h, avg_amount_30d",
+        "Offline: for training",
+        "Online: for real-time scoring"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One definition, consistent everywhere."
+        }
+      ],
+      "code": [],
+      "outcome": "ML plumbing standardised."
+    },
+    "summary": {
+      "points": [
+        "Features are reusable.",
+        "Centralise definitions.",
+        "Serve both offline and online."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a 'feature' in machine learning?",
+        "a": "A model input derived from raw data, such as a user's transaction count over the last hour."
+      }
+    ]
+  },
+  "the-enemy-training-serving-skew": {
+    "core": "Training-serving skew happens when features are computed differently in training (batch SQL in a notebook) and in production (application code), or with different data freshness. The model sees different inputs live than it learned on, and silently degrades.",
+    "first_principles": {
+      "problem": "A model scores 0.92 AUC offline and performs poorly in production with no errors, because the 'same' feature is calculated differently.",
+      "truths": [
+        "Two implementations drift apart.",
+        "Skew causes no errors, just bad predictions.",
+        "Consistency requires shared logic."
+      ],
+      "derivation": [
+        "**Single definition** used for both paths.",
+        "**Same transformations** materialised to the offline and online stores.",
+        "**Log served features** and compare them with the training distribution.",
+        "**Monitor** for skew."
+      ]
+    },
+    "analogy": {
+      "title": "Practising with one ball and playing with another",
+      "story": "Training with a soft ball and then playing the match with a hard ball ruins your timing.",
+      "mapping": [
+        [
+          "Practice ball",
+          "Training features"
+        ],
+        [
+          "Match ball",
+          "Serving features"
+        ],
+        [
+          "Ruined timing",
+          "Model degradation"
+        ]
+      ],
+      "breaks": "Some skew comes from data drift, not logic, which also needs monitoring."
+    },
+    "mindmap": {
+      "center": "Training-Serving Skew",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Different code paths",
+            "Different freshness",
+            "Different defaults"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Silent degradation"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Single definition",
+            "Shared pipelines",
+            "Log + compare"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A null-handling skew",
+      "scenario": "Bug.",
+      "flow": [
+        "Training SQL: missing → 0",
+        "Serving code: missing → mean",
+        "Model sees different values live",
+        "Fix: one definition in the feature store"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Production accuracy matches offline."
+        }
+      ],
+      "code": [],
+      "outcome": "consistent features across environments."
+    },
+    "summary": {
+      "points": [
+        "Skew is silent.",
+        "One definition.",
+        "Log and compare."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is training-serving skew?",
+        "a": "A mismatch between how features are computed or supplied in training versus in production, which silently degrades model performance."
+      }
+    ]
+  },
+  "architecture-online-vs-offline-stores": {
+    "core": "A feature store has two stores. The offline store (a data lake or warehouse, like Parquet, BigQuery or Snowflake) holds full history for training and backfills. The online store (Redis, DynamoDB, Cassandra) holds the latest values for low-latency lookup at inference. Materialisation jobs sync them.",
+    "first_principles": {
+      "problem": "A warehouse is too slow for real-time inference, and a key-value store can't hold years of history for training.",
+      "truths": [
+        "Training needs history at scale.",
+        "Serving needs milliseconds per lookup.",
+        "Both must derive from the same logic."
+      ],
+      "derivation": [
+        "**Offline**: columnar, historical, high-throughput scans.",
+        "**Online**: key-value, latest values, p99 < 10 ms.",
+        "**Materialise** offline → online on schedule or streaming.",
+        "**Serve** via SDK/API: get_online_features(entity)."
+      ]
+    },
+    "analogy": {
+      "title": "An archive and a front-desk drawer",
+      "story": "The archive keeps every record for research; the front desk keeps the latest file for instant answers.",
+      "mapping": [
+        [
+          "Archive",
+          "Offline store"
+        ],
+        [
+          "Front-desk drawer",
+          "Online store"
+        ],
+        [
+          "Filing clerk",
+          "Materialisation job"
+        ]
+      ],
+      "breaks": "Keeping two stores in sync adds operational complexity and freshness lag."
+    },
+    "mindmap": {
+      "center": "Online vs Offline",
+      "branches": [
+        {
+          "label": "Offline",
+          "children": [
+            "Lake/warehouse",
+            "History",
+            "Training"
+          ]
+        },
+        {
+          "label": "Online",
+          "children": [
+            "Redis",
+            "DynamoDB",
+            "Low latency",
+            "Inference"
+          ]
+        },
+        {
+          "label": "Sync",
+          "children": [
+            "Materialisation",
+            "Streaming"
+          ]
+        },
+        {
+          "label": "API",
+          "children": [
+            "get_online_features"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fetching features at inference",
+      "scenario": "Feast.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Millisecond feature lookups during scoring."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "feats = store.get_online_features(\n    features=[\"user_stats:txn_count_1h\", \"user_stats:avg_amount_30d\"],\n    entity_rows=[{\"user_id\": 42}]).to_dict()"
+        }
+      ],
+      "outcome": "one feature system for two access patterns."
+    },
+    "summary": {
+      "points": [
+        "Offline for history.",
+        "Online for speed.",
+        "Materialise between them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a feature store need both online and offline stores?",
+        "a": "Training needs large-scale historical data, while inference needs very low-latency access to the latest values."
+      }
+    ]
+  },
+  "point-in-time-correctness-time-travel": {
+    "core": "When building training data, each label must be joined only with feature values that were known at that event's time, not later. Point-in-time (as-of) joins prevent data leakage, where future information inflates offline accuracy and then fails in production.",
+    "first_principles": {
+      "problem": "Training joins today's 'account balance' to last year's fraud labels, so the model learns from the future and fails live.",
+      "truths": [
+        "Features change over time.",
+        "Models must learn only from information available at prediction time.",
+        "Naive joins leak future data."
+      ],
+      "derivation": [
+        "Store features with **timestamps** (event and created).",
+        "For each label, take the **latest feature value ≤ label time**.",
+        "Use the store's **point-in-time join** (get_historical_features).",
+        "Respect **TTLs** for staleness."
+      ]
+    },
+    "analogy": {
+      "title": "Judging a past decision with only what was known then",
+      "story": "You can't fault a decision using information that only became available later.",
+      "mapping": [
+        [
+          "Decision moment",
+          "Label timestamp"
+        ],
+        [
+          "Information then",
+          "Feature values ≤ timestamp"
+        ],
+        [
+          "Hindsight",
+          "Data leakage"
+        ]
+      ],
+      "breaks": "Point-in-time joins are computationally expensive at scale, so use optimised engines."
+    },
+    "mindmap": {
+      "center": "Point-in-Time",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Data leakage"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Feature time ≤ label time"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "As-of join"
+          ]
+        },
+        {
+          "label": "API",
+          "children": [
+            "get_historical_features"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "TTL",
+            "Timestamps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An as-of join",
+      "scenario": "Conceptual SQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Offline metrics reflect real-world performance."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT l.user_id, l.label, l.ts, f.avg_amount_30d\nFROM labels l\nASOF JOIN features f ON l.user_id = f.user_id AND f.ts <= l.ts"
+        }
+      ],
+      "outcome": "training data without leakage."
+    },
+    "summary": {
+      "points": [
+        "Use only known-at-the-time data.",
+        "As-of joins.",
+        "Timestamps everywhere."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is data leakage in feature engineering?",
+        "a": "Using information in training that wouldn't have been available at prediction time, inflating offline accuracy."
+      }
+    ]
+  },
+  "feature-reuse-and-the-feature-registry": {
+    "core": "The feature registry catalogues every feature (name, definition, owner, entity, source, freshness, version, which models use it), so teams discover and reuse existing features instead of rebuilding them, with consistent semantics and governance.",
+    "first_principles": {
+      "problem": "Seven teams build seven versions of 'user 30-day spend', costing duplicated compute and inconsistent results.",
+      "truths": [
+        "Feature engineering is expensive.",
+        "Discoverability enables reuse.",
+        "Shared features need ownership."
+      ],
+      "derivation": [
+        "**Register** feature views with metadata and owners.",
+        "**Search and browse** the catalogue.",
+        "**Version** definitions; track **lineage** to models.",
+        "**Govern** access (PII flags)."
+      ]
+    },
+    "analogy": {
+      "title": "A shared recipe book in a restaurant group",
+      "story": "Chefs reuse tested recipes instead of inventing their own version of the house sauce.",
+      "mapping": [
+        [
+          "Recipe book",
+          "Feature registry"
+        ],
+        [
+          "House sauce",
+          "Common feature"
+        ],
+        [
+          "Recipe author",
+          "Feature owner"
+        ]
+      ],
+      "breaks": "A registry full of undocumented features doesn't help, so require descriptions and owners."
+    },
+    "mindmap": {
+      "center": "Feature Registry",
+      "branches": [
+        {
+          "label": "Metadata",
+          "children": [
+            "Definition",
+            "Owner",
+            "Entity",
+            "Freshness",
+            "Version"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Discovery",
+            "Reuse",
+            "Lineage"
+          ]
+        },
+        {
+          "label": "Governance",
+          "children": [
+            "PII flags",
+            "Access control"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A feature definition",
+      "scenario": "Feast.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Other teams find and reuse it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "user_stats = FeatureView(\n    name=\"user_stats\", entities=[user], ttl=timedelta(days=2),\n    schema=[Field(name=\"avg_amount_30d\", dtype=Float32)],\n    source=txn_source, owner=\"risk-team@acme.io\",\n    tags={\"pii\": \"false\", \"description\": \"Mean transaction amount over 30 days\"})"
+        }
+      ],
+      "outcome": "features shared as organisational assets."
+    },
+    "summary": {
+      "points": [
+        "Catalogue features.",
+        "Reuse, don't rebuild.",
+        "Own and govern them."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main benefit of a feature registry?",
+        "a": "Discovery and reuse of existing, consistently defined features across teams, with ownership and governance."
+      }
+    ]
+  }
+}

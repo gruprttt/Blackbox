@@ -1,0 +1,399 @@
+{
+  "introduction-the-centralization-trap": {
+    "core": "Traditional ML copies all data to a central server, which is often impossible because of privacy law (GDPR, HIPAA), bandwidth or competitive concerns. Federated Learning flips it: send the model to where the data lives, train locally, and share only model updates.",
+    "first_principles": {
+      "problem": "Hospitals want a joint diagnostic model but cannot legally pool patient records.",
+      "truths": [
+        "Data may be legally or physically immovable.",
+        "Models are much smaller than datasets.",
+        "Model updates can be aggregated."
+      ],
+      "derivation": [
+        "**Ship** the model to clients.",
+        "**Train** locally on private data.",
+        "**Send** only weight updates.",
+        "**Aggregate** centrally into a global model."
+      ]
+    },
+    "analogy": {
+      "title": "Researchers visiting libraries instead of moving the books",
+      "story": "The books stay where they are; the researchers bring back their notes.",
+      "mapping": [
+        [
+          "Books",
+          "Private data"
+        ],
+        [
+          "Travelling researcher",
+          "Model"
+        ],
+        [
+          "Notes",
+          "Weight updates"
+        ]
+      ],
+      "breaks": "Notes can reveal more than you think, since gradients can leak data without extra protection."
+    },
+    "mindmap": {
+      "center": "Centralization Trap",
+      "branches": [
+        {
+          "label": "Blockers",
+          "children": [
+            "Privacy law",
+            "Bandwidth",
+            "Competition"
+          ]
+        },
+        {
+          "label": "FL idea",
+          "children": [
+            "Model to data",
+            "Local training",
+            "Share updates"
+          ]
+        },
+        {
+          "label": "Settings",
+          "children": [
+            "Cross-device",
+            "Cross-silo"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hospital consortium",
+      "scenario": "Cross-silo FL.",
+      "flow": [
+        "Server sends global model to 5 hospitals",
+        "Each trains on local scans",
+        "Updates sent back and averaged",
+        "Repeat for rounds"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A shared model without sharing records."
+        }
+      ],
+      "code": [],
+      "outcome": "collaboration within privacy constraints."
+    },
+    "summary": {
+      "points": [
+        "Data stays put.",
+        "Model travels.",
+        "Updates aggregated."
+      ]
+    },
+    "check": [
+      {
+        "q": "What moves in federated learning: data or model?",
+        "a": "The model (and its updates); raw data never leaves the client."
+      }
+    ]
+  },
+  "the-algorithm-how-fedavg-works": {
+    "core": "Federated Averaging: each round, the server samples clients, sends the global weights, each client runs several local SGD epochs, and the server averages the returned weights weighted by each client's sample count. Multiple local steps cut communication rounds.",
+    "first_principles": {
+      "problem": "Sending gradients after every batch from millions of phones is impossibly chatty.",
+      "truths": [
+        "Communication is the bottleneck, not compute.",
+        "Local steps make progress without talking.",
+        "Weighted averaging respects data size."
+      ],
+      "derivation": [
+        "**Select** a fraction C of clients.",
+        "**Broadcast** global weights w.",
+        "Each client runs **E local epochs**.",
+        "**Aggregate** w = Σ (nₖ/n) · wₖ.",
+        "**Repeat**."
+      ]
+    },
+    "analogy": {
+      "title": "A group project where everyone drafts at home",
+      "story": "Each person works on their copy, then the editor merges drafts, giving more weight to bigger contributions.",
+      "mapping": [
+        [
+          "Draft at home",
+          "Local epochs"
+        ],
+        [
+          "Editor merges",
+          "Server averages"
+        ],
+        [
+          "Bigger contribution",
+          "More samples"
+        ]
+      ],
+      "breaks": "Drafts can be merged by judgement; FedAvg averages numbers blindly, which hurts if clients diverge."
+    },
+    "mindmap": {
+      "center": "FedAvg",
+      "branches": [
+        {
+          "label": "Round",
+          "children": [
+            "Sample clients",
+            "Broadcast",
+            "Local train",
+            "Weighted average"
+          ]
+        },
+        {
+          "label": "Knobs",
+          "children": [
+            "C fraction",
+            "E epochs",
+            "Batch size"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Fewer rounds"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Client drift"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One round, three clients",
+      "scenario": "Weighted average.",
+      "flow": [
+        "Client A 1,000 samples, B 3,000, C 6,000",
+        "Weights 0.1, 0.3, 0.6",
+        "w_new = 0.1·wA + 0.3·wB + 0.6·wC"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Larger datasets influence the global model more."
+        }
+      ],
+      "code": [],
+      "outcome": "a global model learned with few communication rounds."
+    },
+    "summary": {
+      "points": [
+        "Local epochs, then average.",
+        "Weight by sample count.",
+        "Communication-efficient."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do clients run multiple local epochs?",
+        "a": "To make more progress per communication round, since communication is the main bottleneck."
+      }
+    ]
+  },
+  "the-challenge-non-iid-data-and-client-drift": {
+    "core": "Client data isn't independent and identically distributed: each phone or hospital sees a skewed slice. Local training pulls each client's weights toward its own optimum (client drift), so naive averaging converges slowly or to a worse model.",
+    "first_principles": {
+      "problem": "A keyboard model averages updates from users typing different languages and degrades for everyone.",
+      "truths": [
+        "Clients have different distributions.",
+        "More local steps mean more drift.",
+        "Averaging divergent models can cancel progress."
+      ],
+      "derivation": [
+        "**Limit** local epochs.",
+        "**Regularise** toward the global model (FedProx).",
+        "**Correct** drift with control variates (SCAFFOLD).",
+        "**Personalise** with local fine-tuning or per-cluster models."
+      ]
+    },
+    "analogy": {
+      "title": "Averaging directions from people in different cities",
+      "story": "Each says 'north is that way' from their own position, and the average points nowhere useful.",
+      "mapping": [
+        [
+          "Different cities",
+          "Non-IID clients"
+        ],
+        [
+          "Own direction",
+          "Local optimum"
+        ],
+        [
+          "Useless average",
+          "Drift"
+        ]
+      ],
+      "breaks": "Directions are just wrong; client models each contain real information that better aggregation can recover."
+    },
+    "mindmap": {
+      "center": "Non-IID",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "Skewed local data"
+          ]
+        },
+        {
+          "label": "Effect",
+          "children": [
+            "Client drift",
+            "Slow convergence"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "FedProx",
+            "SCAFFOLD",
+            "Fewer local steps"
+          ]
+        },
+        {
+          "label": "Personalisation",
+          "children": [
+            "Local fine-tune",
+            "Clustered FL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "FedProx term",
+      "scenario": "Local objective.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clients can't wander far from the global model."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "loss_local = task_loss(w) + (mu/2) * ||w - w_global||^2"
+        }
+      ],
+      "outcome": "stable convergence on skewed data."
+    },
+    "summary": {
+      "points": [
+        "Real clients are non-IID.",
+        "Drift hurts averaging.",
+        "Regularise or personalise."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does FedProx add to the local loss?",
+        "a": "A proximal term penalising distance from the global weights, limiting client drift."
+      }
+    ]
+  },
+  "privacy-preserving-ai-differential-privacy-and-secure-aggregation": {
+    "core": "Model updates can leak training data (gradient inversion, membership inference). Secure Aggregation uses cryptographic masking so the server sees only the sum of updates, never individual ones. Differential Privacy clips each update and adds calibrated noise so no single example measurably changes the result.",
+    "first_principles": {
+      "problem": "Researchers reconstruct a patient image from a single client's gradient update.",
+      "truths": [
+        "Gradients encode information about inputs.",
+        "Masks that cancel in a sum hide individual values.",
+        "Noise bounds what any one record reveals (ε budget)."
+      ],
+      "derivation": [
+        "**Secure aggregation**: pairwise masks cancel when summed.",
+        "**DP**: clip update norm, add Gaussian noise.",
+        "**Track ε** across rounds (privacy accounting).",
+        "**Combine** both for defence in depth."
+      ]
+    },
+    "analogy": {
+      "title": "A secret ballot with fuzzed results",
+      "story": "Votes are sealed so only the total is counted, and the total is rounded so no one vote can be inferred.",
+      "mapping": [
+        [
+          "Sealed ballots",
+          "Secure aggregation"
+        ],
+        [
+          "Rounded total",
+          "DP noise"
+        ],
+        [
+          "Inferring a vote",
+          "Gradient leakage"
+        ]
+      ],
+      "breaks": "Rounding an election barely matters; DP noise does cost model accuracy."
+    },
+    "mindmap": {
+      "center": "FL Privacy",
+      "branches": [
+        {
+          "label": "Threats",
+          "children": [
+            "Gradient inversion",
+            "Membership inference"
+          ]
+        },
+        {
+          "label": "SecAgg",
+          "children": [
+            "Pairwise masks",
+            "Server sees sum"
+          ]
+        },
+        {
+          "label": "DP",
+          "children": [
+            "Clipping",
+            "Noise",
+            "ε budget"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Privacy vs accuracy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "DP-FedAvg on a client",
+      "scenario": "Per-update steps.",
+      "flow": [
+        "Compute update Δ",
+        "Clip ‖Δ‖ to C",
+        "Add N(0, σ²C²)",
+        "Masked for secure aggregation",
+        "Server decodes only the sum"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Neither the server nor attackers can isolate one user's contribution."
+        }
+      ],
+      "code": [],
+      "outcome": "provable privacy at an accuracy cost."
+    },
+    "summary": {
+      "points": [
+        "Updates leak data.",
+        "SecAgg hides individuals.",
+        "DP bounds leakage."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does secure aggregation hide from the server?",
+        "a": "Individual client updates; the server learns only their aggregate sum."
+      }
+    ]
+  }
+}

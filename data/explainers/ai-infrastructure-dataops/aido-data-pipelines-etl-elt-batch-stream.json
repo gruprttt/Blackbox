@@ -1,0 +1,935 @@
+{
+  "introduction-the-digital-supply-chain": {
+    "core": "Data pipelines are the supply chain of data: they extract raw data from many sources, transform it into useful shapes, and load it where analytics and AI can use it, either in scheduled batches or as continuous streams.",
+    "first_principles": {
+      "problem": "Data sits scattered across logs, databases and SaaS tools, so no one can answer cross-system questions or train models on it.",
+      "truths": [
+        "Data is produced in many places.",
+        "Consumers need it clean and combined.",
+        "Freshness requirements vary."
+      ],
+      "derivation": [
+        "Choose **ETL or ELT**.",
+        "Use **batch** (Spark) for large periodic work.",
+        "Use **streaming** (Flink, Kafka Streams) for real-time needs.",
+        "Handle **windows, state and time**; pick tools with a **framework**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory supply chain",
+      "story": "Raw materials are collected from suppliers, processed in factories and delivered to stores.",
+      "mapping": [
+        [
+          "Suppliers",
+          "Data sources"
+        ],
+        [
+          "Factory",
+          "Transform jobs"
+        ],
+        [
+          "Stores",
+          "Warehouse/feature store"
+        ]
+      ],
+      "breaks": "Unlike physical goods, data can be copied endlessly, so governance and lineage matter."
+    },
+    "mindmap": {
+      "center": "Data Pipelines",
+      "branches": [
+        {
+          "label": "Patterns",
+          "children": [
+            "ETL",
+            "ELT"
+          ]
+        },
+        {
+          "label": "Batch",
+          "children": [
+            "Spark"
+          ]
+        },
+        {
+          "label": "Stream",
+          "children": [
+            "Flink",
+            "Kafka Streams"
+          ]
+        },
+        {
+          "label": "Concepts",
+          "children": [
+            "Windows",
+            "State",
+            "Watermarks"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Latency",
+            "Volume",
+            "Complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An e-commerce data flow",
+      "scenario": "End to end.",
+      "flow": [
+        "Orders DB + clickstream + payments",
+        "Extract to lake",
+        "Transform: join, clean, aggregate",
+        "Load to warehouse + feature store"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Analytics and ML share trusted data."
+        }
+      ],
+      "code": [],
+      "outcome": "you can see data movement as engineered infrastructure."
+    },
+    "summary": {
+      "points": [
+        "Extract, transform, load.",
+        "Batch or stream.",
+        "It's a supply chain."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the three steps of a data pipeline?",
+        "a": "Extract from sources, transform into useful shapes, and load into destinations."
+      }
+    ]
+  },
+  "two-paradigms-etl-vs-elt": {
+    "core": "ETL transforms data before loading it (on separate compute). ELT loads raw data into a powerful warehouse first and transforms it there with SQL (dbt). Cheap cloud warehouses made ELT the modern default, because raw data is kept and transformations are easy to change.",
+    "first_principles": {
+      "problem": "ETL pipelines discard raw data, so new questions require re-extracting from sources.",
+      "truths": [
+        "Warehouse compute is now cheap and elastic.",
+        "Raw data retains future value.",
+        "SQL is widely known."
+      ],
+      "derivation": [
+        "**ETL**: transform in flight, load curated data (good for strict PII filtering).",
+        "**ELT**: load raw, transform in the warehouse (dbt models).",
+        "Keep **raw, staging, marts** layers.",
+        "**Version** transformations as code."
+      ]
+    },
+    "analogy": {
+      "title": "Cooking before shopping vs. stocking the pantry",
+      "story": "ETL cooks the meal at the market and brings home only the dish; ELT brings home ingredients and cooks whatever you need later.",
+      "mapping": [
+        [
+          "Cooked dish",
+          "Curated ETL output"
+        ],
+        [
+          "Pantry ingredients",
+          "Raw ELT data"
+        ],
+        [
+          "Recipes",
+          "dbt models"
+        ]
+      ],
+      "breaks": "ELT can land sensitive raw data in the warehouse, so mask PII early."
+    },
+    "mindmap": {
+      "center": "ETL vs ELT",
+      "branches": [
+        {
+          "label": "ETL",
+          "children": [
+            "Transform first",
+            "Curated load",
+            "PII control"
+          ]
+        },
+        {
+          "label": "ELT",
+          "children": [
+            "Load raw",
+            "Transform in warehouse",
+            "dbt"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "Raw",
+            "Staging",
+            "Marts"
+          ]
+        },
+        {
+          "label": "Trend",
+          "children": [
+            "ELT default"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An ELT model with dbt",
+      "scenario": "SQL transform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Transformations are versioned, tested and re-runnable on raw data."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- models/marts/daily_revenue.sql\nselect date_trunc('day', created_at) as day, sum(amount) as revenue\nfrom {{ ref('stg_orders') }}\nwhere status = 'paid'\ngroup by 1"
+        }
+      ],
+      "outcome": "you can choose the right paradigm."
+    },
+    "summary": {
+      "points": [
+        "ETL = transform first.",
+        "ELT = load raw.",
+        "ELT is the modern default."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why has ELT become popular?",
+        "a": "Cheap, scalable cloud warehouses can transform raw data in place, keeping raw history and making transformations flexible."
+      }
+    ]
+  },
+  "batch-processing-the-heavy-lifter": {
+    "core": "Batch processing handles large, bounded datasets in scheduled chunks (nightly aggregates, training-set builds), using distributed engines like Spark that split data into partitions across many machines.",
+    "first_principles": {
+      "problem": "Processing terabytes on one machine takes days or runs out of memory.",
+      "truths": [
+        "Large data can be partitioned.",
+        "Partitions can be processed in parallel.",
+        "Many questions don't need real-time answers."
+      ],
+      "derivation": [
+        "**Partition** data (by date or key).",
+        "**Parallelise** across executors.",
+        "**Schedule** with Airflow or Dagster.",
+        "Make jobs **idempotent** so they can be re-run safely."
+      ]
+    },
+    "analogy": {
+      "title": "Counting toll-booth cars for a year",
+      "story": "Count each day's tally in parallel, then sum them, rather than counting one car at a time live.",
+      "mapping": [
+        [
+          "Daily tallies",
+          "Partitions"
+        ],
+        [
+          "Many counters",
+          "Executors"
+        ],
+        [
+          "Annual total",
+          "Aggregated result"
+        ]
+      ],
+      "breaks": "Batch latency (hours) is unacceptable for fraud or real-time personalisation."
+    },
+    "mindmap": {
+      "center": "Batch Processing",
+      "branches": [
+        {
+          "label": "Data",
+          "children": [
+            "Bounded",
+            "Partitioned"
+          ]
+        },
+        {
+          "label": "Engine",
+          "children": [
+            "Spark",
+            "Hadoop legacy"
+          ]
+        },
+        {
+          "label": "Orchestration",
+          "children": [
+            "Airflow",
+            "Dagster"
+          ]
+        },
+        {
+          "label": "Principles",
+          "children": [
+            "Idempotent",
+            "Re-runnable"
+          ]
+        },
+        {
+          "label": "Latency",
+          "children": [
+            "Minutes to hours"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A nightly Spark aggregation",
+      "scenario": "PySpark.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Terabytes processed in minutes across a cluster."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "df = spark.read.parquet(\"s3://lake/events/date=2024-06-01/\")\n(df.groupBy(\"user_id\").agg(F.count(\"*\").alias(\"events\"))\n   .write.mode(\"overwrite\").parquet(\"s3://lake/agg/user_daily/date=2024-06-01/\"))"
+        }
+      ],
+      "outcome": "large-scale periodic processing."
+    },
+    "summary": {
+      "points": [
+        "Partition.",
+        "Parallelise.",
+        "Idempotent jobs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should batch jobs be idempotent?",
+        "a": "So they can be safely re-run after failures without duplicating or corrupting results."
+      }
+    ]
+  },
+  "spark-internals-rdds-vs-dataframes-and-the-catalyst-optimizer": {
+    "core": "Spark evolved from RDDs (low-level, opaque functions Spark can't optimise) to DataFrames and Datasets (structured, declarative). With DataFrames the Catalyst optimizer rewrites your query plan (predicate pushdown, column pruning, join reordering) and Tungsten generates efficient code.",
+    "first_principles": {
+      "problem": "Hand-written RDD code is slow because Spark can't see inside your lambdas to optimise them.",
+      "truths": [
+        "Declarative queries can be optimised.",
+        "Opaque functions block optimisation.",
+        "Lazy evaluation enables whole-plan rewriting."
+      ],
+      "derivation": [
+        "Prefer **DataFrames/SQL** over RDDs.",
+        "Spark builds a **logical plan** lazily.",
+        "**Catalyst** optimises it (pushdown, pruning, join strategy).",
+        "**Tungsten** executes it with code generation; inspect with `explain()`."
+      ]
+    },
+    "analogy": {
+      "title": "Giving a taxi driver the destination vs. turn-by-turn orders",
+      "story": "With the destination (declarative), the driver picks the fastest route; with fixed turns (RDD), they can't optimise.",
+      "mapping": [
+        [
+          "Destination",
+          "DataFrame query"
+        ],
+        [
+          "Driver's route choice",
+          "Catalyst optimisation"
+        ],
+        [
+          "Fixed turns",
+          "RDD lambdas"
+        ]
+      ],
+      "breaks": "Python UDFs are opaque to Catalyst too, so prefer built-in functions."
+    },
+    "mindmap": {
+      "center": "Spark Internals",
+      "branches": [
+        {
+          "label": "RDD",
+          "children": [
+            "Low-level",
+            "Opaque"
+          ]
+        },
+        {
+          "label": "DataFrame",
+          "children": [
+            "Structured",
+            "Declarative"
+          ]
+        },
+        {
+          "label": "Catalyst",
+          "children": [
+            "Pushdown",
+            "Pruning",
+            "Join reorder"
+          ]
+        },
+        {
+          "label": "Tungsten",
+          "children": [
+            "Codegen",
+            "Memory"
+          ]
+        },
+        {
+          "label": "Tip",
+          "children": [
+            "Avoid Python UDFs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Seeing optimisations",
+      "scenario": "explain().",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only the needed rows and columns are read."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "df = spark.read.parquet(\"s3://lake/orders\").filter(\"country = 'DE'\").select(\"id\", \"amount\")\ndf.explain(True)\n# PushedFilters: [EqualTo(country,DE)], ReadSchema: struct<id,amount>"
+        }
+      ],
+      "outcome": "Spark code that the engine can optimise."
+    },
+    "summary": {
+      "points": [
+        "Use DataFrames.",
+        "Catalyst rewrites plans.",
+        "Avoid opaque UDFs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are DataFrames usually faster than RDDs in Spark?",
+        "a": "Their declarative structure lets the Catalyst optimizer rewrite and optimise the query plan, which opaque RDD functions prevent."
+      }
+    ]
+  },
+  "stream-processing-the-need-for-now": {
+    "core": "Stream processing handles unbounded data continuously, event by event or in small windows, for fraud detection, real-time recommendations, monitoring and alerting, with latencies in milliseconds to seconds.",
+    "first_principles": {
+      "problem": "A fraud model that runs on last night's batch catches fraud a day too late.",
+      "truths": [
+        "Some decisions lose value over time.",
+        "Data arrives continuously.",
+        "Infinite data needs different computation models."
+      ],
+      "derivation": [
+        "Ingest via a **log** (Kafka, Kinesis).",
+        "Process with a **stream engine** (Flink, Kafka Streams, Spark Structured Streaming).",
+        "Use **windows** for aggregates, and keep **state** for context.",
+        "Handle **late data** with watermarks."
+      ]
+    },
+    "analogy": {
+      "title": "A live news ticker vs. the morning paper",
+      "story": "The ticker updates as events happen; the paper summarises yesterday.",
+      "mapping": [
+        [
+          "Morning paper",
+          "Batch"
+        ],
+        [
+          "Live ticker",
+          "Stream"
+        ],
+        [
+          "Breaking news",
+          "Real-time event"
+        ]
+      ],
+      "breaks": "Streaming adds complexity (state, ordering, exactly-once), so use it only when freshness matters."
+    },
+    "mindmap": {
+      "center": "Stream Processing",
+      "branches": [
+        {
+          "label": "Data",
+          "children": [
+            "Unbounded"
+          ]
+        },
+        {
+          "label": "Ingest",
+          "children": [
+            "Kafka",
+            "Kinesis"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "Flink",
+            "Kafka Streams",
+            "Spark Streaming"
+          ]
+        },
+        {
+          "label": "Concepts",
+          "children": [
+            "Windows",
+            "State",
+            "Watermarks"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Fraud",
+            "Recs",
+            "Alerting"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Real-time fraud scoring",
+      "scenario": "A stream.",
+      "flow": [
+        "Card transaction → Kafka",
+        "Flink enriches with last-hour spend (state)",
+        "Model scores",
+        "Block within 200 ms"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fraud is stopped before it completes."
+        }
+      ],
+      "code": [],
+      "outcome": "decisions made while they still matter."
+    },
+    "summary": {
+      "points": [
+        "Data never stops.",
+        "Process continuously.",
+        "Use it only when freshness matters."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is stream processing worth its complexity?",
+        "a": "When decisions lose value quickly, as in fraud detection, real-time recommendations or alerting."
+      }
+    ]
+  },
+  "flink-concept-1-windowing-and-state": {
+    "core": "You can't average an infinite stream, so windows chop it into finite chunks: tumbling (fixed, non-overlapping), sliding (overlapping) and session (gap-based). Keyed state (per user or card) lets operators remember context, checkpointed for fault tolerance.",
+    "first_principles": {
+      "problem": "'Average spend per user' has no meaning on an endless stream without boundaries and memory.",
+      "truths": [
+        "Aggregates need boundaries.",
+        "Context requires remembering past events.",
+        "State must survive failures."
+      ],
+      "derivation": [
+        "**Tumbling**: e.g. every 1 minute.",
+        "**Sliding**: last 5 minutes, updated every minute.",
+        "**Session**: activity separated by inactivity gaps.",
+        "**Keyed state** + **checkpoints** (RocksDB, S3)."
+      ]
+    },
+    "analogy": {
+      "title": "Counting cars in time slots",
+      "story": "Count per 10-minute slot (tumbling), keep a rolling last-hour count (sliding), or count per convoy (session).",
+      "mapping": [
+        [
+          "Time slots",
+          "Tumbling windows"
+        ],
+        [
+          "Rolling count",
+          "Sliding windows"
+        ],
+        [
+          "Convoys",
+          "Session windows"
+        ],
+        [
+          "Notebook",
+          "State"
+        ]
+      ],
+      "breaks": "Large state increases checkpoint time and recovery cost."
+    },
+    "mindmap": {
+      "center": "Windows & State",
+      "branches": [
+        {
+          "label": "Windows",
+          "children": [
+            "Tumbling",
+            "Sliding",
+            "Session"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "Keyed",
+            "RocksDB backend"
+          ]
+        },
+        {
+          "label": "Fault tolerance",
+          "children": [
+            "Checkpoints",
+            "Savepoints"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Per-card spend in 5-minute windows",
+      "scenario": "Flink SQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bounded aggregates over an unbounded stream."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT card_id, TUMBLE_END(ts, INTERVAL '5' MINUTE) AS w, SUM(amount)\nFROM transactions\nGROUP BY card_id, TUMBLE(ts, INTERVAL '5' MINUTE);"
+        }
+      ],
+      "outcome": "meaningful computations on infinite data."
+    },
+    "summary": {
+      "points": [
+        "Windows bound the stream.",
+        "State remembers.",
+        "Checkpoints protect it."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between tumbling and sliding windows?",
+        "a": "Tumbling windows are fixed and non-overlapping; sliding windows overlap and advance in smaller steps."
+      }
+    ]
+  },
+  "flink-concept-2-the-problem-of-time-and-watermarks": {
+    "core": "Event time (when something happened) differs from processing time (when the system sees it), because of network delays and mobile offline queues. Watermarks declare 'no events older than T are expected', letting windows close correctly while still tolerating some lateness.",
+    "first_principles": {
+      "problem": "Windows computed on processing time put late-arriving events in the wrong bucket, so results are wrong.",
+      "truths": [
+        "Events arrive out of order.",
+        "Waiting forever for stragglers isn't possible.",
+        "Correctness depends on event time."
+      ],
+      "derivation": [
+        "Use **event-time** timestamps from the data.",
+        "Generate **watermarks** (e.g. max event time − 10 s).",
+        "Close windows when the **watermark passes** the end.",
+        "Handle **late events** (allowed lateness, side outputs)."
+      ]
+    },
+    "analogy": {
+      "title": "Collecting exam papers by a deadline",
+      "story": "Papers sent by post arrive late; you set a cut-off and decide what to do with stragglers.",
+      "mapping": [
+        [
+          "Postmark date",
+          "Event time"
+        ],
+        [
+          "Arrival date",
+          "Processing time"
+        ],
+        [
+          "Cut-off",
+          "Watermark"
+        ],
+        [
+          "Stragglers",
+          "Late events"
+        ]
+      ],
+      "breaks": "Watermarks trade latency for completeness, so tune them to your data's lateness."
+    },
+    "mindmap": {
+      "center": "Time & Watermarks",
+      "branches": [
+        {
+          "label": "Clocks",
+          "children": [
+            "Event time",
+            "Processing time"
+          ]
+        },
+        {
+          "label": "Watermark",
+          "children": [
+            "Progress marker",
+            "Bounded out-of-orderness"
+          ]
+        },
+        {
+          "label": "Late data",
+          "children": [
+            "Allowed lateness",
+            "Side outputs"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Latency vs completeness"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A watermark strategy",
+      "scenario": "Flink.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Out-of-order events land in the correct windows."
+        }
+      ],
+      "code": [
+        {
+          "lang": "java",
+          "text": "WatermarkStrategy.<Txn>forBoundedOutOfOrderness(Duration.ofSeconds(10))\n    .withTimestampAssigner((t, ts) -> t.eventTimeMillis());"
+        }
+      ],
+      "outcome": "correct results despite messy arrival times."
+    },
+    "summary": {
+      "points": [
+        "Event time ≠ processing time.",
+        "Watermarks mark progress.",
+        "Handle late data."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a watermark tell a stream processor?",
+        "a": "That it shouldn't expect events with timestamps older than a given time, so windows up to that point can be finalised."
+      }
+    ]
+  },
+  "a-note-on-kafka-streams": {
+    "core": "Kafka Streams is a library, not a cluster: stream processing runs inside your own Java/Kotlin application, reading and writing Kafka topics, with state in local RocksDB stores backed by changelog topics. It scales by adding app instances.",
+    "first_principles": {
+      "problem": "Running a Spark or Flink cluster is overkill for a moderate streaming transformation in one service.",
+      "truths": [
+        "Many stream jobs are modest.",
+        "Kafka already provides durability and partitioning.",
+        "Embedding processing simplifies operations."
+      ],
+      "derivation": [
+        "Add the **library** to your app.",
+        "Define **topologies** (filter, map, join, aggregate).",
+        "**State stores** are local RocksDB + changelog topics.",
+        "**Scale** by adding instances (partition rebalancing)."
+      ]
+    },
+    "analogy": {
+      "title": "A food truck vs. a restaurant kitchen",
+      "story": "For a simple menu, a self-contained truck beats building a whole commercial kitchen.",
+      "mapping": [
+        [
+          "Food truck",
+          "Kafka Streams app"
+        ],
+        [
+          "Restaurant kitchen",
+          "Flink cluster"
+        ],
+        [
+          "Menu",
+          "Processing logic"
+        ]
+      ],
+      "breaks": "It's JVM-only and Kafka-only, and complex multi-source jobs fit Flink better."
+    },
+    "mindmap": {
+      "center": "Kafka Streams",
+      "branches": [
+        {
+          "label": "Nature",
+          "children": [
+            "Library",
+            "No cluster"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "RocksDB",
+            "Changelog topics"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "App instances",
+            "Partitions"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "JVM",
+            "Kafka-only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Counting events per user",
+      "scenario": "Kafka Streams.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Streaming inside a regular microservice."
+        }
+      ],
+      "code": [
+        {
+          "lang": "java",
+          "text": "builder.stream(\"clicks\").groupByKey().count(Materialized.as(\"click-counts\"))\n       .toStream().to(\"click-counts-out\");"
+        }
+      ],
+      "outcome": "lightweight streaming for moderate needs."
+    },
+    "summary": {
+      "points": [
+        "A library, not a cluster.",
+        "Local state.",
+        "Scale with instances."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main operational advantage of Kafka Streams over Flink?",
+        "a": "It runs as a library inside your application, with no separate processing cluster to operate."
+      }
+    ]
+  },
+  "choosing-the-right-tool-a-decision-framework": {
+    "core": "Choose by latency need (hours → batch Spark/dbt, seconds → streaming), data volume and complexity (Flink for complex stateful multi-source, Kafka Streams for simple Kafka-native, Spark for large batch and ML) and team skills and operational capacity.",
+    "first_principles": {
+      "problem": "Teams pick Flink for a nightly report or Spark batch for real-time fraud.",
+      "truths": [
+        "Latency requirements drive architecture.",
+        "Operational cost varies widely.",
+        "Simpler tools fit simpler needs."
+      ],
+      "derivation": [
+        "Ask **how fresh it must be**.",
+        "Ask **how big and complex** it is.",
+        "Ask **what the team can operate**.",
+        "Default to the **simplest tool** that meets the need."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing transport",
+      "story": "A cargo ship for bulk (batch), a courier bike for urgent small parcels (streaming).",
+      "mapping": [
+        [
+          "Cargo ship",
+          "Spark batch"
+        ],
+        [
+          "Courier",
+          "Stream processing"
+        ],
+        [
+          "Delivery deadline",
+          "Latency requirement"
+        ]
+      ],
+      "breaks": "Unified engines (Spark Structured Streaming, Flink batch) blur the lines."
+    },
+    "mindmap": {
+      "center": "Choosing Tools",
+      "branches": [
+        {
+          "label": "Latency",
+          "children": [
+            "Hours → batch",
+            "Seconds → stream"
+          ]
+        },
+        {
+          "label": "Complexity",
+          "children": [
+            "Flink: complex stateful",
+            "Kafka Streams: simple",
+            "Spark: big batch/ML"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Team skills",
+            "Managed services"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Simplest that works"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three requirements",
+      "scenario": "Tool choices.",
+      "flow": [
+        "Daily finance report → dbt in warehouse",
+        "Clickstream sessionisation → Flink",
+        "Enrich orders topic → Kafka Streams",
+        "Feature backfill → Spark"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each job gets the right engine."
+        }
+      ],
+      "code": [],
+      "outcome": "pipelines matched to their needs."
+    },
+    "summary": {
+      "points": [
+        "Latency first.",
+        "Complexity next.",
+        "Simplest viable tool."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the first question when choosing between batch and streaming?",
+        "a": "How fresh the results must be, which is the latency requirement."
+      }
+    ]
+  }
+}

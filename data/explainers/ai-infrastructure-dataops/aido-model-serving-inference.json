@@ -1,0 +1,621 @@
+{
+  "introduction-the-last-mile-of-machine-learning": {
+    "core": "A model in a Jupyter notebook delivers no value. Serving is the 'last mile': packaging the model behind an API, scaling it, versioning it in a registry, and validating new versions safely in production.",
+    "first_principles": {
+      "problem": "A data scientist's 95%-accurate model never reaches users because nobody knows how to deploy it.",
+      "truths": [
+        "Value requires models in production.",
+        "Production needs reliability and scale.",
+        "New models carry risk."
+      ],
+      "derivation": [
+        "Expose **inference APIs**.",
+        "Pick **serving tools** (FastAPI → Triton/KServe/vLLM).",
+        "Use a **model registry**.",
+        "Test with **shadow mode**, then **A/B and canary**."
+      ]
+    },
+    "analogy": {
+      "title": "A chef's recipe vs. a restaurant",
+      "story": "A great recipe in a notebook feeds nobody until the kitchen can cook it reliably for hundreds of diners.",
+      "mapping": [
+        [
+          "Recipe",
+          "Trained model"
+        ],
+        [
+          "Restaurant kitchen",
+          "Serving infrastructure"
+        ],
+        [
+          "Diners",
+          "Applications/users"
+        ]
+      ],
+      "breaks": "Serving isn't the end. Monitoring for drift continues afterwards."
+    },
+    "mindmap": {
+      "center": "Model Serving",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Notebook trap"
+          ]
+        },
+        {
+          "label": "Pieces",
+          "children": [
+            "APIs",
+            "Serving tools",
+            "Registry",
+            "Safe rollout"
+          ]
+        },
+        {
+          "label": "Rollout",
+          "children": [
+            "Shadow",
+            "A/B",
+            "Canary"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "From notebook to production",
+      "scenario": "Steps.",
+      "flow": [
+        "Export model artifact",
+        "Register v1 in MLflow",
+        "Serve via KServe endpoint",
+        "Shadow → canary → full"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The model delivers value safely."
+        }
+      ],
+      "code": [],
+      "outcome": "you can see the path from notebook to production."
+    },
+    "summary": {
+      "points": [
+        "Notebooks aren't production.",
+        "Serve behind APIs.",
+        "Roll out safely."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the 'last mile' of machine learning?",
+        "a": "Getting a trained model into production behind reliable, scalable, versioned serving infrastructure."
+      }
+    ]
+  },
+  "inference-apis-how-apps-talk-to-models": {
+    "core": "Applications in any language call models through a standard API (REST/JSON for simplicity, gRPC for performance) with a clear request and response schema, versioning, timeouts and batching, so the model is a language-agnostic service.",
+    "first_principles": {
+      "problem": "A Python model can't be called directly from a JavaScript frontend or a Go backend.",
+      "truths": [
+        "Network APIs are language-neutral.",
+        "Schemas prevent misuse.",
+        "Latency matters for user-facing inference."
+      ],
+      "derivation": [
+        "Define the **schema**: inputs, outputs, version.",
+        "Use **REST** for ease or **gRPC** for low latency/streaming.",
+        "Add **dynamic batching** to use GPUs efficiently.",
+        "Set **timeouts** and **fallbacks**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal translator at a counter",
+      "story": "Customers speaking any language get their order processed by the same kitchen.",
+      "mapping": [
+        [
+          "Translator",
+          "Inference API"
+        ],
+        [
+          "Customers",
+          "Apps in many languages"
+        ],
+        [
+          "Kitchen",
+          "Model runtime"
+        ]
+      ],
+      "breaks": "Network hops add latency, so very low-latency cases may embed the model in-process."
+    },
+    "mindmap": {
+      "center": "Inference APIs",
+      "branches": [
+        {
+          "label": "Protocols",
+          "children": [
+            "REST/JSON",
+            "gRPC"
+          ]
+        },
+        {
+          "label": "Contract",
+          "children": [
+            "Schema",
+            "Version"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Dynamic batching",
+            "Streaming"
+          ]
+        },
+        {
+          "label": "Resilience",
+          "children": [
+            "Timeouts",
+            "Fallbacks"
+          ]
+        },
+        {
+          "label": "Standard",
+          "children": [
+            "Open Inference Protocol (V2)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A REST inference request",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any service can get a prediction."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -s http://models/v2/models/fraud/infer -d '{\"inputs\":[{\"name\":\"features\",\"shape\":[1,12],\"datatype\":\"FP32\",\"data\":[...]}]}'"
+        }
+      ],
+      "outcome": "models consumable as services."
+    },
+    "summary": {
+      "points": [
+        "Standard API.",
+        "Clear schema.",
+        "Batch and time out."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use dynamic batching in inference servers?",
+        "a": "Grouping concurrent requests into one batch uses GPUs much more efficiently, increasing throughput."
+      }
+    ]
+  },
+  "serving-tools-from-simple-to-supercharged": {
+    "core": "Serving options scale with needs: FastAPI wrappers for simple cases, model servers like TorchServe, Triton (multi-framework, dynamic batching, GPU sharing) and KServe/Seldon (Kubernetes-native, autoscaling, canaries), and LLM-specialised engines like vLLM and TGI.",
+    "first_principles": {
+      "problem": "A hand-written Flask app serving a GPU model can't batch, autoscale or roll out versions safely.",
+      "truths": [
+        "Simple tools are fast to start.",
+        "Production serving needs batching, scaling and versioning.",
+        "LLMs have special memory patterns."
+      ],
+      "derivation": [
+        "**FastAPI**: prototypes and simple CPU models.",
+        "**Triton**: high-performance, multi-model GPU serving.",
+        "**KServe/Seldon**: K8s-native, autoscale-to-zero, canary.",
+        "**vLLM/TGI**: LLM serving with paged KV cache and continuous batching."
+      ]
+    },
+    "analogy": {
+      "title": "From a food stall to a restaurant chain",
+      "story": "A stall works for a few customers; a chain needs standardised kitchens, logistics and quality control.",
+      "mapping": [
+        [
+          "Food stall",
+          "FastAPI"
+        ],
+        [
+          "Professional kitchen",
+          "Triton"
+        ],
+        [
+          "Restaurant chain operations",
+          "KServe on K8s"
+        ],
+        [
+          "Specialist sushi bar",
+          "vLLM for LLMs"
+        ]
+      ],
+      "breaks": "More powerful tools bring operational complexity, so match them to the need."
+    },
+    "mindmap": {
+      "center": "Serving Tools",
+      "branches": [
+        {
+          "label": "Simple",
+          "children": [
+            "FastAPI",
+            "BentoML"
+          ]
+        },
+        {
+          "label": "Model servers",
+          "children": [
+            "Triton",
+            "TorchServe"
+          ]
+        },
+        {
+          "label": "K8s-native",
+          "children": [
+            "KServe",
+            "Seldon"
+          ]
+        },
+        {
+          "label": "LLM",
+          "children": [
+            "vLLM",
+            "TGI",
+            "SGLang"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Batching",
+            "Autoscale",
+            "Canary"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A KServe InferenceService",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "An autoscaled endpoint with versioned storage."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: serving.kserve.io/v1beta1\nkind: InferenceService\nmetadata: { name: fraud }\nspec:\n  predictor:\n    model:\n      modelFormat: { name: sklearn }\n      storageUri: s3://models/fraud/v3"
+        }
+      ],
+      "outcome": "the right serving tool for each stage."
+    },
+    "summary": {
+      "points": [
+        "Start simple.",
+        "Scale with model servers.",
+        "Specialise for LLMs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What special capability do LLM servers like vLLM add?",
+        "a": "Efficient KV-cache memory management (PagedAttention) and continuous batching for high-throughput text generation."
+      }
+    ]
+  },
+  "the-model-registry-version-control-for-ml-artifacts": {
+    "core": "Git versions code but not multi-GB model artifacts or their lineage. A model registry (MLflow, SageMaker, W&B) stores versioned models with metadata: training data version, code commit, hyperparameters, metrics and stage (staging or production).",
+    "first_principles": {
+      "problem": "A model misbehaves in production, and nobody knows which data or code produced it or how to roll back.",
+      "truths": [
+        "Models depend on code, data and parameters.",
+        "Reproducibility needs lineage.",
+        "Rollback needs previous versions."
+      ],
+      "derivation": [
+        "**Log** runs: params, metrics, artifacts.",
+        "**Register** model versions with lineage.",
+        "**Promote** through stages with approvals.",
+        "**Serve by version**; roll back by re-pointing."
+      ]
+    },
+    "analogy": {
+      "title": "A pharmacy's batch records",
+      "story": "Every medicine batch records ingredients, process and tests, so a bad batch can be traced and recalled.",
+      "mapping": [
+        [
+          "Batch record",
+          "Model version metadata"
+        ],
+        [
+          "Ingredients",
+          "Training data version"
+        ],
+        [
+          "Recall",
+          "Rollback"
+        ]
+      ],
+      "breaks": "The registry is only as good as the metadata logged, so automate logging in training pipelines."
+    },
+    "mindmap": {
+      "center": "Model Registry",
+      "branches": [
+        {
+          "label": "Stores",
+          "children": [
+            "Artifacts",
+            "Versions"
+          ]
+        },
+        {
+          "label": "Metadata",
+          "children": [
+            "Data version",
+            "Code commit",
+            "Params",
+            "Metrics"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Staging",
+            "Production",
+            "Archived"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "MLflow",
+            "SageMaker",
+            "W&B"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Registering and promoting",
+      "scenario": "MLflow.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every production model is traceable and reversible."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "with mlflow.start_run():\n    mlflow.log_params(params); mlflow.log_metric(\"auc\", 0.91)\n    mlflow.sklearn.log_model(model, \"model\", registered_model_name=\"fraud\")\n# later: client.set_registered_model_alias(\"fraud\", \"production\", version=7)"
+        }
+      ],
+      "outcome": "governed, reproducible model versions."
+    },
+    "summary": {
+      "points": [
+        "Version models.",
+        "Record lineage.",
+        "Promote and roll back."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why isn't Git enough to version ML models?",
+        "a": "Models are large binary artifacts whose behaviour depends on data and parameters that Git doesn't track."
+      }
+    ]
+  },
+  "testing-in-production-shadow-mode": {
+    "core": "Shadow mode sends real production requests to the new model in parallel with the current one, but only the current model's responses are returned to users. You compare predictions, latency and errors on real traffic with zero user risk.",
+    "first_principles": {
+      "problem": "A model that scores well offline may fail on real-world inputs, latency or edge cases.",
+      "truths": [
+        "Offline test sets don't match live distributions.",
+        "Discarded predictions can't harm users.",
+        "Comparison reveals regressions."
+      ],
+      "derivation": [
+        "**Duplicate** traffic to the shadow model.",
+        "**Log** both predictions and latencies.",
+        "**Compare** agreement, error rates and distribution shifts.",
+        "**Promote** only when the shadow looks healthy."
+      ]
+    },
+    "analogy": {
+      "title": "A trainee pilot shadowing in the cockpit",
+      "story": "They make decisions alongside the real pilot without controlling the plane.",
+      "mapping": [
+        [
+          "Real pilot",
+          "Production model"
+        ],
+        [
+          "Trainee",
+          "Shadow model"
+        ],
+        [
+          "Comparing decisions",
+          "Prediction diff"
+        ]
+      ],
+      "breaks": "Shadow mode doubles inference cost and can't measure business outcomes (users never see the new results)."
+    },
+    "mindmap": {
+      "center": "Shadow Mode",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Mirror traffic",
+            "Discard shadow output"
+          ]
+        },
+        {
+          "label": "Compare",
+          "children": [
+            "Predictions",
+            "Latency",
+            "Errors"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Zero user risk",
+            "Real data"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "2x cost",
+            "No business metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shadowing a new fraud model",
+      "scenario": "Findings.",
+      "flow": [
+        "v8 shadows v7 for 1 week",
+        "Agreement 96%",
+        "v8 flags 3x more on a new merchant category",
+        "Investigate before promotion"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A surprise is caught with no user impact."
+        }
+      ],
+      "code": [],
+      "outcome": "safe validation on real traffic."
+    },
+    "summary": {
+      "points": [
+        "Mirror traffic.",
+        "Discard outputs.",
+        "Compare carefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "What can't shadow mode tell you about a new model?",
+        "a": "Its effect on business outcomes, because users never see the shadow model's predictions."
+      }
+    ]
+  },
+  "testing-in-production-ab-testing-and-canary-releases": {
+    "core": "Canary releases send a small share of real traffic to the new model to check technical safety. A/B tests split users between models to measure business impact (conversion, revenue) with statistical significance. Use both after shadow mode.",
+    "first_principles": {
+      "problem": "A technically accurate model might still hurt business metrics, such as more relevant but less profitable recommendations.",
+      "truths": [
+        "Accuracy isn't the same as business value.",
+        "Statistics separate real effects from noise.",
+        "Gradual exposure limits risk."
+      ],
+      "derivation": [
+        "**Canary**: 1–5% of traffic, watch errors and latency.",
+        "**A/B**: randomise users, define the primary metric and sample size.",
+        "Run until **statistically significant**.",
+        "**Roll out** the winner, or roll back."
+      ]
+    },
+    "analogy": {
+      "title": "Taste-testing a new recipe",
+      "story": "Serve it to a few tables first (canary), then compare sales of old vs new on similar nights (A/B).",
+      "mapping": [
+        [
+          "A few tables",
+          "Canary traffic"
+        ],
+        [
+          "Comparing sales",
+          "A/B metric"
+        ],
+        [
+          "Similar nights",
+          "Randomised groups"
+        ]
+      ],
+      "breaks": "A/B tests need enough traffic and time, and peeking early inflates false positives."
+    },
+    "mindmap": {
+      "center": "A/B & Canary",
+      "branches": [
+        {
+          "label": "Canary",
+          "children": [
+            "Small %",
+            "Technical health"
+          ]
+        },
+        {
+          "label": "A/B",
+          "children": [
+            "Randomised",
+            "Business metric",
+            "Significance"
+          ]
+        },
+        {
+          "label": "Order",
+          "children": [
+            "Shadow → canary → A/B"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Peeking",
+            "Underpowered tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Recommendation model rollout",
+      "scenario": "Stages.",
+      "flow": [
+        "Shadow: healthy",
+        "Canary 5%: errors normal",
+        "A/B 50/50 for 2 weeks",
+        "Conversion +2.1% (p<0.01) → roll out"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A proven business win."
+        }
+      ],
+      "code": [],
+      "outcome": "models promoted on evidence of value."
+    },
+    "summary": {
+      "points": [
+        "Canary for safety.",
+        "A/B for value.",
+        "Wait for significance."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between a canary release and an A/B test for models?",
+        "a": "A canary checks technical safety on a small slice of traffic; an A/B test measures business impact with randomised groups and statistics."
+      }
+    ]
+  }
+}

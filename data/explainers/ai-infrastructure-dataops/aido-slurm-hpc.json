@@ -1,0 +1,719 @@
+{
+  "introduction-batch-vs-service": {
+    "core": "Services (web apps) run forever and must stay available; batch jobs (training, simulations) run to completion and want maximum resources for a period. Slurm is a batch scheduler built to queue jobs and pack them fairly onto large clusters, especially multi-node GPU jobs.",
+    "first_principles": {
+      "problem": "A team runs week-long multi-node training on a scheduler designed for always-on services.",
+      "truths": [
+        "Batch jobs have a start and end.",
+        "Large jobs need all their nodes at once (gang scheduling).",
+        "Queues let demand exceed supply fairly."
+      ],
+      "derivation": [
+        "**Queue** jobs with resource requests.",
+        "**Allocate** whole sets of nodes together.",
+        "**Prioritise** with fair-share.",
+        "**Backfill** small jobs into gaps."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant kitchen versus a factory batch line",
+      "story": "The kitchen serves continuous orders; the factory runs scheduled production batches.",
+      "mapping": [
+        [
+          "Continuous orders",
+          "Services"
+        ],
+        [
+          "Production batches",
+          "Batch jobs"
+        ],
+        [
+          "Shift schedule",
+          "Slurm queue"
+        ]
+      ],
+      "breaks": "Factories don't backfill other products into idle machines minute by minute; Slurm does."
+    },
+    "mindmap": {
+      "center": "Batch vs Service",
+      "branches": [
+        {
+          "label": "Service",
+          "children": [
+            "Long-running",
+            "Availability"
+          ]
+        },
+        {
+          "label": "Batch",
+          "children": [
+            "Runs to completion",
+            "Throughput"
+          ]
+        },
+        {
+          "label": "Slurm",
+          "children": [
+            "Queue",
+            "Gang scheduling",
+            "Fair-share",
+            "Backfill"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 64-GPU training job",
+      "scenario": "Queued in Slurm.",
+      "flow": [
+        "Submit requesting 8 nodes × 8 GPUs",
+        "Waits until all 8 nodes free",
+        "Starts together, runs 3 days",
+        "Nodes released"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No partial starts that deadlock."
+        }
+      ],
+      "code": [],
+      "outcome": "large jobs run efficiently."
+    },
+    "summary": {
+      "points": [
+        "Batch ≠ service.",
+        "Gang scheduling.",
+        "Queues and fairness."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does multi-node training need gang scheduling?",
+        "a": "All ranks must start together; partial allocation would hold resources idle waiting for the rest."
+      }
+    ]
+  },
+  "slurm-architecture-the-controller-and-the-nodes": {
+    "core": "slurmctld is the central controller that tracks nodes, queues and scheduling decisions; slurmd runs on every compute node to launch and monitor job steps; slurmdbd stores accounting in a database for fair-share and reporting. Users submit from login nodes.",
+    "first_principles": {
+      "problem": "A job is stuck 'PD' and the user doesn't know which component to ask.",
+      "truths": [
+        "Central decisions simplify global scheduling.",
+        "Node agents execute locally.",
+        "Accounting history drives fairness."
+      ],
+      "derivation": [
+        "**slurmctld**: state and scheduling (with a backup controller).",
+        "**slurmd**: per-node execution.",
+        "**slurmdbd**: accounting DB.",
+        "**Login nodes**: submission, not compute.",
+        "Inspect with **squeue, sinfo, scontrol**."
+      ]
+    },
+    "analogy": {
+      "title": "An air-traffic control tower and ground crews",
+      "story": "The tower schedules all take-offs; each gate's crew handles its plane.",
+      "mapping": [
+        [
+          "Tower",
+          "slurmctld"
+        ],
+        [
+          "Gate crews",
+          "slurmd"
+        ],
+        [
+          "Flight log",
+          "slurmdbd"
+        ]
+      ],
+      "breaks": "A tower failure grounds everything, which is why Slurm runs a backup controller."
+    },
+    "mindmap": {
+      "center": "Slurm Architecture",
+      "branches": [
+        {
+          "label": "Control",
+          "children": [
+            "slurmctld",
+            "Backup ctld"
+          ]
+        },
+        {
+          "label": "Nodes",
+          "children": [
+            "slurmd"
+          ]
+        },
+        {
+          "label": "Accounting",
+          "children": [
+            "slurmdbd",
+            "Fair-share"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "Login nodes"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "squeue",
+            "sinfo",
+            "scontrol"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Why is my job pending?",
+      "scenario": "Investigating.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Finding",
+          "detail": "Reason=Priority: other users have higher fair-share."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "squeue -u $USER -o '%i %T %r'\nscontrol show job 12345 | grep Reason"
+        }
+      ],
+      "outcome": "state understood from the right component."
+    },
+    "summary": {
+      "points": [
+        "ctld decides.",
+        "slurmd executes.",
+        "dbd remembers."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does slurmdbd provide?",
+        "a": "A database of job accounting used for fair-share priority and usage reporting."
+      }
+    ]
+  },
+  "the-language-of-slurm-sbatch": {
+    "core": "An sbatch script is a bash script with #SBATCH comment directives declaring resources (nodes, tasks, GPUs, memory, time, partition). sbatch queues it and returns a job ID; output goes to files, and environment variables like SLURM_JOB_ID describe the allocation.",
+    "first_principles": {
+      "problem": "Users run long jobs interactively on login nodes and lose them when SSH drops.",
+      "truths": [
+        "Jobs must declare resources up front.",
+        "Batch jobs run unattended.",
+        "Time limits enable backfill."
+      ],
+      "derivation": [
+        "Write **#SBATCH** directives.",
+        "Set an accurate **--time**.",
+        "Direct **--output/--error**.",
+        "Submit with **sbatch**, cancel with **scancel**."
+      ]
+    },
+    "analogy": {
+      "title": "A work order submitted to the facilities team",
+      "story": "You state what you need, how long and where, then they schedule it.",
+      "mapping": [
+        [
+          "Work order",
+          "sbatch script"
+        ],
+        [
+          "Requirements",
+          "#SBATCH lines"
+        ],
+        [
+          "Order number",
+          "Job ID"
+        ]
+      ],
+      "breaks": "Facilities might extend a job; Slurm kills it at the time limit."
+    },
+    "mindmap": {
+      "center": "sbatch",
+      "branches": [
+        {
+          "label": "Directives",
+          "children": [
+            "--nodes",
+            "--gres",
+            "--time",
+            "--partition"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "--output",
+            "%j"
+          ]
+        },
+        {
+          "label": "Env",
+          "children": [
+            "SLURM_JOB_ID",
+            "SLURM_NODELIST"
+          ]
+        },
+        {
+          "label": "Commands",
+          "children": [
+            "sbatch",
+            "scancel",
+            "squeue"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A single-node GPU job",
+      "scenario": "train.sbatch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Submit",
+          "detail": "sbatch train.sbatch → Submitted batch job 12345."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "#!/bin/bash\n#SBATCH --job-name=train\n#SBATCH --partition=gpu\n#SBATCH --nodes=1\n#SBATCH --gres=gpu:4\n#SBATCH --time=12:00:00\n#SBATCH --output=logs/%j.out\nsrun python train.py"
+        }
+      ],
+      "outcome": "unattended, scheduled runs."
+    },
+    "summary": {
+      "points": [
+        "#SBATCH declares resources.",
+        "Accurate time helps backfill.",
+        "Logs to files."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should you set a realistic --time?",
+        "a": "The scheduler uses it to backfill jobs into gaps; overestimates delay your start, underestimates get the job killed."
+      }
+    ]
+  },
+  "resource-allocation-gres-tasks-and-srun": {
+    "core": "GRES (generic resources) lets Slurm schedule GPUs (--gres=gpu:8 or --gpus-per-node). Tasks map to processes (--ntasks-per-node, usually one per GPU). Inside an allocation, srun launches the job steps across nodes, setting rank variables used by distributed frameworks.",
+    "first_principles": {
+      "problem": "A multi-node PyTorch job starts with the wrong number of processes and ranks collide.",
+      "truths": [
+        "One process per GPU is the common pattern.",
+        "Frameworks need rank and world size.",
+        "srun knows the allocation layout."
+      ],
+      "derivation": [
+        "Request **--nodes, --ntasks-per-node, --gpus-per-node**.",
+        "Bind **--cpus-per-task** for data loaders.",
+        "Launch with **srun** (or torchrun per node).",
+        "Map **SLURM_PROCID → RANK**."
+      ]
+    },
+    "analogy": {
+      "title": "Booking hotel rooms and assigning guests",
+      "story": "You book floors (nodes) and rooms (GPUs), then the concierge (srun) puts one guest in each room.",
+      "mapping": [
+        [
+          "Floors",
+          "Nodes"
+        ],
+        [
+          "Rooms",
+          "GPUs"
+        ],
+        [
+          "Guests",
+          "Tasks"
+        ],
+        [
+          "Concierge",
+          "srun"
+        ]
+      ],
+      "breaks": "Guests choose their rooms; processes need explicit GPU binding."
+    },
+    "mindmap": {
+      "center": "Allocation",
+      "branches": [
+        {
+          "label": "GRES",
+          "children": [
+            "--gres=gpu:N",
+            "--gpus-per-node"
+          ]
+        },
+        {
+          "label": "Tasks",
+          "children": [
+            "--ntasks-per-node",
+            "--cpus-per-task"
+          ]
+        },
+        {
+          "label": "Launch",
+          "children": [
+            "srun",
+            "torchrun"
+          ]
+        },
+        {
+          "label": "Env",
+          "children": [
+            "SLURM_PROCID",
+            "SLURM_NTASKS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "4 nodes × 8 GPUs",
+      "scenario": "Distributed training.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "32 processes, one per GPU, ranks 0–31."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=8\n#SBATCH --gpus-per-node=8\n#SBATCH --cpus-per-task=12\nexport MASTER_ADDR=$(scontrol show hostnames $SLURM_NODELIST | head -1)\nsrun python train.py  # RANK=$SLURM_PROCID, WORLD_SIZE=$SLURM_NTASKS"
+        }
+      ],
+      "outcome": "correct distributed layout."
+    },
+    "summary": {
+      "points": [
+        "GRES for GPUs.",
+        "One task per GPU.",
+        "srun launches steps."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which variable usually gives a process its global rank under srun?",
+        "a": "SLURM_PROCID."
+      }
+    ]
+  },
+  "partitions-and-qos-the-traffic-lights": {
+    "core": "Partitions group nodes into queues with their own limits (e.g. gpu, cpu, debug). QOS (Quality of Service) sets per-job or per-user policy: max GPUs, max wall time and priority, plus whether a job can preempt others. Together with fair-share they decide who runs when.",
+    "first_principles": {
+      "problem": "One team's 500 queued jobs block everyone else's quick debug runs.",
+      "truths": [
+        "Different workloads need different limits.",
+        "Fairness needs per-user caps.",
+        "Short jobs benefit from fast lanes."
+      ],
+      "derivation": [
+        "Create **partitions** by hardware or purpose.",
+        "Define **QOS** limits (MaxTRESPerUser, MaxWall).",
+        "Enable **preemption** for low-priority QOS.",
+        "Use **fair-share** for long-run balance."
+      ]
+    },
+    "analogy": {
+      "title": "Traffic lanes and lights",
+      "story": "A bus lane, a fast lane with a speed limit and lights that let emergency vehicles through.",
+      "mapping": [
+        [
+          "Lanes",
+          "Partitions"
+        ],
+        [
+          "Speed limits",
+          "QOS limits"
+        ],
+        [
+          "Emergency vehicles",
+          "Preempting QOS"
+        ]
+      ],
+      "breaks": "Traffic lights are fixed timers; fair-share adapts to recent usage."
+    },
+    "mindmap": {
+      "center": "Partitions & QOS",
+      "branches": [
+        {
+          "label": "Partitions",
+          "children": [
+            "gpu",
+            "cpu",
+            "debug"
+          ]
+        },
+        {
+          "label": "QOS",
+          "children": [
+            "MaxWall",
+            "MaxTRES",
+            "Priority"
+          ]
+        },
+        {
+          "label": "Preemption",
+          "children": [
+            "Requeue",
+            "Cancel"
+          ]
+        },
+        {
+          "label": "Fairness",
+          "children": [
+            "Fair-share decay"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A debug lane",
+      "scenario": "Short, high priority.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Starts in minutes while big jobs queue on gpu."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sbatch --partition=debug --qos=debug --time=00:30:00 --gres=gpu:1 test.sbatch"
+        }
+      ],
+      "outcome": "fair access and fast iteration."
+    },
+    "summary": {
+      "points": [
+        "Partitions group nodes.",
+        "QOS sets policy.",
+        "Fair-share balances use."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between a partition and a QOS?",
+        "a": "A partition is a set of nodes forming a queue; a QOS is a policy (limits, priority, preemption) attached to jobs."
+      }
+    ]
+  },
+  "checkpointing-surviving-preemption-and-node-failures": {
+    "core": "Long multi-node jobs will hit time limits, preemption or hardware failure. Save model, optimiser, scheduler, RNG and data-loader state regularly to shared storage, trap Slurm's warning signal (--signal) to save before kill, and requeue so the job resumes from the latest checkpoint.",
+    "first_principles": {
+      "problem": "A node dies at hour 40 of a 48-hour run with no checkpoint.",
+      "truths": [
+        "At scale, failure probability per day is high.",
+        "Slurm can signal before killing.",
+        "Exact resume needs all state, not only weights."
+      ],
+      "derivation": [
+        "Checkpoint **every N steps** to shared FS.",
+        "**--signal=USR1@300** to save before the time limit.",
+        "**--requeue** and resume from the latest checkpoint.",
+        "Write **atomically** (temp file then rename).",
+        "**Shard** checkpoints for huge models."
+      ]
+    },
+    "analogy": {
+      "title": "Saving a video game before the boss fight",
+      "story": "If you lose, you restart from the save point, not the beginning.",
+      "mapping": [
+        [
+          "Save point",
+          "Checkpoint"
+        ],
+        [
+          "Losing",
+          "Node failure"
+        ],
+        [
+          "Reload",
+          "Resume"
+        ]
+      ],
+      "breaks": "A game save is instant; large checkpoints take minutes, so frequency trades overhead against lost work."
+    },
+    "mindmap": {
+      "center": "Checkpointing",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Failures",
+            "Time limits",
+            "Preemption"
+          ]
+        },
+        {
+          "label": "Save",
+          "children": [
+            "Weights",
+            "Optimizer",
+            "RNG",
+            "Dataloader"
+          ]
+        },
+        {
+          "label": "Slurm",
+          "children": [
+            "--signal",
+            "--requeue"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Atomic writes",
+            "Sharded"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Signal-driven save",
+      "scenario": "Trap before time limit.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Five minutes' warning to save, then the job requeues and resumes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "#SBATCH --signal=B:USR1@300\n#SBATCH --requeue\ntrap 'touch SAVE_NOW' USR1\nsrun python train.py --resume latest &\nwait"
+        }
+      ],
+      "outcome": "at most minutes of work lost."
+    },
+    "summary": {
+      "points": [
+        "Failures are certain at scale.",
+        "Save full state.",
+        "Signal + requeue."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why checkpoint optimizer state, not just weights?",
+        "a": "Optimisers like Adam hold moment estimates; without them, resumed training behaves differently and can diverge."
+      }
+    ]
+  },
+  "slurm-vs-kubernetes-the-cage-match": {
+    "core": "Slurm excels at batch HPC: gang scheduling, fair-share, topology awareness and bare-metal performance. Kubernetes excels at services, containers, autoscaling and ecosystem. Many AI orgs use Slurm for big training and Kubernetes for serving, or bridge them (Slinky, Kueue, Volcano).",
+    "first_principles": {
+      "problem": "A team debates migrating a research cluster from Slurm to Kubernetes based on hype.",
+      "truths": [
+        "Batch and service needs differ.",
+        "Kubernetes' default scheduler isn't gang-aware.",
+        "Researchers value simple sbatch workflows."
+      ],
+      "derivation": [
+        "**Slurm**: large training, HPC users, fair-share.",
+        "**Kubernetes**: serving, pipelines, containers.",
+        "**Bridge**: Kueue/Volcano for batch on K8s, or Slurm on K8s.",
+        "Decide by **workload mix and team skills**."
+      ]
+    },
+    "analogy": {
+      "title": "A freight railway versus a city bus network",
+      "story": "Rail moves huge scheduled loads efficiently; buses serve continuous flexible routes.",
+      "mapping": [
+        [
+          "Freight trains",
+          "Big training jobs on Slurm"
+        ],
+        [
+          "Buses",
+          "Services on Kubernetes"
+        ],
+        [
+          "Interchange",
+          "Bridging tools"
+        ]
+      ],
+      "breaks": "Both systems keep borrowing each other's features, so the line keeps blurring."
+    },
+    "mindmap": {
+      "center": "Slurm vs K8s",
+      "branches": [
+        {
+          "label": "Slurm",
+          "children": [
+            "Gang scheduling",
+            "Fair-share",
+            "Bare metal"
+          ]
+        },
+        {
+          "label": "Kubernetes",
+          "children": [
+            "Services",
+            "Autoscaling",
+            "Ecosystem"
+          ]
+        },
+        {
+          "label": "Bridges",
+          "children": [
+            "Kueue",
+            "Volcano",
+            "Slinky"
+          ]
+        },
+        {
+          "label": "Decide",
+          "children": [
+            "Workload mix",
+            "Skills"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A hybrid platform",
+      "scenario": "One org.",
+      "flow": [
+        "Pre-training on Slurm (1,024 GPUs)",
+        "Checkpoints to shared storage",
+        "Fine-tune and serve on Kubernetes",
+        "Kueue for small batch jobs"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Use each where it's strongest."
+        }
+      ],
+      "code": [],
+      "outcome": "right tool per workload."
+    },
+    "summary": {
+      "points": [
+        "Slurm for batch HPC.",
+        "Kubernetes for services.",
+        "Bridges exist."
+      ]
+    },
+    "check": [
+      {
+        "q": "What key batch feature does vanilla Kubernetes scheduling lack?",
+        "a": "Gang scheduling: starting all pods of a job together (added by Kueue/Volcano)."
+      }
+    ]
+  }
+}

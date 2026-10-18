@@ -1,0 +1,698 @@
+{
+  "introduction-mlops-on-steroids": {
+    "core": "LLM operations amplify MLOps challenges. Models with billions of parameters need massive GPU memory, generation is sequential and memory-hungry (the KV cache), costs scale with tokens, and customisation calls for efficient techniques like LoRA.",
+    "first_principles": {
+      "problem": "Teams try to serve a 70B model like a small classifier and run out of GPU memory and budget.",
+      "truths": [
+        "Model size drives memory needs.",
+        "Autoregressive generation is sequential.",
+        "Tokens are the unit of cost."
+      ],
+      "derivation": [
+        "Tackle **VRAM** with quantisation.",
+        "Serve efficiently with **vLLM** (PagedAttention, continuous batching).",
+        "Manage **token economics** and **context windows**.",
+        "Customise cheaply with **LoRA/QLoRA**."
+      ]
+    },
+    "analogy": {
+      "title": "Moving from a car to a cargo ship",
+      "story": "The same principles of navigation apply, but at a scale that changes every logistics decision.",
+      "mapping": [
+        [
+          "Car",
+          "Small ML model"
+        ],
+        [
+          "Cargo ship",
+          "LLM"
+        ],
+        [
+          "Logistics",
+          "GPU memory, cost, batching"
+        ]
+      ],
+      "breaks": "Hosted APIs avoid much of this, at the cost of control and per-token pricing."
+    },
+    "mindmap": {
+      "center": "LLM Ops",
+      "branches": [
+        {
+          "label": "Challenges",
+          "children": [
+            "VRAM",
+            "KV cache",
+            "Token cost",
+            "Context limits"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Quantisation",
+            "vLLM",
+            "LoRA"
+          ]
+        },
+        {
+          "label": "Choice",
+          "children": [
+            "Self-host vs API"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Serving Llama-3-70B",
+      "scenario": "Requirements.",
+      "flow": [
+        "FP16 weights ≈ 140 GB",
+        "Needs 2× 80 GB GPUs",
+        "INT4 ≈ 35 GB → 1 GPU",
+        "vLLM for throughput"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The infrastructure plan changes drastically."
+        }
+      ],
+      "code": [],
+      "outcome": "LLM-specific operational awareness."
+    },
+    "summary": {
+      "points": [
+        "Size changes everything.",
+        "Memory is the constraint.",
+        "Tokens are the cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is serving LLMs harder than serving small ML models?",
+        "a": "Their enormous memory requirements, sequential generation with large KV caches, and per-token cost scaling."
+      }
+    ]
+  },
+  "the-vram-bottleneck-and-quantization": {
+    "core": "Model memory ≈ parameters × bytes per parameter: 70B parameters at FP16 (2 bytes) is about 140 GB. Quantisation stores weights in fewer bits (INT8 or INT4 using methods like GPTQ, AWQ or GGUF), shrinking memory 2–4x with modest quality loss.",
+    "first_principles": {
+      "problem": "A 70B model doesn't fit on available GPUs, and buying more is expensive or impossible.",
+      "truths": [
+        "Each parameter costs bytes.",
+        "Neural networks tolerate reduced precision.",
+        "Memory bandwidth limits generation speed."
+      ],
+      "derivation": [
+        "**FP32**: 4 bytes; **FP16/BF16**: 2; **INT8**: 1; **INT4**: 0.5.",
+        "Memory ≈ params × bytes + KV cache + overhead.",
+        "Use **post-training quantisation** (GPTQ, AWQ).",
+        "**Evaluate** quality on your own tasks."
+      ]
+    },
+    "analogy": {
+      "title": "Compressing photos from RAW to JPEG",
+      "story": "Much smaller files that look almost the same for most uses.",
+      "mapping": [
+        [
+          "RAW photo",
+          "FP16 weights"
+        ],
+        [
+          "JPEG",
+          "INT4 weights"
+        ],
+        [
+          "Slight artefacts",
+          "Small accuracy loss"
+        ]
+      ],
+      "breaks": "Aggressive quantisation (below 4-bit) can degrade reasoning noticeably."
+    },
+    "mindmap": {
+      "center": "VRAM & Quantisation",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "Params × bytes"
+          ]
+        },
+        {
+          "label": "Precisions",
+          "children": [
+            "FP32",
+            "FP16/BF16",
+            "INT8",
+            "INT4"
+          ]
+        },
+        {
+          "label": "Methods",
+          "children": [
+            "GPTQ",
+            "AWQ",
+            "GGUF",
+            "bitsandbytes"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "Task evals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Memory maths",
+      "scenario": "70B model.",
+      "flow": [
+        "FP16: 70B × 2 = 140 GB",
+        "INT8: 70 GB",
+        "INT4: 35 GB",
+        "+ KV cache + runtime overhead"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A single 48–80 GB GPU becomes feasible."
+        }
+      ],
+      "code": [],
+      "outcome": "models that fit available hardware."
+    },
+    "summary": {
+      "points": [
+        "Params × bytes.",
+        "Fewer bits.",
+        "Evaluate quality."
+      ]
+    },
+    "check": [
+      {
+        "q": "Roughly how much GPU memory do the weights of a 7B-parameter model need at FP16?",
+        "a": "About 14 GB (7 billion × 2 bytes), plus KV cache and overhead."
+      }
+    ]
+  },
+  "efficient-serving-the-magic-of-vllm": {
+    "core": "Generating each token needs the attention keys and values of all previous tokens (the KV cache), which can be huge and fragmented. vLLM's PagedAttention manages KV memory in pages like an OS's virtual memory, and continuous batching adds requests mid-flight, which multiplies throughput.",
+    "first_principles": {
+      "problem": "Naive serving wastes 60–80% of KV-cache memory to fragmentation and handles few concurrent requests.",
+      "truths": [
+        "KV cache grows with sequence length × batch.",
+        "Pre-allocating maximum lengths wastes memory.",
+        "GPUs idle between static batches."
+      ],
+      "derivation": [
+        "**PagedAttention**: allocate KV blocks on demand.",
+        "**Share** prefix blocks across requests (prompt caching).",
+        "**Continuous batching**: add and remove requests per step.",
+        "Result: **2–24x** throughput vs naive serving."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant that seats diners as soon as a seat frees",
+      "story": "Instead of waiting for a whole table to finish before seating the next group, any free seat is filled immediately.",
+      "mapping": [
+        [
+          "Seats",
+          "KV-cache blocks"
+        ],
+        [
+          "Seating as freed",
+          "Continuous batching"
+        ],
+        [
+          "Reserved empty tables",
+          "Pre-allocated waste"
+        ]
+      ],
+      "breaks": "Very long contexts still exhaust KV memory, so you need limits and offloading."
+    },
+    "mindmap": {
+      "center": "vLLM",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "KV cache size",
+            "Fragmentation"
+          ]
+        },
+        {
+          "label": "PagedAttention",
+          "children": [
+            "Paged blocks",
+            "On-demand"
+          ]
+        },
+        {
+          "label": "Batching",
+          "children": [
+            "Continuous"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Prefix caching",
+            "Tensor parallelism"
+          ]
+        },
+        {
+          "label": "Result",
+          "children": [
+            "Much higher throughput"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Serving with vLLM",
+      "scenario": "OpenAI-compatible server.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Many concurrent users per GPU."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "vllm serve meta-llama/Meta-Llama-3-8B-Instruct --max-model-len 8192 --gpu-memory-utilization 0.9\ncurl localhost:8000/v1/chat/completions -d '{\"model\":\"meta-llama/Meta-Llama-3-8B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'"
+        }
+      ],
+      "outcome": "LLM serving that uses GPU memory efficiently."
+    },
+    "summary": {
+      "points": [
+        "The KV cache dominates.",
+        "Page it.",
+        "Batch continuously."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does vLLM's PagedAttention solve?",
+        "a": "KV-cache memory fragmentation and waste, by allocating KV memory in on-demand blocks like virtual-memory pages."
+      }
+    ]
+  },
+  "token-economics-the-currency-of-ai": {
+    "core": "LLMs process tokens (roughly ¾ of a word), and cost, latency and limits are all denominated in tokens. Output tokens usually cost more than input tokens. Cost per request ≈ input × input price + output × output price, which drives design choices.",
+    "first_principles": {
+      "problem": "A chatbot sends the whole conversation history plus long system prompts with every request, and the bill explodes.",
+      "truths": [
+        "Every token in and out costs money.",
+        "Output generation is slower and pricier.",
+        "Prompts are often bloated."
+      ],
+      "derivation": [
+        "**Measure** tokens per request (input and output).",
+        "**Trim** prompts and history (summarise, retrieve selectively).",
+        "**Cap** output length; **cache** repeated prefixes.",
+        "**Route** easy queries to smaller, cheaper models."
+      ]
+    },
+    "analogy": {
+      "title": "A taxi meter",
+      "story": "You pay for every kilometre, so the shortest route and the right-sized car save money.",
+      "mapping": [
+        [
+          "Kilometres",
+          "Tokens"
+        ],
+        [
+          "Meter",
+          "Billing"
+        ],
+        [
+          "Smaller car",
+          "Smaller model"
+        ]
+      ],
+      "breaks": "Over-trimming context hurts answer quality, so balance cost against accuracy."
+    },
+    "mindmap": {
+      "center": "Token Economics",
+      "branches": [
+        {
+          "label": "Unit",
+          "children": [
+            "Token ≈ ¾ word"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Input price",
+            "Output price (higher)"
+          ]
+        },
+        {
+          "label": "Levers",
+          "children": [
+            "Trim prompts",
+            "Cap output",
+            "Prompt caching",
+            "Model routing"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "Tokens/request",
+            "$/conversation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cost per request",
+      "scenario": "Calculation.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Lever",
+          "detail": "Halving the prompt saves about $4.5k per million requests."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "inp, out = 3000, 500\ncost = inp/1e6 * 3.00 + out/1e6 * 15.00   # $ per 1M tokens\nprint(f\"${cost:.4f} per request\")       # ≈ $0.0165; ×1M requests ≈ $16.5k"
+        }
+      ],
+      "outcome": "LLM features designed with costs in mind."
+    },
+    "summary": {
+      "points": [
+        "Tokens are money.",
+        "Output costs more.",
+        "Trim, cap, cache, route."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do output tokens typically cost more than input tokens?",
+        "a": "They're generated sequentially, one at a time, which takes more compute time per token than processing input in parallel."
+      }
+    ]
+  },
+  "context-window-optimization": {
+    "core": "The context window caps total tokens (input + output). Longer contexts cost more, slow responses and can dilute attention ('lost in the middle'). Optimise by retrieving only relevant chunks, summarising history, ordering key information well and caching stable prefixes.",
+    "first_principles": {
+      "problem": "Stuffing 100k tokens of documents into every prompt is slow and expensive, and answers get worse.",
+      "truths": [
+        "Cost and latency grow with context length.",
+        "Models attend unevenly across long contexts.",
+        "Much context is irrelevant to the question."
+      ],
+      "derivation": [
+        "**Retrieve** top-k relevant chunks (RAG) rather than dumping everything.",
+        "**Summarise** older conversation turns.",
+        "**Place** critical instructions at the start or end.",
+        "**Cache** static system prompts (prefix caching)."
+      ]
+    },
+    "analogy": {
+      "title": "Packing a suitcase for a trip",
+      "story": "Take only what you'll need; an overstuffed case is heavy and you can't find anything.",
+      "mapping": [
+        [
+          "Suitcase capacity",
+          "Context window"
+        ],
+        [
+          "Packing list",
+          "Retrieved chunks"
+        ],
+        [
+          "Overstuffed",
+          "Lost in the middle"
+        ]
+      ],
+      "breaks": "Some tasks genuinely need long context (whole-codebase analysis), so use long-context models deliberately."
+    },
+    "mindmap": {
+      "center": "Context Optimization",
+      "branches": [
+        {
+          "label": "Limit",
+          "children": [
+            "Input + output tokens"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "Cost",
+            "Latency",
+            "Lost in the middle"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "RAG",
+            "Summarise history",
+            "Placement",
+            "Prefix caching"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Conversation memory strategy",
+      "scenario": "Chat assistant.",
+      "flow": [
+        "Keep last 6 turns verbatim",
+        "Summarise older turns into 200 tokens",
+        "Retrieve 4 relevant doc chunks",
+        "Static system prompt cached"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "80% fewer tokens with better answers."
+        }
+      ],
+      "code": [],
+      "outcome": "efficient, focused prompts."
+    },
+    "summary": {
+      "points": [
+        "Less is often more.",
+        "Retrieve selectively.",
+        "Cache the static parts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the 'lost in the middle' problem?",
+        "a": "Models tend to use information at the start and end of long contexts better than information buried in the middle."
+      }
+    ]
+  },
+  "customization-the-problem-with-fine-tuning": {
+    "core": "Base models may lack your domain style, format or knowledge. Full fine-tuning updates every weight, which needs huge GPU memory (weights, gradients and optimizer states, often 3–4x the model size) and produces a full model copy per variant.",
+    "first_principles": {
+      "problem": "Fine-tuning a 70B model needs a cluster of GPUs and produces a 140 GB copy for every customer variant.",
+      "truths": [
+        "Training memory far exceeds inference memory.",
+        "Most adaptation needs small changes.",
+        "Storing many full copies is wasteful."
+      ],
+      "derivation": [
+        "Try **prompting and RAG** first.",
+        "Fine-tune for **style, format or narrow tasks** only.",
+        "Use **parameter-efficient fine-tuning** (PEFT) such as LoRA.",
+        "**Evaluate** against the base model."
+      ]
+    },
+    "analogy": {
+      "title": "Rewriting an entire textbook to add a chapter",
+      "story": "Reprinting thousands of pages for a small addition is wasteful.",
+      "mapping": [
+        [
+          "Textbook",
+          "Base model"
+        ],
+        [
+          "Reprinting",
+          "Full fine-tuning"
+        ],
+        [
+          "Small addition",
+          "Domain adaptation"
+        ]
+      ],
+      "breaks": "Fine-tuning doesn't reliably add facts; use RAG for knowledge."
+    },
+    "mindmap": {
+      "center": "Fine-Tuning Problem",
+      "branches": [
+        {
+          "label": "Full FT",
+          "children": [
+            "All weights",
+            "3-4x memory",
+            "Full copies"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Prompting",
+            "RAG",
+            "PEFT/LoRA"
+          ]
+        },
+        {
+          "label": "Use FT for",
+          "children": [
+            "Style",
+            "Format",
+            "Narrow tasks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Memory for full fine-tuning",
+      "scenario": "7B model.",
+      "flow": [
+        "Weights FP16: 14 GB",
+        "Gradients: 14 GB",
+        "Adam states: ~56 GB (FP32)",
+        "Total ≈ 84+ GB"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Even a 7B model needs serious hardware."
+        }
+      ],
+      "code": [],
+      "outcome": "you understand why full fine-tuning is expensive."
+    },
+    "summary": {
+      "points": [
+        "Full FT is heavy.",
+        "Try prompts and RAG first.",
+        "Prefer PEFT."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does full fine-tuning need much more memory than inference?",
+        "a": "Training stores gradients and optimizer states for every parameter in addition to the weights."
+      }
+    ]
+  },
+  "adapters-lora-and-qlora": {
+    "core": "LoRA freezes the base model and trains small low-rank adapter matrices (often under 1% of parameters) added to attention layers. QLoRA also quantises the frozen base to 4-bit, letting you fine-tune large models on a single GPU. Adapters are small files you can swap per task or tenant.",
+    "first_principles": {
+      "problem": "You need many customised model variants without the cost of full fine-tuning and full copies.",
+      "truths": [
+        "Weight updates during fine-tuning are often low-rank.",
+        "Freezing the base saves memory.",
+        "Small adapters can be hot-swapped."
+      ],
+      "derivation": [
+        "**Freeze** the base weights.",
+        "**Add** low-rank matrices A·B (rank r = 8–64) to target layers.",
+        "**Train** only the adapters (QLoRA: base in 4-bit).",
+        "**Serve** a shared base + per-task adapters (multi-LoRA serving)."
+      ]
+    },
+    "analogy": {
+      "title": "Sticky notes in a textbook",
+      "story": "Instead of rewriting the book, you add notes on key pages, and different students can have different notes.",
+      "mapping": [
+        [
+          "Textbook",
+          "Frozen base model"
+        ],
+        [
+          "Sticky notes",
+          "LoRA adapters"
+        ],
+        [
+          "Different students",
+          "Different tasks/tenants"
+        ]
+      ],
+      "breaks": "Adapters have limited capacity, and some deep behaviour changes need full fine-tuning."
+    },
+    "mindmap": {
+      "center": "LoRA & QLoRA",
+      "branches": [
+        {
+          "label": "LoRA",
+          "children": [
+            "Frozen base",
+            "Low-rank A·B",
+            "<1% params"
+          ]
+        },
+        {
+          "label": "QLoRA",
+          "children": [
+            "4-bit base",
+            "Single GPU"
+          ]
+        },
+        {
+          "label": "Serving",
+          "children": [
+            "Shared base",
+            "Hot-swap adapters"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "PEFT",
+            "Unsloth",
+            "vLLM multi-LoRA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Configuring LoRA",
+      "scenario": "PEFT.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A tailored model in hours on one GPU, as a 50 MB adapter."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from peft import LoraConfig, get_peft_model\ncfg = LoraConfig(r=16, lora_alpha=32, target_modules=[\"q_proj\", \"v_proj\"], lora_dropout=0.05)\nmodel = get_peft_model(base_model, cfg)\nmodel.print_trainable_parameters()  # ~0.2% trainable"
+        }
+      ],
+      "outcome": "cheap, swappable model customisation."
+    },
+    "summary": {
+      "points": [
+        "Freeze the base.",
+        "Train small adapters.",
+        "Swap per task."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does QLoRA add on top of LoRA?",
+        "a": "It quantises the frozen base model to 4-bit, drastically reducing memory so large models can be fine-tuned on a single GPU."
+      }
+    ]
+  }
+}

@@ -1,0 +1,618 @@
+{
+  "introduction-hitting-the-wall": {
+    "core": "Single-GPU training hits two walls: it's too slow (the data or compute is too big, which data parallelism fixes) or the model is too big (it doesn't fit in memory, which model parallelism, ZeRO and 3D parallelism fix).",
+    "first_principles": {
+      "problem": "A model takes three months to train on one GPU, or simply won't fit in its memory.",
+      "truths": [
+        "Work can be split across devices.",
+        "Splitting adds communication.",
+        "Different bottlenecks need different splits."
+      ],
+      "derivation": [
+        "**Too slow** → Data Parallelism (DDP).",
+        "**Too big** → Tensor or Pipeline Parallelism.",
+        "**Memory-redundant** → ZeRO/FSDP.",
+        "**Huge** → combine them (3D parallelism)."
+      ]
+    },
+    "analogy": {
+      "title": "Filling a swimming pool with a garden hose",
+      "story": "Use more hoses (data parallel), or split the pool into sections (model parallel).",
+      "mapping": [
+        [
+          "More hoses",
+          "Data parallelism"
+        ],
+        [
+          "Sections",
+          "Model parallelism"
+        ],
+        [
+          "Pool",
+          "Training job"
+        ]
+      ],
+      "breaks": "Parallelism has overheads, and scaling efficiency drops as communication grows."
+    },
+    "mindmap": {
+      "center": "Distributed Training",
+      "branches": [
+        {
+          "label": "Walls",
+          "children": [
+            "Too slow",
+            "Too big"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "DDP"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Tensor",
+            "Pipeline"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "ZeRO",
+            "FSDP"
+          ]
+        },
+        {
+          "label": "Combined",
+          "children": [
+            "3D parallelism"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing a strategy",
+      "scenario": "Two scenarios.",
+      "flow": [
+        "ResNet on ImageNet, slow → DDP on 8 GPUs",
+        "70B LLM doesn't fit → TP + PP + ZeRO across 64 GPUs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The strategy matches the wall you've hit."
+        }
+      ],
+      "code": [],
+      "outcome": "you can diagnose which parallelism you need."
+    },
+    "summary": {
+      "points": [
+        "Slow → data parallel.",
+        "Big → model parallel.",
+        "Combine at scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which parallelism addresses a model that doesn't fit on one GPU?",
+        "a": "Model parallelism (tensor or pipeline), often combined with ZeRO/FSDP."
+      }
+    ]
+  },
+  "data-parallelism-ddp-the-cloning-technique": {
+    "core": "Distributed Data Parallel puts a full copy of the model on each GPU, splits each batch across them, computes gradients independently, then all-reduces the gradients so every replica applies the same update. Throughput scales with the number of GPUs.",
+    "first_principles": {
+      "problem": "Training on one GPU is too slow, but the model fits on a single GPU.",
+      "truths": [
+        "Gradients from different data can be averaged.",
+        "Identical replicas stay in sync with identical updates.",
+        "Communication overhead grows with model size."
+      ],
+      "derivation": [
+        "**Replicate** the model on N GPUs.",
+        "**Shard** data (DistributedSampler).",
+        "**All-reduce** gradients (overlapping with backward).",
+        "Scale **batch size and learning rate** appropriately."
+      ]
+    },
+    "analogy": {
+      "title": "Cloning a student to study faster",
+      "story": "Each clone reads a different chapter, then they share notes so everyone learns everything.",
+      "mapping": [
+        [
+          "Clones",
+          "Model replicas"
+        ],
+        [
+          "Chapters",
+          "Data shards"
+        ],
+        [
+          "Sharing notes",
+          "Gradient all-reduce"
+        ]
+      ],
+      "breaks": "Each GPU must hold the whole model, optimizer and gradients, so it doesn't help models that are too big."
+    },
+    "mindmap": {
+      "center": "DDP",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Replicate model",
+            "Shard data",
+            "All-reduce grads"
+          ]
+        },
+        {
+          "label": "Scaling",
+          "children": [
+            "Throughput ~N"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Model must fit",
+            "Comm overhead"
+          ]
+        },
+        {
+          "label": "Tips",
+          "children": [
+            "Overlap comm",
+            "LR scaling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Launching DDP",
+      "scenario": "PyTorch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Close to 8x faster epochs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "torchrun --nproc_per_node=8 train.py\n# in train.py: model = DDP(model.to(local_rank), device_ids=[local_rank])\n#              sampler = DistributedSampler(dataset)"
+        }
+      ],
+      "outcome": "faster training for models that fit."
+    },
+    "summary": {
+      "points": [
+        "Clone the model.",
+        "Split the data.",
+        "Sync the gradients."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's synchronised between replicas in DDP?",
+        "a": "Gradients, via all-reduce, so every replica applies the same weight update."
+      }
+    ]
+  },
+  "model-parallelism-tensor-parallelism-tp": {
+    "core": "Tensor parallelism splits individual layers' weight matrices across GPUs (column- and row-wise, as in Megatron-LM). Each GPU computes part of every matrix multiply, then results are combined with all-reduce or all-gather inside the layer, so huge layers fit.",
+    "first_principles": {
+      "problem": "A single layer's weights or activations exceed one GPU's memory.",
+      "truths": [
+        "Matrix multiplies can be partitioned.",
+        "Partial results must be combined.",
+        "Communication happens inside every layer."
+      ],
+      "derivation": [
+        "Split weights **column-wise** (MLP first layer) and **row-wise** (second).",
+        "Each GPU computes its **slice**.",
+        "**All-reduce** combines outputs per layer.",
+        "Keep TP **within NVLink** domains (≤8 GPUs)."
+      ]
+    },
+    "analogy": {
+      "title": "Several chefs each chopping part of one huge vegetable",
+      "story": "Each handles a section, then they combine the pieces for the next step.",
+      "mapping": [
+        [
+          "Huge vegetable",
+          "Weight matrix"
+        ],
+        [
+          "Sections",
+          "Tensor shards"
+        ],
+        [
+          "Combining",
+          "All-reduce"
+        ]
+      ],
+      "breaks": "Heavy communication per layer makes cross-node TP slow."
+    },
+    "mindmap": {
+      "center": "Tensor Parallelism",
+      "branches": [
+        {
+          "label": "Split",
+          "children": [
+            "Column-wise",
+            "Row-wise"
+          ]
+        },
+        {
+          "label": "Communication",
+          "children": [
+            "Per layer",
+            "All-reduce"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Within NVLink node"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Megatron-LM",
+            "DeepSpeed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "TP of an MLP block",
+      "scenario": "Two GPUs.",
+      "flow": [
+        "W1 split by columns: GPU0, GPU1",
+        "Each computes partial activations",
+        "W2 split by rows",
+        "All-reduce sums outputs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each GPU holds half the weights."
+        }
+      ],
+      "code": [],
+      "outcome": "layers too big for one GPU become trainable."
+    },
+    "summary": {
+      "points": [
+        "Slice the matrices.",
+        "Combine per layer.",
+        "Keep it in-node."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is tensor parallelism usually confined to GPUs within one node?",
+        "a": "It requires communication within every layer, which needs very high-bandwidth intra-node links like NVLink."
+      }
+    ]
+  },
+  "model-parallelism-pipeline-parallelism-pp": {
+    "core": "Pipeline parallelism splits the model by layers into stages on different GPUs, like an assembly line. Micro-batches flow through the stages (GPipe, 1F1B schedules) to reduce idle 'bubbles' while each stage works on a different micro-batch.",
+    "first_principles": {
+      "problem": "A model with many layers doesn't fit, and tensor parallelism across nodes is too communication-heavy.",
+      "truths": [
+        "Layers can be assigned to different devices.",
+        "Sequential stages create idle time.",
+        "Micro-batching overlaps the stages."
+      ],
+      "derivation": [
+        "**Partition** layers into balanced stages.",
+        "**Split** batches into micro-batches.",
+        "**Schedule** forward and backward passes (1F1B) to minimise bubbles.",
+        "Communicate only **activations between stages** (cross-node friendly)."
+      ]
+    },
+    "analogy": {
+      "title": "A car assembly line",
+      "story": "Each station adds parts and passes the car on; several cars are in progress at once.",
+      "mapping": [
+        [
+          "Stations",
+          "Pipeline stages"
+        ],
+        [
+          "Cars",
+          "Micro-batches"
+        ],
+        [
+          "Idle stations",
+          "Pipeline bubbles"
+        ]
+      ],
+      "breaks": "Unbalanced stages and bubbles reduce efficiency, and large micro-batch counts increase activation memory."
+    },
+    "mindmap": {
+      "center": "Pipeline Parallelism",
+      "branches": [
+        {
+          "label": "Split",
+          "children": [
+            "By layers",
+            "Stages"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Micro-batches"
+          ]
+        },
+        {
+          "label": "Schedules",
+          "children": [
+            "GPipe",
+            "1F1B",
+            "Interleaved"
+          ]
+        },
+        {
+          "label": "Issue",
+          "children": [
+            "Bubbles",
+            "Balance"
+          ]
+        },
+        {
+          "label": "Comm",
+          "children": [
+            "Activations only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 4-stage pipeline",
+      "scenario": "48-layer model.",
+      "flow": [
+        "GPU0: layers 1–12",
+        "GPU1: 13–24",
+        "GPU2: 25–36",
+        "GPU3: 37–48",
+        "8 micro-batches in flight"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fits across nodes with modest communication."
+        }
+      ],
+      "code": [],
+      "outcome": "deep models split by layers."
+    },
+    "summary": {
+      "points": [
+        "Stages by layers.",
+        "Micro-batches overlap.",
+        "Minimise bubbles."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a 'pipeline bubble'?",
+        "a": "Idle time on pipeline stages while waiting for micro-batches to arrive from earlier stages or for backward passes."
+      }
+    ]
+  },
+  "zero-zero-redundancy-optimizer-the-memory-saver": {
+    "core": "In plain DDP every GPU stores a full copy of the optimizer states, gradients and parameters, which is redundant. ZeRO (DeepSpeed) and FSDP shard them across GPUs: stage 1 shards optimizer states, stage 2 adds gradients, stage 3 adds parameters, gathering pieces just in time.",
+    "first_principles": {
+      "problem": "Adam's optimizer states alone are about 12 bytes per parameter, so a 10B model's training state can't fit even when the weights do.",
+      "truths": [
+        "Optimizer states dominate training memory.",
+        "Each GPU only needs its shard most of the time.",
+        "Gathering on demand trades communication for memory."
+      ],
+      "derivation": [
+        "**Stage 1**: shard optimizer states (~4x saving).",
+        "**Stage 2**: + shard gradients.",
+        "**Stage 3** / FSDP: + shard parameters (gather per layer).",
+        "**Offload** to CPU/NVMe for extreme cases."
+      ]
+    },
+    "analogy": {
+      "title": "A study group splitting the notes",
+      "story": "Instead of everyone keeping a full copy of every textbook, each person keeps a section and shares it when needed.",
+      "mapping": [
+        [
+          "Full textbook copies",
+          "Replicated state"
+        ],
+        [
+          "Sections",
+          "Shards"
+        ],
+        [
+          "Sharing when needed",
+          "All-gather on demand"
+        ]
+      ],
+      "breaks": "Stage 3 adds communication, and performance depends on interconnect speed."
+    },
+    "mindmap": {
+      "center": "ZeRO / FSDP",
+      "branches": [
+        {
+          "label": "Redundancy",
+          "children": [
+            "Optimizer states",
+            "Gradients",
+            "Params"
+          ]
+        },
+        {
+          "label": "Stages",
+          "children": [
+            "1: optimizer",
+            "2: + grads",
+            "3: + params"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "CPU/NVMe offload"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "DeepSpeed",
+            "PyTorch FSDP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Memory per GPU for a 7B model on 8 GPUs",
+      "scenario": "Approximate.",
+      "flow": [
+        "DDP: ~112 GB per GPU (doesn't fit)",
+        "ZeRO-1: ~38 GB",
+        "ZeRO-3/FSDP: ~14 GB + activations"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The model trains on commodity 40–80 GB GPUs."
+        }
+      ],
+      "code": [],
+      "outcome": "data-parallel training without memory redundancy."
+    },
+    "summary": {
+      "points": [
+        "Shard the redundant state.",
+        "Three stages.",
+        "Trade communication for memory."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does ZeRO stage 3 (or FSDP full sharding) shard?",
+        "a": "Optimizer states, gradients and model parameters across all data-parallel GPUs."
+      }
+    ]
+  },
+  "combining-strategies-3d-parallelism": {
+    "core": "The largest models combine tensor parallelism (within a node, over NVLink), pipeline parallelism (across nodes, by layers) and data parallelism (replicating the whole pipeline, often with ZeRO), mapping each to the network tier it suits best.",
+    "first_principles": {
+      "problem": "No single strategy can train a 175B+ model efficiently on thousands of GPUs.",
+      "truths": [
+        "Each strategy has different communication needs.",
+        "The hardware has tiers of bandwidth.",
+        "Mapping strategy to tier maximises efficiency."
+      ],
+      "derivation": [
+        "**TP** inside a node (highest bandwidth).",
+        "**PP** across nodes (activations only).",
+        "**DP/ZeRO** across pipeline replicas (gradients).",
+        "Total GPUs = **TP × PP × DP**."
+      ]
+    },
+    "analogy": {
+      "title": "A large construction project",
+      "story": "Teams of specialists work closely on a floor (TP), floors are built in sequence (PP), and identical buildings go up in parallel (DP).",
+      "mapping": [
+        [
+          "Specialists on a floor",
+          "Tensor parallel"
+        ],
+        [
+          "Floors in sequence",
+          "Pipeline parallel"
+        ],
+        [
+          "Parallel buildings",
+          "Data parallel"
+        ]
+      ],
+      "breaks": "Configuration is complex, and frameworks (Megatron, DeepSpeed, NeMo) help."
+    },
+    "mindmap": {
+      "center": "3D Parallelism",
+      "branches": [
+        {
+          "label": "TP",
+          "children": [
+            "Intra-node",
+            "NVLink"
+          ]
+        },
+        {
+          "label": "PP",
+          "children": [
+            "Inter-node",
+            "Layers"
+          ]
+        },
+        {
+          "label": "DP",
+          "children": [
+            "Replicas",
+            "ZeRO"
+          ]
+        },
+        {
+          "label": "Formula",
+          "children": [
+            "GPUs = TP×PP×DP"
+          ]
+        },
+        {
+          "label": "Frameworks",
+          "children": [
+            "Megatron-LM",
+            "DeepSpeed",
+            "NeMo"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A 1,024-GPU layout",
+      "scenario": "Configuration.",
+      "flow": [
+        "TP = 8 (one node)",
+        "PP = 8 (8 nodes per pipeline)",
+        "DP = 16 (16 pipeline replicas)",
+        "8 × 8 × 16 = 1,024 GPUs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each communication pattern uses the right links."
+        }
+      ],
+      "code": [],
+      "outcome": "frontier-scale training made possible."
+    },
+    "summary": {
+      "points": [
+        "TP in-node.",
+        "PP across nodes.",
+        "DP across replicas."
+      ]
+    },
+    "check": [
+      {
+        "q": "In 3D parallelism, how is the total GPU count determined?",
+        "a": "As the product of tensor-parallel, pipeline-parallel and data-parallel degrees (TP × PP × DP)."
+      }
+    ]
+  }
+}

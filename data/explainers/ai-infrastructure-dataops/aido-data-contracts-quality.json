@@ -1,0 +1,406 @@
+{
+  "introduction-the-silent-failure": {
+    "core": "Bad data rarely crashes pipelines. It silently flows downstream, corrupting dashboards and models. Data quality engineering adds contracts (agreed schemas and semantics), tests (expectations) and drift monitoring to catch problems at the source.",
+    "first_principles": {
+      "problem": "An upstream team renames a field, nulls flood a column, and a pricing model quietly makes bad predictions for two weeks.",
+      "truths": [
+        "Data producers and consumers are often different teams.",
+        "Silent errors are the most expensive.",
+        "Statistical properties change over time."
+      ],
+      "derivation": [
+        "Define **data contracts**.",
+        "Enforce them with **schema registries**.",
+        "Test data with **Great Expectations/Soda**.",
+        "Monitor **data drift and concept drift**."
+      ]
+    },
+    "analogy": {
+      "title": "A water treatment plant downstream of a leak",
+      "story": "If sewage leaks upstream, the downstream plant can't tell until people get sick, unless there are sensors.",
+      "mapping": [
+        [
+          "Upstream leak",
+          "Bad source data"
+        ],
+        [
+          "Sensors",
+          "Quality checks"
+        ],
+        [
+          "People getting sick",
+          "Bad decisions/models"
+        ]
+      ],
+      "breaks": "You can't test every property, so focus on what consumers depend on."
+    },
+    "mindmap": {
+      "center": "Data Quality",
+      "branches": [
+        {
+          "label": "Risk",
+          "children": [
+            "Silent failures"
+          ]
+        },
+        {
+          "label": "Contracts",
+          "children": [
+            "Schema",
+            "Semantics",
+            "SLAs"
+          ]
+        },
+        {
+          "label": "Tests",
+          "children": [
+            "Great Expectations",
+            "Soda",
+            "dbt tests"
+          ]
+        },
+        {
+          "label": "Monitoring",
+          "children": [
+            "Data drift",
+            "Concept drift"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A silent failure",
+      "scenario": "Timeline.",
+      "flow": [
+        "Upstream changes currency from USD to cents",
+        "Pipeline succeeds",
+        "Revenue dashboard shows 100x spike",
+        "Model retrains on wrong values"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "A green pipeline doesn't mean correct data."
+        }
+      ],
+      "code": [],
+      "outcome": "data quality treated as engineering."
+    },
+    "summary": {
+      "points": [
+        "Bad data is silent.",
+        "Catch it at the source.",
+        "Contracts + tests + monitoring."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are data quality failures especially dangerous?",
+        "a": "They usually don't crash pipelines, so bad data flows silently into dashboards and models."
+      }
+    ]
+  },
+  "data-contracts-schema-registries": {
+    "core": "A data contract is an API-like agreement between producer and consumers: schema, types, semantics, constraints, freshness SLAs and evolution rules. Schema registries (Confluent, Apicurio) enforce compatible evolution for streaming data and reject breaking changes at publish time.",
+    "first_principles": {
+      "problem": "Producers change event formats without warning, breaking every downstream consumer.",
+      "truths": [
+        "Data is an interface between teams.",
+        "Breaking changes need coordination.",
+        "Machines can enforce compatibility."
+      ],
+      "derivation": [
+        "**Define the contract**: schema (Avro/Protobuf/JSON Schema), owners, SLAs.",
+        "**Register** schemas.",
+        "**Enforce compatibility** (backward/forward) at produce time.",
+        "**Version** and communicate breaking changes."
+      ]
+    },
+    "analogy": {
+      "title": "An API contract for data",
+      "story": "Just as an API promises its request and response shape, a data contract promises the shape and meaning of the data.",
+      "mapping": [
+        [
+          "API spec",
+          "Data contract"
+        ],
+        [
+          "API gateway checks",
+          "Schema registry"
+        ],
+        [
+          "Breaking change",
+          "Removed/renamed field"
+        ]
+      ],
+      "breaks": "Schemas don't capture all semantics (units, meanings), so document those in the contract too."
+    },
+    "mindmap": {
+      "center": "Data Contracts",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "Schema",
+            "Semantics",
+            "SLAs",
+            "Owners"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "Schema registry",
+            "Compatibility modes"
+          ]
+        },
+        {
+          "label": "Formats",
+          "children": [
+            "Avro",
+            "Protobuf",
+            "JSON Schema"
+          ]
+        },
+        {
+          "label": "Evolution",
+          "children": [
+            "Versioning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Backward compatibility rejection",
+      "scenario": "Schema registry.",
+      "flow": [
+        "Producer tries to remove required field 'amount'",
+        "Registry (BACKWARD mode) rejects",
+        "Producer adds new optional field instead",
+        "Consumers unaffected"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Breaking changes are stopped at the source."
+        }
+      ],
+      "code": [],
+      "outcome": "data interfaces as stable as APIs."
+    },
+    "summary": {
+      "points": [
+        "Data is an API.",
+        "Write contracts.",
+        "Enforce compatibility."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a schema registry's compatibility check prevent?",
+        "a": "Producers publishing schema changes that would break existing consumers."
+      }
+    ]
+  },
+  "data-as-code-great-expectations-soda": {
+    "core": "Write unit tests for data: expectations such as 'not null', 'unique', 'between 0 and 1', 'row count within ±10% of yesterday' or 'values in this set'. Tools like Great Expectations, Soda and dbt tests run them in pipelines and block bad data before it propagates.",
+    "first_principles": {
+      "problem": "Schema checks pass, but the data is wrong: nulls, duplicates, impossible values, missing partitions.",
+      "truths": [
+        "Data has semantic constraints.",
+        "Tests can be automated.",
+        "Failing fast prevents spread."
+      ],
+      "derivation": [
+        "Define **expectations** per dataset.",
+        "Run them **in the pipeline** (before publishing).",
+        "**Quarantine or block** on failure.",
+        "**Alert** owners with failing rows."
+      ]
+    },
+    "analogy": {
+      "title": "Quality control on a production line",
+      "story": "Inspect each batch before it ships; reject defective batches.",
+      "mapping": [
+        [
+          "Inspection",
+          "Expectations"
+        ],
+        [
+          "Defective batch",
+          "Bad data"
+        ],
+        [
+          "Not shipping",
+          "Blocking publication"
+        ]
+      ],
+      "breaks": "Too many brittle tests cause alert fatigue, so test what matters."
+    },
+    "mindmap": {
+      "center": "Data Tests",
+      "branches": [
+        {
+          "label": "Checks",
+          "children": [
+            "Nulls",
+            "Uniqueness",
+            "Ranges",
+            "Volume",
+            "Freshness"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Great Expectations",
+            "Soda",
+            "dbt tests"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Block",
+            "Quarantine",
+            "Alert"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Soda checks",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bad batches never reach dashboards or models."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "checks for orders:\n  - row_count > 1000\n  - missing_count(customer_id) = 0\n  - duplicate_count(order_id) = 0\n  - invalid_percent(status) = 0:\n      valid values: [paid, refunded, pending]\n  - freshness(created_at) < 2h"
+        }
+      ],
+      "outcome": "data verified before it's used."
+    },
+    "summary": {
+      "points": [
+        "Test the data.",
+        "Run it in the pipeline.",
+        "Block bad data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Give two examples of data quality expectations.",
+        "a": "For example, a column has no nulls, and values fall within an allowed range (also uniqueness, freshness and volume checks)."
+      }
+    ]
+  },
+  "the-silent-killers-data-drift-vs-concept-drift": {
+    "core": "Data drift: input distributions shift (users get younger, a new region is added). Concept drift: the relationship between inputs and outcomes changes (fraud patterns evolve). Both degrade models without any schema change, so monitor distributions and performance and retrain as needed.",
+    "first_principles": {
+      "problem": "A model's accuracy slowly decays over months while every data check passes.",
+      "truths": [
+        "The world changes.",
+        "Models learn a snapshot of relationships.",
+        "Statistical tests detect shifts."
+      ],
+      "derivation": [
+        "**Data drift**: compare feature distributions (PSI, KS test) against training.",
+        "**Concept drift**: track live performance when labels arrive.",
+        "Set **alert thresholds**.",
+        "**Retrain** on fresh data and validate."
+      ]
+    },
+    "analogy": {
+      "title": "A weather forecaster's rules going stale",
+      "story": "Rules learned from past climate fail as the climate changes (concept), or the forecaster moves to a new city (data).",
+      "mapping": [
+        [
+          "Moving city",
+          "Data drift"
+        ],
+        [
+          "Climate change",
+          "Concept drift"
+        ],
+        [
+          "Updating rules",
+          "Retraining"
+        ]
+      ],
+      "breaks": "Labels often arrive late, so concept drift detection lags and proxies help."
+    },
+    "mindmap": {
+      "center": "Drift",
+      "branches": [
+        {
+          "label": "Data drift",
+          "children": [
+            "Input distribution shift",
+            "PSI",
+            "KS test"
+          ]
+        },
+        {
+          "label": "Concept drift",
+          "children": [
+            "Input→output relationship shift",
+            "Performance decay"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "Alert",
+            "Retrain",
+            "Validate"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Evidently",
+            "WhyLabs",
+            "Arize"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detecting drift",
+      "scenario": "Monitoring.",
+      "flow": [
+        "PSI on 'transaction_amount' = 0.28 (>0.2 threshold)",
+        "Alert: data drift",
+        "Investigate: new high-value market launched",
+        "Retrain with new data"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Degradation is caught before business impact."
+        }
+      ],
+      "code": [],
+      "outcome": "models that stay accurate as the world changes."
+    },
+    "summary": {
+      "points": [
+        "Inputs shift (data drift).",
+        "Relationships shift (concept drift).",
+        "Monitor and retrain."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between data drift and concept drift?",
+        "a": "Data drift is a change in input distributions; concept drift is a change in the relationship between inputs and the target."
+      }
+    ]
+  }
+}

@@ -1,0 +1,718 @@
+{
+  "introduction-giving-ai-long-term-memory": {
+    "core": "LLMs know only their training data (frozen at a cutoff) and have limited context windows. Vector databases give them long-term, searchable memory of your documents, retrieved by meaning and fed into prompts (RAG).",
+    "first_principles": {
+      "problem": "An LLM can't answer questions about your company's internal docs, and it hallucinates instead.",
+      "truths": [
+        "Training data is frozen and generic.",
+        "Context windows are finite and costly.",
+        "Relevant facts can be retrieved on demand."
+      ],
+      "derivation": [
+        "Convert docs to **embeddings**.",
+        "Store them in a **vector database**.",
+        "**Retrieve** the most similar chunks per question.",
+        "**Augment** the prompt (RAG); search efficiently with **ANN indexes**."
+      ]
+    },
+    "analogy": {
+      "title": "A brilliant student without the textbook",
+      "story": "Smart, but wrong on specific facts until allowed to look things up.",
+      "mapping": [
+        [
+          "Student",
+          "LLM"
+        ],
+        [
+          "Textbook",
+          "Your documents"
+        ],
+        [
+          "Looking things up",
+          "Retrieval"
+        ]
+      ],
+      "breaks": "Retrieval quality limits answer quality: garbage in, garbage out."
+    },
+    "mindmap": {
+      "center": "Vector DBs for AI",
+      "branches": [
+        {
+          "label": "LLM limits",
+          "children": [
+            "Frozen knowledge",
+            "Finite context"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Embeddings",
+            "Vector DB",
+            "RAG"
+          ]
+        },
+        {
+          "label": "Search",
+          "children": [
+            "ANN",
+            "IVF",
+            "HNSW"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An internal policy question",
+      "scenario": "Without and with RAG.",
+      "flow": [
+        "Without: LLM invents a refund policy",
+        "With RAG: retrieves policy doc chunk",
+        "Answers with citation"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Grounded, current answers."
+        }
+      ],
+      "code": [],
+      "outcome": "LLMs that know your data."
+    },
+    "summary": {
+      "points": [
+        "LLMs forget your data.",
+        "Vectors remember it.",
+        "Retrieve, then generate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do LLMs need an external memory like a vector database?",
+        "a": "Their knowledge is frozen at training time and their context is limited, so relevant private or current facts must be retrieved at query time."
+      }
+    ]
+  },
+  "the-core-idea-embeddings": {
+    "core": "An embedding model converts text (or images) into a dense vector of numbers where similar meanings sit close together in space. Similarity is measured with cosine similarity or dot product, so search becomes geometry.",
+    "first_principles": {
+      "problem": "Keyword search misses 'how do I get my money back?' when the doc says 'refund policy'.",
+      "truths": [
+        "Meaning can be represented numerically.",
+        "Similar concepts cluster.",
+        "Distance metrics quantify similarity."
+      ],
+      "derivation": [
+        "**Chunk** documents (e.g. 300–800 tokens, with overlap).",
+        "**Embed** each chunk with the same model.",
+        "**Store** vectors + metadata.",
+        "**Query**: embed the question, find the nearest vectors."
+      ]
+    },
+    "analogy": {
+      "title": "A map of meanings",
+      "story": "Words are placed on a map so 'king' is near 'queen' and 'refund' is near 'money back'.",
+      "mapping": [
+        [
+          "Map coordinates",
+          "Vector dimensions"
+        ],
+        [
+          "Nearby places",
+          "Similar meanings"
+        ],
+        [
+          "Distance",
+          "Cosine similarity"
+        ]
+      ],
+      "breaks": "Embeddings carry their model's biases and blind spots, and changing models requires re-embedding."
+    },
+    "mindmap": {
+      "center": "Embeddings",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Dense vectors",
+            "Semantic space"
+          ]
+        },
+        {
+          "label": "Similarity",
+          "children": [
+            "Cosine",
+            "Dot product",
+            "L2"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Chunk",
+            "Embed",
+            "Store",
+            "Query"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Same model for both",
+            "Re-embed on change"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Semantic similarity",
+      "scenario": "Code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Search by meaning, not exact words."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "q = embed(\"how do I get my money back?\")\nd = embed(\"Refund policy: customers may request a refund within 30 days\")\ncosine(q, d)  # ≈ 0.82 → highly related, despite no shared keywords"
+        }
+      ],
+      "outcome": "semantic search foundations."
+    },
+    "summary": {
+      "points": [
+        "Meaning → numbers.",
+        "Close = similar.",
+        "Same model for docs and queries."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must queries and documents be embedded with the same model?",
+        "a": "Different models produce incompatible vector spaces, so distances between them would be meaningless."
+      }
+    ]
+  },
+  "rag-architecture-the-open-book-test": {
+    "core": "Retrieval-Augmented Generation: embed the user question, retrieve the top-k relevant chunks from the vector database, insert them into the prompt as context, and have the LLM answer from that context, ideally citing the sources. It's an open-book exam.",
+    "first_principles": {
+      "problem": "Fine-tuning an LLM on frequently changing documents is slow and expensive, and it still hallucinates.",
+      "truths": [
+        "Context provided at query time grounds answers.",
+        "Documents change frequently.",
+        "Citations build trust."
+      ],
+      "derivation": [
+        "**Ingest**: chunk → embed → store (with metadata).",
+        "**Retrieve**: query embedding → top-k (+ filters, hybrid search, reranking).",
+        "**Augment**: build the prompt with the chunks.",
+        "**Generate**: answer + cite, and refuse when the context is insufficient."
+      ]
+    },
+    "analogy": {
+      "title": "An open-book test",
+      "story": "The student looks up the relevant pages, then writes an answer based on them.",
+      "mapping": [
+        [
+          "Student",
+          "LLM"
+        ],
+        [
+          "Looking up pages",
+          "Retrieval"
+        ],
+        [
+          "Answer citing pages",
+          "Grounded generation"
+        ]
+      ],
+      "breaks": "Bad chunking or retrieval leads to confident wrong answers, so evaluate retrieval quality."
+    },
+    "mindmap": {
+      "center": "RAG",
+      "branches": [
+        {
+          "label": "Ingest",
+          "children": [
+            "Chunk",
+            "Embed",
+            "Store"
+          ]
+        },
+        {
+          "label": "Retrieve",
+          "children": [
+            "Top-k",
+            "Filters",
+            "Hybrid",
+            "Rerank"
+          ]
+        },
+        {
+          "label": "Augment",
+          "children": [
+            "Prompt with context"
+          ]
+        },
+        {
+          "label": "Generate",
+          "children": [
+            "Cite",
+            "Refuse if unknown"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A minimal RAG loop",
+      "scenario": "Python sketch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Current, grounded answers without retraining."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "chunks = vdb.search(embed(question), k=5, filter={\"team\": \"hr\"})\nprompt = f\"Answer using only this context. Cite sources.\\n{format(chunks)}\\nQ: {question}\"\nanswer = llm.generate(prompt)"
+        }
+      ],
+      "outcome": "LLM apps grounded in your knowledge."
+    },
+    "summary": {
+      "points": [
+        "Retrieve relevant chunks.",
+        "Augment the prompt.",
+        "Generate with citations."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is RAG often preferred over fine-tuning for knowledge that changes frequently?",
+        "a": "Updating the vector store is quick and cheap, while retraining models is slow and costly, and RAG supports citations."
+      }
+    ]
+  },
+  "the-challenge-of-search-indexing-algorithms": {
+    "core": "Exact nearest-neighbour search compares the query with every vector, which is O(n) and too slow for millions or billions of vectors. Approximate Nearest Neighbour (ANN) indexes trade a little accuracy (recall) for orders-of-magnitude speed.",
+    "first_principles": {
+      "problem": "Brute-force search over 100 million 1,536-dimensional vectors takes seconds per query.",
+      "truths": [
+        "Distance computations are expensive in high dimensions.",
+        "Near-perfect recall is usually enough.",
+        "Indexes structure space to skip most comparisons."
+      ],
+      "derivation": [
+        "**Exact (flat)**: perfect recall, O(n).",
+        "**ANN**: partition or graph-structure the space.",
+        "Measure the **recall vs latency** trade-off.",
+        "Tune parameters (nprobe, ef_search)."
+      ]
+    },
+    "analogy": {
+      "title": "Finding a book in a huge library",
+      "story": "Checking every book is exact but slow; using sections and signposts is fast and almost always right.",
+      "mapping": [
+        [
+          "Every book",
+          "Brute force"
+        ],
+        [
+          "Sections and signposts",
+          "ANN index"
+        ],
+        [
+          "Almost always right",
+          "High recall"
+        ]
+      ],
+      "breaks": "ANN can miss the true nearest neighbour; for critical exact needs use flat search on small sets."
+    },
+    "mindmap": {
+      "center": "ANN Search",
+      "branches": [
+        {
+          "label": "Exact",
+          "children": [
+            "Flat",
+            "O(n)",
+            "Perfect recall"
+          ]
+        },
+        {
+          "label": "ANN",
+          "children": [
+            "IVF",
+            "HNSW",
+            "PQ"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Recall vs latency",
+            "Memory"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "nprobe",
+            "ef_search"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Brute force vs ANN",
+      "scenario": "Numbers.",
+      "flow": [
+        "100M vectors, flat: ~2 s/query",
+        "HNSW: ~5 ms/query at 98% recall",
+        "Trade 2% recall for 400x speed"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Interactive search at scale."
+        }
+      ],
+      "code": [],
+      "outcome": "you understand why vector databases use ANN."
+    },
+    "summary": {
+      "points": [
+        "Exact is slow.",
+        "ANN is fast.",
+        "Tune recall vs speed."
+      ]
+    },
+    "check": [
+      {
+        "q": "What trade-off do ANN indexes make?",
+        "a": "They accept slightly lower recall (sometimes missing the true nearest neighbour) for dramatically faster search."
+      }
+    ]
+  },
+  "indexing-algorithm-1-ivf-inverted-file-index": {
+    "core": "IVF clusters the vectors (k-means) into partitions with centroids. At query time it compares the query only with the nearest few centroids (nprobe) and searches only those partitions. It's often combined with product quantization (IVF-PQ) for memory efficiency.",
+    "first_principles": {
+      "problem": "Comparing against every vector is too slow, but you need a structure that's simple and memory-efficient.",
+      "truths": [
+        "Similar vectors cluster.",
+        "Searching nearby clusters finds most neighbours.",
+        "More probes means better recall but slower search."
+      ],
+      "derivation": [
+        "**Train** k-means to get N centroids.",
+        "**Assign** each vector to its nearest centroid list.",
+        "**Query**: find the nprobe closest centroids, then search those lists.",
+        "Add **PQ** compression for large scale."
+      ]
+    },
+    "analogy": {
+      "title": "A librarian sorting books by subject",
+      "story": "You go to the 'History' and 'Politics' sections only, not every shelf.",
+      "mapping": [
+        [
+          "Subjects",
+          "Clusters"
+        ],
+        [
+          "Section signs",
+          "Centroids"
+        ],
+        [
+          "Sections checked",
+          "nprobe"
+        ]
+      ],
+      "breaks": "Vectors near cluster boundaries can be missed with low nprobe, and clusters need retraining if data shifts."
+    },
+    "mindmap": {
+      "center": "IVF",
+      "branches": [
+        {
+          "label": "Build",
+          "children": [
+            "k-means",
+            "Centroids",
+            "Inverted lists"
+          ]
+        },
+        {
+          "label": "Query",
+          "children": [
+            "nprobe nearest clusters"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "nlist",
+            "nprobe"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "PQ compression"
+          ]
+        },
+        {
+          "label": "Issue",
+          "children": [
+            "Boundary misses",
+            "Retrain on drift"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "An IVF index in FAISS",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Search touches ~0.4% of the vectors."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "quant = faiss.IndexFlatL2(d)\nindex = faiss.IndexIVFFlat(quant, d, 4096)   # 4096 clusters\nindex.train(xb); index.add(xb)\nindex.nprobe = 16                              # search 16 clusters\nD, I = index.search(xq, 10)"
+        }
+      ],
+      "outcome": "partition-based ANN understood."
+    },
+    "summary": {
+      "points": [
+        "Cluster vectors.",
+        "Search nearby clusters.",
+        "Tune nprobe."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the nprobe parameter control in IVF?",
+        "a": "How many nearest clusters are searched per query, trading speed for recall."
+      }
+    ]
+  },
+  "indexing-algorithm-2-hnsw-hierarchical-navigable-small-world": {
+    "core": "HNSW builds a multi-layer graph: sparse upper layers act as highways for long jumps and dense lower layers handle local search. A query greedily navigates from the top layer down to its nearest neighbours, giving excellent recall and low latency.",
+    "first_principles": {
+      "problem": "Cluster-based indexes miss boundary neighbours, and you need very high recall at millisecond latency.",
+      "truths": [
+        "Small-world graphs connect any two nodes in few hops.",
+        "Hierarchy speeds up long-distance navigation.",
+        "Graph search can be greedy and fast."
+      ],
+      "derivation": [
+        "Insert each vector, connecting it to **M** neighbours.",
+        "Assign **random layers** (fewer nodes at higher levels).",
+        "**Search**: start at the top, descend greedily (ef_search candidates).",
+        "Tune **M, ef_construction and ef_search**."
+      ]
+    },
+    "analogy": {
+      "title": "Motorways, main roads and local streets",
+      "story": "Take the motorway to the right region, then main roads, then local streets to the exact address.",
+      "mapping": [
+        [
+          "Motorways",
+          "Top layers"
+        ],
+        [
+          "Local streets",
+          "Bottom layer"
+        ],
+        [
+          "Exit choices",
+          "Greedy navigation"
+        ]
+      ],
+      "breaks": "HNSW uses lots of memory (graph links) and has costlier inserts and deletes."
+    },
+    "mindmap": {
+      "center": "HNSW",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Multi-layer graph",
+            "Small world"
+          ]
+        },
+        {
+          "label": "Build",
+          "children": [
+            "M neighbours",
+            "ef_construction"
+          ]
+        },
+        {
+          "label": "Query",
+          "children": [
+            "Top-down greedy",
+            "ef_search"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "High recall",
+            "Low latency"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Memory",
+            "Updates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "HNSW in pgvector",
+      "scenario": "SQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Millisecond queries at about 99% recall."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE INDEX ON docs USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);\nSET hnsw.ef_search = 100;\nSELECT id FROM docs ORDER BY embedding <=> $1 LIMIT 10;"
+        }
+      ],
+      "outcome": "graph-based ANN understood."
+    },
+    "summary": {
+      "points": [
+        "Layered graph.",
+        "Highways then streets.",
+        "Tune M and ef."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is HNSW memory-intensive?",
+        "a": "It stores graph links (M neighbours per node, across layers) in addition to the vectors."
+      }
+    ]
+  },
+  "choosing-a-vector-database-the-landscape": {
+    "core": "Options range from vector extensions on existing databases (pgvector, OpenSearch, Elasticsearch) to purpose-built vector databases (Pinecone, Weaviate, Qdrant, Milvus) and libraries (FAISS). Choose by scale, filtering needs, hybrid search, operations and existing stack.",
+    "first_principles": {
+      "problem": "Teams adopt a new specialised database when pgvector in their existing Postgres would have done the job.",
+      "truths": [
+        "Scale requirements vary enormously.",
+        "Operational overhead matters.",
+        "Metadata filtering and hybrid search are often essential."
+      ],
+      "derivation": [
+        "**< ~10M vectors + existing Postgres** → pgvector.",
+        "**Search + keyword needs** → OpenSearch/Elastic hybrid.",
+        "**Large scale or managed** → Pinecone, Qdrant, Milvus, Weaviate.",
+        "Evaluate **filtering, hybrid search, multi-tenancy, cost and ops**."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing storage for your belongings",
+      "story": "A cupboard at home (pgvector) is fine for most people; a dedicated warehouse (purpose-built DB) suits large collections.",
+      "mapping": [
+        [
+          "Home cupboard",
+          "pgvector"
+        ],
+        [
+          "Warehouse",
+          "Purpose-built vector DB"
+        ],
+        [
+          "Moving costs",
+          "Operational overhead"
+        ]
+      ],
+      "breaks": "Benchmarks vary with workload, so test with your own data and query patterns."
+    },
+    "mindmap": {
+      "center": "Vector DB Landscape",
+      "branches": [
+        {
+          "label": "Extensions",
+          "children": [
+            "pgvector",
+            "OpenSearch",
+            "Elasticsearch"
+          ]
+        },
+        {
+          "label": "Purpose-built",
+          "children": [
+            "Pinecone",
+            "Qdrant",
+            "Milvus",
+            "Weaviate"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "FAISS"
+          ]
+        },
+        {
+          "label": "Criteria",
+          "children": [
+            "Scale",
+            "Filtering",
+            "Hybrid",
+            "Ops",
+            "Cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two selection decisions",
+      "scenario": "Contexts.",
+      "flow": [
+        "Startup, 2M chunks, Postgres already → pgvector",
+        "Enterprise search, 500M vectors, multi-tenant → managed Milvus/Qdrant"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The right tool without over-engineering."
+        }
+      ],
+      "code": [],
+      "outcome": "vector storage chosen pragmatically."
+    },
+    "summary": {
+      "points": [
+        "Start with what you have.",
+        "Scale up when needed.",
+        "Test with real data."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is pgvector often a good choice?",
+        "a": "When you already run Postgres and have moderate vector volumes, which avoids running a new specialised system."
+      }
+    ]
+  }
+}

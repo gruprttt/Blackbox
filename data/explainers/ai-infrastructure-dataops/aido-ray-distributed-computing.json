@@ -1,0 +1,520 @@
+{
+  "introduction-the-distributed-python-problem": {
+    "core": "Python runs one thread of bytecode at a time (the GIL), and multiprocessing is limited to one machine. Ray gives Python a simple API for running functions and classes across a cluster, handling scheduling, data transfer and fault tolerance.",
+    "first_principles": {
+      "problem": "Hyperparameter search over 1,000 configs runs for days on one machine.",
+      "truths": [
+        "The GIL limits CPU parallelism within a process.",
+        "Multiprocessing doesn't span machines.",
+        "Hand-rolled distribution is complex."
+      ],
+      "derivation": [
+        "Turn functions into **remote tasks**.",
+        "Turn classes into **remote actors**.",
+        "Pass data through a **shared object store**.",
+        "Let a **scheduler** place work."
+      ]
+    },
+    "analogy": {
+      "title": "A dispatch office for a delivery fleet",
+      "story": "You hand the office jobs; it assigns drivers across the city and tracks completion.",
+      "mapping": [
+        [
+          "Office",
+          "Ray scheduler"
+        ],
+        [
+          "Drivers",
+          "Workers"
+        ],
+        [
+          "Jobs",
+          "Tasks"
+        ]
+      ],
+      "breaks": "Drivers are independent; Ray tasks can depend on each other's outputs."
+    },
+    "mindmap": {
+      "center": "Why Ray",
+      "branches": [
+        {
+          "label": "Limits",
+          "children": [
+            "GIL",
+            "Single machine"
+          ]
+        },
+        {
+          "label": "Ray gives",
+          "children": [
+            "Tasks",
+            "Actors",
+            "Object store"
+          ]
+        },
+        {
+          "label": "Handles",
+          "children": [
+            "Scheduling",
+            "Fault tolerance"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Tuning",
+            "Training",
+            "Serving"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parallel config search",
+      "scenario": "From loop to cluster.",
+      "flow": [
+        "Serial: 1,000 configs × 5 min = 3.5 days",
+        "Ray on 100 CPUs",
+        "≈ 50 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Near-linear speedup with minimal code changes."
+        }
+      ],
+      "code": [],
+      "outcome": "Python scaled to a cluster."
+    },
+    "summary": {
+      "points": [
+        "GIL and one machine limit Python.",
+        "Ray distributes functions and classes.",
+        "Minimal code changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't multiprocessing solve cluster-scale work?",
+        "a": "It only uses cores on one machine and doesn't handle cross-machine scheduling or data transfer."
+      }
+    ]
+  },
+  "core-concept-tasks-remote-functions": {
+    "core": "Decorating a function with @ray.remote makes .remote() calls run asynchronously on any worker and return an ObjectRef (a future). ray.get() fetches results, and passing ObjectRefs into other tasks builds a dependency graph without moving data through the driver.",
+    "first_principles": {
+      "problem": "We want to parallelise a stateless function across a cluster without writing RPC code.",
+      "truths": [
+        "Stateless work parallelises trivially.",
+        "Futures let you launch first and collect later.",
+        "Dependencies can be expressed by passing futures."
+      ],
+      "derivation": [
+        "**@ray.remote** a function.",
+        "Call **f.remote(x)** → ObjectRef.",
+        "**ray.get(refs)** to collect.",
+        "Declare **resources** (num_cpus, num_gpus).",
+        "Avoid calling **ray.get inside loops**."
+      ]
+    },
+    "analogy": {
+      "title": "Dropping off clothes at a laundry",
+      "story": "You get a ticket now and pick up the clean clothes later.",
+      "mapping": [
+        [
+          "Ticket",
+          "ObjectRef"
+        ],
+        [
+          "Pickup",
+          "ray.get"
+        ],
+        [
+          "Laundry",
+          "Worker"
+        ]
+      ],
+      "breaks": "You can hand a ticket to another shop as input; real laundry tickets don't chain."
+    },
+    "mindmap": {
+      "center": "Ray Tasks",
+      "branches": [
+        {
+          "label": "API",
+          "children": [
+            "@ray.remote",
+            ".remote()",
+            "ray.get"
+          ]
+        },
+        {
+          "label": "Futures",
+          "children": [
+            "ObjectRef",
+            "Chaining"
+          ]
+        },
+        {
+          "label": "Resources",
+          "children": [
+            "num_cpus",
+            "num_gpus"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "get in loop",
+            "Tiny tasks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parallel map",
+      "scenario": "Square numbers.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "1,000 tasks scheduled across the cluster at once."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import ray\nray.init()\n\n@ray.remote\ndef square(x):\n    return x * x\n\nrefs = [square.remote(i) for i in range(1000)]\nprint(sum(ray.get(refs)))"
+        }
+      ],
+      "outcome": "stateless parallelism with a decorator."
+    },
+    "summary": {
+      "points": [
+        "Decorate, call .remote, get.",
+        "Futures enable chaining.",
+        "Batch ray.get calls."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is ray.get inside a loop an anti-pattern?",
+        "a": "It blocks on each task in turn, serialising work that could run in parallel."
+      }
+    ]
+  },
+  "core-concept-actors-stateful-services": {
+    "core": "An actor is a remote instance of a class: a dedicated worker process holding state, whose method calls run serially in order. Actors suit things like a model loaded once on a GPU, a parameter server, a counter or a simulator.",
+    "first_principles": {
+      "problem": "Reloading a 10 GB model for every inference task wastes minutes.",
+      "truths": [
+        "Some work needs persistent state.",
+        "Loading expensive resources once saves time.",
+        "Serial method execution avoids races."
+      ],
+      "derivation": [
+        "**@ray.remote class**.",
+        "**Actor.remote()** creates a process.",
+        "**actor.method.remote()** returns ObjectRefs.",
+        "Use **actor pools** for parallelism.",
+        "Configure **max_restarts** for fault tolerance."
+      ]
+    },
+    "analogy": {
+      "title": "A dedicated specialist at a desk",
+      "story": "Instead of briefing a new temp each time, you send all requests to the expert who already knows the case.",
+      "mapping": [
+        [
+          "Specialist",
+          "Actor"
+        ],
+        [
+          "Knowing the case",
+          "Loaded state"
+        ],
+        [
+          "Queue at desk",
+          "Serial method calls"
+        ]
+      ],
+      "breaks": "If the specialist leaves, their knowledge goes too; actor state is lost on crash unless checkpointed."
+    },
+    "mindmap": {
+      "center": "Ray Actors",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Stateful worker",
+            "Class instance"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Serial methods",
+            "Persistent state"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Model server",
+            "Param server",
+            "Simulators"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Actor pools"
+          ]
+        },
+        {
+          "label": "Faults",
+          "children": [
+            "max_restarts",
+            "Checkpoint"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A model-serving actor",
+      "scenario": "Load once, predict many.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Model loads once; batches stream through."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "@ray.remote(num_gpus=1)\nclass Predictor:\n    def __init__(self):\n        self.model = load_model()\n    def predict(self, batch):\n        return self.model(batch)\n\np = Predictor.remote()\nresults = ray.get([p.predict.remote(b) for b in batches])"
+        }
+      ],
+      "outcome": "state amortised across calls."
+    },
+    "summary": {
+      "points": [
+        "Actors hold state.",
+        "Methods run serially.",
+        "Pools for parallelism."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you use an actor instead of a task?",
+        "a": "When work needs persistent state or an expensive resource like a loaded model kept between calls."
+      }
+    ]
+  },
+  "ray-architecture-the-object-store-and-cluster-internals": {
+    "core": "A Ray cluster has a head node (Global Control Store for metadata, cluster dashboard) and worker nodes, each running a raylet (local scheduler and resource manager) plus a shared-memory Plasma object store. Large objects are stored once per node and read zero-copy, and are transferred between nodes on demand.",
+    "first_principles": {
+      "problem": "Tasks slow to a crawl and nodes run out of memory, and nobody knows why.",
+      "truths": [
+        "Shared memory avoids copies within a node.",
+        "Distributed scheduling avoids a central bottleneck.",
+        "Object memory is finite and spills to disk."
+      ],
+      "derivation": [
+        "**Head**: GCS metadata.",
+        "**Raylet** per node schedules locally, spills over to others.",
+        "**Object store**: zero-copy reads, reference counting.",
+        "**Spilling** to disk when full.",
+        "Use **ray.put** for large shared inputs."
+      ]
+    },
+    "analogy": {
+      "title": "Regional warehouses with a central registry",
+      "story": "Each region stores goods locally and ships between regions only when needed; the registry knows where everything is.",
+      "mapping": [
+        [
+          "Regional warehouse",
+          "Node object store"
+        ],
+        [
+          "Central registry",
+          "GCS"
+        ],
+        [
+          "Local manager",
+          "Raylet"
+        ]
+      ],
+      "breaks": "Warehouses keep goods indefinitely; Ray frees objects when no references remain."
+    },
+    "mindmap": {
+      "center": "Ray Internals",
+      "branches": [
+        {
+          "label": "Head",
+          "children": [
+            "GCS",
+            "Dashboard"
+          ]
+        },
+        {
+          "label": "Node",
+          "children": [
+            "Raylet",
+            "Workers",
+            "Object store"
+          ]
+        },
+        {
+          "label": "Objects",
+          "children": [
+            "Zero-copy",
+            "Ref counting",
+            "Spilling"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "ray status",
+            "Dashboard"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sharing a large array",
+      "scenario": "ray.put once.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One copy per node instead of 100 serialisations."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "big = ray.put(np.zeros((10_000, 10_000)))\nrefs = [process.remote(big, i) for i in range(100)]"
+        }
+      ],
+      "outcome": "efficient memory use."
+    },
+    "summary": {
+      "points": [
+        "Head, raylets, object stores.",
+        "Zero-copy within a node.",
+        "ray.put big inputs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use ray.put for a large input shared by many tasks?",
+        "a": "It stores the object once in the object store instead of serialising it with every task call."
+      }
+    ]
+  },
+  "ray-ecosystem-high-level-libraries": {
+    "core": "On top of tasks and actors, Ray provides libraries: Ray Data (distributed preprocessing and streaming), Ray Train (distributed training wrappers), Ray Tune (hyperparameter search), Ray Serve (model serving) and RLlib (reinforcement learning). The same cluster runs the whole ML lifecycle.",
+    "first_principles": {
+      "problem": "Teams glue Spark, Horovod, Optuna and a separate serving stack, each with its own cluster.",
+      "truths": [
+        "ML has many distributed stages.",
+        "One runtime reduces glue and data movement.",
+        "High-level APIs speed common patterns."
+      ],
+      "derivation": [
+        "**Ray Data** for ETL and loading.",
+        "**Ray Train** for DDP/FSDP at scale.",
+        "**Ray Tune** for search with early stopping.",
+        "**Ray Serve** for composable inference.",
+        "Run on **KubeRay** in Kubernetes."
+      ]
+    },
+    "analogy": {
+      "title": "A Swiss Army knife built on one handle",
+      "story": "Different blades for different jobs, all sharing the same grip.",
+      "mapping": [
+        [
+          "Handle",
+          "Ray core"
+        ],
+        [
+          "Blades",
+          "Data, Train, Tune, Serve, RLlib"
+        ]
+      ],
+      "breaks": "A specialist tool sometimes beats the multi-tool, e.g. Spark for heavy SQL ETL."
+    },
+    "mindmap": {
+      "center": "Ray Ecosystem",
+      "branches": [
+        {
+          "label": "Data",
+          "children": [
+            "Preprocess",
+            "Stream"
+          ]
+        },
+        {
+          "label": "Train",
+          "children": [
+            "DDP",
+            "FSDP"
+          ]
+        },
+        {
+          "label": "Tune",
+          "children": [
+            "Search",
+            "Early stop"
+          ]
+        },
+        {
+          "label": "Serve",
+          "children": [
+            "Deployments",
+            "Autoscaling"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "KubeRay",
+            "Dashboard"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tune with early stopping",
+      "scenario": "Ray Tune.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "200 trials, bad ones stopped early."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from ray import tune\ntuner = tune.Tuner(train_fn,\n    param_space={'lr': tune.loguniform(1e-5, 1e-2)},\n    tune_config=tune.TuneConfig(num_samples=200, scheduler=tune.schedulers.ASHAScheduler()))\ntuner.fit()"
+        }
+      ],
+      "outcome": "end-to-end ML on one runtime."
+    },
+    "summary": {
+      "points": [
+        "Libraries on core primitives.",
+        "Covers data to serving.",
+        "KubeRay for Kubernetes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Ray library handles hyperparameter search?",
+        "a": "Ray Tune."
+      }
+    ]
+  }
+}

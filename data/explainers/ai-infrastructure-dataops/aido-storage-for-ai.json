@@ -1,0 +1,700 @@
+{
+  "introduction-the-gpu-is-a-hungry-mouth": {
+    "core": "A GPU can consume gigabytes of training data per second. If storage, network or decoding can't keep up, the expensive GPU idles waiting on I/O, so AI storage is designed for throughput and parallelism first.",
+    "first_principles": {
+      "problem": "GPU utilisation sits at 40% because data loading takes longer than each training step.",
+      "truths": [
+        "Compute has outpaced storage bandwidth.",
+        "Idle GPUs waste money.",
+        "Data pipelines have several stages that can bottleneck."
+      ],
+      "derivation": [
+        "**Measure** data-loader wait time per step.",
+        "Use **parallel** filesystems or object stores.",
+        "**Pack** small files into shards.",
+        "**Prefetch** and cache close to the GPU."
+      ]
+    },
+    "analogy": {
+      "title": "A Formula 1 pit crew waiting for the car",
+      "story": "The crew is world-class, but useless if the car isn't there.",
+      "mapping": [
+        [
+          "Pit crew",
+          "GPU"
+        ],
+        [
+          "Car arriving",
+          "Data batch"
+        ],
+        [
+          "Waiting",
+          "I/O stall"
+        ]
+      ],
+      "breaks": "A pit crew works in bursts; a GPU wants a continuous stream."
+    },
+    "mindmap": {
+      "center": "GPU Starvation",
+      "branches": [
+        {
+          "label": "Symptom",
+          "children": [
+            "Low GPU util",
+            "Loader wait"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Slow storage",
+            "Small files",
+            "CPU decode"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Parallel FS",
+            "Sharding",
+            "Prefetch/cache"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Profiling a training loop",
+      "scenario": "PyTorch profiler.",
+      "flow": [
+        "Step time 400 ms, loader 250 ms",
+        "More workers + sharded data",
+        "Loader 20 ms → GPU util 92%"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Profile I/O before buying more GPUs."
+        }
+      ],
+      "code": [],
+      "outcome": "GPUs kept busy."
+    },
+    "summary": {
+      "points": [
+        "GPUs are hungry.",
+        "I/O is often the bottleneck.",
+        "Measure loader wait."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the first metric to check when GPU utilisation is low?",
+        "a": "Time spent waiting on the data loader per step versus compute time."
+      }
+    ]
+  },
+  "parallel-filesystems-lustre-gpfs": {
+    "core": "Parallel filesystems like Lustre and GPFS (Spectrum Scale) stripe each file across many storage servers, so thousands of clients read in parallel at aggregate bandwidths of hundreds of GB/s. A separate metadata server handles namespace operations.",
+    "first_principles": {
+      "problem": "An NFS server tops out at ~1 GB/s while 256 GPUs need far more.",
+      "truths": [
+        "One server has a bandwidth ceiling.",
+        "Striping spreads load across servers.",
+        "Metadata and data have different access patterns."
+      ],
+      "derivation": [
+        "**Separate** metadata (MDS) from data (OSS/OST).",
+        "**Stripe** files across many OSTs.",
+        "Clients talk **directly** to data servers.",
+        "Tune **stripe count/size** for large files."
+      ]
+    },
+    "analogy": {
+      "title": "A multi-lane motorway instead of a single-lane road",
+      "story": "Traffic spreads across many lanes, so throughput scales with lanes.",
+      "mapping": [
+        [
+          "Lanes",
+          "Storage servers"
+        ],
+        [
+          "Car split across lanes",
+          "Striped file"
+        ],
+        [
+          "Toll booth",
+          "Metadata server"
+        ]
+      ],
+      "breaks": "The metadata server is a single booth, so millions of tiny files still create a jam."
+    },
+    "mindmap": {
+      "center": "Parallel FS",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "Metadata server",
+            "Object storage servers",
+            "Clients"
+          ]
+        },
+        {
+          "label": "Striping",
+          "children": [
+            "Stripe count",
+            "Stripe size"
+          ]
+        },
+        {
+          "label": "Strength",
+          "children": [
+            "Huge bandwidth",
+            "POSIX"
+          ]
+        },
+        {
+          "label": "Weakness",
+          "children": [
+            "Small files",
+            "Metadata load"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Striping a large dataset directory",
+      "scenario": "Lustre.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each shard read from 16 servers at once."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "lfs setstripe -c 16 -S 4M /lustre/datasets/imagenet-shards"
+        }
+      ],
+      "outcome": "bandwidth scaled across servers."
+    },
+    "summary": {
+      "points": [
+        "Stripe across servers.",
+        "Metadata is separate.",
+        "Great for big files."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do parallel filesystems struggle with millions of tiny files?",
+        "a": "Every open and stat hits the metadata server, which becomes the bottleneck regardless of data bandwidth."
+      }
+    ]
+  },
+  "object-storage-the-data-lake": {
+    "core": "Object storage (S3, GCS, Azure Blob) stores immutable objects in a flat namespace accessed over HTTP. It is cheap, durable and effectively infinite, but has per-request latency and no POSIX semantics, so it rewards large sequential reads.",
+    "first_principles": {
+      "problem": "Petabytes of training data need a cheap, durable home accessible from any cluster.",
+      "truths": [
+        "HTTP requests have fixed overhead (~10–100 ms).",
+        "Objects are immutable, written whole.",
+        "Throughput scales with parallel requests."
+      ],
+      "derivation": [
+        "Store **large objects** (shards, Parquet).",
+        "Read with **many parallel range requests**.",
+        "Use **prefixes** to spread request load.",
+        "**Cache** hot data on local NVMe."
+      ]
+    },
+    "analogy": {
+      "title": "An enormous warehouse with a counter service",
+      "story": "You can't wander the aisles; you ask for a box by label and it's handed over, so it's best to order big boxes.",
+      "mapping": [
+        [
+          "Labelled box",
+          "Object key"
+        ],
+        [
+          "Counter request",
+          "HTTP GET"
+        ],
+        [
+          "Big boxes",
+          "Large shards"
+        ]
+      ],
+      "breaks": "A warehouse can't serve a thousand people at once, but object stores scale with parallel requests."
+    },
+    "mindmap": {
+      "center": "Object Storage",
+      "branches": [
+        {
+          "label": "Traits",
+          "children": [
+            "Flat namespace",
+            "Immutable",
+            "HTTP API"
+          ]
+        },
+        {
+          "label": "Strengths",
+          "children": [
+            "Cheap",
+            "Durable",
+            "Unlimited"
+          ]
+        },
+        {
+          "label": "Weaknesses",
+          "children": [
+            "Request latency",
+            "No POSIX"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Big shards",
+            "Parallel reads",
+            "Local cache"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parallel shard download",
+      "scenario": "AWS CLI tuning.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Saturates the NIC instead of crawling one file at a time."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws configure set default.s3.max_concurrent_requests 64\naws s3 cp s3://datasets/train/ /nvme/train/ --recursive"
+        }
+      ],
+      "outcome": "data lake throughput scaled with parallelism."
+    },
+    "summary": {
+      "points": [
+        "Cheap and durable.",
+        "Latency per request.",
+        "Big objects, many parallel reads."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are big objects better than small ones in S3?",
+        "a": "Each request carries fixed latency, so fewer, larger requests amortise overhead and give higher throughput."
+      }
+    ]
+  },
+  "the-fast-path-gpudirect-storage-gds": {
+    "core": "Normally data travels disk → CPU RAM (bounce buffer) → GPU memory, which costs CPU cycles and memory bandwidth. GPUDirect Storage uses DMA to move data straight from NVMe or the network into GPU memory, cutting latency and freeing the CPU.",
+    "first_principles": {
+      "problem": "Data-loading CPU threads are saturated copying buffers, and throughput plateaus.",
+      "truths": [
+        "Each copy costs bandwidth and CPU.",
+        "PCIe allows peer-to-peer DMA.",
+        "The GPU is the final destination anyway."
+      ],
+      "derivation": [
+        "**Remove** the CPU bounce buffer.",
+        "**DMA** from NVMe/NIC to GPU memory (cuFile API).",
+        "Needs **supported** drivers, filesystems and topology.",
+        "Pair with **GPU decoding** (DALI)."
+      ]
+    },
+    "analogy": {
+      "title": "Delivering straight to the kitchen instead of via the front desk",
+      "story": "The parcel no longer stops at reception to be carried upstairs.",
+      "mapping": [
+        [
+          "Front desk",
+          "CPU RAM bounce buffer"
+        ],
+        [
+          "Kitchen",
+          "GPU memory"
+        ],
+        [
+          "Direct route",
+          "DMA"
+        ]
+      ],
+      "breaks": "It only works if the building layout allows it, i.e. the PCIe topology must support peer-to-peer."
+    },
+    "mindmap": {
+      "center": "GPUDirect Storage",
+      "branches": [
+        {
+          "label": "Old path",
+          "children": [
+            "Disk → CPU → GPU",
+            "Bounce buffer"
+          ]
+        },
+        {
+          "label": "GDS",
+          "children": [
+            "DMA to GPU",
+            "cuFile"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "Supported FS",
+            "PCIe topology"
+          ]
+        },
+        {
+          "label": "Gains",
+          "children": [
+            "Lower latency",
+            "Less CPU"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before and after GDS",
+      "scenario": "NVMe → GPU reads.",
+      "flow": [
+        "Bounce path: 6 GB/s, 8 CPU cores busy",
+        "GDS: 12 GB/s, ~1 core"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Removing copies beats adding cores."
+        }
+      ],
+      "code": [],
+      "outcome": "faster loading with a freed CPU."
+    },
+    "summary": {
+      "points": [
+        "Skip the CPU bounce.",
+        "DMA into GPU memory.",
+        "Topology matters."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does GDS eliminate?",
+        "a": "The intermediate copy through CPU system memory (the bounce buffer)."
+      }
+    ]
+  },
+  "the-small-file-problem-the-inode-killer": {
+    "core": "Datasets like ImageNet hold millions of ~100 KB files. Every file needs metadata operations (open, stat, close) and its own request, so per-file overhead, not bandwidth, dominates, crushing metadata servers and object-store request rates.",
+    "first_principles": {
+      "problem": "Reading 1.2M small JPEGs per epoch generates millions of metadata ops and the loader crawls.",
+      "truths": [
+        "Per-file overhead is fixed regardless of size.",
+        "Metadata servers have limited ops/s.",
+        "Random small reads defeat disk and network efficiency."
+      ],
+      "derivation": [
+        "Compute **ops/s needed** = files per epoch ÷ epoch time.",
+        "Compare with **metadata server capacity**.",
+        "Recognise that **packing** is the fix.",
+        "Avoid listing huge directories."
+      ]
+    },
+    "analogy": {
+      "title": "Posting a million postcards instead of one parcel",
+      "story": "Each postcard needs its own stamp, sorting and delivery, and the post office drowns.",
+      "mapping": [
+        [
+          "Postcards",
+          "Small files"
+        ],
+        [
+          "Stamp and sorting",
+          "Metadata ops"
+        ],
+        [
+          "Parcel",
+          "Shard"
+        ]
+      ],
+      "breaks": "The post office scales with staff, but a single metadata server doesn't scale horizontally."
+    },
+    "mindmap": {
+      "center": "Small Files",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "Millions of files",
+            "Per-file overhead"
+          ]
+        },
+        {
+          "label": "Hits",
+          "children": [
+            "Metadata server",
+            "Request rate",
+            "Random I/O"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "Ops/s needed"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Aggregate into shards"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The maths for ImageNet",
+      "scenario": "1.28M files.",
+      "flow": [
+        "Epoch target: 10 min",
+        "1.28M files ÷ 600 s ≈ 2,100 opens/s (×3 ops each)",
+        "× 64 parallel jobs → ~400k metadata ops/s",
+        "Metadata server melts"
+      ],
+      "steps": [
+        {
+          "label": "Conclusion",
+          "detail": "Bandwidth was never the problem."
+        }
+      ],
+      "code": [],
+      "outcome": "the root cause correctly identified."
+    },
+    "summary": {
+      "points": [
+        "Per-file overhead dominates.",
+        "Metadata is the bottleneck.",
+        "Do the maths."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't faster disk fix the small-file problem?",
+        "a": "The limit is per-file metadata operations and request overhead, not byte throughput."
+      }
+    ]
+  },
+  "solving-small-files-aggregation-tartfrecordparquet": {
+    "core": "Pack many small samples into large shard files (TAR for WebDataset, TFRecord, Parquet, or MosaicML MDS) of roughly 100 MB–1 GB. Loaders then stream big sequential reads and shuffle within and across shards.",
+    "first_principles": {
+      "problem": "Millions of tiny files overwhelm metadata and request rates.",
+      "truths": [
+        "Sequential reads of large files are efficient.",
+        "Shuffling can happen at the shard and buffer level.",
+        "Formats can hold samples plus labels together."
+      ],
+      "derivation": [
+        "**Pack** samples into ~100 MB–1 GB shards.",
+        "Choose a **format**: TAR (WebDataset), TFRecord, Parquet (columnar).",
+        "**Shuffle** shard order plus an in-memory buffer.",
+        "**Index** shards for random access when needed."
+      ]
+    },
+    "analogy": {
+      "title": "Shipping containers instead of loose boxes",
+      "story": "Loading one container moves thousands of items in a single crane lift.",
+      "mapping": [
+        [
+          "Loose boxes",
+          "Small files"
+        ],
+        [
+          "Container",
+          "Shard"
+        ],
+        [
+          "Crane lift",
+          "One large read"
+        ]
+      ],
+      "breaks": "You can't easily pull one item from a sealed container; shards need an index for random access."
+    },
+    "mindmap": {
+      "center": "Aggregation",
+      "branches": [
+        {
+          "label": "Formats",
+          "children": [
+            "TAR/WebDataset",
+            "TFRecord",
+            "Parquet",
+            "MDS"
+          ]
+        },
+        {
+          "label": "Size",
+          "children": [
+            "100 MB–1 GB"
+          ]
+        },
+        {
+          "label": "Shuffle",
+          "children": [
+            "Shard order",
+            "Buffer"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Sequential I/O",
+            "Few metadata ops"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "WebDataset loading",
+      "scenario": "Sharded TAR files.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "1,024 big reads instead of 1.28M small ones."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import webdataset as wds\nds = (wds.WebDataset('s3://bucket/train-{0000..1023}.tar')\n      .shuffle(1000).decode('pil').to_tuple('jpg', 'cls'))"
+        }
+      ],
+      "outcome": "loader throughput limited only by bandwidth."
+    },
+    "summary": {
+      "points": [
+        "Pack into shards.",
+        "Shuffle at two levels.",
+        "Pick a format for your data."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you keep randomness when reading sequential shards?",
+        "a": "Shuffle shard order each epoch and use an in-memory shuffle buffer across samples."
+      }
+    ]
+  },
+  "streaming-architecture-training-without-downloading-everything": {
+    "core": "Instead of copying a whole dataset to local disk before training, stream shards from object storage on demand with prefetching and a local cache. Training starts immediately, local disk can be smaller than the dataset, and multiple nodes coordinate which shards they read.",
+    "first_principles": {
+      "problem": "A 50 TB dataset takes hours to download, and nodes don't have 50 TB of local disk.",
+      "truths": [
+        "Training reads data sequentially per epoch.",
+        "Prefetching can hide network latency.",
+        "Nodes must not duplicate work in distributed training."
+      ],
+      "derivation": [
+        "**Stream** shards over HTTP.",
+        "**Prefetch** ahead of the GPU.",
+        "**Cache** on local NVMe with eviction.",
+        "**Partition** shards per rank and worker.",
+        "Support **deterministic resume** mid-epoch."
+      ]
+    },
+    "analogy": {
+      "title": "Streaming a film instead of downloading it",
+      "story": "You start watching in seconds while the next minutes buffer in the background.",
+      "mapping": [
+        [
+          "Buffering",
+          "Prefetch"
+        ],
+        [
+          "Start watching",
+          "Training begins"
+        ],
+        [
+          "Device storage",
+          "Local cache"
+        ]
+      ],
+      "breaks": "Films play once linearly; training needs shuffling and exact resumption, which streaming libraries must add."
+    },
+    "mindmap": {
+      "center": "Streaming Data",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "No full download",
+            "Small local disk"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "Prefetch",
+            "Local cache",
+            "Shard partitioning"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "WebDataset",
+            "MosaicML Streaming",
+            "Ray Data"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "Deterministic resume"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "MosaicML Streaming",
+      "scenario": "Distributed training.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Training starts in minutes; each rank reads its own shards."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from streaming import StreamingDataset\nds = StreamingDataset(remote='s3://bucket/mds', local='/nvme/cache', shuffle=True)"
+        }
+      ],
+      "outcome": "dataset size decoupled from local disk."
+    },
+    "summary": {
+      "points": [
+        "Stream, don't download.",
+        "Prefetch and cache.",
+        "Partition across ranks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must a streaming loader handle in distributed training?",
+        "a": "Assigning disjoint shards to each rank and worker, and resuming deterministically after interruption."
+      }
+    ]
+  }
+}

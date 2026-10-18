@@ -1,0 +1,602 @@
+{
+  "introduction-the-precision-trap": {
+    "core": "Models are trained in FP32/BF16, but inference rarely needs that precision. Storing weights in INT8 or INT4 cuts memory 2–8× and speeds up inference, because LLM decoding is limited by how fast weights move from memory, often with minimal accuracy loss.",
+    "first_principles": {
+      "problem": "A 70B model in FP16 needs 140 GB of GPU memory and won't fit on one GPU.",
+      "truths": [
+        "Neural nets tolerate small numeric noise.",
+        "Memory bandwidth limits decoding.",
+        "Fewer bits mean less data to move."
+      ],
+      "derivation": [
+        "**Count bytes**: params × bits ÷ 8.",
+        "**Reduce** precision to INT8/INT4/FP8.",
+        "**Measure** accuracy impact.",
+        "Keep **sensitive parts** at higher precision."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe in grams versus milligrams",
+      "story": "Home cooking doesn't need milligram precision, and the dish tastes the same.",
+      "mapping": [
+        [
+          "Milligrams",
+          "FP32"
+        ],
+        [
+          "Grams",
+          "INT8"
+        ],
+        [
+          "Same taste",
+          "Similar accuracy"
+        ]
+      ],
+      "breaks": "Some 'ingredients' (outlier weights, certain layers) really do need precision."
+    },
+    "mindmap": {
+      "center": "Precision Trap",
+      "branches": [
+        {
+          "label": "Cost",
+          "children": [
+            "Memory",
+            "Bandwidth"
+          ]
+        },
+        {
+          "label": "Formats",
+          "children": [
+            "FP32",
+            "BF16",
+            "FP8",
+            "INT8",
+            "INT4"
+          ]
+        },
+        {
+          "label": "Gains",
+          "children": [
+            "2–8× smaller",
+            "Faster"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Accuracy loss"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing a 70B model",
+      "scenario": "Bytes per parameter.",
+      "flow": [
+        "FP16: 70B × 2 B = 140 GB",
+        "INT8: 70 GB",
+        "INT4: 35 GB → fits one 48 GB GPU"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Serving cost cut by fitting fewer GPUs."
+        }
+      ],
+      "code": [],
+      "outcome": "large models on modest hardware."
+    },
+    "summary": {
+      "points": [
+        "Inference needs fewer bits.",
+        "Bytes drive cost.",
+        "Measure accuracy."
+      ]
+    },
+    "check": [
+      {
+        "q": "How much memory do 7B parameters need at INT4?",
+        "a": "About 3.5 GB (7B × 0.5 bytes), plus overhead."
+      }
+    ]
+  },
+  "the-physics-of-quantization-mapping-the-range": {
+    "core": "Quantization maps a float range [min, max] onto a small integer grid using a scale (and optionally a zero-point): q = round(x / scale) + zp. Symmetric schemes centre on zero; asymmetric schemes fit skewed ranges. Granularity (per-tensor, per-channel, per-group) controls how well the grid fits.",
+    "first_principles": {
+      "problem": "One huge outlier stretches the range so most values collapse onto a few integer levels.",
+      "truths": [
+        "INT8 has only 256 levels.",
+        "Range choice decides resolution.",
+        "Finer granularity fits local ranges better."
+      ],
+      "derivation": [
+        "**scale** = (max − min) / (2ᵇ − 1).",
+        "**Quantize**: round, clamp; **dequantize**: (q − zp)·scale.",
+        "**Symmetric** vs **asymmetric**.",
+        "**Per-channel/per-group** scales for weights.",
+        "Handle **outliers** separately (clipping, mixed precision)."
+      ]
+    },
+    "analogy": {
+      "title": "Fitting an ocean into a cup with a ruler of marks",
+      "story": "If the ruler must span a rare giant wave, everyday ripples all read as zero.",
+      "mapping": [
+        [
+          "Ruler marks",
+          "Integer levels"
+        ],
+        [
+          "Giant wave",
+          "Outlier"
+        ],
+        [
+          "Ripples lost",
+          "Precision loss"
+        ]
+      ],
+      "breaks": "You can't use multiple rulers in the ocean, but per-group scales effectively do."
+    },
+    "mindmap": {
+      "center": "Range Mapping",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "scale",
+            "zero-point",
+            "round/clamp"
+          ]
+        },
+        {
+          "label": "Schemes",
+          "children": [
+            "Symmetric",
+            "Asymmetric"
+          ]
+        },
+        {
+          "label": "Granularity",
+          "children": [
+            "Per-tensor",
+            "Per-channel",
+            "Per-group"
+          ]
+        },
+        {
+          "label": "Enemy",
+          "children": [
+            "Outliers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Symmetric INT8",
+      "scenario": "Range ±2.0.",
+      "flow": [
+        "scale = 2.0 / 127 ≈ 0.0157",
+        "x = 0.5 → q = round(31.75) = 32",
+        "Dequant 32 × 0.0157 = 0.504"
+      ],
+      "steps": [
+        {
+          "label": "Error",
+          "detail": "0.004 rounding error, small relative to the value."
+        }
+      ],
+      "code": [],
+      "outcome": "floats represented with 8 bits."
+    },
+    "summary": {
+      "points": [
+        "Scale + zero-point.",
+        "Range sets resolution.",
+        "Finer granularity helps."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do outliers hurt per-tensor quantization?",
+        "a": "They stretch the range, so the scale grows and normal values lose resolution."
+      }
+    ]
+  },
+  "calibration-finding-the-boundaries": {
+    "core": "Weights are fixed, so their ranges are known; activations depend on input. Calibration runs a representative sample of data through the model and records activation statistics, then picks clipping ranges (min-max, percentile, entropy/KL or MSE-optimal) that balance clipping error against rounding error.",
+    "first_principles": {
+      "problem": "Quantized activations clip badly on real traffic because ranges were set from random data.",
+      "truths": [
+        "Activation ranges vary by input.",
+        "Clipping rare outliers improves typical precision.",
+        "Calibration data must look like production."
+      ],
+      "derivation": [
+        "Collect **~100–1,000 representative samples**.",
+        "Record **activation histograms**.",
+        "Choose **range method**: min-max, percentile (99.99%), KL, MSE.",
+        "**Validate** accuracy on held-out data."
+      ]
+    },
+    "analogy": {
+      "title": "Setting a camera's exposure from test shots",
+      "story": "You take a few sample photos of the scene to choose settings before the real shoot.",
+      "mapping": [
+        [
+          "Test shots",
+          "Calibration data"
+        ],
+        [
+          "Exposure",
+          "Clipping range"
+        ],
+        [
+          "Blown highlights",
+          "Clipped activations"
+        ]
+      ],
+      "breaks": "Lighting changes during a shoot; production distribution shift may need recalibration."
+    },
+    "mindmap": {
+      "center": "Calibration",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Activations vary"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Representative",
+            "Small sample"
+          ]
+        },
+        {
+          "label": "Methods",
+          "children": [
+            "Min-max",
+            "Percentile",
+            "KL/entropy",
+            "MSE"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "Held-out accuracy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Min-max vs percentile",
+      "scenario": "One activation layer.",
+      "flow": [
+        "Min-max range ±48 (one outlier)",
+        "99.99th percentile ±6",
+        "Percentile: accuracy −0.2% vs −3% with min-max"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Clip rare outliers for better overall precision."
+        }
+      ],
+      "code": [],
+      "outcome": "ranges matching real data."
+    },
+    "summary": {
+      "points": [
+        "Activations need calibration.",
+        "Use representative data.",
+        "Clip outliers wisely."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not always use min-max calibration?",
+        "a": "Rare outliers inflate the range and waste resolution for typical values."
+      }
+    ]
+  },
+  "ptq-vs-qat-when-to-quantize": {
+    "core": "Post-Training Quantization (PTQ) quantizes a trained model using calibration only. It's fast and cheap, and works well at INT8 and, with methods like GPTQ/AWQ, at INT4 for LLMs. Quantization-Aware Training (QAT) simulates quantization during training (fake-quant with straight-through gradients), so the model learns to tolerate it. It's costlier but recovers accuracy at low bit-widths.",
+    "first_principles": {
+      "problem": "PTQ to INT4 drops a vision model's accuracy by 6%, which is unacceptable.",
+      "truths": [
+        "Retraining is expensive.",
+        "Models can adapt to noise if they see it in training.",
+        "Lower bits need more care."
+      ],
+      "derivation": [
+        "Start with **PTQ** (minutes, small data).",
+        "Use **LLM PTQ methods** (GPTQ, AWQ, SmoothQuant).",
+        "If accuracy fails, apply **QAT** (fine-tune with fake-quant).",
+        "Compare cost against **accuracy recovered**."
+      ]
+    },
+    "analogy": {
+      "title": "Translating a speech afterwards versus writing it for translation",
+      "story": "Post-hoc translation is quick; writing with translation in mind avoids idioms that don't translate.",
+      "mapping": [
+        [
+          "Translate after",
+          "PTQ"
+        ],
+        [
+          "Write for translation",
+          "QAT"
+        ],
+        [
+          "Untranslatable idioms",
+          "Quantization-sensitive weights"
+        ]
+      ],
+      "breaks": "Speeches don't need gradients; QAT relies on the straight-through estimator to train through rounding."
+    },
+    "mindmap": {
+      "center": "PTQ vs QAT",
+      "branches": [
+        {
+          "label": "PTQ",
+          "children": [
+            "Calibration only",
+            "Fast",
+            "GPTQ/AWQ"
+          ]
+        },
+        {
+          "label": "QAT",
+          "children": [
+            "Fake-quant",
+            "STE gradients",
+            "Best accuracy"
+          ]
+        },
+        {
+          "label": "Choose",
+          "children": [
+            "Bit-width",
+            "Accuracy budget",
+            "Compute"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Escalation path",
+      "scenario": "Mobile vision model.",
+      "flow": [
+        "PTQ INT8: −0.4% → ship",
+        "PTQ INT4: −6% → fail",
+        "QAT INT4 3 epochs: −0.9% → ship"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Try cheap first; escalate only when needed."
+        }
+      ],
+      "code": [],
+      "outcome": "low-bit model with acceptable accuracy."
+    },
+    "summary": {
+      "points": [
+        "PTQ first.",
+        "QAT when accuracy suffers.",
+        "LLM-specific PTQ methods."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does QAT simulate during training?",
+        "a": "The rounding and clamping of quantization (fake-quant), so the model learns weights robust to it."
+      }
+    ]
+  },
+  "hardware-acceleration-why-integers-are-cheaper": {
+    "core": "Integer multipliers use far less silicon area and energy than floating-point ones, so GPUs and NPUs offer 2–4× more INT8/FP8 throughput than FP16. Fewer bytes also stretch memory bandwidth and cache. Speedups only appear if kernels and hardware actually support the format.",
+    "first_principles": {
+      "problem": "A model is quantized to INT4 but runs no faster because the runtime dequantizes to FP16 for every matmul.",
+      "truths": [
+        "Multiplier cost grows roughly with bit-width squared.",
+        "Data movement costs more energy than arithmetic.",
+        "Hardware support varies by generation."
+      ],
+      "derivation": [
+        "Match format to **hardware** (Tensor Core INT8/FP8, ARM dot-product).",
+        "Use **optimised kernels** (TensorRT-LLM, Marlin, llama.cpp).",
+        "Know whether you're **memory- or compute-bound**.",
+        "**Benchmark** end to end."
+      ]
+    },
+    "analogy": {
+      "title": "Counting with whole coins versus measuring gold dust",
+      "story": "Counting coins is quick and simple; weighing dust needs precise, slow scales.",
+      "mapping": [
+        [
+          "Coins",
+          "Integers"
+        ],
+        [
+          "Gold dust",
+          "Floats"
+        ],
+        [
+          "Precision scales",
+          "FP units"
+        ]
+      ],
+      "breaks": "Coins are always cheaper; integers only help if the hardware has fast integer paths."
+    },
+    "mindmap": {
+      "center": "Hardware Gains",
+      "branches": [
+        {
+          "label": "Why cheaper",
+          "children": [
+            "Smaller multipliers",
+            "Less energy",
+            "Fewer bytes"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "Tensor Cores",
+            "NPUs",
+            "CPU VNNI"
+          ]
+        },
+        {
+          "label": "Software",
+          "children": [
+            "TensorRT",
+            "Marlin",
+            "llama.cpp"
+          ]
+        },
+        {
+          "label": "Bound",
+          "children": [
+            "Memory",
+            "Compute"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decoding throughput",
+      "scenario": "Same 8B model.",
+      "flow": [
+        "FP16: 60 tok/s",
+        "INT4 weights + fused kernel: 150 tok/s",
+        "INT4 without fused kernel: 55 tok/s"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Kernels matter as much as bits."
+        }
+      ],
+      "code": [],
+      "outcome": "real speedups from quantization."
+    },
+    "summary": {
+      "points": [
+        "Integers are cheaper in silicon.",
+        "Fewer bytes to move.",
+        "Needs kernel support."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might a quantized model not run faster?",
+        "a": "The runtime may lack optimised low-bit kernels and dequantize back to FP16, losing the benefit."
+      }
+    ]
+  },
+  "mixed-precision-quantization-not-all-layers-are-equal": {
+    "core": "Layers differ in sensitivity: embeddings, first and last layers, attention outputs and outlier channels often degrade badly at low bits. Mixed precision measures per-layer sensitivity and keeps sensitive parts at FP16/INT8 while pushing robust layers to INT4, getting most of the savings with little loss.",
+    "first_principles": {
+      "problem": "Uniform INT4 breaks the model, but uniform INT8 doesn't save enough memory.",
+      "truths": [
+        "Sensitivity varies by layer.",
+        "A few layers hold most of the error.",
+        "Bit budgets can be allocated."
+      ],
+      "derivation": [
+        "**Profile** sensitivity (quantize one layer at a time and measure).",
+        "**Keep** sensitive layers higher precision.",
+        "**Use** outlier handling (LLM.int8(), AWQ protects salient channels).",
+        "**Optimise** bits under a memory budget."
+      ]
+    },
+    "analogy": {
+      "title": "Packing a suitcase",
+      "story": "Fold sweaters tightly but give the fragile glasses padding.",
+      "mapping": [
+        [
+          "Sweaters",
+          "Robust layers → INT4"
+        ],
+        [
+          "Glasses",
+          "Sensitive layers → FP16"
+        ],
+        [
+          "Suitcase limit",
+          "Memory budget"
+        ]
+      ],
+      "breaks": "A suitcase has one constraint; mixed precision also has kernel-support constraints per format."
+    },
+    "mindmap": {
+      "center": "Mixed Precision",
+      "branches": [
+        {
+          "label": "Sensitive",
+          "children": [
+            "Embeddings",
+            "First/last layers",
+            "Outlier channels"
+          ]
+        },
+        {
+          "label": "Method",
+          "children": [
+            "Per-layer profiling",
+            "Bit allocation"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "LLM.int8()",
+            "AWQ",
+            "GGUF k-quants"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Max savings",
+            "Min loss"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sensitivity sweep",
+      "scenario": "A 7B LLM.",
+      "flow": [
+        "All INT4: perplexity +1.8",
+        "Profile: lm_head and 2 layers dominate",
+        "Keep those at INT8, rest INT4",
+        "Perplexity +0.3, size 4.1 GB"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Nearly INT4 size with near-INT8 quality."
+        }
+      ],
+      "code": [],
+      "outcome": "an efficient precision mix."
+    },
+    "summary": {
+      "points": [
+        "Layers differ.",
+        "Profile sensitivity.",
+        "Spend bits where needed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which parts of a model are commonly kept at higher precision?",
+        "a": "Embeddings, the first and last (output) layers and outlier-heavy channels."
+      }
+    ]
+  }
+}
