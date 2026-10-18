@@ -1,0 +1,510 @@
+{
+  "introduction-it-works-on-my-machine-is-not-enough": {
+    "core": "Working code isn't production-ready. A service also needs monitoring, alerting, runbooks, capacity, dependencies understood, failure handling and an owner. Operational readiness gates check this before launch.",
+    "first_principles": {
+      "problem": "A new service launches, falls over under real load, and nobody knows how to debug it at 3 AM.",
+      "truths": [
+        "Production differs from test environments.",
+        "Operability must be designed in.",
+        "Launch is when problems are cheapest to fix."
+      ],
+      "derivation": [
+        "Run a **Production Readiness Review**.",
+        "Do **capacity planning** with real maths.",
+        "Understand **queueing** (Erlang C).",
+        "Apply **N+1** and **utilisation headroom** rules."
+      ]
+    },
+    "analogy": {
+      "title": "A test-kitchen dish vs. dinner service",
+      "story": "Perfect in the test kitchen, but can the line produce 200 plates an hour consistently?",
+      "mapping": [
+        [
+          "Test kitchen",
+          "Dev/staging"
+        ],
+        [
+          "Dinner rush",
+          "Production load"
+        ],
+        [
+          "Line readiness",
+          "Operational readiness"
+        ]
+      ],
+      "breaks": "Readiness gates can become bureaucracy, so keep them practical and automated."
+    },
+    "mindmap": {
+      "center": "Operational Readiness",
+      "branches": [
+        {
+          "label": "Gap",
+          "children": [
+            "Works ≠ operable"
+          ]
+        },
+        {
+          "label": "Gate",
+          "children": [
+            "PRR"
+          ]
+        },
+        {
+          "label": "Capacity",
+          "children": [
+            "Planning",
+            "Erlang C",
+            "N+1",
+            "N/0.7"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A launch that skipped readiness",
+      "scenario": "Consequences.",
+      "flow": [
+        "No load test",
+        "No alerts on key SLI",
+        "Launch traffic 5x estimate",
+        "Hours of outage, no runbook"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Readiness work is cheaper before launch."
+        }
+      ],
+      "code": [],
+      "outcome": "launches that are operable from day one."
+    },
+    "summary": {
+      "points": [
+        "Working ≠ ready.",
+        "Gate the launch.",
+        "Plan capacity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name three things a service needs beyond working code to be production-ready.",
+        "a": "For example, monitoring and alerting, runbooks and an owner, and validated capacity."
+      }
+    ]
+  },
+  "production-readiness-reviews-prr": {
+    "core": "A PRR is a structured checklist review before a service goes to production (or before SRE takes it on): SLOs, monitoring, alerting, runbooks, on-call, capacity, dependencies, failure modes, security, deploy and rollback, and DR.",
+    "first_principles": {
+      "problem": "Services are 'thrown over the wall' to operations with no observability or documentation.",
+      "truths": [
+        "Checklists catch omissions.",
+        "Shared standards raise the floor.",
+        "Ownership must be explicit."
+      ],
+      "derivation": [
+        "**Reliability**: SLOs, alerts on SLIs, dashboards.",
+        "**Operations**: runbooks, on-call rota, an owner.",
+        "**Resilience**: dependencies, timeouts, graceful degradation, DR.",
+        "**Change**: CI/CD, canary, rollback; **capacity**: load tested."
+      ]
+    },
+    "analogy": {
+      "title": "A pre-flight inspection",
+      "story": "Before any commercial flight, every critical system is checked against a list, however experienced the crew.",
+      "mapping": [
+        [
+          "Pre-flight list",
+          "PRR checklist"
+        ],
+        [
+          "Aircraft",
+          "Service"
+        ],
+        [
+          "Sign-off",
+          "Launch approval"
+        ]
+      ],
+      "breaks": "A PRR is a conversation, not just checkboxes. Use judgement on the risks."
+    },
+    "mindmap": {
+      "center": "PRR",
+      "branches": [
+        {
+          "label": "Reliability",
+          "children": [
+            "SLOs",
+            "Alerts",
+            "Dashboards"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Runbooks",
+            "On-call",
+            "Owner"
+          ]
+        },
+        {
+          "label": "Resilience",
+          "children": [
+            "Dependencies",
+            "Timeouts",
+            "DR"
+          ]
+        },
+        {
+          "label": "Change",
+          "children": [
+            "CI/CD",
+            "Canary",
+            "Rollback"
+          ]
+        },
+        {
+          "label": "Capacity",
+          "children": [
+            "Load test"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "PRR findings",
+      "scenario": "Before launch.",
+      "flow": [
+        "No timeout on payment API calls → fix",
+        "No rollback tested → test",
+        "Load test 2x expected peak → passed",
+        "Approved with 2 follow-ups"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A smooth launch with known risks."
+        }
+      ],
+      "code": [],
+      "outcome": "every production service meets a baseline."
+    },
+    "summary": {
+      "points": [
+        "Checklist review.",
+        "Cover reliability, ops, resilience and change.",
+        "Explicit sign-off."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the purpose of a Production Readiness Review?",
+        "a": "To verify a service meets operational standards (monitoring, runbooks, resilience, capacity) before going to production."
+      }
+    ]
+  },
+  "capacity-planning-science-not-guesswork": {
+    "core": "Capacity planning forecasts demand (peak RPS, growth, events), measures per-instance capacity through load testing, and provisions with headroom, replacing 'start with 5 big instances and see'.",
+    "first_principles": {
+      "problem": "Intuitive sizing either wastes money or collapses on launch day.",
+      "truths": [
+        "Demand can be estimated from data and business plans.",
+        "Per-instance capacity must be measured, not assumed.",
+        "Latency rises sharply near saturation."
+      ],
+      "derivation": [
+        "**Forecast** peak demand (with growth and events).",
+        "**Load test** to find per-instance capacity at your SLO latency.",
+        "**Compute** instances = peak / safe per-instance capacity.",
+        "Add **headroom and redundancy** (N+1)."
+      ]
+    },
+    "analogy": {
+      "title": "Planning seats for a concert",
+      "story": "Estimate attendance, know how many people each section holds safely, and add spare space for emergencies.",
+      "mapping": [
+        [
+          "Attendance",
+          "Peak demand"
+        ],
+        [
+          "Section capacity",
+          "Per-instance capacity"
+        ],
+        [
+          "Spare space",
+          "Headroom"
+        ]
+      ],
+      "breaks": "Forecasts are uncertain, so combine planning with autoscaling."
+    },
+    "mindmap": {
+      "center": "Capacity Planning",
+      "branches": [
+        {
+          "label": "Demand",
+          "children": [
+            "Peak RPS",
+            "Growth",
+            "Events"
+          ]
+        },
+        {
+          "label": "Supply",
+          "children": [
+            "Load-tested capacity at SLO"
+          ]
+        },
+        {
+          "label": "Formula",
+          "children": [
+            "Peak / safe capacity"
+          ]
+        },
+        {
+          "label": "Margins",
+          "children": [
+            "Headroom",
+            "N+1"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing a launch",
+      "scenario": "Numbers.",
+      "flow": [
+        "Expected peak: 3,000 RPS",
+        "Load test: 250 RPS/instance at p99 < 200 ms",
+        "Base: 12 instances",
+        "+ headroom/N+1 → 18"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A confident launch."
+        }
+      ],
+      "code": [],
+      "outcome": "capacity based on data."
+    },
+    "summary": {
+      "points": [
+        "Forecast demand.",
+        "Measure supply.",
+        "Add headroom."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why measure per-instance capacity at your SLO latency, not at maximum throughput?",
+        "a": "Near maximum throughput latency explodes, so the usable capacity is what meets the SLO."
+      }
+    ]
+  },
+  "the-erlang-c-formula-the-math-of-queues": {
+    "core": "Simple division (400 RPS / 100 per server = 4 servers) ignores randomness: requests arrive in bursts and queues form. Erlang C computes the probability of waiting and the average wait for given servers, arrival rate and service time.",
+    "first_principles": {
+      "problem": "Running 4 servers at 100% theoretical utilisation causes unbounded queues and latency spikes.",
+      "truths": [
+        "Arrivals are random (Poisson).",
+        "Queueing delay grows non-linearly with utilisation.",
+        "Extra servers dramatically reduce waiting."
+      ],
+      "derivation": [
+        "Inputs: **arrival rate λ**, **service rate μ**, **servers c**.",
+        "**Load A = λ/μ** (Erlangs); utilisation = A/c.",
+        "Erlang C gives **P(wait)**.",
+        "Choose **c** so P(wait) or the average wait meets targets."
+      ]
+    },
+    "analogy": {
+      "title": "A call centre staffing model",
+      "story": "Erlang C was invented to decide how many operators are needed so callers rarely wait.",
+      "mapping": [
+        [
+          "Callers",
+          "Requests"
+        ],
+        [
+          "Operators",
+          "Servers"
+        ],
+        [
+          "Hold time",
+          "Queue latency"
+        ]
+      ],
+      "breaks": "It assumes Poisson arrivals and exponential service times, which real systems only approximate."
+    },
+    "mindmap": {
+      "center": "Erlang C",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "λ arrival",
+            "μ service",
+            "c servers"
+          ]
+        },
+        {
+          "label": "Load",
+          "children": [
+            "A = λ/μ"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "P(wait)",
+            "Avg wait"
+          ]
+        },
+        {
+          "label": "Lesson",
+          "children": [
+            "Utilisation → non-linear delay"
+          ]
+        },
+        {
+          "label": "Origin",
+          "children": [
+            "Telephony"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The impact of one extra server",
+      "scenario": "Illustrative.",
+      "flow": [
+        "λ=380/s, μ=100/s → A=3.8",
+        "c=4 (95% util): P(wait) very high, long queues",
+        "c=5 (76%): P(wait) drops sharply",
+        "c=6: waits near zero"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One extra server transforms latency."
+        }
+      ],
+      "code": [],
+      "outcome": "capacity sized with queueing reality in mind."
+    },
+    "summary": {
+      "points": [
+        "Arrivals are random.",
+        "Delay grows non-linearly.",
+        "Use the maths."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does running servers near 100% utilisation cause latency spikes?",
+        "a": "Random arrival bursts form queues, and waiting time grows non-linearly as utilisation approaches 100%."
+      }
+    ]
+  },
+  "the-n1-and-n07-rules-practical-capacity-formulas": {
+    "core": "Two practical rules. N+1 means provision enough to survive losing one unit (instance, AZ) at peak. N/0.7 means size so peak utilisation stays around 70%, leaving room for bursts and queueing.",
+    "first_principles": {
+      "problem": "Engineers need quick, safe sizing rules beyond theoretical queueing models.",
+      "truths": [
+        "Components fail.",
+        "Bursts exceed averages.",
+        "Around 70% utilisation balances cost and latency."
+      ],
+      "derivation": [
+        "Compute **N** = peak / per-unit capacity.",
+        "**Headroom**: N / 0.7 to keep peak around 70%.",
+        "**Redundancy**: add +1 (or a whole AZ's worth).",
+        "**Review** after growth or architecture changes."
+      ]
+    },
+    "analogy": {
+      "title": "Seats in a car pool",
+      "story": "Plan for 70% full, so latecomers fit, and keep a spare car in case one breaks down.",
+      "mapping": [
+        [
+          "70% full",
+          "N/0.7"
+        ],
+        [
+          "Spare car",
+          "N+1"
+        ],
+        [
+          "Latecomers",
+          "Traffic bursts"
+        ]
+      ],
+      "breaks": "The 0.7 factor is a heuristic. Latency-sensitive services may need lower utilisation."
+    },
+    "mindmap": {
+      "center": "Capacity Rules",
+      "branches": [
+        {
+          "label": "N",
+          "children": [
+            "Peak / unit capacity"
+          ]
+        },
+        {
+          "label": "N/0.7",
+          "children": [
+            "~70% peak utilisation"
+          ]
+        },
+        {
+          "label": "N+1",
+          "children": [
+            "Survive one failure"
+          ]
+        },
+        {
+          "label": "Zones",
+          "children": [
+            "AZ-level N+1"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Heuristic"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Applying both rules",
+      "scenario": "Arithmetic.",
+      "flow": [
+        "Peak 2,000 RPS, 200 RPS/instance → N=10",
+        "N/0.7 → 15",
+        "N+1 across 3 AZs → ~18 (6 per AZ)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "It survives an AZ loss at peak without saturation."
+        }
+      ],
+      "code": [],
+      "outcome": "simple, safe sizing."
+    },
+    "summary": {
+      "points": [
+        "Headroom: /0.7.",
+        "Redundancy: +1.",
+        "Think in AZs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the N+1 rule protect against?",
+        "a": "Losing one unit of capacity (an instance or AZ) at peak without degrading service."
+      }
+    ]
+  }
+}
