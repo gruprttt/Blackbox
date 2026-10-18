@@ -1,0 +1,622 @@
+{
+  "introduction-stable-but-dead": {
+    "core": "A metastable failure is a state where a system stays degraded even after the original trigger (a load spike, brief outage, cache flush) is gone, because a sustaining feedback loop (retries, cache misses, queue backlogs) keeps it overloaded. The system is 'stable' in the bad state and won't recover without intervention.",
+    "first_principles": {
+      "problem": "A 2-minute database blip is fixed, but the service stays down for hours.",
+      "truths": [
+        "Triggers can be brief.",
+        "Feedback loops can sustain overload.",
+        "Recovery may need active load reduction."
+      ],
+      "derivation": [
+        "Distinguish **trigger** vs **sustaining effect**.",
+        "Identify **work amplification** loops.",
+        "Measure **goodput**, not just throughput.",
+        "Break loops (**shed load, stop retries, warm caches**).",
+        "Design to **avoid the vulnerable state**."
+      ]
+    },
+    "analogy": {
+      "title": "A traffic jam that persists after the accident is cleared",
+      "story": "Cars keep arriving faster than the queue drains, so the jam lasts for hours.",
+      "mapping": [
+        [
+          "Accident",
+          "Trigger"
+        ],
+        [
+          "Persistent jam",
+          "Metastable state"
+        ],
+        [
+          "Arriving cars",
+          "Sustaining load"
+        ]
+      ],
+      "breaks": "Traffic eventually thins at night; system retries can keep load high indefinitely."
+    },
+    "mindmap": {
+      "center": "Metastable Failures",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "Stable",
+            "Vulnerable",
+            "Metastable"
+          ]
+        },
+        {
+          "label": "Trigger",
+          "children": [
+            "Spike",
+            "Blip",
+            "Cache flush"
+          ]
+        },
+        {
+          "label": "Sustaining",
+          "children": [
+            "Retries",
+            "Cache misses",
+            "Backlogs"
+          ]
+        },
+        {
+          "label": "Recovery",
+          "children": [
+            "Shed load",
+            "Stop amplification"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Incident timeline",
+      "scenario": "Pattern.",
+      "flow": [
+        "DB failover (2 min)",
+        "Clients retry ×3; caches cold",
+        "Load 4× capacity even after DB returns",
+        "Recovers only after retries disabled and load shed"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Fixing the trigger isn't enough."
+        }
+      ],
+      "code": [],
+      "outcome": "metastability recognised."
+    },
+    "summary": {
+      "points": [
+        "Bad state persists.",
+        "Feedback sustains it.",
+        "Break the loop."
+      ]
+    },
+    "check": [
+      {
+        "q": "What distinguishes a metastable failure from an ordinary outage?",
+        "a": "It persists after the trigger is removed because a feedback loop sustains the overload."
+      }
+    ]
+  },
+  "the-physics-of-failure": {
+    "core": "Systems often run in a vulnerable state: efficient at normal load, but with work amplification (retries, timeouts causing redundant work, cache misses hitting slower paths) that kicks in under stress. Once load exceeds capacity, amplification increases effective load further, creating a second stable equilibrium at low goodput. Capacity headroom and limiting amplification shrink the danger zone.",
+    "first_principles": {
+      "problem": "Load tests at 120% show graceful degradation, but production collapses at 105% after a cache flush.",
+      "truths": [
+        "Efficiency often relies on caches and optimistic paths.",
+        "Overload changes system behaviour.",
+        "Two equilibria can exist."
+      ],
+      "derivation": [
+        "Map **amplification factors**.",
+        "Test **recovery from overload**, not just peak.",
+        "Keep **headroom** for cold-cache and retry load.",
+        "Cap **amplification** (retry budgets).",
+        "Monitor **goodput**."
+      ]
+    },
+    "analogy": {
+      "title": "A ball in a valley next to a deeper valley",
+      "story": "A big enough push tips it over the ridge into the other valley, and it stays there.",
+      "mapping": [
+        [
+          "Shallow valley",
+          "Healthy state"
+        ],
+        [
+          "Ridge",
+          "Capacity limit"
+        ],
+        [
+          "Deeper valley",
+          "Metastable state"
+        ],
+        [
+          "Push",
+          "Trigger"
+        ]
+      ],
+      "breaks": "Physical valleys are static; system ridges move with cache state and traffic mix."
+    },
+    "mindmap": {
+      "center": "Physics of Failure",
+      "branches": [
+        {
+          "label": "States",
+          "children": [
+            "Stable",
+            "Vulnerable",
+            "Metastable"
+          ]
+        },
+        {
+          "label": "Amplifiers",
+          "children": [
+            "Retries",
+            "Timeouts",
+            "Cache misses",
+            "Fallback costs"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "Overload recovery tests"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Headroom",
+            "Retry budgets",
+            "Goodput monitoring"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Amplification maths",
+      "scenario": "Estimate.",
+      "flow": [
+        "Normal: 90% cache hit, DB load 10%",
+        "Cache flushed: DB load 100% of reads → 10×",
+        "Timeouts trigger retries ×3 → 30×",
+        "Far beyond DB capacity"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Plan for worst-case amplification."
+        }
+      ],
+      "code": [],
+      "outcome": "danger zones quantified."
+    },
+    "summary": {
+      "points": [
+        "Efficiency hides fragility.",
+        "Amplification under stress.",
+        "Test recovery."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might a system that handles 120% load in tests still collapse in production?",
+        "a": "Production triggers like cold caches and retries amplify load beyond what tests modelled."
+      }
+    ]
+  },
+  "mechanism-1-the-retry-storm": {
+    "core": "When latency rises, client timeouts fire and clients retry. Each retry adds load, raising latency further and causing more timeouts, while the server wastes work on requests whose clients already gave up. With retries at multiple layers, amplification multiplies (3 layers × 3 retries = 27×).",
+    "first_principles": {
+      "problem": "A slowdown turns into a total outage because every layer retries three times.",
+      "truths": [
+        "Retries add load exactly when capacity is short.",
+        "Abandoned requests waste server work.",
+        "Layered retries multiply."
+      ],
+      "derivation": [
+        "**Retry budgets** (e.g. ≤10% of requests).",
+        "**Single retry layer**.",
+        "**Exponential backoff + jitter**.",
+        "**Deadline propagation** so servers drop abandoned work.",
+        "**Circuit breakers** to stop retrying."
+      ]
+    },
+    "analogy": {
+      "title": "Repeatedly hitting refresh on a slow website",
+      "story": "Everyone refreshing makes the site even slower.",
+      "mapping": [
+        [
+          "Refresh button",
+          "Retry"
+        ],
+        [
+          "Everyone refreshing",
+          "Retry storm"
+        ],
+        [
+          "Slow site",
+          "Overloaded server"
+        ]
+      ],
+      "breaks": "Users get bored and stop; programs retry relentlessly unless limited."
+    },
+    "mindmap": {
+      "center": "Retry Storm",
+      "branches": [
+        {
+          "label": "Loop",
+          "children": [
+            "Latency → timeouts → retries → more latency"
+          ]
+        },
+        {
+          "label": "Multipliers",
+          "children": [
+            "Layers",
+            "Attempts"
+          ]
+        },
+        {
+          "label": "Waste",
+          "children": [
+            "Abandoned work"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Retry budgets",
+            "One layer",
+            "Backoff + jitter",
+            "Deadlines",
+            "Circuit breakers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Retry budget",
+      "scenario": "Concept.",
+      "flow": [
+        "Track requests and retries per client",
+        "Allow retry only if retries < 10% of recent requests",
+        "Under overload, retries stop automatically",
+        "Load stays near 1.1× instead of 27×"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Overload doesn't self-amplify."
+        }
+      ],
+      "code": [],
+      "outcome": "retry storms prevented."
+    },
+    "summary": {
+      "points": [
+        "Retries amplify.",
+        "Budget them.",
+        "Propagate deadlines."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a retry budget?",
+        "a": "A cap on retries as a fraction of total requests, so retries can't multiply load during overload."
+      }
+    ]
+  },
+  "mechanism-2-the-cache-stampede-dogpile": {
+    "core": "When a hot cache entry expires (or the cache restarts), many concurrent requests miss simultaneously and all hit the backend to recompute the same value, a stampede or dogpile. The backend overloads, recomputation slows, more requests pile up and the cache never refills, sustaining the outage.",
+    "first_principles": {
+      "problem": "A popular homepage key expires and 10,000 simultaneous requests crush the database.",
+      "truths": [
+        "Hot keys are requested concurrently.",
+        "Recomputation is expensive.",
+        "Cold caches shift all load to the backend."
+      ],
+      "derivation": [
+        "**Request coalescing** (single-flight lock).",
+        "**Stale-while-revalidate**.",
+        "**Probabilistic early expiration**.",
+        "**TTL jitter**.",
+        "**Warm caches** before switching traffic."
+      ]
+    },
+    "analogy": {
+      "title": "A crowd rushing a buffet the moment it reopens",
+      "story": "Everyone grabs at once, the staff can't refill, and the queue never clears.",
+      "mapping": [
+        [
+          "Buffet refill",
+          "Cache recompute"
+        ],
+        [
+          "Crowd",
+          "Concurrent misses"
+        ],
+        [
+          "One server refilling",
+          "Single-flight"
+        ]
+      ],
+      "breaks": "Buffet crowds can be managed by staff; caches need coded coordination."
+    },
+    "mindmap": {
+      "center": "Cache Stampede",
+      "branches": [
+        {
+          "label": "Triggers",
+          "children": [
+            "Hot key expiry",
+            "Cache restart",
+            "Deploy flush"
+          ]
+        },
+        {
+          "label": "Effect",
+          "children": [
+            "Backend overload",
+            "Never refills"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Single-flight",
+            "Stale-while-revalidate",
+            "Early expiration",
+            "TTL jitter",
+            "Warming"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Single-flight",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One recompute instead of 10,000."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "var g singleflight.Group\nfunc Home(ctx context.Context) ([]byte, error) {\n    if v, ok := cache.Get(\"home\"); ok { return v, nil }\n    v, err, _ := g.Do(\"home\", func() (any, error) {\n        b, err := renderHome(ctx); if err == nil { cache.Set(\"home\", b, 5*time.Minute) }\n        return b, err\n    })\n    if err != nil { return nil, err }\n    return v.([]byte), nil\n}"
+        }
+      ],
+      "outcome": "stampedes neutralised."
+    },
+    "summary": {
+      "points": [
+        "Concurrent misses overload.",
+        "Coalesce recomputes.",
+        "Serve stale while refreshing."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does request coalescing prevent a cache stampede?",
+        "a": "Only one request recomputes the missing value while others wait for its result."
+      }
+    ]
+  },
+  "mitigation-breaking-the-loop": {
+    "core": "Escaping or preventing metastable states means breaking the sustaining loop: shed load (reject quickly at the edge), stop or budget retries, use circuit breakers, prioritise work that produces goodput, serve stale data, reduce timeouts' wasted work with deadlines, and keep emergency levers (traffic throttles, feature flags) ready. Prevention keeps headroom and caps amplification.",
+    "first_principles": {
+      "problem": "Engineers restart services repeatedly during a metastable outage and nothing improves.",
+      "truths": [
+        "Restarts don't remove sustaining load.",
+        "Reducing load lets the system drain.",
+        "Levers must exist before the incident."
+      ],
+      "derivation": [
+        "**Shed load** to below capacity.",
+        "**Disable retries** / tighten budgets.",
+        "**Prioritise** critical traffic.",
+        "**Serve stale** or degraded responses.",
+        "**Ramp traffic back** gradually; keep **runbook levers**."
+      ]
+    },
+    "analogy": {
+      "title": "Clearing a jammed motorway",
+      "story": "Close the on-ramps temporarily so the existing queue can drain, then reopen gradually.",
+      "mapping": [
+        [
+          "Closing on-ramps",
+          "Load shedding"
+        ],
+        [
+          "Draining queue",
+          "Recovery"
+        ],
+        [
+          "Gradual reopening",
+          "Ramp-up"
+        ]
+      ],
+      "breaks": "On-ramps are physical; software levers must be built and tested in advance."
+    },
+    "mindmap": {
+      "center": "Breaking the Loop",
+      "branches": [
+        {
+          "label": "Immediate",
+          "children": [
+            "Shed load",
+            "Stop retries",
+            "Throttle traffic"
+          ]
+        },
+        {
+          "label": "Degrade",
+          "children": [
+            "Stale data",
+            "Feature flags"
+          ]
+        },
+        {
+          "label": "Prioritise",
+          "children": [
+            "Critical traffic"
+          ]
+        },
+        {
+          "label": "Recover",
+          "children": [
+            "Gradual ramp"
+          ]
+        },
+        {
+          "label": "Prevent",
+          "children": [
+            "Headroom",
+            "Budgets",
+            "Tests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Recovery runbook",
+      "scenario": "Steps.",
+      "flow": [
+        "Enable edge throttle to 40% of normal",
+        "Set retry budget to 0",
+        "Warm caches with priority keys",
+        "Ramp traffic 10% per 5 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Recovery in minutes instead of hours."
+        }
+      ],
+      "code": [],
+      "outcome": "metastable states escapable."
+    },
+    "summary": {
+      "points": [
+        "Remove sustaining load.",
+        "Prioritise goodput.",
+        "Ramp back gradually."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why don't restarts fix metastable failures?",
+        "a": "The sustaining load (retries, cold caches) continues, pushing restarted instances straight back into overload."
+      }
+    ]
+  },
+  "probabilistic-early-expiration-preventing-the-cache-stampede": {
+    "core": "Probabilistic early expiration (XFetch) lets each request decide to recompute a value slightly before its TTL with a probability that rises as expiry nears: recompute if now − δ·β·ln(rand()) ≥ expiry, where δ is recompute cost. One request typically refreshes early while others keep using the cached value, so there's never a synchronised miss.",
+    "first_principles": {
+      "problem": "Even with locks, expensive keys cause latency spikes at every expiry.",
+      "truths": [
+        "Refreshing before expiry avoids misses.",
+        "Randomness spreads refresh decisions.",
+        "Cost-aware timing refreshes expensive values earlier."
+      ],
+      "derivation": [
+        "Store **value, compute time δ and expiry**.",
+        "On read, compute **XFetch condition**.",
+        "If true, **recompute** (others still served cached).",
+        "Tune **β** (>1 = earlier).",
+        "Combine with **single-flight**."
+      ]
+    },
+    "analogy": {
+      "title": "Refuelling before the tank hits empty, at a slightly random time",
+      "story": "Different drivers refuel at different moments, so the petrol station never has a sudden rush.",
+      "mapping": [
+        [
+          "Empty tank",
+          "Expiry"
+        ],
+        [
+          "Random refuel time",
+          "Probabilistic refresh"
+        ],
+        [
+          "Petrol station rush",
+          "Stampede"
+        ]
+      ],
+      "breaks": "Drivers see the fuel gauge; requests compute probability from stored metadata."
+    },
+    "mindmap": {
+      "center": "Early Expiration",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "now − δ·β·ln(rand) ≥ expiry"
+          ]
+        },
+        {
+          "label": "Inputs",
+          "children": [
+            "δ compute cost",
+            "β tuning",
+            "TTL"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "No synchronised misses"
+          ]
+        },
+        {
+          "label": "Combine",
+          "children": [
+            "Single-flight",
+            "TTL jitter"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "XFetch",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Smooth refreshes, no expiry spikes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import math, random, time\ndef get(key, recompute, ttl, beta=1.0):\n    entry = cache.get(key)   # (value, delta, expiry)\n    now = time.time()\n    if entry is None or now - entry.delta * beta * math.log(random.random()) >= entry.expiry:\n        start = time.time(); value = recompute(); delta = time.time() - start\n        cache.set(key, (value, delta, now + ttl))\n        return value\n    return entry.value"
+        }
+      ],
+      "outcome": "stampede-free hot keys."
+    },
+    "summary": {
+      "points": [
+        "Refresh early, randomly.",
+        "Weight by compute cost.",
+        "Never all at once."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does probabilistic early expiration prevent stampedes?",
+        "a": "Individual requests refresh at random times before expiry, so the entry rarely expires for everyone simultaneously."
+      }
+    ]
+  }
+}

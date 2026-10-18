@@ -1,0 +1,528 @@
+{
+  "introduction-the-amnesiac-database": {
+    "core": "Typical databases store current state and overwrite history: an account balance of €70 doesn't show how it got there. Event sourcing stores the sequence of state-changing events as the source of truth and derives current state by replaying them. CQRS separates the write model (commands, invariants) from read models optimised for queries, often fed by those events.",
+    "first_principles": {
+      "problem": "An audit asks why a customer's balance changed last March, and the database only holds today's value.",
+      "truths": [
+        "Overwrites lose history.",
+        "Events capture intent and time.",
+        "Reads and writes have different shapes."
+      ],
+      "derivation": [
+        "Store **events** (append-only).",
+        "**Rebuild state** by replay.",
+        "Separate **command** and **query** models (CQRS).",
+        "**Project** events into read models.",
+        "Use **snapshots** for long streams."
+      ]
+    },
+    "analogy": {
+      "title": "A bank statement versus a balance display",
+      "story": "The statement lists every transaction; the balance is just the sum.",
+      "mapping": [
+        [
+          "Statement lines",
+          "Events"
+        ],
+        [
+          "Balance",
+          "Current state"
+        ],
+        [
+          "Summing",
+          "Replay"
+        ]
+      ],
+      "breaks": "Statements are printed monthly; event stores are appended in real time and replayed by code."
+    },
+    "mindmap": {
+      "center": "Event Sourcing & CQRS",
+      "branches": [
+        {
+          "label": "Event sourcing",
+          "children": [
+            "Append-only events",
+            "Replay",
+            "Snapshots"
+          ]
+        },
+        {
+          "label": "CQRS",
+          "children": [
+            "Write model",
+            "Read models",
+            "Projections"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Audit",
+            "Time travel",
+            "Scalable reads"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Complexity",
+            "Eventual consistency",
+            "Schema evolution"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Account history",
+      "scenario": "Events.",
+      "flow": [
+        "AccountOpened(€0)",
+        "Deposited(€100)",
+        "Withdrawn(€30)",
+        "Replay → balance €70, with full history"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every change explainable."
+        }
+      ],
+      "code": [],
+      "outcome": "history as the source of truth."
+    },
+    "summary": {
+      "points": [
+        "Store what happened.",
+        "Derive state.",
+        "Separate reads and writes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the source of truth in event sourcing?",
+        "a": "The append-only sequence of events, not the current state."
+      }
+    ]
+  },
+  "cqrs-splitting-the-brain": {
+    "core": "Command Query Responsibility Segregation uses different models for updates and reads. Commands validate business rules against a write model (often an aggregate) and emit changes; queries hit read models (denormalised tables, search indexes, caches) shaped for each screen. Read models update asynchronously, so reads are eventually consistent, but each side scales and evolves independently.",
+    "first_principles": {
+      "problem": "One normalised schema serves both complex transactional writes and dozens of dashboard queries, satisfying neither.",
+      "truths": [
+        "Writes need invariants; reads need speed.",
+        "Different queries need different shapes.",
+        "Async projection decouples them."
+      ],
+      "derivation": [
+        "**Command side**: aggregates, validation, events.",
+        "**Query side**: projections per use case.",
+        "**Project** events or CDC into read stores.",
+        "Handle **eventual consistency** in UX.",
+        "Use CQRS **only where complexity justifies it**."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant kitchen and its menu board",
+      "story": "The kitchen enforces recipes; the menu board is a separate, simplified view updated after changes.",
+      "mapping": [
+        [
+          "Kitchen",
+          "Command model"
+        ],
+        [
+          "Menu board",
+          "Read model"
+        ],
+        [
+          "Updating the board",
+          "Projection"
+        ]
+      ],
+      "breaks": "Menu boards change rarely; read models update continuously."
+    },
+    "mindmap": {
+      "center": "CQRS",
+      "branches": [
+        {
+          "label": "Commands",
+          "children": [
+            "Validate",
+            "Aggregates",
+            "Emit events"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "Denormalised views",
+            "Search",
+            "Caches"
+          ]
+        },
+        {
+          "label": "Sync",
+          "children": [
+            "Projections",
+            "CDC"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Eventual consistency",
+            "More moving parts"
+          ]
+        },
+        {
+          "label": "Use when",
+          "children": [
+            "Complex domains",
+            "Divergent read needs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Orders with CQRS",
+      "scenario": "Design.",
+      "flow": [
+        "PlaceOrder command → Order aggregate → OrderPlaced",
+        "Projection: orders_by_customer table",
+        "Projection: Elasticsearch for search",
+        "Dashboard queries hit projections"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fast reads without compromising write rules."
+        }
+      ],
+      "code": [],
+      "outcome": "independent read and write optimisation."
+    },
+    "summary": {
+      "points": [
+        "Separate models.",
+        "Project asynchronously.",
+        "Use judiciously."
+      ]
+    },
+    "check": [
+      {
+        "q": "What consistency do CQRS read models typically have?",
+        "a": "Eventual consistency, since they're updated asynchronously from the write side."
+      }
+    ]
+  },
+  "the-mechanics-of-event-sourcing": {
+    "core": "Each aggregate has an event stream. To handle a command: load events (or snapshot + later events), rebuild state, validate, append new events with an expected version (optimistic concurrency) and publish them. Projections subscribe to build read models. Snapshots speed up long streams, and upcasters handle schema evolution of old events.",
+    "first_principles": {
+      "problem": "Two concurrent commands on the same aggregate both append events and violate an invariant.",
+      "truths": [
+        "State is a fold over events.",
+        "Version checks detect concurrent writers.",
+        "Old events must remain readable."
+      ],
+      "derivation": [
+        "**Load** stream → **fold** into state.",
+        "**Validate** command.",
+        "**Append** with expectedVersion.",
+        "**Snapshot** every N events.",
+        "**Upcast** old event versions."
+      ]
+    },
+    "analogy": {
+      "title": "A ledger where new entries must reference the last line number",
+      "story": "If someone added a line meanwhile, you recheck before writing.",
+      "mapping": [
+        [
+          "Ledger lines",
+          "Events"
+        ],
+        [
+          "Last line number",
+          "Expected version"
+        ],
+        [
+          "Recheck",
+          "Retry on conflict"
+        ]
+      ],
+      "breaks": "Ledgers are single-copy; event stores replicate and serve many readers."
+    },
+    "mindmap": {
+      "center": "Event Sourcing Mechanics",
+      "branches": [
+        {
+          "label": "Write path",
+          "children": [
+            "Load",
+            "Fold",
+            "Validate",
+            "Append with version"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "Optimistic",
+            "Expected version"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Snapshots"
+          ]
+        },
+        {
+          "label": "Evolution",
+          "children": [
+            "Upcasters",
+            "Versioned events"
+          ]
+        },
+        {
+          "label": "Stores",
+          "children": [
+            "EventStoreDB",
+            "Kafka + DB",
+            "Postgres tables"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Command handling",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Concurrent withdrawals can't overdraw."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def withdraw(account_id, amount):\n    events, version = store.load(account_id)\n    acct = Account.replay(events)\n    if acct.balance < amount: raise InsufficientFunds()\n    store.append(account_id, [Withdrawn(amount)], expected_version=version)  # raises on conflict"
+        }
+      ],
+      "outcome": "correct, concurrent event-sourced writes."
+    },
+    "summary": {
+      "points": [
+        "Fold events to state.",
+        "Append with expected version.",
+        "Snapshot and upcast."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does event sourcing handle concurrent writes to one aggregate?",
+        "a": "With optimistic concurrency: appends specify an expected stream version and fail if it changed."
+      }
+    ]
+  },
+  "the-superpower-time-travel-debugging": {
+    "core": "Because every change is stored, you can reconstruct state at any past moment, replay production events into a fixed version of the code, build new read models retroactively from history, and audit exactly who did what and when. That makes debugging, compliance and analytics dramatically easier.",
+    "first_principles": {
+      "problem": "A pricing bug corrupted order totals for two weeks, and the team needs to know exactly which orders and why.",
+      "truths": [
+        "History enables reconstruction.",
+        "Projections can be rebuilt.",
+        "Events record intent."
+      ],
+      "derivation": [
+        "**Replay to a point in time**.",
+        "**Rebuild projections** after fixing bugs.",
+        "**Create new projections** from old events.",
+        "**Audit** via event metadata (user, cause).",
+        "**Test** with real event streams."
+      ]
+    },
+    "analogy": {
+      "title": "A flight data recorder",
+      "story": "After an incident you replay every input to see exactly what happened.",
+      "mapping": [
+        [
+          "Flight recorder",
+          "Event store"
+        ],
+        [
+          "Replay",
+          "Rebuild state at time t"
+        ],
+        [
+          "Investigation",
+          "Debugging"
+        ]
+      ],
+      "breaks": "Recorders keep hours of data; event stores keep years, which has storage and privacy implications."
+    },
+    "mindmap": {
+      "center": "Time Travel",
+      "branches": [
+        {
+          "label": "Capabilities",
+          "children": [
+            "Point-in-time state",
+            "Replay with fixed code",
+            "New projections",
+            "Audit trail"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Debugging",
+            "Compliance",
+            "Analytics",
+            "Testing"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Privacy (GDPR)",
+            "Storage growth"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing a projection bug",
+      "scenario": "Flow.",
+      "flow": [
+        "Bug found in order_totals projection",
+        "Fix projection code",
+        "Truncate and replay all events",
+        "Corrected totals; list of affected orders produced"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Data repaired from source of truth."
+        }
+      ],
+      "code": [],
+      "outcome": "history-powered recovery."
+    },
+    "summary": {
+      "points": [
+        "Reconstruct any moment.",
+        "Rebuild projections.",
+        "Full audit."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does event sourcing help fix a buggy read model?",
+        "a": "Fix the projection code and rebuild the read model by replaying the stored events."
+      }
+    ]
+  },
+  "when-not-to-use-event-sourcing": {
+    "core": "Event sourcing adds significant complexity: eventual consistency between writes and reads, event schema evolution forever, replay and snapshot management, harder ad-hoc queries, GDPR deletion challenges (crypto-shredding) and a steep learning curve. Avoid it for simple CRUD domains, small teams, or where an audit table or CDC stream would suffice.",
+    "first_principles": {
+      "problem": "A team event-sources a simple settings page and spends months on projections and upcasters.",
+      "truths": [
+        "Complexity must pay for itself.",
+        "Events are hard to change once stored.",
+        "Simpler patterns often meet audit needs."
+      ],
+      "derivation": [
+        "Use for **complex domains** with rich behaviour and audit needs.",
+        "Avoid for **CRUD**.",
+        "Consider **audit logs, temporal tables, CDC** instead.",
+        "Plan **GDPR** (crypto-shredding).",
+        "Apply **per bounded context**, not system-wide."
+      ]
+    },
+    "analogy": {
+      "title": "Keeping a detailed diary of every glass of water",
+      "story": "Useful for a medical study, silly for everyday life.",
+      "mapping": [
+        [
+          "Detailed diary",
+          "Event sourcing"
+        ],
+        [
+          "Medical study",
+          "Complex regulated domain"
+        ],
+        [
+          "Everyday life",
+          "Simple CRUD"
+        ]
+      ],
+      "breaks": "Diaries can be thrown away; events are meant to be permanent."
+    },
+    "mindmap": {
+      "center": "When Not To",
+      "branches": [
+        {
+          "label": "Costs",
+          "children": [
+            "Eventual consistency",
+            "Schema evolution",
+            "Replay ops",
+            "Query difficulty",
+            "GDPR"
+          ]
+        },
+        {
+          "label": "Avoid for",
+          "children": [
+            "CRUD",
+            "Small teams",
+            "Simple domains"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Audit tables",
+            "Temporal tables",
+            "CDC"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Per bounded context"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision",
+      "scenario": "Two contexts.",
+      "flow": [
+        "Trading ledger with regulatory audit → event sourcing",
+        "User preferences page → plain CRUD + audit log"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Use the heavy tool only where it pays."
+        }
+      ],
+      "code": [],
+      "outcome": "pragmatic adoption."
+    },
+    "summary": {
+      "points": [
+        "Powerful but costly.",
+        "Not for CRUD.",
+        "Scope to where it pays."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name a simpler alternative to event sourcing for audit needs.",
+        "a": "An audit log table, temporal tables or a CDC stream."
+      }
+    ]
+  }
+}

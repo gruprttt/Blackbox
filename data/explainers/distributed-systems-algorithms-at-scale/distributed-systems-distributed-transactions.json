@@ -1,0 +1,754 @@
+{
+  "introduction-the-problem-with-splitting-databases": {
+    "core": "In a monolith, one ACID transaction can update orders, payments and inventory together. Once data is split across services or databases, a business operation spans several independent stores, and partial failure can leave some updated and others not. Distributed transaction techniques (2PC, sagas, TCC) restore all-or-nothing semantics or compensating equivalents.",
+    "first_principles": {
+      "problem": "An order is created and payment captured, but inventory reservation fails, and nothing rolls back.",
+      "truths": [
+        "Local transactions don't span services.",
+        "Partial failure is normal.",
+        "Business operations need atomic outcomes."
+      ],
+      "derivation": [
+        "Prefer **designs that avoid** cross-service transactions.",
+        "Use **2PC** for tightly coupled, short, homogeneous resources.",
+        "Use **sagas** for long-running, cross-service workflows.",
+        "Use **TCC** for reservations.",
+        "Ensure **idempotency** and **outboxes**."
+      ]
+    },
+    "analogy": {
+      "title": "Booking flights, hotel and car separately",
+      "story": "If the hotel fails after the flight is booked, you need to cancel or rebook rather than end up half-booked.",
+      "mapping": [
+        [
+          "Separate bookings",
+          "Service-local transactions"
+        ],
+        [
+          "Half-booked trip",
+          "Partial failure"
+        ],
+        [
+          "Cancelling the flight",
+          "Compensation"
+        ]
+      ],
+      "breaks": "Travel agents can phone around; services need explicit protocols."
+    },
+    "mindmap": {
+      "center": "Distributed Transactions",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Data across services",
+            "Partial failure"
+          ]
+        },
+        {
+          "label": "Approaches",
+          "children": [
+            "2PC",
+            "3PC",
+            "Sagas",
+            "TCC"
+          ]
+        },
+        {
+          "label": "Supporting",
+          "children": [
+            "Idempotency",
+            "Outbox"
+          ]
+        },
+        {
+          "label": "Advice",
+          "children": [
+            "Avoid when possible"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Checkout spanning services",
+      "scenario": "Failure.",
+      "flow": [
+        "Orders: created ✓",
+        "Payments: captured ✓",
+        "Inventory: out of stock ✗",
+        "Need: refund payment, cancel order"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Plan the failure path explicitly."
+        }
+      ],
+      "code": [],
+      "outcome": "atomicity reconsidered for distributed data."
+    },
+    "summary": {
+      "points": [
+        "ACID doesn't span services.",
+        "Partial failure happens.",
+        "Choose a protocol."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a single ACID transaction cover multiple microservices' databases?",
+        "a": "Each service owns an independent database, and local transactions can't span them."
+      }
+    ]
+  },
+  "the-old-way-two-phase-commit-2pc": {
+    "core": "Two-phase commit uses a coordinator: in the prepare phase each participant durably prepares and votes yes or no; if all vote yes, the coordinator logs commit and tells everyone to commit, else abort. It gives atomicity but is blocking: if the coordinator fails after prepare, participants hold locks indefinitely. Latency and availability suffer, so it's used mainly within databases (XA, Spanner's Paxos-backed 2PC).",
+    "first_principles": {
+      "problem": "A coordinator crashes after participants prepared, and their row locks block other transactions for hours.",
+      "truths": [
+        "Unanimous agreement gives atomicity.",
+        "Prepared participants can't decide alone.",
+        "Locks held during uncertainty block others."
+      ],
+      "derivation": [
+        "**Prepare**: participants persist and vote.",
+        "**Commit/abort** decision logged by coordinator.",
+        "**Recovery**: participants query coordinator.",
+        "Make coordinator **highly available** (Paxos/Raft-backed).",
+        "Keep transactions **short**."
+      ]
+    },
+    "analogy": {
+      "title": "A wedding officiant asking 'do you?' to both",
+      "story": "Only if both say yes is the marriage declared; if the officiant faints mid-ceremony, everyone waits.",
+      "mapping": [
+        [
+          "Officiant",
+          "Coordinator"
+        ],
+        [
+          "'I do'",
+          "Yes vote"
+        ],
+        [
+          "Fainting",
+          "Coordinator failure"
+        ]
+      ],
+      "breaks": "Weddings have two parties; 2PC can involve many participants, multiplying blocking risk."
+    },
+    "mindmap": {
+      "center": "2PC",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "Prepare/vote",
+            "Commit/abort"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "Atomicity"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "Blocking",
+            "Coordinator SPOF",
+            "Latency",
+            "Locks"
+          ]
+        },
+        {
+          "label": "Mitigation",
+          "children": [
+            "Replicated coordinator"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "XA",
+            "Spanner",
+            "Database internals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "2PC message flow",
+      "scenario": "Trace.",
+      "flow": [
+        "Coordinator → PREPARE to A, B",
+        "A: YES (prepared), B: YES",
+        "Coordinator logs COMMIT → sends COMMIT",
+        "A, B commit and release locks"
+      ],
+      "steps": [
+        {
+          "label": "Failure",
+          "detail": "Crash before COMMIT sent → A, B blocked until recovery."
+        }
+      ],
+      "code": [],
+      "outcome": "2PC's strengths and limits understood."
+    },
+    "summary": {
+      "points": [
+        "Vote then commit.",
+        "Atomic but blocking.",
+        "Replicate the coordinator."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is 2PC called a blocking protocol?",
+        "a": "Prepared participants can't commit or abort on their own and must wait for the coordinator's decision."
+      }
+    ]
+  },
+  "a-note-on-three-phase-commit-3pc": {
+    "core": "Three-phase commit adds a pre-commit phase so participants know a commit decision is coming, allowing them to time out and proceed without the coordinator under assumptions of bounded delays and no network partitions. Because real networks partition and delays are unbounded, 3PC can still violate safety and is rarely used; consensus-backed 2PC is preferred.",
+    "first_principles": {
+      "problem": "Teams consider 3PC to fix 2PC's blocking without realising its assumptions.",
+      "truths": [
+        "Extra phases reduce uncertainty windows.",
+        "Timeouts assume bounded delays.",
+        "Partitions break those assumptions."
+      ],
+      "derivation": [
+        "Know **CanCommit → PreCommit → DoCommit**.",
+        "Non-blocking only under **synchronous, no-partition** assumptions.",
+        "Prefer **2PC with replicated coordinator**.",
+        "Or avoid with **sagas**.",
+        "Treat 3PC as **academic context**."
+      ]
+    },
+    "analogy": {
+      "title": "Announcing 'we're about to commit' before committing",
+      "story": "Helps if everyone can hear reliably, but useless if the room is split by a soundproof wall.",
+      "mapping": [
+        [
+          "Announcement",
+          "PreCommit"
+        ],
+        [
+          "Soundproof wall",
+          "Network partition"
+        ],
+        [
+          "Proceeding alone",
+          "Timeout-based commit"
+        ]
+      ],
+      "breaks": "People can shout across walls; partitioned nodes can't communicate at all."
+    },
+    "mindmap": {
+      "center": "3PC",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "CanCommit",
+            "PreCommit",
+            "DoCommit"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Non-blocking"
+          ]
+        },
+        {
+          "label": "Assumptions",
+          "children": [
+            "Bounded delay",
+            "No partitions"
+          ]
+        },
+        {
+          "label": "Reality",
+          "children": [
+            "Unsafe under partitions"
+          ]
+        },
+        {
+          "label": "Preferred",
+          "children": [
+            "Consensus-backed 2PC",
+            "Sagas"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Partition failure",
+      "scenario": "Scenario.",
+      "flow": [
+        "Half the participants received PreCommit, half didn't",
+        "Partition: each side times out",
+        "One side commits, the other aborts",
+        "Atomicity violated"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Timing assumptions fail in real networks."
+        }
+      ],
+      "code": [],
+      "outcome": "why 3PC is rarely used."
+    },
+    "summary": {
+      "points": [
+        "Adds a phase.",
+        "Assumes synchrony.",
+        "Unsafe under partitions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why isn't 3PC widely used in practice?",
+        "a": "It relies on bounded delays and no partitions, so real network partitions can cause inconsistent outcomes."
+      }
+    ]
+  },
+  "the-modern-way-the-saga-pattern": {
+    "core": "A saga breaks a business transaction into a sequence of local transactions, one per service, each publishing an event or message that triggers the next. If a step fails, previously completed steps are undone by compensating transactions. Sagas avoid distributed locks and blocking, at the cost of eventual consistency and intermediate states visible to others.",
+    "first_principles": {
+      "problem": "A travel booking spans flights, hotels and cars owned by different services, and 2PC across them is impractical.",
+      "truths": [
+        "Local transactions are reliable.",
+        "Business actions can usually be undone semantically.",
+        "Intermediate states will be visible."
+      ],
+      "derivation": [
+        "Split into **local steps**.",
+        "Define a **compensation** for each step.",
+        "Coordinate via **orchestration or choreography**.",
+        "Use **outbox** for reliable messaging.",
+        "Design for **isolation anomalies** (semantic locks, pending states)."
+      ]
+    },
+    "analogy": {
+      "title": "A series of dominoes with an undo plan",
+      "story": "Each falls in turn; if one sticks, you set the earlier ones back up in reverse.",
+      "mapping": [
+        [
+          "Dominoes",
+          "Local transactions"
+        ],
+        [
+          "Setting back up",
+          "Compensations"
+        ],
+        [
+          "Sticking domino",
+          "Failed step"
+        ]
+      ],
+      "breaks": "Dominoes reset exactly; compensations are semantic (a refund, not erasing history)."
+    },
+    "mindmap": {
+      "center": "Sagas",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Local transactions",
+            "Compensations"
+          ]
+        },
+        {
+          "label": "Coordination",
+          "children": [
+            "Orchestration",
+            "Choreography"
+          ]
+        },
+        {
+          "label": "Reliability",
+          "children": [
+            "Outbox",
+            "Idempotency"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Eventual consistency",
+            "Visible intermediate states"
+          ]
+        },
+        {
+          "label": "Countermeasures",
+          "children": [
+            "Pending states",
+            "Semantic locks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Order saga",
+      "scenario": "Steps.",
+      "flow": [
+        "1 Create order (PENDING)",
+        "2 Reserve inventory",
+        "3 Charge payment",
+        "4 Mark order CONFIRMED",
+        "Failure at 3 → release inventory, cancel order"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All-or-compensated outcome without locks."
+        }
+      ],
+      "code": [],
+      "outcome": "practical cross-service consistency."
+    },
+    "summary": {
+      "points": [
+        "Local steps.",
+        "Compensate failures.",
+        "Eventual consistency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What replaces rollback in a saga?",
+        "a": "Compensating transactions that semantically undo completed steps."
+      }
+    ]
+  },
+  "saga-compensation-the-undo-button": {
+    "core": "Compensations semantically reverse completed steps: refund a charge, release a reservation, cancel an order and send an apology email. They must be idempotent, retryable until they succeed, and designed with the domain (some actions like sending an email can't be undone, only followed up). Order steps so irreversible actions happen last (pivot transactions).",
+    "first_principles": {
+      "problem": "A saga sends a 'your order shipped' email before payment fails, and the compensation can't unsend it.",
+      "truths": [
+        "Not all actions are reversible.",
+        "Compensations can fail too.",
+        "Order of steps affects risk."
+      ],
+      "derivation": [
+        "Define **compensation per step**.",
+        "Make compensations **idempotent and retryable**.",
+        "Place **irreversible steps last** (after the pivot).",
+        "Use **pending/semantic locks** to hide intermediate state.",
+        "**Alert** on stuck compensations."
+      ]
+    },
+    "analogy": {
+      "title": "Returning items to shops after cancelling a party",
+      "story": "You can return the cake order, but you can't un-send invitations, so send them last.",
+      "mapping": [
+        [
+          "Returning cake",
+          "Compensation"
+        ],
+        [
+          "Invitations",
+          "Irreversible step"
+        ],
+        [
+          "Sending last",
+          "Pivot ordering"
+        ]
+      ],
+      "breaks": "Shops may refuse returns; compensations must be retried until they succeed or escalate."
+    },
+    "mindmap": {
+      "center": "Compensation",
+      "branches": [
+        {
+          "label": "Examples",
+          "children": [
+            "Refund",
+            "Release reservation",
+            "Cancel"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Idempotent",
+            "Retryable",
+            "Domain-aware"
+          ]
+        },
+        {
+          "label": "Ordering",
+          "children": [
+            "Compensatable → pivot → retryable"
+          ]
+        },
+        {
+          "label": "Visibility",
+          "children": [
+            "Pending states"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Alerts",
+            "Manual intervention"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Step ordering",
+      "scenario": "Saga design.",
+      "flow": [
+        "Compensatable: reserve stock, authorise card",
+        "Pivot: capture payment",
+        "Retryable after pivot: create shipment, send confirmation email"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Emails only after success is guaranteed."
+        }
+      ],
+      "code": [],
+      "outcome": "safe, reversible workflows."
+    },
+    "summary": {
+      "points": [
+        "Semantic undo.",
+        "Idempotent and retried.",
+        "Irreversible steps last."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a saga's pivot transaction?",
+        "a": "The point of no return after which remaining steps are retried to completion rather than compensated."
+      }
+    ]
+  },
+  "coordinating-sagas-choreography-vs-orchestration": {
+    "core": "Choreographed sagas have each service listen for events and emit the next (OrderCreated → InventoryReserved → PaymentCharged), which is decoupled but makes the flow implicit and hard to trace. Orchestrated sagas use a central coordinator (Temporal, Step Functions, Camunda) that commands each step and tracks state, which is explicit, easier to change and observe, and handles compensations centrally.",
+    "first_principles": {
+      "problem": "A choreographed order saga across six services becomes impossible to debug when it stalls.",
+      "truths": [
+        "Implicit flows are hard to follow.",
+        "Central coordinators add a component.",
+        "Durable workflow engines handle retries and state."
+      ],
+      "derivation": [
+        "**Choreography** for short, simple sagas.",
+        "**Orchestration** for complex, long-running ones.",
+        "Use **durable workflow engines**.",
+        "Add **correlation IDs** and timeouts.",
+        "Model **compensations** explicitly."
+      ]
+    },
+    "analogy": {
+      "title": "A dance troupe versus a conductor-led orchestra",
+      "story": "Dancers react to each other; the orchestra follows the conductor's explicit score.",
+      "mapping": [
+        [
+          "Dancers reacting",
+          "Choreography"
+        ],
+        [
+          "Conductor",
+          "Orchestrator"
+        ],
+        [
+          "Score",
+          "Workflow definition"
+        ]
+      ],
+      "breaks": "Dancers rehearse together; services evolve independently, making implicit flows fragile."
+    },
+    "mindmap": {
+      "center": "Saga Coordination",
+      "branches": [
+        {
+          "label": "Choreography",
+          "children": [
+            "Events",
+            "Decoupled",
+            "Implicit flow"
+          ]
+        },
+        {
+          "label": "Orchestration",
+          "children": [
+            "Central coordinator",
+            "Explicit state",
+            "Easier debugging"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "Temporal",
+            "Step Functions",
+            "Camunda"
+          ]
+        },
+        {
+          "label": "Must",
+          "children": [
+            "Correlation IDs",
+            "Timeouts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Orchestrated saga",
+      "scenario": "Temporal-style pseudo-code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Flow and compensation visible in one place."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "@workflow\ndef place_order(order):\n    reserve = activity(reserve_inventory, order)\n    try:\n        activity(charge_payment, order)\n    except PaymentFailed:\n        activity(release_inventory, reserve)\n        activity(cancel_order, order)\n        raise\n    activity(create_shipment, order)"
+        }
+      ],
+      "outcome": "manageable sagas."
+    },
+    "summary": {
+      "points": [
+        "Choreography: simple.",
+        "Orchestration: complex.",
+        "Durable engines help."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is orchestration often preferred for complex sagas?",
+        "a": "The flow and compensations are explicit in one coordinator, making it easier to understand, change and debug."
+      }
+    ]
+  },
+  "tcc-try-confirm-cancel": {
+    "core": "Try-Confirm-Cancel splits each participant's work into Try (reserve resources tentatively, with a timeout), Confirm (finalise the reservation) and Cancel (release it). A coordinator calls Try on all participants; if all succeed it calls Confirm, otherwise Cancel. It's like 2PC at the business level without database locks, suited to reservations (seats, stock, credit).",
+    "first_principles": {
+      "problem": "Booking a flight seat and hotel room must either both happen or neither, without holding database locks for minutes.",
+      "truths": [
+        "Tentative reservations hold capacity safely.",
+        "Reservations can expire.",
+        "Business-level protocols avoid DB locks."
+      ],
+      "derivation": [
+        "Implement **Try** as a reservation with expiry.",
+        "**Confirm** converts to a firm booking.",
+        "**Cancel** releases.",
+        "Make all three **idempotent**.",
+        "Handle **timeouts** (auto-cancel)."
+      ]
+    },
+    "analogy": {
+      "title": "Putting items on hold at shops",
+      "story": "Each shop holds the item for an hour; once all are held you buy them, or you release the holds.",
+      "mapping": [
+        [
+          "Hold",
+          "Try"
+        ],
+        [
+          "Buying",
+          "Confirm"
+        ],
+        [
+          "Releasing",
+          "Cancel"
+        ],
+        [
+          "One-hour expiry",
+          "Reservation timeout"
+        ]
+      ],
+      "breaks": "Shops trust you; TCC needs expiries and idempotency to survive coordinator failure."
+    },
+    "mindmap": {
+      "center": "TCC",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "Try",
+            "Confirm",
+            "Cancel"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Business-level",
+            "No DB locks",
+            "Timeouts"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Idempotent",
+            "Reservation expiry"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Seats",
+            "Stock",
+            "Credit holds"
+          ]
+        },
+        {
+          "label": "vs Saga",
+          "children": [
+            "Reserve first vs act then compensate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Trip booking",
+      "scenario": "Flow.",
+      "flow": [
+        "Try: hold seat 14C (15 min), hold room 302",
+        "Both succeed → Confirm both",
+        "Room hold fails → Cancel seat hold",
+        "Unconfirmed holds auto-expire"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All-or-nothing without long locks."
+        }
+      ],
+      "code": [],
+      "outcome": "reservation-based atomicity."
+    },
+    "summary": {
+      "points": [
+        "Reserve, then confirm.",
+        "Cancel on failure.",
+        "Expire holds."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does TCC differ from a saga?",
+        "a": "TCC reserves resources tentatively before confirming, while sagas perform actions and compensate afterwards."
+      }
+    ]
+  }
+}

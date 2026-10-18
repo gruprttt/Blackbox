@@ -1,0 +1,719 @@
+{
+  "introduction-the-reshuffling-nightmare": {
+    "core": "Placing keys with `hash(key) % N` spreads them evenly, but changing N moves almost every key: going from 4 to 5 servers remaps about 80% of keys. For caches that means a stampede of misses; for databases a massive data migration. Consistent hashing changes the mapping so adding or removing a node moves only about 1/N of the keys.",
+    "first_principles": {
+      "problem": "Adding one cache server to a cluster of 10 causes a 90% miss rate and overloads the database.",
+      "truths": [
+        "Modulo depends on N.",
+        "Changing N changes most results.",
+        "Only the new node's share needs to move."
+      ],
+      "derivation": [
+        "Measure **keys moved** on resize.",
+        "Notice modulo moves **~(N−1)/N**.",
+        "Want only **~1/N** to move.",
+        "Decouple placement from **node count**.",
+        "Map keys and nodes into the **same space**."
+      ]
+    },
+    "analogy": {
+      "title": "Renumbering every seat when one chair is added",
+      "story": "Seating by 'ticket number mod rows' means one extra row reseats the whole theatre.",
+      "mapping": [
+        [
+          "Rows",
+          "Servers"
+        ],
+        [
+          "Ticket mod rows",
+          "hash % N"
+        ],
+        [
+          "Reseating everyone",
+          "Mass key movement"
+        ]
+      ],
+      "breaks": "Theatre-goers complain; caches just silently miss."
+    },
+    "mindmap": {
+      "center": "Reshuffling Problem",
+      "branches": [
+        {
+          "label": "Naive",
+          "children": [
+            "hash % N"
+          ]
+        },
+        {
+          "label": "Pain",
+          "children": [
+            "Most keys move",
+            "Cache stampede",
+            "Migration storms"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Move ~1/N"
+          ]
+        },
+        {
+          "label": "Answer",
+          "children": [
+            "Consistent hashing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure movement",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "80% of keys change server for a 25% capacity increase."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "keys = range(100_000)\nmoved = sum(1 for k in keys if hash(str(k)) % 4 != hash(str(k)) % 5)\nprint(moved / len(keys))   # ≈ 0.80"
+        }
+      ],
+      "outcome": "why modulo hashing fails elastic clusters."
+    },
+    "summary": {
+      "points": [
+        "Modulo depends on N.",
+        "Resizing reshuffles most keys.",
+        "Aim for ~1/N moved."
+      ]
+    },
+    "check": [
+      {
+        "q": "Roughly what fraction of keys move when going from N to N+1 with modulo hashing?",
+        "a": "About N/(N+1), nearly all of them, versus the ideal of about 1/(N+1)."
+      }
+    ]
+  },
+  "the-hash-ring": {
+    "core": "Consistent hashing maps both nodes and keys onto the same circular space (for example 0 to 2³²−1). A key belongs to the first node found walking clockwise from its position. Because each node owns only the arc before it, placement depends on neighbours, not on the total node count.",
+    "first_principles": {
+      "problem": "An engineer can't see why the ring makes placement independent of N.",
+      "truths": [
+        "Same hash space for keys and nodes.",
+        "Clockwise successor owns the key.",
+        "Ownership is local to arcs."
+      ],
+      "derivation": [
+        "Hash **nodes** onto the ring.",
+        "Hash **keys** onto the ring.",
+        "Owner = **first node clockwise**.",
+        "Wrap around at the **top**.",
+        "Replicas = **next R distinct nodes**."
+      ]
+    },
+    "analogy": {
+      "title": "Bus stops on a circular route",
+      "story": "Each passenger boards at the next stop after where they're standing; adding a stop only affects people just before it.",
+      "mapping": [
+        [
+          "Stops",
+          "Nodes"
+        ],
+        [
+          "Passengers",
+          "Keys"
+        ],
+        [
+          "Next stop",
+          "Clockwise successor"
+        ]
+      ],
+      "breaks": "Bus stops are evenly spaced by design; hashed nodes land randomly."
+    },
+    "mindmap": {
+      "center": "Hash Ring",
+      "branches": [
+        {
+          "label": "Space",
+          "children": [
+            "Circular",
+            "0..2^32−1"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Nodes hashed",
+            "Keys hashed"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "First clockwise"
+          ]
+        },
+        {
+          "label": "Replication",
+          "children": [
+            "Next R distinct nodes"
+          ]
+        },
+        {
+          "label": "Property",
+          "children": [
+            "Local ownership"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ring lookup",
+      "scenario": "Trace.",
+      "flow": [
+        "Nodes at A=100, B=400, C=800 (space 0–999)",
+        "key x hashes to 250 → B",
+        "key y hashes to 850 → wraps → A",
+        "key z hashes to 400 → B"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each node owns the arc ending at it."
+        }
+      ],
+      "code": [],
+      "outcome": "placement by position, not count."
+    },
+    "summary": {
+      "points": [
+        "One circle for keys and nodes.",
+        "Clockwise successor owns.",
+        "Ownership is arc-local."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which node owns a key that hashes past the last node on the ring?",
+        "a": "The first node on the ring, because lookup wraps around past the top."
+      }
+    ]
+  },
+  "adding-and-removing-nodes": {
+    "core": "When a node joins the ring, it takes over only the keys on the arc between its predecessor and itself, all from one neighbour. When a node leaves, its arc passes to its successor. On average just K/N keys move, and only the adjacent nodes are involved, which keeps scaling and failure recovery cheap.",
+    "first_principles": {
+      "problem": "Operators fear scaling out because they expect a cluster-wide rebalance.",
+      "truths": [
+        "New node splits one arc.",
+        "Departing node's arc goes to successor.",
+        "Other nodes are untouched."
+      ],
+      "derivation": [
+        "On join: **stream keys** from successor for the new arc.",
+        "On leave: successor **absorbs** the arc.",
+        "Expect **~K/N** keys moved.",
+        "Keep **replicas** to serve during moves.",
+        "Throttle **streaming** to protect latency."
+      ]
+    },
+    "analogy": {
+      "title": "A new shop opening on a high street",
+      "story": "It only takes customers from the next shop along, not from every shop in town.",
+      "mapping": [
+        [
+          "New shop",
+          "Joining node"
+        ],
+        [
+          "Next shop's customers",
+          "Successor's keys"
+        ],
+        [
+          "Rest of town",
+          "Unaffected nodes"
+        ]
+      ],
+      "breaks": "Customers choose freely; keys follow the ring rule exactly."
+    },
+    "mindmap": {
+      "center": "Membership Changes",
+      "branches": [
+        {
+          "label": "Join",
+          "children": [
+            "Split one arc",
+            "Stream from successor"
+          ]
+        },
+        {
+          "label": "Leave",
+          "children": [
+            "Successor absorbs"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "~K/N keys",
+            "Neighbours only"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Replicas serve during move",
+            "Throttled streaming"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Join trace",
+      "scenario": "Numbers.",
+      "flow": [
+        "Ring A=100, B=400, C=800; 9,000 keys",
+        "D joins at 600",
+        "Keys in (400, 600] move from C to D",
+        "~2,000 keys move; A and B untouched"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One neighbour affected."
+        }
+      ],
+      "code": [],
+      "outcome": "cheap, local rebalancing."
+    },
+    "summary": {
+      "points": [
+        "Joins split one arc.",
+        "Leaves pass to successor.",
+        "~1/N keys move."
+      ]
+    },
+    "check": [
+      {
+        "q": "When a node leaves the ring, which node receives its keys?",
+        "a": "Its clockwise successor, which now owns the merged arc."
+      }
+    ]
+  },
+  "the-problem-of-hotspots-and-data-skew": {
+    "core": "With few nodes, random positions on the ring give very uneven arcs: one node may own 40% of the space while another owns 10%. Popular keys add a second skew: a single celebrity key overloads whichever node owns it regardless of arc size. And when a node fails, its whole load lands on one successor, risking cascades.",
+    "first_principles": {
+      "problem": "One cache node runs at 90% CPU while others idle, even though the cluster is 'consistently hashed'.",
+      "truths": [
+        "Random points cluster unevenly.",
+        "Key popularity isn't uniform.",
+        "Failover dumps load on one neighbour."
+      ],
+      "derivation": [
+        "Measure **arc ownership** per node.",
+        "Measure **request rate per key**.",
+        "Recognise **failover concentration**.",
+        "Fix arc skew with **virtual nodes**.",
+        "Fix hot keys with **replication/splitting**."
+      ]
+    },
+    "analogy": {
+      "title": "Dividing a pizza by throwing darts",
+      "story": "Cut lines at dart marks and some slices are huge, some tiny, and the slice with the pepperoni is everyone's favourite.",
+      "mapping": [
+        [
+          "Dart cuts",
+          "Random node positions"
+        ],
+        [
+          "Huge slice",
+          "Overloaded arc"
+        ],
+        [
+          "Pepperoni slice",
+          "Hot key"
+        ]
+      ],
+      "breaks": "Pizza doesn't move when a slice is eaten; failed node load cascades."
+    },
+    "mindmap": {
+      "center": "Hotspots and Skew",
+      "branches": [
+        {
+          "label": "Arc skew",
+          "children": [
+            "Few nodes",
+            "Random positions"
+          ]
+        },
+        {
+          "label": "Key skew",
+          "children": [
+            "Celebrity keys",
+            "Zipf traffic"
+          ]
+        },
+        {
+          "label": "Failover",
+          "children": [
+            "Load to one successor"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Virtual nodes",
+            "Key replication",
+            "Bounded loads"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Skew measurement",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One node owns 8× another's share."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import random\nN = 5\npts = sorted(random.random() for _ in range(N))\narcs = [(pts[i] - pts[i-1]) % 1 for i in range(N)]\nprint([round(a, 2) for a in arcs])   # e.g. [0.41, 0.07, 0.18, 0.29, 0.05]"
+        }
+      ],
+      "outcome": "why plain rings need help."
+    },
+    "summary": {
+      "points": [
+        "Few nodes skew arcs.",
+        "Hot keys skew load.",
+        "Failover concentrates load."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do virtual nodes not fix a single hot key?",
+        "a": "All traffic for that key still goes to one owner; you need replication, caching or key splitting for that."
+      }
+    ]
+  },
+  "virtual-nodes-vnodes-the-solution-to-skew": {
+    "core": "Instead of one position per physical node, give each node many positions (virtual nodes, typically 100–256) on the ring. With many random points the law of large numbers evens out ownership, failover load spreads across many successors, and stronger machines can be given more vnodes for weighted capacity.",
+    "first_principles": {
+      "problem": "Plain ring placement leaves arcs uneven and failover overloads one neighbour.",
+      "truths": [
+        "Many samples average out.",
+        "Spread positions mean spread neighbours.",
+        "Vnode count can encode weight."
+      ],
+      "derivation": [
+        "Hash **node#i** for i in 1..V.",
+        "Keep a **sorted list** of all vnode positions.",
+        "Map each vnode to its **physical node**.",
+        "Assign **more vnodes** to bigger machines.",
+        "Balance **V vs metadata size**."
+      ]
+    },
+    "analogy": {
+      "title": "Each shop opening many small kiosks across town",
+      "story": "Customers spread evenly, and if one shop closes, its kiosks' customers go to many different neighbours.",
+      "mapping": [
+        [
+          "Kiosks",
+          "Virtual nodes"
+        ],
+        [
+          "Shop",
+          "Physical node"
+        ],
+        [
+          "More kiosks",
+          "Higher weight"
+        ]
+      ],
+      "breaks": "Kiosks cost rent; vnodes cost only ring metadata and more streaming peers."
+    },
+    "mindmap": {
+      "center": "Virtual Nodes",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Many positions per node"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Even ownership",
+            "Spread failover",
+            "Weighted capacity"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Metadata",
+            "More peers per repair"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Cassandra num_tokens",
+            "128–256 typical"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Vnode ring",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ownership spread within a few percent across nodes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import bisect, hashlib\nH = lambda s: int(hashlib.md5(s.encode()).hexdigest(), 16)\n\nclass Ring:\n    def __init__(self, nodes, v=128):\n        self.pts = sorted((H(f'{n}#{i}'), n) for n in nodes for i in range(v))\n        self.keys = [p for p, _ in self.pts]\n    def owner(self, key):\n        i = bisect.bisect(self.keys, H(key)) % len(self.keys)\n        return self.pts[i][1]"
+        }
+      ],
+      "outcome": "balanced, weighted rings."
+    },
+    "summary": {
+      "points": [
+        "Many points per node.",
+        "Even load and failover.",
+        "Weight via vnode count."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do vnodes help when a node fails?",
+        "a": "Its many arcs pass to many different successors, so the extra load spreads across the cluster instead of one neighbour."
+      }
+    ]
+  },
+  "real-world-implementations": {
+    "core": "Consistent hashing shows up everywhere: Amazon Dynamo and Cassandra use token rings with vnodes; memcached clients use the Ketama ring; Envoy and NGINX offer ring-hash and Maglev load balancing for session affinity; Discord and Akka shard entities this way. Variants like jump hash and rendezvous (HRW) hashing trade the ring for other placement functions.",
+    "first_principles": {
+      "problem": "A team builds custom sharding without realising their proxy already supports consistent hashing.",
+      "truths": [
+        "The idea is widespread.",
+        "Variants trade memory, speed, and flexibility.",
+        "Proxies often provide it built in."
+      ],
+      "derivation": [
+        "Databases: **Dynamo, Cassandra, Riak**.",
+        "Caches: **Ketama** client hashing.",
+        "Proxies: **ring_hash, Maglev**.",
+        "Alternatives: **jump hash, rendezvous**.",
+        "Pick by **membership change** and **lookup cost**."
+      ]
+    },
+    "analogy": {
+      "title": "Different cuisines using the same technique",
+      "story": "Braising appears in French, Chinese and Mexican kitchens with local twists; consistent hashing is the same idea with different implementations.",
+      "mapping": [
+        [
+          "Technique",
+          "Consistent hashing"
+        ],
+        [
+          "Cuisines",
+          "Systems"
+        ],
+        [
+          "Local twists",
+          "Variants"
+        ]
+      ],
+      "breaks": "Recipes vary by taste; variants vary by measurable trade-offs."
+    },
+    "mindmap": {
+      "center": "Implementations",
+      "branches": [
+        {
+          "label": "Databases",
+          "children": [
+            "Dynamo",
+            "Cassandra",
+            "Riak"
+          ]
+        },
+        {
+          "label": "Caches",
+          "children": [
+            "Ketama"
+          ]
+        },
+        {
+          "label": "Load balancers",
+          "children": [
+            "Envoy ring_hash",
+            "Maglev",
+            "NGINX hash consistent"
+          ]
+        },
+        {
+          "label": "Variants",
+          "children": [
+            "Jump hash",
+            "Rendezvous/HRW",
+            "Bounded-load CH"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "NGINX consistent upstream",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Adding cache4 remaps only ~25% of URIs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "nginx",
+          "text": "upstream cache_pool {\n    hash $request_uri consistent;   # Ketama-compatible ring\n    server cache1:11211;\n    server cache2:11211;\n    server cache3:11211;\n}"
+        }
+      ],
+      "outcome": "off-the-shelf consistent hashing."
+    },
+    "summary": {
+      "points": [
+        "Used widely.",
+        "Several variants.",
+        "Often built in."
+      ]
+    },
+    "check": [
+      {
+        "q": "What advantage does rendezvous hashing have over a ring?",
+        "a": "No ring or vnodes to maintain; each key picks the node with the highest hash(key, node) score, giving even spread with minimal state."
+      }
+    ]
+  },
+  "implementation-deep-dive-data-structures-and-complexity": {
+    "core": "A practical ring is a sorted array of (position, node) pairs: lookup is a binary search for the first position ≥ hash(key), O(log(N·V)). Adding or removing a node inserts or removes V entries, O(N·V) with an array or O(V log(N·V)) with a balanced tree. Jump hash needs no storage at all and runs in O(log N), but only supports appending or removing the last bucket.",
+    "first_principles": {
+      "problem": "A ring lookup that scans linearly over 50,000 vnodes becomes the proxy's hottest function.",
+      "truths": [
+        "Sorted positions enable binary search.",
+        "Updates touch V entries.",
+        "Different structures trade update vs lookup."
+      ],
+      "derivation": [
+        "Store vnodes in a **sorted array**.",
+        "Lookup via **bisect** with wrap-around.",
+        "Rebuild arrays **copy-on-write** for concurrent reads.",
+        "Consider **jump hash** for fixed shard lists.",
+        "Use a **fast non-crypto hash** (xxHash, Murmur)."
+      ]
+    },
+    "analogy": {
+      "title": "A phone book vs flipping every page",
+      "story": "Sorted names let you open near the right page and halve the search each time.",
+      "mapping": [
+        [
+          "Sorted phone book",
+          "Sorted vnode array"
+        ],
+        [
+          "Halving search",
+          "Binary search"
+        ],
+        [
+          "Reprinting book",
+          "Rebuilding on membership change"
+        ]
+      ],
+      "breaks": "Phone books are reprinted yearly; rings rebuild on every membership change."
+    },
+    "mindmap": {
+      "center": "Ring Internals",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Sorted array",
+            "Balanced tree"
+          ]
+        },
+        {
+          "label": "Lookup",
+          "children": [
+            "Binary search",
+            "O(log NV)"
+          ]
+        },
+        {
+          "label": "Update",
+          "children": [
+            "Insert V points",
+            "Copy-on-write"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Jump hash O(log N), no memory",
+            "Maglev lookup table O(1)"
+          ]
+        },
+        {
+          "label": "Hash",
+          "children": [
+            "xxHash",
+            "Murmur3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Jump consistent hash",
+      "scenario": "Python (Lamping & Veach).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No ring memory; ideal balance; buckets must be numbered 0..n−1."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def jump_hash(key: int, buckets: int) -> int:\n    b, j = -1, 0\n    while j < buckets:\n        b = j\n        key = (key * 2862933555777941757 + 1) & 0xFFFFFFFFFFFFFFFF\n        j = int((b + 1) * (1 << 31) / ((key >> 33) + 1))\n    return b"
+        }
+      ],
+      "outcome": "choosing the right structure."
+    },
+    "summary": {
+      "points": [
+        "Sorted array plus bisect.",
+        "Updates cost V inserts.",
+        "Jump/Maglev as alternatives."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is jump hash's main limitation?",
+        "a": "Buckets are sequentially numbered, so you can only add or remove at the end, not remove an arbitrary node."
+      }
+    ]
+  }
+}

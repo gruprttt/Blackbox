@@ -1,0 +1,533 @@
+{
+  "introduction-the-nightmare-of-shared-state": {
+    "core": "Threads that share mutable memory need locks, and locks bring deadlocks, races and contention that grow worse with every core. The actor model takes a different route: nothing is shared. State is private to an actor and changes only through messages, which the actor handles one at a time, so concurrency lives in the message queue instead of in locks.",
+    "first_principles": {
+      "problem": "A multi-threaded order book deadlocks under load because two threads take the same pair of locks in opposite order.",
+      "truths": [
+        "Shared mutable state needs synchronisation.",
+        "Locks compose badly.",
+        "A single owner needs no lock."
+      ],
+      "derivation": [
+        "Give each piece of state **one owner**.",
+        "Change state only via **messages**.",
+        "Process messages **one at a time** per owner.",
+        "Scale by adding **more owners**, not more threads per owner.",
+        "Make communication **asynchronous**."
+      ]
+    },
+    "analogy": {
+      "title": "Desk clerks with in-trays",
+      "story": "Nobody grabs papers off a clerk's desk. You drop a note in their tray and they handle notes one by one.",
+      "mapping": [
+        [
+          "Clerk",
+          "Actor"
+        ],
+        [
+          "In-tray",
+          "Mailbox"
+        ],
+        [
+          "Note",
+          "Message"
+        ],
+        [
+          "Private desk",
+          "Encapsulated state"
+        ]
+      ],
+      "breaks": "Clerks can shout across the room; actors only ever exchange messages."
+    },
+    "mindmap": {
+      "center": "Shared-State Problem",
+      "branches": [
+        {
+          "label": "Pain",
+          "children": [
+            "Deadlocks",
+            "Races",
+            "Contention"
+          ]
+        },
+        {
+          "label": "Root cause",
+          "children": [
+            "Shared mutable memory"
+          ]
+        },
+        {
+          "label": "Actor answer",
+          "children": [
+            "Private state",
+            "Messages",
+            "Serial processing"
+          ]
+        },
+        {
+          "label": "Gain",
+          "children": [
+            "No locks",
+            "Location transparency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bank account",
+      "scenario": "Locks vs actor.",
+      "flow": [
+        "Thread version: lock(acct) → read → write → unlock",
+        "Actor version: send Deposit(50) to account actor",
+        "Actor dequeues, updates balance, replies",
+        "Concurrent deposits simply queue"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No lock ordering to get wrong."
+        }
+      ],
+      "code": [],
+      "outcome": "concurrency without locks."
+    },
+    "summary": {
+      "points": [
+        "Shared state needs locks.",
+        "Actors own state privately.",
+        "Messages serialise access."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't an actor need a lock on its own state?",
+        "a": "Only the actor touches its state, and it processes one message at a time, so there is never concurrent access."
+      }
+    ]
+  },
+  "anatomy-of-an-actor": {
+    "core": "An actor has an address, a mailbox and behaviour with private state. On each message it can do three things: send messages to actors it knows, create new actors, and decide how it will handle the next message (change state or behaviour). Everything else, such as location, threads and scheduling, is hidden by the runtime.",
+    "first_principles": {
+      "problem": "A developer treats actors like objects and calls their methods directly, breaking isolation.",
+      "truths": [
+        "Address hides location.",
+        "Mailbox orders arrivals.",
+        "Three primitive actions suffice."
+      ],
+      "derivation": [
+        "Reference actors by **address** (ActorRef).",
+        "Queue messages in a **mailbox**.",
+        "On message: **send**, **create**, **become**.",
+        "Keep messages **immutable**.",
+        "Let the runtime **schedule** actors onto threads."
+      ]
+    },
+    "analogy": {
+      "title": "A post-office box with a resident",
+      "story": "You know the box number, not where the person lives. They read mail one letter at a time and can reply, hire help or change their habits.",
+      "mapping": [
+        [
+          "Box number",
+          "Address"
+        ],
+        [
+          "Letters",
+          "Messages"
+        ],
+        [
+          "Hiring help",
+          "Spawning actors"
+        ],
+        [
+          "Changing habits",
+          "Become"
+        ]
+      ],
+      "breaks": "People multitask; an actor handles exactly one message at a time."
+    },
+    "mindmap": {
+      "center": "Actor Anatomy",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "Address",
+            "Mailbox",
+            "State",
+            "Behaviour"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Send",
+            "Create",
+            "Become"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Immutable messages",
+            "No shared refs"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "Scheduling",
+            "Dispatchers",
+            "Location transparency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Counter actor",
+      "scenario": "Akka-style Scala.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "State changes only inside receive; `become` swaps behaviour."
+        }
+      ],
+      "code": [
+        {
+          "lang": "scala",
+          "text": "class Counter extends Actor {\n  var n = 0\n  def receive = {\n    case Inc      => n += 1\n    case Get      => sender() ! n\n    case Reset    => context.become(frozen)\n  }\n  def frozen: Receive = { case Get => sender() ! n }\n}"
+        }
+      ],
+      "outcome": "the three primitives in action."
+    },
+    "summary": {
+      "points": [
+        "Address, mailbox, state.",
+        "Send, create, become.",
+        "Runtime hides threads."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the three things an actor can do in response to a message?",
+        "a": "Send messages, create new actors, and designate the behaviour for the next message."
+      }
+    ]
+  },
+  "the-let-it-crash-philosophy": {
+    "core": "Rather than wrapping every line in defensive error handling, let-it-crash says: when an actor hits an unexpected state, let it die and have something else restart it in a known-good state. Bugs from corrupted state are wiped out by restarting, and recovery logic lives in one place (the supervisor) instead of being scattered through business code.",
+    "first_principles": {
+      "problem": "Error-handling code is longer than the business logic and still misses cases, leaving actors in half-broken states.",
+      "truths": [
+        "Unexpected errors can't all be anticipated.",
+        "A fresh start clears corrupted state.",
+        "Isolation contains crash blast radius."
+      ],
+      "derivation": [
+        "Handle **expected** errors locally.",
+        "Let **unexpected** errors crash the actor.",
+        "Restart into a **clean initial state**.",
+        "Keep important state **persisted** elsewhere.",
+        "Put recovery policy in the **supervisor**."
+      ]
+    },
+    "analogy": {
+      "title": "Turning it off and on again",
+      "story": "IT doesn't debug every glitch on your laptop; a reboot restores a known state, and most problems vanish.",
+      "mapping": [
+        [
+          "Reboot",
+          "Actor restart"
+        ],
+        [
+          "Known state",
+          "Initial state"
+        ],
+        [
+          "IT desk",
+          "Supervisor"
+        ]
+      ],
+      "breaks": "Reboots lose your unsaved work; actors must persist what matters before crashing."
+    },
+    "mindmap": {
+      "center": "Let It Crash",
+      "branches": [
+        {
+          "label": "Idea",
+          "children": [
+            "Fail fast",
+            "Restart clean"
+          ]
+        },
+        {
+          "label": "Requires",
+          "children": [
+            "Isolation",
+            "Supervision",
+            "Persisted state"
+          ]
+        },
+        {
+          "label": "Handle locally",
+          "children": [
+            "Expected errors"
+          ]
+        },
+        {
+          "label": "Crash on",
+          "children": [
+            "Unexpected state",
+            "Bugs"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Simpler code",
+            "Self-healing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Parser actor",
+      "scenario": "Bad input.",
+      "flow": [
+        "Parser receives malformed message",
+        "Throws exception, actor dies",
+        "Supervisor restarts it with empty buffer",
+        "Next message processed normally"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One bad message doesn't poison the system."
+        }
+      ],
+      "code": [],
+      "outcome": "self-healing with little code."
+    },
+    "summary": {
+      "points": [
+        "Fail fast on surprises.",
+        "Restart to a clean state.",
+        "Recovery lives in supervisors."
+      ]
+    },
+    "check": [
+      {
+        "q": "What must be true for let-it-crash to be safe?",
+        "a": "Actors are isolated and any state that must survive is persisted or recoverable, so a restart loses nothing important."
+      }
+    ]
+  },
+  "supervisor-hierarchies": {
+    "core": "Actors form a tree: every actor's parent supervises it. When a child fails, the parent chooses a strategy: resume, restart the child, restart all siblings (when they depend on each other), stop it, or escalate the failure to its own parent. Restart limits stop crash loops by escalating once a child fails too often.",
+    "first_principles": {
+      "problem": "A database connection actor crash-loops forever, flooding logs without the system ever reacting.",
+      "truths": [
+        "Failures need an owner.",
+        "Related actors may need joint restarts.",
+        "Repeated failure means a deeper problem."
+      ],
+      "derivation": [
+        "Arrange actors in a **tree**.",
+        "Choose **one-for-one** or **all-for-one**.",
+        "Pick resume / restart / stop / **escalate**.",
+        "Set **max restarts in a time window**.",
+        "Keep the **root** simple and robust."
+      ]
+    },
+    "analogy": {
+      "title": "A management chain",
+      "story": "A team lead fixes small problems, restarts a team if members depend on each other, and escalates to their boss when it keeps happening.",
+      "mapping": [
+        [
+          "Team lead",
+          "Supervisor"
+        ],
+        [
+          "Escalation",
+          "Escalate directive"
+        ],
+        [
+          "Restart team",
+          "All-for-one"
+        ]
+      ],
+      "breaks": "Managers make judgement calls; supervisor strategies are fixed rules."
+    },
+    "mindmap": {
+      "center": "Supervision",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Tree",
+            "Parent supervises child"
+          ]
+        },
+        {
+          "label": "Strategies",
+          "children": [
+            "One-for-one",
+            "All-for-one",
+            "Rest-for-one"
+          ]
+        },
+        {
+          "label": "Directives",
+          "children": [
+            "Resume",
+            "Restart",
+            "Stop",
+            "Escalate"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Restart intensity limits",
+            "Backoff"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Erlang supervisor spec",
+      "scenario": "OTP.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "More than 5 restarts in 10 s escalates to the parent."
+        }
+      ],
+      "code": [
+        {
+          "lang": "erlang",
+          "text": "init([]) ->\n    SupFlags = #{strategy => one_for_one, intensity => 5, period => 10},\n    Children = [#{id => db_conn, start => {db_conn, start_link, []}},\n                #{id => cache,   start => {cache,   start_link, []}}],\n    {ok, {SupFlags, Children}}."
+        }
+      ],
+      "outcome": "contained, bounded recovery."
+    },
+    "summary": {
+      "points": [
+        "Parents supervise children.",
+        "Choose strategy and directive.",
+        "Limit restart intensity."
+      ]
+    },
+    "check": [
+      {
+        "q": "When would you use all-for-one instead of one-for-one?",
+        "a": "When sibling actors depend on each other's state, so one failing leaves the others inconsistent and they should restart together."
+      }
+    ]
+  },
+  "flavors-of-actors-akka-vs-orleans": {
+    "core": "Classic actors (Erlang/OTP, Akka) are created and supervised explicitly: you manage their lifecycle and location. Virtual actors (Microsoft Orleans, Dapr) always conceptually exist; the runtime activates them on demand by identity, places them on a node, and deactivates idle ones. Classic gives control; virtual gives simplicity at cluster scale.",
+    "first_principles": {
+      "problem": "A team spends weeks building sharding and lifecycle code for millions of per-user actors in Akka.",
+      "truths": [
+        "Lifecycle management is work.",
+        "Identity-based addressing enables auto-placement.",
+        "Control and simplicity trade off."
+      ],
+      "derivation": [
+        "Classic: **explicit spawn, supervise, stop**.",
+        "Virtual: **address by ID**, runtime activates.",
+        "Virtual: **idle deactivation** saves memory.",
+        "Use **Akka Cluster Sharding** for similar behaviour.",
+        "Choose by need for **control vs convenience**."
+      ]
+    },
+    "analogy": {
+      "title": "Hiring staff vs a temp agency",
+      "story": "You hire, manage and fire your own staff; or you call the agency by role name and someone always turns up.",
+      "mapping": [
+        [
+          "Own staff",
+          "Classic actors"
+        ],
+        [
+          "Agency by role",
+          "Virtual actors by ID"
+        ],
+        [
+          "Agency placement",
+          "Runtime activation"
+        ]
+      ],
+      "breaks": "Agencies can run out of temps; virtual actors are limited only by cluster capacity."
+    },
+    "mindmap": {
+      "center": "Actor Flavours",
+      "branches": [
+        {
+          "label": "Classic",
+          "children": [
+            "Erlang/OTP",
+            "Akka",
+            "Explicit lifecycle",
+            "Supervision trees"
+          ]
+        },
+        {
+          "label": "Virtual",
+          "children": [
+            "Orleans",
+            "Dapr",
+            "Always exist",
+            "Auto activation"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Control",
+            "Simplicity"
+          ]
+        },
+        {
+          "label": "Bridges",
+          "children": [
+            "Akka Cluster Sharding"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Orleans grain",
+      "scenario": "C#.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No spawn or placement code; the runtime handles it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "csharp",
+          "text": "public class PlayerGrain : Grain, IPlayerGrain {\n    int score;\n    public Task AddScore(int s) { score += s; return Task.CompletedTask; }\n}\n// caller\nvar p = client.GetGrain<IPlayerGrain>(playerId);\nawait p.AddScore(10);   // activated on demand"
+        }
+      ],
+      "outcome": "right flavour for the job."
+    },
+    "summary": {
+      "points": [
+        "Classic: explicit control.",
+        "Virtual: on-demand by ID.",
+        "Pick by scale and needs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'virtual' mean in Orleans virtual actors?",
+        "a": "Actors always logically exist by identity; the runtime activates and places them on demand and deactivates them when idle."
+      }
+    ]
+  }
+}

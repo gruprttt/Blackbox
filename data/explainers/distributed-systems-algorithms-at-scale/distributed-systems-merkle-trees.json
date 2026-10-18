@@ -1,0 +1,523 @@
+{
+  "introduction-the-integrity-problem": {
+    "core": "To check that two copies of a large dataset are identical, or that a downloaded file hasn't been tampered with, comparing every byte is too expensive across a network. A hash gives a short fingerprint, but a single hash tells you only that something differs, not where. Merkle trees hash in a hierarchy so you can both verify and locate differences cheaply.",
+    "first_principles": {
+      "problem": "Two replicas of a 1 TB table disagree, and comparing them row-by-row over the network would take hours.",
+      "truths": [
+        "Hashes fingerprint data compactly.",
+        "One hash can't locate a difference.",
+        "Hierarchies enable divide and conquer."
+      ],
+      "derivation": [
+        "**Hash chunks** of the data.",
+        "Hash **pairs of hashes** upward.",
+        "Compare **roots** first.",
+        "**Descend** only where hashes differ.",
+        "Cost becomes **logarithmic**."
+      ]
+    },
+    "analogy": {
+      "title": "Checking a library by shelf totals",
+      "story": "Compare each floor's book count first, then the shelves on the floor that differs, then the books on that shelf.",
+      "mapping": [
+        [
+          "Floor count",
+          "Upper hash"
+        ],
+        [
+          "Shelf",
+          "Subtree"
+        ],
+        [
+          "Book",
+          "Leaf data"
+        ]
+      ],
+      "breaks": "Counts can match by coincidence; good hashes almost never collide."
+    },
+    "mindmap": {
+      "center": "Integrity Problem",
+      "branches": [
+        {
+          "label": "Need",
+          "children": [
+            "Verify copies",
+            "Detect tampering"
+          ]
+        },
+        {
+          "label": "Naive",
+          "children": [
+            "Byte compare",
+            "Single hash"
+          ]
+        },
+        {
+          "label": "Merkle idea",
+          "children": [
+            "Hierarchical hashes",
+            "Descend on mismatch"
+          ]
+        },
+        {
+          "label": "Gain",
+          "children": [
+            "Log cost",
+            "Locate diffs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Replica check",
+      "scenario": "Cost comparison.",
+      "flow": [
+        "Naive: send 1 TB",
+        "Single hash: 32 bytes, says 'different'",
+        "Merkle: compare root, then children, ~log2(n) levels",
+        "Find the 3 differing chunks"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Kilobytes exchanged instead of terabytes."
+        }
+      ],
+      "code": [],
+      "outcome": "why Merkle trees exist."
+    },
+    "summary": {
+      "points": [
+        "Hashes fingerprint.",
+        "Hierarchy locates differences.",
+        "Logarithmic cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why isn't a single hash of the whole dataset enough for repair?",
+        "a": "It tells you the copies differ but not which part differs, so you'd still have to compare everything."
+      }
+    ]
+  },
+  "anatomy-of-a-merkle-tree": {
+    "core": "Split data into blocks and hash each one: those are the leaves. Each parent node is the hash of its children's hashes concatenated, up to a single root hash that commits to all the data. Change one byte anywhere and the leaf, every ancestor and the root all change; the tree height is log2 of the number of blocks.",
+    "first_principles": {
+      "problem": "An engineer stores only per-block hashes and can't cheaply prove the whole set is consistent.",
+      "truths": [
+        "Parent hash depends on children.",
+        "Any change propagates to root.",
+        "Binary tree height is log2(n)."
+      ],
+      "derivation": [
+        "**Leaf = H(block)**.",
+        "**Node = H(left ‖ right)**.",
+        "Handle **odd counts** (duplicate or promote).",
+        "Use **domain separation** for leaf vs node.",
+        "Publish the **root** as commitment."
+      ]
+    },
+    "analogy": {
+      "title": "A family tree of signatures",
+      "story": "Each parent signs a page listing their children's signatures, so forging any descendant changes the founder's signature.",
+      "mapping": [
+        [
+          "Children's signatures",
+          "Child hashes"
+        ],
+        [
+          "Parent's page",
+          "Internal node"
+        ],
+        [
+          "Founder",
+          "Root"
+        ]
+      ],
+      "breaks": "Signatures need keys; hashes need none, just collision resistance."
+    },
+    "mindmap": {
+      "center": "Merkle Tree Anatomy",
+      "branches": [
+        {
+          "label": "Leaves",
+          "children": [
+            "H(block)"
+          ]
+        },
+        {
+          "label": "Internal",
+          "children": [
+            "H(left‖right)"
+          ]
+        },
+        {
+          "label": "Root",
+          "children": [
+            "Commits to all data"
+          ]
+        },
+        {
+          "label": "Details",
+          "children": [
+            "Odd counts",
+            "Domain separation",
+            "Height log2 n"
+          ]
+        },
+        {
+          "label": "Property",
+          "children": [
+            "Change propagates up"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Building a root",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Prefixes 0x00/0x01 stop leaf/node confusion attacks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import hashlib\nh = lambda b: hashlib.sha256(b).digest()\n\ndef merkle_root(blocks):\n    level = [h(b'\\x00' + b) for b in blocks]\n    while len(level) > 1:\n        if len(level) % 2: level.append(level[-1])\n        level = [h(b'\\x01' + level[i] + level[i+1]) for i in range(0, len(level), 2)]\n    return level[0]"
+        }
+      ],
+      "outcome": "a root committing to every block."
+    },
+    "summary": {
+      "points": [
+        "Leaves hash data.",
+        "Parents hash children.",
+        "Root commits to all."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefix leaves and internal nodes differently?",
+        "a": "Domain separation stops an attacker presenting an internal node as a leaf to forge a proof (second-preimage attack)."
+      }
+    ]
+  },
+  "efficient-verification-merkle-proofs": {
+    "core": "To prove a block belongs to a dataset with a known root, you don't send the whole dataset, just the block plus the sibling hash at each level up to the root (the audit path). The verifier rehashes upward and checks the result equals the trusted root. Proof size and work are O(log n): about 20 hashes for a million blocks.",
+    "first_principles": {
+      "problem": "A light client wants to confirm one transaction is in a block without downloading every transaction.",
+      "truths": [
+        "Root is trusted.",
+        "Siblings let you recompute the path.",
+        "Path length is log n."
+      ],
+      "derivation": [
+        "Prover sends **block + sibling hashes**.",
+        "Include **left/right position** per level.",
+        "Verifier **hashes upward**.",
+        "Compare to **trusted root**.",
+        "Trust the root via **signature or consensus**."
+      ]
+    },
+    "analogy": {
+      "title": "Proving you're in a family photo album",
+      "story": "Instead of the whole album, you show your photo plus the label on each folder up to the album's sealed cover.",
+      "mapping": [
+        [
+          "Your photo",
+          "Leaf"
+        ],
+        [
+          "Folder labels",
+          "Sibling hashes"
+        ],
+        [
+          "Sealed cover",
+          "Root"
+        ]
+      ],
+      "breaks": "Labels can be copied; hashes can't be forged without breaking the hash function."
+    },
+    "mindmap": {
+      "center": "Merkle Proofs",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Leaf",
+            "Sibling path",
+            "Positions"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Hash upward",
+            "Compare root"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "O(log n) size",
+            "O(log n) work"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Light clients",
+            "Certificate Transparency",
+            "Package logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verify a proof",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Size",
+          "detail": "1 M leaves → 20 siblings × 32 B = 640 bytes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def verify(leaf, path, root):\n    node = h(b'\\x00' + leaf)\n    for sibling, is_left in path:\n        node = h(b'\\x01' + (sibling + node if is_left else node + sibling))\n    return node == root"
+        }
+      ],
+      "outcome": "membership proven in a few hundred bytes."
+    },
+    "summary": {
+      "points": [
+        "Send leaf plus siblings.",
+        "Recompute to root.",
+        "Logarithmic size."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many hashes are in a proof for 1,048,576 leaves?",
+        "a": "20, one sibling per level, since log2(1,048,576) = 20."
+      }
+    ]
+  },
+  "anti-entropy-finding-the-difference-between-replicas": {
+    "core": "Eventually consistent databases (Dynamo, Cassandra, Riak) use Merkle trees for anti-entropy repair. Each replica builds a tree over its key range; replicas exchange roots and walk down only the subtrees whose hashes differ, then stream just the mismatched key ranges. This keeps repair traffic proportional to the differences, not the data size.",
+    "first_principles": {
+      "problem": "Full repair streams the entire dataset between replicas weekly, saturating the network.",
+      "truths": [
+        "Replicas drift due to missed writes.",
+        "Most data already matches.",
+        "Hash comparison is cheap."
+      ],
+      "derivation": [
+        "Build trees over **token ranges**.",
+        "Exchange **roots**, then differing **children**.",
+        "Stream only **mismatched leaves**.",
+        "Run **incrementally** to avoid rebuilds.",
+        "Schedule within **gc_grace** to prevent resurrection."
+      ]
+    },
+    "analogy": {
+      "title": "Two accountants reconciling ledgers",
+      "story": "They compare yearly totals, then monthly, then daily, and only pull receipts for days that don't match.",
+      "mapping": [
+        [
+          "Yearly total",
+          "Root"
+        ],
+        [
+          "Monthly",
+          "Subtree"
+        ],
+        [
+          "Daily receipts",
+          "Leaf ranges"
+        ]
+      ],
+      "breaks": "Ledgers are static; replicas change during repair, so trees are snapshots."
+    },
+    "mindmap": {
+      "center": "Anti-Entropy",
+      "branches": [
+        {
+          "label": "Where",
+          "children": [
+            "Dynamo",
+            "Cassandra",
+            "Riak"
+          ]
+        },
+        {
+          "label": "How",
+          "children": [
+            "Tree per range",
+            "Compare roots",
+            "Descend on diff",
+            "Stream diffs"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Incremental repair",
+            "Within gc_grace"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "∝ differences"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cassandra repair",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only 3 ranges streamed, not the whole table."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nodetool repair -pr keyspace1          # primary range, Merkle-based\nnodetool repair --full keyspace1       # rebuild trees from scratch\n# logs: 'Endpoints /10.0.0.2 and /10.0.0.3 have 3 range(s) out of sync'"
+        }
+      ],
+      "outcome": "cheap convergence of replicas."
+    },
+    "summary": {
+      "points": [
+        "Trees per range.",
+        "Descend where different.",
+        "Stream only diffs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must Cassandra repair run within gc_grace_seconds?",
+        "a": "Otherwise tombstones may be purged before reaching all replicas, and repair would resurrect deleted data."
+      }
+    ]
+  },
+  "immutable-ledgers-blockchains": {
+    "core": "Blockchains, Git and Certificate Transparency logs chain hashes so history is tamper-evident: each block or commit contains the hash of its predecessor and a Merkle root of its contents. Altering anything in the past changes every later hash, so anyone holding a recent hash can detect rewriting. Tamper-evident is not tamper-proof; consensus or audit decides which history is accepted.",
+    "first_principles": {
+      "problem": "An auditor needs assurance that past log entries weren't silently edited.",
+      "truths": [
+        "Hashes chain history.",
+        "Changing the past changes the head.",
+        "Witnesses holding hashes detect rewrites."
+      ],
+      "derivation": [
+        "Include **previous hash** in each record.",
+        "Commit contents via **Merkle root**.",
+        "Distribute or publish **head hashes**.",
+        "Use **consistency proofs** between log versions.",
+        "Rely on **consensus/audit** for acceptance."
+      ]
+    },
+    "analogy": {
+      "title": "A notary book with numbered, sealed pages",
+      "story": "Each page quotes the seal of the previous one, so ripping out or rewriting a page breaks every seal after it.",
+      "mapping": [
+        [
+          "Seal quote",
+          "Previous hash"
+        ],
+        [
+          "Page contents",
+          "Merkle root"
+        ],
+        [
+          "Notary copies",
+          "Distributed head hashes"
+        ]
+      ],
+      "breaks": "A forger could rewrite every page; detection needs others to hold old seals."
+    },
+    "mindmap": {
+      "center": "Hash-Chained Ledgers",
+      "branches": [
+        {
+          "label": "Examples",
+          "children": [
+            "Bitcoin",
+            "Git",
+            "Certificate Transparency"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "Prev hash",
+            "Merkle root"
+          ]
+        },
+        {
+          "label": "Property",
+          "children": [
+            "Tamper-evident"
+          ]
+        },
+        {
+          "label": "Acceptance",
+          "children": [
+            "Consensus",
+            "Auditors",
+            "Gossiped heads"
+          ]
+        },
+        {
+          "label": "Proofs",
+          "children": [
+            "Inclusion",
+            "Consistency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Git as a Merkle DAG",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Anyone with the old HEAD hash sees history was rewritten."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "git cat-file -p HEAD\n# tree 9c1f...      <- Merkle root of files\n# parent 4ab2...    <- previous commit hash\n# author ...\ngit rebase -i HEAD~3   # rewriting changes every later hash"
+        }
+      ],
+      "outcome": "tamper-evident history."
+    },
+    "summary": {
+      "points": [
+        "Chain previous hashes.",
+        "Merkle roots for contents.",
+        "Evident, not proof."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a hash chain tamper-evident but not tamper-proof?",
+        "a": "Someone can rewrite and rehash everything; it's only detected if others hold the earlier hashes to compare against."
+      }
+    ]
+  }
+}

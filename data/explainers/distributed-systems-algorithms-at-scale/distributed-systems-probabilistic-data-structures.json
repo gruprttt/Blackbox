@@ -1,0 +1,734 @@
+{
+  "introduction-the-memory-wall": {
+    "core": "Exact answers to 'have we seen this?', 'how many distinct?' or 'how often?' over billions of items need memory proportional to the data. Probabilistic data structures trade a small, bounded error for tiny, fixed memory and fast operations, which is ideal for streams, caches and analytics at scale.",
+    "first_principles": {
+      "problem": "Counting unique visitors exactly across 10 billion events needs hundreds of gigabytes of RAM.",
+      "truths": [
+        "Exact sets grow with data.",
+        "Many questions tolerate small error.",
+        "Hashing gives uniform random-like bits."
+      ],
+      "derivation": [
+        "**Membership** → Bloom/Cuckoo filters.",
+        "**Cardinality** → HyperLogLog.",
+        "**Frequency** → Count-Min Sketch.",
+        "**Top-k** → sketch + heap.",
+        "Choose **error bounds** up front."
+      ]
+    },
+    "analogy": {
+      "title": "Estimating crowd size from a photo sample",
+      "story": "Count a sample area and multiply; you're close enough without counting every person.",
+      "mapping": [
+        [
+          "Photo sample",
+          "Hashed bits"
+        ],
+        [
+          "Estimate",
+          "Approximate answer"
+        ],
+        [
+          "Error margin",
+          "Bounded error"
+        ]
+      ],
+      "breaks": "Crowd estimates can be biased; these structures have mathematically proven error bounds."
+    },
+    "mindmap": {
+      "center": "Probabilistic DS",
+      "branches": [
+        {
+          "label": "Questions",
+          "children": [
+            "Seen it?",
+            "How many unique?",
+            "How often?",
+            "Top-k?"
+          ]
+        },
+        {
+          "label": "Structures",
+          "children": [
+            "Bloom",
+            "Cuckoo",
+            "HyperLogLog",
+            "Count-Min"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Small error",
+            "Tiny memory"
+          ]
+        },
+        {
+          "label": "Foundation",
+          "children": [
+            "Hash functions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Memory comparison",
+      "scenario": "Unique counting.",
+      "flow": [
+        "Exact set of 1B user IDs: ~16 GB+",
+        "HyperLogLog: 12 KB, ~0.8% error"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Six orders of magnitude less memory."
+        }
+      ],
+      "code": [],
+      "outcome": "scale through approximation."
+    },
+    "summary": {
+      "points": [
+        "Exactness costs memory.",
+        "Bounded error is fine.",
+        "Pick the structure per question."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do probabilistic data structures trade for memory savings?",
+        "a": "A small, bounded probability of error in their answers."
+      }
+    ]
+  },
+  "the-magic-sauce-hash-functions": {
+    "core": "Probabilistic structures rely on fast, well-distributed non-cryptographic hash functions (MurmurHash3, xxHash, CityHash) that map inputs to uniform-looking bits. Multiple independent hashes can be derived cheaply from two (Kirsch–Mitzenmacher double hashing: h_i = h1 + i·h2). Poor hashes skew results and break error guarantees.",
+    "first_principles": {
+      "problem": "A homemade hash clusters values and the Bloom filter's false-positive rate is ten times the target.",
+      "truths": [
+        "Uniformity underpins error bounds.",
+        "Cryptographic hashes are slower than needed.",
+        "Independence matters."
+      ],
+      "derivation": [
+        "Use **xxHash/Murmur3**.",
+        "Derive k hashes via **double hashing**.",
+        "Avoid **simple modulo of keys**.",
+        "Seed hashes to avoid **adversarial** inputs when exposed.",
+        "Test **distribution**."
+      ]
+    },
+    "analogy": {
+      "title": "Shuffling a deck thoroughly",
+      "story": "A good shuffle spreads cards evenly; a lazy one leaves clumps that ruin the game.",
+      "mapping": [
+        [
+          "Good shuffle",
+          "Uniform hash"
+        ],
+        [
+          "Clumps",
+          "Collisions/skew"
+        ],
+        [
+          "Several shuffles",
+          "Multiple hash functions"
+        ]
+      ],
+      "breaks": "Cards can be reshuffled; hash outputs are deterministic for the same input and seed."
+    },
+    "mindmap": {
+      "center": "Hash Functions",
+      "branches": [
+        {
+          "label": "Choices",
+          "children": [
+            "xxHash",
+            "MurmurHash3",
+            "CityHash"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Uniform",
+            "Fast",
+            "Independent"
+          ]
+        },
+        {
+          "label": "Trick",
+          "children": [
+            "Double hashing"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Skew",
+            "Adversarial inputs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "k hashes from two",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "k positions for the cost of two hashes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import mmh3\ndef hashes(key, k, m):\n    h1 = mmh3.hash(key, 0) & 0xffffffff\n    h2 = mmh3.hash(key, 1) & 0xffffffff\n    return [(h1 + i * h2) % m for i in range(k)]"
+        }
+      ],
+      "outcome": "reliable randomness for sketches."
+    },
+    "summary": {
+      "points": [
+        "Uniform hashes matter.",
+        "Double hashing.",
+        "Non-crypto is enough."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not use SHA-256 for Bloom filters?",
+        "a": "It's much slower than needed; fast non-cryptographic hashes give sufficient uniformity."
+      }
+    ]
+  },
+  "bloom-filters-the-membership-question": {
+    "core": "A Bloom filter is a bit array of m bits with k hash functions. Insert sets k bits; a query checks them: if any is 0, the item is definitely absent; if all are 1, it's probably present. There are no false negatives and a tunable false-positive rate (~1% at ~9.6 bits per item). Standard Bloom filters can't delete.",
+    "first_principles": {
+      "problem": "A database does expensive disk lookups for keys that don't exist.",
+      "truths": [
+        "Definite 'no' answers save work.",
+        "Bits can represent membership compactly.",
+        "Overlapping bits cause false positives."
+      ],
+      "derivation": [
+        "Size **m ≈ −n ln p / (ln 2)²**.",
+        "Use **k ≈ (m/n) ln 2** hashes.",
+        "Query before **expensive lookups**.",
+        "Accept **false positives**.",
+        "Use **counting/cuckoo** variants for deletes."
+      ]
+    },
+    "analogy": {
+      "title": "A bouncer's list of first initials",
+      "story": "If your initial isn't on it, you're definitely not invited; if it is, check the full list.",
+      "mapping": [
+        [
+          "Initial list",
+          "Bit array"
+        ],
+        [
+          "Definitely not invited",
+          "No false negatives"
+        ],
+        [
+          "Check full list",
+          "Confirm on false positive"
+        ]
+      ],
+      "breaks": "Initial lists are human-readable; Bloom bits are shared by many items, so you can't remove one safely."
+    },
+    "mindmap": {
+      "center": "Bloom Filters",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "m bits",
+            "k hashes"
+          ]
+        },
+        {
+          "label": "Answers",
+          "children": [
+            "Definitely not",
+            "Probably yes"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "~9.6 bits/item for 1%"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "LSM trees",
+            "Caches",
+            "CDNs",
+            "Spam lists"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "No delete",
+            "Fixed capacity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "LSM-tree lookups",
+      "scenario": "Use.",
+      "flow": [
+        "Each SSTable has a Bloom filter",
+        "Get(key): skip SSTables whose filter says 'no'",
+        "99% of disk reads for missing keys avoided"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fast negative lookups."
+        }
+      ],
+      "code": [],
+      "outcome": "cheap membership checks."
+    },
+    "summary": {
+      "points": [
+        "No false negatives.",
+        "Tunable false positives.",
+        "Tiny memory."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can a Bloom filter return a false negative?",
+        "a": "No; it can only return false positives."
+      }
+    ]
+  },
+  "cuckoo-filters-a-better-bloom-filter": {
+    "core": "Cuckoo filters store short fingerprints of items in buckets chosen by two hash locations (partial-key cuckoo hashing), relocating existing fingerprints when buckets fill. They support deletion, offer better space efficiency than Bloom filters at low false-positive rates and give faster lookups (two bucket reads), but insertions can fail when the table is near full.",
+    "first_principles": {
+      "problem": "A cache-membership filter needs deletes when items are evicted, which Bloom filters can't do.",
+      "truths": [
+        "Fingerprints identify items compactly.",
+        "Two candidate buckets allow relocation.",
+        "Stored fingerprints can be removed."
+      ],
+      "derivation": [
+        "Store **f-bit fingerprints**.",
+        "Two buckets: **i1 = h(x), i2 = i1 ⊕ h(fp)**.",
+        "**Kick out** existing entries when full.",
+        "**Delete** by removing a fingerprint.",
+        "Keep load below **~95%**."
+      ]
+    },
+    "analogy": {
+      "title": "A cuckoo chick pushing others out of the nest",
+      "story": "New entries displace old ones to their alternative nests until everyone fits.",
+      "mapping": [
+        [
+          "Nests",
+          "Buckets"
+        ],
+        [
+          "Chicks",
+          "Fingerprints"
+        ],
+        [
+          "Alternative nest",
+          "Second bucket"
+        ]
+      ],
+      "breaks": "Cuckoo chicks are ruthless; filters give up after a bounded number of kicks."
+    },
+    "mindmap": {
+      "center": "Cuckoo Filters",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Buckets",
+            "Fingerprints",
+            "Two locations"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Insert with kicks",
+            "Lookup 2 buckets",
+            "Delete"
+          ]
+        },
+        {
+          "label": "vs Bloom",
+          "children": [
+            "Deletes",
+            "Better space at low FPR",
+            "Faster lookup"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Insert failures near full",
+            "Duplicate limits"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bloom vs Cuckoo",
+      "scenario": "Choice.",
+      "flow": [
+        "Static set, no deletes → Bloom",
+        "Dynamic cache membership with evictions → Cuckoo"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Deletions supported with similar memory."
+        }
+      ],
+      "code": [],
+      "outcome": "right filter for dynamic sets."
+    },
+    "summary": {
+      "points": [
+        "Fingerprints in buckets.",
+        "Supports delete.",
+        "Watch load factor."
+      ]
+    },
+    "check": [
+      {
+        "q": "What key capability do cuckoo filters add over Bloom filters?",
+        "a": "Deleting items."
+      }
+    ]
+  },
+  "hyperloglog-the-how-many-uniques-question": {
+    "core": "HyperLogLog estimates distinct counts by hashing items and tracking, in m registers, the maximum number of leading zeros seen (a rare long run implies many items). Combining registers with a harmonic mean gives ~1.04/√m standard error, about 0.8% with 16,384 registers in 12 KB. HLLs merge by register-wise max, so they work across shards and time windows.",
+    "first_principles": {
+      "problem": "Daily unique users must be computed across 50 shards and combined into weekly totals.",
+      "truths": [
+        "Long runs of zeros are rare.",
+        "Rarity indicates scale.",
+        "Max is mergeable."
+      ],
+      "derivation": [
+        "Hash item; **first p bits** pick a register.",
+        "Store **max leading zeros** of the rest.",
+        "Estimate with **harmonic mean + corrections**.",
+        "**Merge** by max per register.",
+        "Use **Redis PFADD/PFCOUNT**."
+      ]
+    },
+    "analogy": {
+      "title": "Guessing how many coins were flipped from the longest run of heads",
+      "story": "A run of 20 heads suggests about a million flips.",
+      "mapping": [
+        [
+          "Coin flips",
+          "Hashed items"
+        ],
+        [
+          "Longest run",
+          "Leading zeros"
+        ],
+        [
+          "Many observers",
+          "Registers"
+        ]
+      ],
+      "breaks": "One coin run is very noisy; HLL averages thousands of registers to reduce error."
+    },
+    "mindmap": {
+      "center": "HyperLogLog",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Leading zeros",
+            "Registers",
+            "Harmonic mean"
+          ]
+        },
+        {
+          "label": "Accuracy",
+          "children": [
+            "1.04/√m",
+            "~0.8% at 12 KB"
+          ]
+        },
+        {
+          "label": "Merge",
+          "children": [
+            "Register max"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Redis PF*",
+            "BigQuery APPROX_COUNT_DISTINCT",
+            "Druid"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Redis HLL",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Weekly uniques from daily sketches, 12 KB each."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "PFADD visitors:2026-10-18 user:1 user:2 user:3\nPFCOUNT visitors:2026-10-18\nPFMERGE visitors:week visitors:2026-10-12 visitors:2026-10-13 ... visitors:2026-10-18\nPFCOUNT visitors:week"
+        }
+      ],
+      "outcome": "mergeable cardinality at tiny cost."
+    },
+    "summary": {
+      "points": [
+        "Leading zeros estimate scale.",
+        "~1% error in KBs.",
+        "Merge across shards."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can HyperLogLogs from different shards be merged?",
+        "a": "Each register stores a maximum, and the max of maxima equals the max over the union."
+      }
+    ]
+  },
+  "count-min-sketch-the-how-often-question": {
+    "core": "A Count-Min Sketch is a d×w matrix of counters with d hash functions. Each increment adds to one counter per row; a query takes the minimum across rows. Collisions only inflate counts, so estimates never undercount, with error ≤ εN (ε = e/w) with probability 1 − δ (δ = e^−d). It's used for heavy hitters, rate limiting and frequency analytics.",
+    "first_principles": {
+      "problem": "Tracking request counts per IP for millions of IPs exactly needs too much memory.",
+      "truths": [
+        "Collisions add, never subtract.",
+        "Taking the minimum reduces collision error.",
+        "Width and depth control accuracy."
+      ],
+      "derivation": [
+        "Choose **w = e/ε**, **d = ln(1/δ)**.",
+        "**Increment** one counter per row.",
+        "**Query** = min across rows.",
+        "Accept **overestimation**.",
+        "Use **conservative update** to reduce error."
+      ]
+    },
+    "analogy": {
+      "title": "Several tally sheets with shared lines",
+      "story": "Each sheet groups some names together; the smallest tally across sheets is closest to the truth.",
+      "mapping": [
+        [
+          "Tally sheets",
+          "Rows"
+        ],
+        [
+          "Shared lines",
+          "Hash collisions"
+        ],
+        [
+          "Smallest tally",
+          "Min estimate"
+        ]
+      ],
+      "breaks": "Tally sheets can be audited; sketches can't list which items they counted."
+    },
+    "mindmap": {
+      "center": "Count-Min Sketch",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "d × w counters",
+            "d hashes"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Increment",
+            "Min query"
+          ]
+        },
+        {
+          "label": "Error",
+          "children": [
+            "Overestimates only",
+            "εN bound"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Heavy hitters",
+            "Rate limiting",
+            "Analytics"
+          ]
+        },
+        {
+          "label": "Tricks",
+          "children": [
+            "Conservative update"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Per-IP counting",
+      "scenario": "Sizing.",
+      "flow": [
+        "ε = 0.001, δ = 0.01 → w ≈ 2,718, d ≈ 5",
+        "13,590 counters (~54 KB at 32-bit)",
+        "Handles millions of IPs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Frequency estimates in kilobytes."
+        }
+      ],
+      "code": [],
+      "outcome": "approximate counting at scale."
+    },
+    "summary": {
+      "points": [
+        "Min across rows.",
+        "Never underestimates.",
+        "Size by ε and δ."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can a Count-Min Sketch underestimate an item's count?",
+        "a": "No; collisions only add, so it can only overestimate."
+      }
+    ]
+  },
+  "combining-structures-the-top-k-pattern": {
+    "core": "Finding the top-k most frequent items in a stream combines a Count-Min Sketch (approximate counts for any item) with a min-heap of size k holding current candidates. On each item, update the sketch, read its estimate and replace the heap's minimum if the estimate is larger. Space-Saving and Misra-Gries are alternatives with deterministic guarantees.",
+    "first_principles": {
+      "problem": "A CDN wants the top 100 most requested URLs per minute across billions of requests.",
+      "truths": [
+        "Most items are rare.",
+        "Only candidates near the top matter.",
+        "Sketches estimate any item's count."
+      ],
+      "derivation": [
+        "**Sketch** all items.",
+        "**Heap** of k candidates.",
+        "On update: if estimate > heap min, **replace**.",
+        "Consider **Space-Saving** for accuracy.",
+        "**Window** by time (rotate sketches)."
+      ]
+    },
+    "analogy": {
+      "title": "A leaderboard fed by an approximate scorekeeper",
+      "story": "The scorekeeper estimates everyone's score; only those beating the bottom of the board get listed.",
+      "mapping": [
+        [
+          "Scorekeeper",
+          "Count-Min Sketch"
+        ],
+        [
+          "Leaderboard",
+          "Min-heap"
+        ],
+        [
+          "Bottom of board",
+          "Heap minimum"
+        ]
+      ],
+      "breaks": "Leaderboards are exact; sketch estimates can promote an item slightly wrongly."
+    },
+    "mindmap": {
+      "center": "Top-k Pattern",
+      "branches": [
+        {
+          "label": "Components",
+          "children": [
+            "Count-Min Sketch",
+            "Min-heap"
+          ]
+        },
+        {
+          "label": "Algorithm",
+          "children": [
+            "Update sketch",
+            "Compare with heap min",
+            "Replace"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Space-Saving",
+            "Misra-Gries"
+          ]
+        },
+        {
+          "label": "Windows",
+          "children": [
+            "Rotating sketches"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Heavy hitters",
+            "Trending",
+            "DDoS detection"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Top-k loop",
+      "scenario": "Python sketch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Top-100 URLs maintained in KBs of memory."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import heapq\nheap, members = [], {}\ndef observe(item):\n    cms.add(item)\n    est = cms.estimate(item)\n    if item in members:\n        members[item] = est\n        heap[:] = [(c, i) for i, c in members.items()]; heapq.heapify(heap)\n    elif len(heap) < K: heapq.heappush(heap, (est, item)); members[item] = est\n    elif est > heap[0][0]:\n        _, old = heapq.heapreplace(heap, (est, item)); del members[old]; members[item] = est"
+        }
+      ],
+      "outcome": "streaming heavy hitters."
+    },
+    "summary": {
+      "points": [
+        "Sketch counts.",
+        "Heap keeps candidates.",
+        "Window over time."
+      ]
+    },
+    "check": [
+      {
+        "q": "What two structures combine to find top-k in a stream?",
+        "a": "A Count-Min Sketch for counts and a min-heap of size k for candidates."
+      }
+    ]
+  }
+}

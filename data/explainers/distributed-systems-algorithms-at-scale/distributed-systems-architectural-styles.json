@@ -1,0 +1,711 @@
+{
+  "introduction-what-is-software-architecture": {
+    "core": "Software architecture is the set of significant, hard-to-change decisions: how a system is split into components, how they communicate, where data lives and which qualities (scalability, availability, maintainability, cost) are prioritised. Good architecture makes the important changes cheap and the system's trade-offs explicit.",
+    "first_principles": {
+      "problem": "A team picks microservices because 'everyone does', then drowns in deployment and debugging complexity.",
+      "truths": [
+        "Every structure trades some qualities for others.",
+        "Early decisions constrain later ones.",
+        "Team structure shapes system structure (Conway's law)."
+      ],
+      "derivation": [
+        "Identify **quality attributes** that matter most.",
+        "Choose **decomposition** (monolith, modular, services).",
+        "Choose **communication** (sync, async, events).",
+        "Decide **data ownership**.",
+        "Record decisions in **ADRs**."
+      ]
+    },
+    "analogy": {
+      "title": "A city plan",
+      "story": "Where roads, districts and utilities go decides how easily the city grows.",
+      "mapping": [
+        [
+          "Districts",
+          "Components"
+        ],
+        [
+          "Roads",
+          "Communication"
+        ],
+        [
+          "Utilities",
+          "Data stores"
+        ],
+        [
+          "Zoning rules",
+          "Architecture principles"
+        ]
+      ],
+      "breaks": "Cities are hard to rebuild; software can be refactored, though at real cost."
+    },
+    "mindmap": {
+      "center": "Software Architecture",
+      "branches": [
+        {
+          "label": "Decisions",
+          "children": [
+            "Decomposition",
+            "Communication",
+            "Data ownership"
+          ]
+        },
+        {
+          "label": "Qualities",
+          "children": [
+            "Scalability",
+            "Availability",
+            "Maintainability",
+            "Cost"
+          ]
+        },
+        {
+          "label": "Laws",
+          "children": [
+            "Conway's law"
+          ]
+        },
+        {
+          "label": "Records",
+          "children": [
+            "ADRs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Architecture decision record",
+      "scenario": "Format.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Trade-offs written down and revisitable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "# ADR-007: Use a modular monolith\n## Context: 8 engineers, unclear domain boundaries\n## Decision: single deployable with enforced module boundaries\n## Consequences: simple ops now; extract services when boundaries stabilise"
+        }
+      ],
+      "outcome": "deliberate, documented architecture."
+    },
+    "summary": {
+      "points": [
+        "Hard-to-change decisions.",
+        "Trade-offs between qualities.",
+        "Write them down."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Conway's law say?",
+        "a": "Systems tend to mirror the communication structure of the organisations that build them."
+      }
+    ]
+  },
+  "the-monolith-all-eggs-in-one-basket": {
+    "core": "A monolith is one deployable unit containing all functionality, usually with one database. It's simple to develop, test, deploy and debug early on, with fast in-process calls and easy transactions. As it grows, coupling, slow builds, scaling everything together and coordinated deployments across many teams become painful.",
+    "first_principles": {
+      "problem": "A 200-engineer company deploys one giant app weekly, and any bug blocks every team's release.",
+      "truths": [
+        "In-process calls are fast and reliable.",
+        "Shared code invites coupling.",
+        "One deployable means shared release cadence."
+      ],
+      "derivation": [
+        "Start with a **monolith** for small teams and unclear domains.",
+        "Keep **modules** clean internally.",
+        "Scale **horizontally** behind a load balancer.",
+        "Watch for **pain signals** (deploy contention, build time).",
+        "Split only when **justified**."
+      ]
+    },
+    "analogy": {
+      "title": "A single large department store",
+      "story": "Everything under one roof is convenient, until renovating one floor closes the whole store.",
+      "mapping": [
+        [
+          "Store",
+          "Monolith"
+        ],
+        [
+          "Departments",
+          "Modules"
+        ],
+        [
+          "Closing the store",
+          "Coordinated deploys"
+        ]
+      ],
+      "breaks": "Stores can close sections; monolith deploys usually affect everything."
+    },
+    "mindmap": {
+      "center": "Monolith",
+      "branches": [
+        {
+          "label": "Pros",
+          "children": [
+            "Simple",
+            "Fast calls",
+            "Easy transactions",
+            "Easy debugging"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Coupling",
+            "Slow builds",
+            "Scale together",
+            "Shared releases"
+          ]
+        },
+        {
+          "label": "Fit",
+          "children": [
+            "Small teams",
+            "New products"
+          ]
+        },
+        {
+          "label": "Signals to split",
+          "children": [
+            "Deploy contention",
+            "Team scale"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Healthy monolith",
+      "scenario": "Practices.",
+      "flow": [
+        "Single Rails/Django app, 6 engineers",
+        "Deploys 10×/day via CI",
+        "Scaled to 8 instances behind ALB",
+        "No reason to split yet"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Monoliths aren't bad by default."
+        }
+      ],
+      "code": [],
+      "outcome": "simplicity while it fits."
+    },
+    "summary": {
+      "points": [
+        "Simple to start.",
+        "Pain grows with scale.",
+        "Split on evidence."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name one major benefit of a monolith for a small team.",
+        "a": "Simplicity: fast in-process calls, easy local transactions, one thing to deploy and debug."
+      }
+    ]
+  },
+  "the-modular-monolith-the-organized-middle-ground": {
+    "core": "A modular monolith is a single deployable divided into well-bounded modules with explicit interfaces, private internals and (ideally) separate schemas or tables per module. You keep monolith simplicity while gaining clean boundaries that make later extraction into services straightforward.",
+    "first_principles": {
+      "problem": "A monolith has become a 'big ball of mud' where any module calls any other's internals.",
+      "truths": [
+        "Boundaries matter more than deployment units.",
+        "Enforced rules prevent coupling.",
+        "Extracting clean modules is much easier."
+      ],
+      "derivation": [
+        "Define **modules by domain**.",
+        "Expose **public APIs**, hide internals.",
+        "Enforce with **architecture tests** (ArchUnit, packwerk).",
+        "Separate **data ownership** per module.",
+        "Extract to a **service** when needed."
+      ]
+    },
+    "analogy": {
+      "title": "A house with well-defined rooms and doors",
+      "story": "Everything is under one roof, but you don't walk through the bathroom to reach the kitchen.",
+      "mapping": [
+        [
+          "Rooms",
+          "Modules"
+        ],
+        [
+          "Doors",
+          "Public APIs"
+        ],
+        [
+          "Walls",
+          "Enforced boundaries"
+        ]
+      ],
+      "breaks": "Walls are physical; code boundaries need tooling to stop people tunnelling through."
+    },
+    "mindmap": {
+      "center": "Modular Monolith",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Domain modules",
+            "Public APIs",
+            "Private internals"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Schema per module"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "ArchUnit",
+            "packwerk",
+            "Lint rules"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Simple ops",
+            "Clean boundaries",
+            "Easy extraction"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Boundary enforcement",
+      "scenario": "Rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Build fails if anyone reaches into billing internals."
+        }
+      ],
+      "code": [
+        {
+          "lang": "java",
+          "text": "@ArchTest\nstatic final ArchRule billingIsolated =\n    noClasses().that().resideOutsideOfPackage(\"..billing..\")\n        .should().accessClassesThat().resideInAPackage(\"..billing.internal..\");"
+        }
+      ],
+      "outcome": "clean modules, one deploy."
+    },
+    "summary": {
+      "points": [
+        "Monolith deploy.",
+        "Service-like boundaries.",
+        "Enforce with tests."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a modular monolith a good stepping stone to microservices?",
+        "a": "Clean module boundaries and data ownership make extracting a module into a service straightforward."
+      }
+    ]
+  },
+  "microservices-divide-and-conquer": {
+    "core": "Microservices split a system into independently deployable services, each owning its data and a business capability, communicating over the network. They enable team autonomy, independent scaling and technology choice, but bring distributed-systems costs: network failures, eventual consistency, observability, versioning and operational overhead.",
+    "first_principles": {
+      "problem": "Teams step on each other in a shared codebase and can't release or scale independently.",
+      "truths": [
+        "Independent deployability enables autonomy.",
+        "Network calls fail and add latency.",
+        "Shared databases recreate coupling."
+      ],
+      "derivation": [
+        "Align services to **business capabilities/bounded contexts**.",
+        "**Own data** per service.",
+        "Design for **failure** (timeouts, retries, circuit breakers).",
+        "Invest in **observability and platform**.",
+        "Version **APIs** carefully."
+      ]
+    },
+    "analogy": {
+      "title": "A food court instead of one restaurant",
+      "story": "Each stall runs independently with its own kitchen, but customers now walk between stalls.",
+      "mapping": [
+        [
+          "Stalls",
+          "Services"
+        ],
+        [
+          "Own kitchen",
+          "Own database"
+        ],
+        [
+          "Walking between stalls",
+          "Network calls"
+        ]
+      ],
+      "breaks": "Food courts share a seating area; services shouldn't share databases."
+    },
+    "mindmap": {
+      "center": "Microservices",
+      "branches": [
+        {
+          "label": "Benefits",
+          "children": [
+            "Autonomy",
+            "Independent deploys",
+            "Independent scaling",
+            "Tech choice"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Network failures",
+            "Consistency",
+            "Observability",
+            "Ops overhead"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Own data",
+            "Bounded contexts",
+            "Resilience patterns"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Splitting checkout",
+      "scenario": "Services.",
+      "flow": [
+        "Orders service (orders DB)",
+        "Payments service (payments DB)",
+        "Inventory service (inventory DB)",
+        "Async events link them"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Teams deploy independently; must handle partial failures."
+        }
+      ],
+      "code": [],
+      "outcome": "autonomy with eyes open."
+    },
+    "summary": {
+      "points": [
+        "Independent services.",
+        "Own your data.",
+        "Pay the distributed tax."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should microservices avoid sharing a database?",
+        "a": "A shared database couples services' schemas and deployments, undermining independence."
+      }
+    ]
+  },
+  "a-note-on-soa-service-oriented-architecture": {
+    "core": "Service-Oriented Architecture (2000s) also decomposed systems into services, but typically with coarse-grained enterprise services, heavyweight standards (SOAP, WS-*), and a central Enterprise Service Bus handling routing, transformation and orchestration. Microservices kept the service idea but favoured smart endpoints and dumb pipes, decentralised data and lightweight protocols.",
+    "first_principles": {
+      "problem": "Engineers dismiss microservices as 'SOA rebranded' or repeat SOA's ESB mistakes.",
+      "truths": [
+        "Centralised integration logic becomes a bottleneck.",
+        "Heavy standards slow change.",
+        "Service boundaries are a lasting idea."
+      ],
+      "derivation": [
+        "Keep **logic in services**, not the bus.",
+        "Use **lightweight protocols** (HTTP/JSON, gRPC, events).",
+        "**Decentralise** governance and data.",
+        "Avoid a **god ESB**.",
+        "Learn from SOA's **contract thinking**."
+      ]
+    },
+    "analogy": {
+      "title": "A central switchboard operator versus direct dialling",
+      "story": "The operator knew everyone and became overloaded; direct dialling scales.",
+      "mapping": [
+        [
+          "Operator",
+          "ESB"
+        ],
+        [
+          "Direct dialling",
+          "Smart endpoints, dumb pipes"
+        ],
+        [
+          "Phone book",
+          "Service contracts"
+        ]
+      ],
+      "breaks": "Operators added human flexibility; ESBs added complexity few could change."
+    },
+    "mindmap": {
+      "center": "SOA vs Microservices",
+      "branches": [
+        {
+          "label": "SOA",
+          "children": [
+            "Coarse services",
+            "SOAP/WS-*",
+            "ESB",
+            "Central governance"
+          ]
+        },
+        {
+          "label": "Microservices",
+          "children": [
+            "Fine services",
+            "HTTP/gRPC/events",
+            "Dumb pipes",
+            "Decentralised"
+          ]
+        },
+        {
+          "label": "Lessons",
+          "children": [
+            "Avoid god bus",
+            "Keep contracts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Integration styles",
+      "scenario": "Comparison.",
+      "flow": [
+        "SOA: Order → ESB transforms & routes → Billing",
+        "Microservices: Order publishes OrderPlaced → Billing consumes"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Put logic in endpoints."
+        }
+      ],
+      "code": [],
+      "outcome": "history informs better design."
+    },
+    "summary": {
+      "points": [
+        "SOA came first.",
+        "ESB was the trap.",
+        "Smart endpoints, dumb pipes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'smart endpoints and dumb pipes' mean?",
+        "a": "Business logic lives in services, while the communication layer just transports messages."
+      }
+    ]
+  },
+  "communication-event-driven-architecture-eda": {
+    "core": "In event-driven architecture, services publish events (facts that happened) to a broker, and interested services subscribe and react asynchronously. This decouples producers from consumers in time and knowledge, absorbs load spikes and makes adding new consumers easy, at the cost of eventual consistency, harder debugging and the need for idempotency and schema governance.",
+    "first_principles": {
+      "problem": "Order creation synchronously calls five services; if one is slow, checkout fails.",
+      "truths": [
+        "Facts can be broadcast.",
+        "Async boundaries isolate failures.",
+        "Delivery may be duplicated or delayed."
+      ],
+      "derivation": [
+        "Publish **domain events** (OrderPlaced).",
+        "Use a **broker** (Kafka, SNS/SQS, EventBridge).",
+        "Make consumers **idempotent**.",
+        "Govern **schemas**.",
+        "Trace with **correlation IDs**."
+      ]
+    },
+    "analogy": {
+      "title": "A town crier",
+      "story": "The crier announces news; whoever cares acts on it, without the crier knowing who listened.",
+      "mapping": [
+        [
+          "Crier",
+          "Producer"
+        ],
+        [
+          "Announcement",
+          "Event"
+        ],
+        [
+          "Listeners",
+          "Consumers"
+        ]
+      ],
+      "breaks": "Town criers speak once; brokers can retain and replay events."
+    },
+    "mindmap": {
+      "center": "Event-Driven",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Events as facts",
+            "Pub/sub",
+            "Broker"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Decoupling",
+            "Spike absorption",
+            "Extensibility"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Eventual consistency",
+            "Debugging",
+            "Duplicates"
+          ]
+        },
+        {
+          "label": "Practices",
+          "children": [
+            "Idempotency",
+            "Schemas",
+            "Correlation IDs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Checkout decoupled",
+      "scenario": "Flow.",
+      "flow": [
+        "Order service saves order, publishes OrderPlaced",
+        "Payments, inventory, email consume independently",
+        "Slow email doesn't affect checkout"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Checkout latency independent of downstream services."
+        }
+      ],
+      "code": [],
+      "outcome": "resilient, extensible communication."
+    },
+    "summary": {
+      "points": [
+        "Publish facts.",
+        "Consume asynchronously.",
+        "Design for duplicates."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a key trade-off of event-driven architecture?",
+        "a": "Looser coupling and resilience in exchange for eventual consistency and harder debugging."
+      }
+    ]
+  },
+  "coordination-orchestration-vs-choreography": {
+    "core": "Multi-step business processes can be orchestrated (a central coordinator such as a workflow engine like Temporal or Step Functions tells each service what to do and tracks state) or choreographed (services react to each other's events with no central controller). Orchestration is easier to understand and change; choreography is more decoupled but harder to see end to end.",
+    "first_principles": {
+      "problem": "An order process spread across event handlers is impossible to follow when something goes wrong.",
+      "truths": [
+        "Processes need visibility.",
+        "Central control can be a bottleneck.",
+        "Events reduce coupling."
+      ],
+      "derivation": [
+        "**Orchestrate** complex, long-running, compensating flows.",
+        "**Choreograph** simple reactions and broadcasts.",
+        "Use **workflow engines** for durable orchestration.",
+        "Trace **choreography** with correlation IDs.",
+        "**Mix** both where sensible."
+      ]
+    },
+    "analogy": {
+      "title": "An orchestra conductor versus a dance troupe",
+      "story": "The conductor directs every section; dancers react to each other's moves.",
+      "mapping": [
+        [
+          "Conductor",
+          "Orchestrator"
+        ],
+        [
+          "Dancers reacting",
+          "Choreographed services"
+        ],
+        [
+          "Score",
+          "Workflow definition"
+        ]
+      ],
+      "breaks": "Dancers rehearse together; choreographed services are often built by teams who never meet."
+    },
+    "mindmap": {
+      "center": "Orchestration vs Choreography",
+      "branches": [
+        {
+          "label": "Orchestration",
+          "children": [
+            "Central coordinator",
+            "Visible state",
+            "Easier changes",
+            "Temporal/Step Functions"
+          ]
+        },
+        {
+          "label": "Choreography",
+          "children": [
+            "Event reactions",
+            "Decoupled",
+            "Hard to trace"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Complex flows → orchestrate",
+            "Simple fan-out → choreograph"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Order saga orchestrated",
+      "scenario": "Steps.",
+      "flow": [
+        "Workflow: reserve inventory → charge payment → create shipment",
+        "On payment failure: release inventory (compensate)",
+        "State visible in workflow UI"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clear, debuggable business process."
+        }
+      ],
+      "code": [],
+      "outcome": "right coordination style per process."
+    },
+    "summary": {
+      "points": [
+        "Orchestrate complexity.",
+        "Choreograph simple reactions.",
+        "Mix deliberately."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main downside of choreography for complex processes?",
+        "a": "No single place shows the end-to-end flow, making it hard to understand and debug."
+      }
+    ]
+  }
+}

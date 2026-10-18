@@ -1,0 +1,940 @@
+{
+  "introduction-what-time-is-it-really": {
+    "core": "In a distributed system there's no single global clock. Each machine's clock drifts, synchronisation is imperfect and messages take variable time. That means you can't reliably order events across machines by timestamp alone, which matters for databases, logs, leases, caches and conflict resolution.",
+    "first_principles": {
+      "problem": "Two servers record writes with wall-clock timestamps and 'last write wins' keeps the older value.",
+      "truths": [
+        "Clocks drift and jump.",
+        "Network delay is unbounded.",
+        "Ordering needs more than timestamps."
+      ],
+      "derivation": [
+        "Know **physical clock limits** (NTP, PTP).",
+        "Use **monotonic clocks** for durations.",
+        "Use **logical clocks** for causality.",
+        "Use **bounded uncertainty** (TrueTime) for global ordering.",
+        "Avoid **timestamp-only** conflict resolution."
+      ]
+    },
+    "analogy": {
+      "title": "Synchronising watches across a big group",
+      "story": "Everyone's watch is a bit off, so 'who arrived first' by watch time can be wrong.",
+      "mapping": [
+        [
+          "Watches",
+          "Machine clocks"
+        ],
+        [
+          "Being off",
+          "Clock skew"
+        ],
+        [
+          "Arrival order",
+          "Event order"
+        ]
+      ],
+      "breaks": "People can compare watches face to face; servers only exchange delayed messages."
+    },
+    "mindmap": {
+      "center": "Time in Distributed Systems",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "Drift",
+            "Skew",
+            "Jumps",
+            "Network delay"
+          ]
+        },
+        {
+          "label": "Physical",
+          "children": [
+            "NTP",
+            "PTP"
+          ]
+        },
+        {
+          "label": "Logical",
+          "children": [
+            "Lamport",
+            "Vector clocks"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "TrueTime",
+            "HLC"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Monotonic for durations"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "LWW gone wrong",
+      "scenario": "Scenario.",
+      "flow": [
+        "Server A (clock +2 s fast) writes v1 at 10:00:02",
+        "Server B writes v2 later, at its 10:00:01",
+        "LWW keeps v1, the older write"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Wall clocks can invert real order."
+        }
+      ],
+      "code": [],
+      "outcome": "healthy scepticism of timestamps."
+    },
+    "summary": {
+      "points": [
+        "No global clock.",
+        "Clocks drift.",
+        "Order needs care."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is last-write-wins by wall-clock timestamp risky?",
+        "a": "Clock skew can make a later write appear older, so newer data gets discarded."
+      }
+    ]
+  },
+  "physical-clocks-drift-and-synchronization": {
+    "core": "Quartz oscillators drift by tens of parts per million (seconds per day). NTP synchronises clocks over the network, estimating offset from round-trip times, typically to within milliseconds on LANs and tens of milliseconds over the internet, with accuracy degraded by asymmetric paths and congestion. Cloud providers offer local, highly accurate time services.",
+    "first_principles": {
+      "problem": "Log timestamps from different hosts disagree by seconds, making incident timelines confusing.",
+      "truths": [
+        "Hardware clocks drift.",
+        "Network delay limits sync accuracy.",
+        "Better sources improve accuracy."
+      ],
+      "derivation": [
+        "Run **chrony/ntpd** on all hosts.",
+        "Use **cloud time services** (Amazon Time Sync, Google NTP).",
+        "Monitor **clock offset**.",
+        "Prefer **slewing** over stepping.",
+        "Never assume **perfect sync**."
+      ]
+    },
+    "analogy": {
+      "title": "Pendulum clocks in different rooms",
+      "story": "Each runs slightly fast or slow, so you regularly reset them against the town hall clock.",
+      "mapping": [
+        [
+          "Pendulum clocks",
+          "Server clocks"
+        ],
+        [
+          "Town hall clock",
+          "NTP server"
+        ],
+        [
+          "Resetting",
+          "Synchronisation"
+        ]
+      ],
+      "breaks": "Resetting by walking to the hall has fixed delay; network delay varies unpredictably."
+    },
+    "mindmap": {
+      "center": "Physical Clocks",
+      "branches": [
+        {
+          "label": "Drift",
+          "children": [
+            "Quartz ppm",
+            "Temperature"
+          ]
+        },
+        {
+          "label": "NTP",
+          "children": [
+            "Offset estimation",
+            "Stratum",
+            "ms accuracy"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "chrony",
+            "Cloud time sync",
+            "Monitor offset"
+          ]
+        },
+        {
+          "label": "Corrections",
+          "children": [
+            "Slew",
+            "Step"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check offset",
+      "scenario": "chrony.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Know how far off each host is."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "chronyc tracking\n# System time: 0.000012345 seconds fast of NTP time\nchronyc sources -v"
+        }
+      ],
+      "outcome": "clocks kept close and monitored."
+    },
+    "summary": {
+      "points": [
+        "Clocks drift.",
+        "NTP corrects roughly.",
+        "Monitor offsets."
+      ]
+    },
+    "check": [
+      {
+        "q": "What limits NTP's accuracy?",
+        "a": "Variable and asymmetric network delay between client and time server."
+      }
+    ]
+  },
+  "ptp-when-milliseconds-arent-good-enough": {
+    "core": "Precision Time Protocol (IEEE 1588) achieves sub-microsecond synchronisation using hardware timestamping in NICs and switches (boundary and transparent clocks) that measure and compensate for path delay at each hop. It's used in finance (trade timestamps), telecom and cloud databases, and some cloud providers expose PTP hardware clocks to instances.",
+    "first_principles": {
+      "problem": "High-frequency trading regulations require timestamps accurate to microseconds, beyond NTP.",
+      "truths": [
+        "Software timestamps add jitter.",
+        "Hardware timestamping is precise.",
+        "Network devices can correct delay per hop."
+      ],
+      "derivation": [
+        "Use **PTP-capable NICs** (hardware timestamps).",
+        "Use **PTP-aware switches** (boundary/transparent clocks).",
+        "Run **ptp4l/phc2sys** or chrony with PHC.",
+        "Use cloud **PTP hardware clocks** where offered.",
+        "Monitor **offset and path delay**."
+      ]
+    },
+    "analogy": {
+      "title": "Relay timing at every checkpoint of a race",
+      "story": "Each checkpoint records exact pass times, so you can subtract travel time precisely.",
+      "mapping": [
+        [
+          "Checkpoints",
+          "PTP switches"
+        ],
+        [
+          "Precise stopwatches",
+          "Hardware timestamps"
+        ],
+        [
+          "Subtracting travel time",
+          "Delay compensation"
+        ]
+      ],
+      "breaks": "Race checkpoints are fixed; network paths can change, needing continuous recalibration."
+    },
+    "mindmap": {
+      "center": "PTP",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Hardware timestamping",
+            "Delay request/response"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "Boundary clocks",
+            "Transparent clocks"
+          ]
+        },
+        {
+          "label": "Accuracy",
+          "children": [
+            "Sub-microsecond"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Finance",
+            "Telecom",
+            "Databases"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ptp4l",
+            "phc2sys",
+            "chrony PHC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Accuracy comparison",
+      "scenario": "Typical.",
+      "flow": [
+        "NTP over internet: ~10 ms",
+        "NTP on LAN: ~1 ms",
+        "PTP with hardware timestamps: < 1 µs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Orders of magnitude tighter time."
+        }
+      ],
+      "code": [],
+      "outcome": "precision time where required."
+    },
+    "summary": {
+      "points": [
+        "Hardware timestamps.",
+        "Per-hop correction.",
+        "Sub-microsecond."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes PTP far more accurate than NTP?",
+        "a": "Hardware timestamping in NICs and switches that compensates for delay at each hop."
+      }
+    ]
+  },
+  "a-quirky-problem-leap-seconds": {
+    "core": "Leap seconds occasionally add (or could remove) a second to UTC to match Earth's rotation, creating 23:59:60. Software that assumes 60-second minutes has crashed (2012 Linux livelocks, Cloudflare's 2017 negative duration bug). Many providers smear the leap second over hours instead, and the practice is set to be abolished by 2035.",
+    "first_principles": {
+      "problem": "A service computes negative durations during a leap second and crashes.",
+      "truths": [
+        "UTC isn't perfectly uniform.",
+        "Wall clocks can repeat or skip.",
+        "Smearing hides the step."
+      ],
+      "derivation": [
+        "Use **monotonic clocks** for durations.",
+        "Use **leap smearing** (Google, AWS) consistently across fleet.",
+        "Don't **mix** smeared and non-smeared sources.",
+        "Test **time edge cases**.",
+        "Track **leap second abolition** plans."
+      ]
+    },
+    "analogy": {
+      "title": "A clock that occasionally pauses for one extra tick",
+      "story": "Anyone timing an egg by the wall clock at that moment gets confused.",
+      "mapping": [
+        [
+          "Extra tick",
+          "Leap second"
+        ],
+        [
+          "Egg timer",
+          "Duration calculation"
+        ],
+        [
+          "Gradual adjustment",
+          "Smearing"
+        ]
+      ],
+      "breaks": "Egg timers just overcook; software can crash or corrupt data."
+    },
+    "mindmap": {
+      "center": "Leap Seconds",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "23:59:60",
+            "UTC adjustment"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "Livelocks",
+            "Negative durations"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "Leap smearing",
+            "Monotonic clocks",
+            "Consistent sources"
+          ]
+        },
+        {
+          "label": "Future",
+          "children": [
+            "Abolition by 2035"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Negative duration bug",
+      "scenario": "Code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Durations immune to wall-clock jumps."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "start := time.Now()   // Go's time.Now includes a monotonic reading\ndoWork()\nelapsed := time.Since(start)   // uses monotonic clock → never negative"
+        }
+      ],
+      "outcome": "leap-second-safe code."
+    },
+    "summary": {
+      "points": [
+        "UTC can repeat seconds.",
+        "Smear consistently.",
+        "Monotonic for durations."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is leap smearing?",
+        "a": "Spreading the extra leap second gradually over hours so clocks never show 23:59:60 or jump."
+      }
+    ]
+  },
+  "monotonic-clocks-vs-wall-clocks": {
+    "core": "Wall clocks (CLOCK_REALTIME) give the date and time and can jump forwards or backwards when NTP corrects them or an admin changes them. Monotonic clocks (CLOCK_MONOTONIC) only move forward at a steady rate from an arbitrary start, so they're right for measuring durations, timeouts and rate limits but meaningless across machines or reboots.",
+    "first_principles": {
+      "problem": "A timeout calculated with wall time fires early when NTP steps the clock back.",
+      "truths": [
+        "Wall time can jump.",
+        "Monotonic time never goes backwards.",
+        "Each serves a different purpose."
+      ],
+      "derivation": [
+        "**Wall clock** for timestamps shown to humans/stored.",
+        "**Monotonic clock** for durations, timeouts, rate limiting.",
+        "Never **subtract wall times** for elapsed time.",
+        "Don't compare **monotonic values across hosts**.",
+        "Know your language's APIs."
+      ]
+    },
+    "analogy": {
+      "title": "A calendar versus a stopwatch",
+      "story": "The calendar tells you the date (and can be corrected); the stopwatch only counts elapsed time.",
+      "mapping": [
+        [
+          "Calendar",
+          "Wall clock"
+        ],
+        [
+          "Stopwatch",
+          "Monotonic clock"
+        ],
+        [
+          "Correcting the calendar",
+          "NTP step"
+        ]
+      ],
+      "breaks": "Stopwatches can be shared; monotonic readings are meaningless on another machine."
+    },
+    "mindmap": {
+      "center": "Clock Types",
+      "branches": [
+        {
+          "label": "Wall",
+          "children": [
+            "CLOCK_REALTIME",
+            "Can jump",
+            "Human time"
+          ]
+        },
+        {
+          "label": "Monotonic",
+          "children": [
+            "CLOCK_MONOTONIC",
+            "Never backwards",
+            "Durations"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Timestamps vs timeouts"
+          ]
+        },
+        {
+          "label": "APIs",
+          "children": [
+            "time.monotonic()",
+            "System.nanoTime()",
+            "Instant (Rust)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Correct timeout",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Timeout unaffected by clock changes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import time\ndeadline = time.monotonic() + 5.0\nwhile time.monotonic() < deadline:\n    if try_connect(): break\n    time.sleep(0.1)"
+        }
+      ],
+      "outcome": "correct duration measurement."
+    },
+    "summary": {
+      "points": [
+        "Wall for dates.",
+        "Monotonic for durations.",
+        "Never mix them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which clock should you use to measure a request's latency?",
+        "a": "A monotonic clock."
+      }
+    ]
+  },
+  "the-need-for-logical-time": {
+    "core": "Often we don't need true time, just consistent ordering of events that are causally related: if A could have influenced B, A must come first. Lamport's 'happened-before' relation defines this partial order: events in one process are ordered, a send precedes its receive, and the relation is transitive. Events not related are concurrent.",
+    "first_principles": {
+      "problem": "Replicas apply updates in different orders and diverge, despite synchronised clocks.",
+      "truths": [
+        "Causality matters more than wall time.",
+        "Messages carry ordering information.",
+        "Some events are genuinely concurrent."
+      ],
+      "derivation": [
+        "Define **happened-before (→)**.",
+        "Track it with **logical clocks**.",
+        "Order **causally related** events consistently.",
+        "Treat **concurrent** events specially (conflicts).",
+        "Combine with **physical time** when needed (HLC)."
+      ]
+    },
+    "analogy": {
+      "title": "Email reply chains",
+      "story": "You know a reply came after the original, even without timestamps, because it quotes it.",
+      "mapping": [
+        [
+          "Original email",
+          "Send event"
+        ],
+        [
+          "Reply",
+          "Receive and later event"
+        ],
+        [
+          "Quoting",
+          "Carrying the clock value"
+        ]
+      ],
+      "breaks": "Emails are human-readable; logical clocks are numbers that must be propagated correctly."
+    },
+    "mindmap": {
+      "center": "Logical Time",
+      "branches": [
+        {
+          "label": "Concept",
+          "children": [
+            "Happened-before",
+            "Partial order"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Same process order",
+            "Send before receive",
+            "Transitivity"
+          ]
+        },
+        {
+          "label": "Concurrency",
+          "children": [
+            "Unrelated events"
+          ]
+        },
+        {
+          "label": "Implementations",
+          "children": [
+            "Lamport clocks",
+            "Vector clocks",
+            "HLC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Happened-before",
+      "scenario": "Example.",
+      "flow": [
+        "P1: a (send m)",
+        "P2: b (receive m) → c",
+        "a → b → c",
+        "P3's event d unrelated → concurrent with all"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Order defined without clocks."
+        }
+      ],
+      "code": [],
+      "outcome": "causality as the foundation of ordering."
+    },
+    "summary": {
+      "points": [
+        "Causality, not clocks.",
+        "Happened-before.",
+        "Concurrency is real."
+      ]
+    },
+    "check": [
+      {
+        "q": "When are two events 'concurrent' in Lamport's model?",
+        "a": "When neither happened-before the other."
+      }
+    ]
+  },
+  "lamport-timestamps-the-simple-counter": {
+    "core": "A Lamport clock is a counter per process: increment before each event, attach it to messages, and on receive set counter = max(local, received) + 1. If A → B then L(A) < L(B), giving a total order (with process ID tie-breaks) consistent with causality. The converse doesn't hold: L(A) < L(B) doesn't mean A caused B.",
+    "first_principles": {
+      "problem": "A distributed mutual exclusion scheme needs a consistent global order of requests.",
+      "truths": [
+        "Counters can propagate causality.",
+        "max() captures received knowledge.",
+        "Ties need a deterministic breaker."
+      ],
+      "derivation": [
+        "**Increment** on each local event.",
+        "**Send** counter with messages.",
+        "**Receive**: max(local, msg) + 1.",
+        "**Tie-break** by process ID for total order.",
+        "Remember: **can't detect concurrency**."
+      ]
+    },
+    "analogy": {
+      "title": "Ticket numbers that always increase when you hear about a higher one",
+      "story": "You always take a number higher than any you've seen.",
+      "mapping": [
+        [
+          "Ticket number",
+          "Lamport timestamp"
+        ],
+        [
+          "Hearing a higher number",
+          "Receiving a message"
+        ],
+        [
+          "Taking a higher number",
+          "max + 1"
+        ]
+      ],
+      "breaks": "Ticket numbers are unique per shop; Lamport timestamps can collide across processes without tie-breaks."
+    },
+    "mindmap": {
+      "center": "Lamport Clocks",
+      "branches": [
+        {
+          "label": "Rules",
+          "children": [
+            "Increment per event",
+            "Attach to messages",
+            "max + 1 on receive"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "A → B ⇒ L(A) < L(B)"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "L(A) < L(B) ⇏ A → B"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Total ordering",
+            "Mutual exclusion",
+            "Logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lamport in code",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Causally consistent ordering with one integer."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class Lamport:\n    def __init__(self): self.t = 0\n    def tick(self): self.t += 1; return self.t\n    def send(self): return self.tick()\n    def recv(self, msg_t): self.t = max(self.t, msg_t) + 1; return self.t"
+        }
+      ],
+      "outcome": "simple, consistent event ordering."
+    },
+    "summary": {
+      "points": [
+        "One counter.",
+        "max + 1 on receive.",
+        "Can't detect concurrency."
+      ]
+    },
+    "check": [
+      {
+        "q": "If L(A) < L(B), can you conclude A happened before B?",
+        "a": "No; Lamport clocks only guarantee the reverse implication."
+      }
+    ]
+  },
+  "vector-clocks-detecting-concurrency": {
+    "core": "A vector clock keeps one counter per process. Each process increments its own entry on events and merges (element-wise max) on receive. Comparing vectors tells you whether A → B (all entries ≤, at least one <), B → A, or they're concurrent (neither dominates). Used for conflict detection in Dynamo-style stores and CRDTs, at the cost of size growing with participants.",
+    "first_principles": {
+      "problem": "Two clients update the same shopping cart on different replicas, and the system must detect the conflict rather than silently dropping one.",
+      "truths": [
+        "Concurrency must be detectable.",
+        "Per-process counters capture full causal history.",
+        "Size grows with number of writers."
+      ],
+      "derivation": [
+        "Vector **V[i]** per process.",
+        "**Increment own entry** on events.",
+        "**Merge** with element-wise max on receive.",
+        "**Compare**: dominates vs concurrent.",
+        "**Prune/bound** size (dotted version vectors)."
+      ]
+    },
+    "analogy": {
+      "title": "Each friend tracking how many messages they've seen from everyone",
+      "story": "Comparing tallies reveals whether one person had seen the other's news before replying.",
+      "mapping": [
+        [
+          "Tally per friend",
+          "Vector entry"
+        ],
+        [
+          "Comparing tallies",
+          "Vector comparison"
+        ],
+        [
+          "Neither saw the other's news",
+          "Concurrent"
+        ]
+      ],
+      "breaks": "Friends' tallies stay small; vectors grow with every client or replica."
+    },
+    "mindmap": {
+      "center": "Vector Clocks",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Counter per process"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Increment own",
+            "Merge max"
+          ]
+        },
+        {
+          "label": "Comparison",
+          "children": [
+            "Happened-before",
+            "Concurrent"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Conflict detection",
+            "Dynamo",
+            "Riak",
+            "CRDTs"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Size grows"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detecting concurrency",
+      "scenario": "Vectors.",
+      "flow": [
+        "Replica A writes: [A:2, B:1]",
+        "Replica B writes: [A:1, B:2]",
+        "Neither dominates → concurrent → keep both siblings or merge"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Conflict surfaced instead of lost update."
+        }
+      ],
+      "code": [],
+      "outcome": "causality and concurrency both visible."
+    },
+    "summary": {
+      "points": [
+        "Counter per process.",
+        "Merge by max.",
+        "Detects concurrency."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you know two vector clocks represent concurrent events?",
+        "a": "Neither vector is less than or equal to the other in every entry."
+      }
+    ]
+  },
+  "google-truetime-the-hybrid-solution": {
+    "core": "Google's TrueTime (used by Spanner) uses GPS and atomic clocks in every datacenter to return an interval [earliest, latest] guaranteed to contain true time, with uncertainty ε of a few milliseconds. Spanner assigns commit timestamps and then waits out the uncertainty (commit wait) so timestamps order transactions globally (external consistency). Hybrid Logical Clocks (HLC) offer a cheaper approximation used by CockroachDB.",
+    "first_principles": {
+      "problem": "A globally distributed database needs transaction order matching real time without central coordination.",
+      "truths": [
+        "Bounded uncertainty is better than unknown uncertainty.",
+        "Waiting out uncertainty gives ordering guarantees.",
+        "Hardware can shrink uncertainty."
+      ],
+      "derivation": [
+        "Use **TrueTime.now()** intervals.",
+        "Assign **commit timestamp** ≥ latest.",
+        "**Commit wait** until timestamp < earliest.",
+        "Keep **ε small** with GPS/atomic clocks.",
+        "Use **HLC** where hardware isn't available."
+      ]
+    },
+    "analogy": {
+      "title": "Two people agreeing who arrived first by waiting out their watch error",
+      "story": "If watches can be off by 5 ms, wait 5 ms before declaring your arrival time final.",
+      "mapping": [
+        [
+          "Watch error",
+          "Uncertainty ε"
+        ],
+        [
+          "Waiting",
+          "Commit wait"
+        ],
+        [
+          "Arrival order",
+          "Transaction order"
+        ]
+      ],
+      "breaks": "People can't wait for every arrival; Spanner waits milliseconds per commit, which is acceptable."
+    },
+    "mindmap": {
+      "center": "TrueTime",
+      "branches": [
+        {
+          "label": "API",
+          "children": [
+            "Interval [earliest, latest]"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "GPS",
+            "Atomic clocks"
+          ]
+        },
+        {
+          "label": "Technique",
+          "children": [
+            "Commit wait"
+          ]
+        },
+        {
+          "label": "Guarantee",
+          "children": [
+            "External consistency"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "HLC (CockroachDB)",
+            "AWS Time Sync bounds"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Commit wait",
+      "scenario": "Steps.",
+      "flow": [
+        "TT.now() = [10.000, 10.007]",
+        "Choose commit ts = 10.007",
+        "Wait until TT.now().earliest > 10.007 (~7 ms)",
+        "Commit visible; any later transaction gets a higher timestamp"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Global ordering consistent with real time."
+        }
+      ],
+      "code": [],
+      "outcome": "hybrid physical-logical ordering."
+    },
+    "summary": {
+      "points": [
+        "Bounded uncertainty.",
+        "Commit wait.",
+        "External consistency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Spanner's commit wait achieve?",
+        "a": "It ensures a transaction's timestamp is in the past everywhere before it's visible, so timestamp order matches real-time order."
+      }
+    ]
+  }
+}

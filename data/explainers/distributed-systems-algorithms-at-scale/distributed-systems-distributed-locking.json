@@ -1,0 +1,522 @@
+{
+  "introduction-why-do-we-need-locks": {
+    "core": "Distributed locks ensure only one process acts on a resource at a time across machines: one cron runner, one writer to a file, one processor per account. Locks serve efficiency (avoid duplicate work, where an occasional double is fine) or correctness (must never overlap, which needs consensus plus fencing). Knowing which you need decides the implementation.",
+    "first_principles": {
+      "problem": "A team uses a Redis lock to protect financial updates and occasionally double-applies them.",
+      "truths": [
+        "Local mutexes don't span machines.",
+        "Networks and pauses break exclusivity.",
+        "Efficiency and correctness locks differ."
+      ],
+      "derivation": [
+        "Ask: **efficiency or correctness**?",
+        "Efficiency: **simple Redis lock** with TTL.",
+        "Correctness: **consensus-based** (etcd/ZooKeeper) + **fencing**.",
+        "Prefer **idempotency or transactions** over locks where possible.",
+        "Always use **expiry**."
+      ]
+    },
+    "analogy": {
+      "title": "A single key to a shared tool shed",
+      "story": "Mostly it stops two people using the saw at once; for dangerous machinery you also need a logbook check.",
+      "mapping": [
+        [
+          "Key",
+          "Lock"
+        ],
+        [
+          "Logbook check",
+          "Fencing"
+        ],
+        [
+          "Dangerous machinery",
+          "Correctness-critical resource"
+        ]
+      ],
+      "breaks": "Keys can't be duplicated by time passing; locks can expire while the holder still thinks it has them."
+    },
+    "mindmap": {
+      "center": "Distributed Locks",
+      "branches": [
+        {
+          "label": "Purposes",
+          "children": [
+            "Efficiency",
+            "Correctness"
+          ]
+        },
+        {
+          "label": "Implementations",
+          "children": [
+            "Redis",
+            "etcd",
+            "ZooKeeper",
+            "DB row locks"
+          ]
+        },
+        {
+          "label": "Dangers",
+          "children": [
+            "Expiry while held",
+            "Pauses",
+            "Clock drift"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Idempotency",
+            "Transactions",
+            "Single-writer partitioning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing an approach",
+      "scenario": "Mapping.",
+      "flow": [
+        "Daily report job → Redis SET NX PX (efficiency)",
+        "Account balance updates → DB transaction or etcd lock + fencing",
+        "Event processing → partition by key, no lock"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right strength per need."
+        }
+      ],
+      "code": [],
+      "outcome": "locks used appropriately."
+    },
+    "summary": {
+      "points": [
+        "Efficiency vs correctness.",
+        "Expiry always.",
+        "Avoid locks when possible."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why distinguish efficiency locks from correctness locks?",
+        "a": "Efficiency locks tolerate rare overlaps and can be simple; correctness locks must never overlap and need consensus plus fencing."
+      }
+    ]
+  },
+  "the-lease-mechanism": {
+    "core": "Distributed locks are leases: they expire automatically after a TTL so a crashed holder doesn't block others forever. The holder must finish or renew before expiry. The trade-off: short TTLs recover faster from crashes but risk expiring during long operations or pauses; long TTLs delay recovery.",
+    "first_principles": {
+      "problem": "A worker crashes holding a lock with no expiry, and the job is blocked until someone notices.",
+      "truths": [
+        "Holders can crash.",
+        "Expiry enables recovery.",
+        "Work can outlast the lease."
+      ],
+      "derivation": [
+        "Set **TTL** based on operation time.",
+        "**Renew** (keepalive) for long work.",
+        "**Check** lease validity before critical steps.",
+        "Release **explicitly** when done (only if still owner).",
+        "Combine with **fencing** for correctness."
+      ]
+    },
+    "analogy": {
+      "title": "Renting a locker by the hour",
+      "story": "If you don't come back, it's cleared automatically; if you need more time, you pay to extend.",
+      "mapping": [
+        [
+          "Locker rental",
+          "Lease"
+        ],
+        [
+          "Hourly expiry",
+          "TTL"
+        ],
+        [
+          "Extending",
+          "Renewal"
+        ]
+      ],
+      "breaks": "Locker staff warn you; distributed leases expire silently."
+    },
+    "mindmap": {
+      "center": "Leases",
+      "branches": [
+        {
+          "label": "Mechanics",
+          "children": [
+            "TTL",
+            "Renewal",
+            "Explicit release"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Short TTL: fast recovery, expiry risk",
+            "Long TTL: slow recovery"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Owner check on release",
+            "Fencing"
+          ]
+        },
+        {
+          "label": "Systems",
+          "children": [
+            "etcd leases",
+            "Redis PX",
+            "ZooKeeper ephemeral nodes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe release",
+      "scenario": "Redis Lua.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Never deletes another holder's lock."
+        }
+      ],
+      "code": [
+        {
+          "lang": "lua",
+          "text": "-- release only if we still own the lock\nif redis.call('GET', KEYS[1]) == ARGV[1] then\n  return redis.call('DEL', KEYS[1])\nelse\n  return 0\nend"
+        }
+      ],
+      "outcome": "self-healing locks."
+    },
+    "summary": {
+      "points": [
+        "Locks expire.",
+        "Renew long work.",
+        "Release only your own."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must lock release check ownership?",
+        "a": "The lock may have expired and been acquired by someone else, whose lock you'd otherwise delete."
+      }
+    ]
+  },
+  "redlock-distributed-locking-with-redis": {
+    "core": "Redlock acquires a lock on a majority of N independent Redis masters (e.g. 3 of 5) within a time limit, using SET key random NX PX ttl on each, and considers the lock held for the remaining validity time. It improves availability over a single Redis but, as Martin Kleppmann argued, relies on timing assumptions (bounded pauses and drift) and provides no fencing tokens, so it's unsafe for correctness-critical locking.",
+    "first_principles": {
+      "problem": "A team adopts Redlock believing it guarantees mutual exclusion under all conditions.",
+      "truths": [
+        "Majorities improve availability.",
+        "Timing assumptions can be violated.",
+        "No monotonic token means no fencing."
+      ],
+      "derivation": [
+        "Use Redlock for **efficiency locks** at most.",
+        "Understand its **timing assumptions**.",
+        "For correctness use **consensus + fencing**.",
+        "Prefer a **single Redis + simple lock** if failover risk is acceptable.",
+        "Read the **Kleppmann/Antirez debate**."
+      ]
+    },
+    "analogy": {
+      "title": "Getting permission from three of five managers by phone within a minute",
+      "story": "Usually fine, but if a call is delayed or you fall asleep mid-task, two people may both think they're approved.",
+      "mapping": [
+        [
+          "Managers",
+          "Redis masters"
+        ],
+        [
+          "Within a minute",
+          "Validity time"
+        ],
+        [
+          "Falling asleep",
+          "Process pause"
+        ]
+      ],
+      "breaks": "Managers keep records; Redis keys just expire."
+    },
+    "mindmap": {
+      "center": "Redlock",
+      "branches": [
+        {
+          "label": "Algorithm",
+          "children": [
+            "N masters",
+            "Majority acquire",
+            "Validity time"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "No single Redis SPOF"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Timing assumptions",
+            "No fencing tokens"
+          ]
+        },
+        {
+          "label": "Verdict",
+          "children": [
+            "Efficiency only"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "etcd/ZooKeeper + fencing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Failure scenario",
+      "scenario": "Trace.",
+      "flow": [
+        "Client 1 acquires on 3/5 nodes",
+        "Client 1 pauses (GC) past TTL",
+        "Client 2 acquires on 3/5",
+        "Client 1 wakes and writes, with no token to reject it"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Unsafe for correctness without fencing."
+        }
+      ],
+      "code": [],
+      "outcome": "informed use of Redlock."
+    },
+    "summary": {
+      "points": [
+        "Majority of Redis nodes.",
+        "Timing-dependent.",
+        "No fencing."
+      ]
+    },
+    "check": [
+      {
+        "q": "What key safety feature does Redlock lack?",
+        "a": "Monotonic fencing tokens to reject stale lock holders."
+      }
+    ]
+  },
+  "the-danger-of-clock-drift": {
+    "core": "Time-based locks assume clocks advance at similar rates and processes don't pause unexpectedly. In reality clocks drift, NTP can step time, VMs migrate and GC pauses last seconds. Any of these can make a lock holder believe its lease is valid after others see it expired, so overlapping holders are possible without fencing.",
+    "first_principles": {
+      "problem": "A Redis server's clock jumps forward after an NTP correction, expiring a lock early while its holder is mid-operation.",
+      "truths": [
+        "Clocks can jump.",
+        "Pauses aren't observable by the paused process.",
+        "TTLs depend on clocks on both sides."
+      ],
+      "derivation": [
+        "Use **monotonic clocks** where possible.",
+        "Avoid **wall-clock** jumps (slewing).",
+        "Add **safety margins**.",
+        "Never rely on **time alone** for correctness.",
+        "Use **fencing tokens**."
+      ]
+    },
+    "analogy": {
+      "title": "Two people timing the same hourglass from different rooms",
+      "story": "If one room's clock is off, they disagree on when time is up.",
+      "mapping": [
+        [
+          "Hourglass",
+          "Lease TTL"
+        ],
+        [
+          "Different clocks",
+          "Drift between machines"
+        ],
+        [
+          "Disagreement",
+          "Overlapping holders"
+        ]
+      ],
+      "breaks": "Hourglasses don't jump; system clocks can be stepped by NTP."
+    },
+    "mindmap": {
+      "center": "Clock Drift Danger",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Drift",
+            "NTP steps",
+            "VM migration",
+            "GC pauses"
+          ]
+        },
+        {
+          "label": "Effects",
+          "children": [
+            "Early expiry",
+            "Late belief",
+            "Overlap"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "Monotonic clocks",
+            "Slewing",
+            "Margins",
+            "Fencing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Overlap from a clock jump",
+      "scenario": "Timeline.",
+      "flow": [
+        "Lock TTL 10 s set at server time 100",
+        "Server clock steps +8 s at 103",
+        "Key expires at real time 105",
+        "Second client acquires while first still working"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Time-based safety is fragile."
+        }
+      ],
+      "code": [],
+      "outcome": "healthy distrust of TTLs."
+    },
+    "summary": {
+      "points": [
+        "Clocks lie.",
+        "Pauses hide time.",
+        "Fence for safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a GC pause break a time-based lock?",
+        "a": "The holder doesn't notice time passing, so it may act after the lock has expired and been granted to someone else."
+      }
+    ]
+  },
+  "consensus-based-locking-zookeeper-and-etcd": {
+    "core": "Consensus stores give correctness-grade locks: ZooKeeper's ephemeral sequential znodes (lowest sequence holds the lock, others watch their predecessor, the lock vanishes when the session dies) and etcd's leases with revision-ordered keys (concurrency.Mutex). Both provide monotonic numbers (zxid, revision) usable as fencing tokens.",
+    "first_principles": {
+      "problem": "A payment reconciliation job must never run twice concurrently, even during failures.",
+      "truths": [
+        "Consensus gives a single consistent view.",
+        "Sessions/leases tie locks to liveness.",
+        "Revisions are monotonic tokens."
+      ],
+      "derivation": [
+        "**ZooKeeper**: ephemeral sequential znodes + watch predecessor.",
+        "**etcd**: lease + key with revision; lowest revision wins.",
+        "Use the **revision/zxid as fencing token**.",
+        "Handle **session loss** (stop work).",
+        "Avoid **herd effect** by watching predecessor only."
+      ]
+    },
+    "analogy": {
+      "title": "A numbered queue at a government office",
+      "story": "Your ticket number is your place; if you leave, your ticket is void, and only the counter's current number is served.",
+      "mapping": [
+        [
+          "Ticket numbers",
+          "Sequential znodes/revisions"
+        ],
+        [
+          "Leaving",
+          "Session expiry"
+        ],
+        [
+          "Counter's number",
+          "Fencing token check"
+        ]
+      ],
+      "breaks": "Government queues are slow; consensus locks are acquired in milliseconds."
+    },
+    "mindmap": {
+      "center": "Consensus Locks",
+      "branches": [
+        {
+          "label": "ZooKeeper",
+          "children": [
+            "Ephemeral sequential znodes",
+            "Watch predecessor",
+            "Sessions"
+          ]
+        },
+        {
+          "label": "etcd",
+          "children": [
+            "Leases",
+            "Revisions",
+            "concurrency.Mutex"
+          ]
+        },
+        {
+          "label": "Fencing",
+          "children": [
+            "zxid",
+            "Revision"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Session loss → release"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Herd effect"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "etcd mutex",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exclusive execution with a fencing token."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "s, _ := concurrency.NewSession(cli, concurrency.WithTTL(10))\nm := concurrency.NewMutex(s, \"/locks/reconcile\")\nif err := m.Lock(ctx); err != nil { return err }\ntoken := m.Header().Revision          // fencing token\nrunReconcile(ctx, token)\nm.Unlock(ctx)"
+        }
+      ],
+      "outcome": "correctness-grade locking."
+    },
+    "summary": {
+      "points": [
+        "Consensus-backed.",
+        "Liveness via sessions.",
+        "Revision as fencing token."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a ZooKeeper lock avoid the herd effect?",
+        "a": "Each waiter watches only its immediate predecessor znode rather than the lock holder."
+      }
+    ]
+  }
+}

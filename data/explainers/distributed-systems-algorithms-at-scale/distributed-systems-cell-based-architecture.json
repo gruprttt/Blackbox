@@ -1,0 +1,514 @@
+{
+  "introduction-the-problem-with-layers": {
+    "core": "Traditional architectures scale by layers: one load-balancer tier, one app tier, one database tier shared by all customers. A bad deploy, poison request or overload in any layer affects everyone. Cell-based architecture instead slices the system vertically into independent full-stack cells, each serving a subset of customers, limiting blast radius.",
+    "first_principles": {
+      "problem": "A single malformed request pattern from one customer crashes the shared app tier for all customers.",
+      "truths": [
+        "Shared tiers share failures.",
+        "Vertical slices isolate them.",
+        "Most requests only need one customer's data."
+      ],
+      "derivation": [
+        "Identify a **partition key** (customer, tenant).",
+        "Build **full-stack cells**.",
+        "Route with a **thin cell router**.",
+        "**Deploy** cell by cell.",
+        "**Cap cell size**."
+      ]
+    },
+    "analogy": {
+      "title": "Separate kitchens per restaurant in a food hall",
+      "story": "A grease fire in one kitchen doesn't close the others.",
+      "mapping": [
+        [
+          "Kitchens",
+          "Cells"
+        ],
+        [
+          "Shared dining room",
+          "Router"
+        ],
+        [
+          "Grease fire",
+          "Failure"
+        ]
+      ],
+      "breaks": "Food halls share plumbing; cells should share as little as possible."
+    },
+    "mindmap": {
+      "center": "Layers vs Cells",
+      "branches": [
+        {
+          "label": "Layered",
+          "children": [
+            "Shared tiers",
+            "Global blast radius"
+          ]
+        },
+        {
+          "label": "Cells",
+          "children": [
+            "Vertical slices",
+            "Customer subsets",
+            "Independent stacks"
+          ]
+        },
+        {
+          "label": "Router",
+          "children": [
+            "Thin",
+            "Static mapping"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Contained failures",
+            "Predictable scale"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Blast radius comparison",
+      "scenario": "Effect.",
+      "flow": [
+        "Layered: poison request → 100% customers affected",
+        "Cells (20): → ~5% affected"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Most customers unaffected."
+        }
+      ],
+      "code": [],
+      "outcome": "why cells exist."
+    },
+    "summary": {
+      "points": [
+        "Layers share failure.",
+        "Cells isolate.",
+        "Thin routing."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main benefit of cell-based architecture?",
+        "a": "It limits the blast radius of failures to the customers in one cell."
+      }
+    ]
+  },
+  "defining-the-cell": {
+    "core": "A cell is a complete, independent instance of the service (compute, storage, queues, caches) with a fixed maximum capacity, serving the customers mapped to it. Cells share nothing except a minimal routing layer and global control functions. The partition key must let almost all requests be served within one cell.",
+    "first_principles": {
+      "problem": "Engineers build 'cells' that still share a global database, so one cell's overload affects all.",
+      "truths": [
+        "Isolation fails if anything significant is shared.",
+        "Fixed size makes cells testable.",
+        "Cross-cell requests break isolation."
+      ],
+      "derivation": [
+        "Include **all dependencies** in the cell.",
+        "Set a **max size** and test it.",
+        "Choose a **partition key** with locality.",
+        "Keep **global services** minimal and highly available.",
+        "Treat **cross-cell calls** as exceptional."
+      ]
+    },
+    "analogy": {
+      "title": "Identical self-contained branch offices",
+      "story": "Each has its own staff, files and phones, serving its own clients.",
+      "mapping": [
+        [
+          "Branch office",
+          "Cell"
+        ],
+        [
+          "Own files",
+          "Own database"
+        ],
+        [
+          "Head office",
+          "Minimal global layer"
+        ]
+      ],
+      "breaks": "Branches can borrow staff; cells shouldn't borrow capacity across boundaries."
+    },
+    "mindmap": {
+      "center": "Defining a Cell",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "Compute",
+            "Storage",
+            "Queues",
+            "Caches"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Independent",
+            "Fixed max size",
+            "Tested capacity"
+          ]
+        },
+        {
+          "label": "Partition key",
+          "children": [
+            "Tenant",
+            "Customer",
+            "Region"
+          ]
+        },
+        {
+          "label": "Global",
+          "children": [
+            "Router",
+            "Control plane"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SaaS cell",
+      "scenario": "Contents.",
+      "flow": [
+        "ALB + ECS services",
+        "Aurora cluster",
+        "SQS queues + workers",
+        "ElastiCache",
+        "Max 2,000 tenants per cell"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each cell independently testable and deployable."
+        }
+      ],
+      "code": [],
+      "outcome": "clear cell boundaries."
+    },
+    "summary": {
+      "points": [
+        "Full stack.",
+        "Fixed size.",
+        "Share nothing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must a cell include its own database?",
+        "a": "A shared database would couple cells and let one cell's problems affect all."
+      }
+    ]
+  },
+  "blast-radius-mathematics": {
+    "core": "With N equal cells, a failure confined to one cell affects about 1/N of customers. More, smaller cells shrink impact but add operational overhead and reduce pooling efficiency. Deploying cell by cell (one, then a wave, then the rest) catches bad changes while impact is small, so blast radius per change is roughly 1/N.",
+    "first_principles": {
+      "problem": "Leadership asks how many cells are needed to keep any single failure under 5% customer impact.",
+      "truths": [
+        "Impact scales with cell size.",
+        "Overhead scales with cell count.",
+        "Progressive deploys limit change risk."
+      ],
+      "derivation": [
+        "Impact ≈ **1/N**.",
+        "Choose **N** from impact target (5% → ≥20 cells).",
+        "Balance **overhead** (cost per cell).",
+        "Deploy **one cell first**, bake, then waves.",
+        "Size cells for **max tested load**."
+      ]
+    },
+    "analogy": {
+      "title": "Dividing a field into fenced paddocks",
+      "story": "A sick animal affects only its paddock; more paddocks, fewer animals at risk, but more fences.",
+      "mapping": [
+        [
+          "Paddocks",
+          "Cells"
+        ],
+        [
+          "Sick animal",
+          "Failure"
+        ],
+        [
+          "Fences",
+          "Overhead"
+        ]
+      ],
+      "breaks": "Paddocks are fixed; cells can be split or added as you grow."
+    },
+    "mindmap": {
+      "center": "Blast Radius Maths",
+      "branches": [
+        {
+          "label": "Impact",
+          "children": [
+            "≈ 1/N"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "More cells → less impact",
+            "More overhead"
+          ]
+        },
+        {
+          "label": "Deploys",
+          "children": [
+            "One cell",
+            "Bake time",
+            "Waves"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "Tested max load"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing for a target",
+      "scenario": "Maths.",
+      "flow": [
+        "Target: ≤ 5% impact per failure",
+        "N ≥ 20 cells",
+        "Deploy: 1 cell → 4 cells → 15 cells",
+        "Worst-case bad deploy impact: 5%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Quantified, bounded risk."
+        }
+      ],
+      "code": [],
+      "outcome": "cell counts chosen by maths."
+    },
+    "summary": {
+      "points": [
+        "1/N impact.",
+        "Balance overhead.",
+        "Deploy progressively."
+      ]
+    },
+    "check": [
+      {
+        "q": "With 25 equal cells, roughly what share of customers does a single-cell failure affect?",
+        "a": "About 4%."
+      }
+    ]
+  },
+  "shuffle-sharding-magic-with-math": {
+    "core": "Shuffle sharding assigns each customer a random subset of k workers (or cells) from n, instead of one fixed group. A poison customer can only break its own k workers, and another customer shares all k of them with probability 1/C(n,k), tiny for modest n and k. With client retries across their shard, most customers are unaffected even by a poison neighbour.",
+    "first_principles": {
+      "problem": "In simple sharding, a noisy customer takes down every other customer in its shard.",
+      "truths": [
+        "Combinations grow combinatorially.",
+        "Full overlap is what causes shared outage.",
+        "Retries across a shard avoid failed members."
+      ],
+      "derivation": [
+        "Pick **n** workers, **k** per customer.",
+        "Assign a **random combination**.",
+        "Clients **retry across shard members**.",
+        "Overlap probability **1/C(n,k)**.",
+        "Use for **multi-tenant fronts** (Route 53, API endpoints)."
+      ]
+    },
+    "analogy": {
+      "title": "Giving each guest a random pair of keys to rooms",
+      "story": "If one guest jams their rooms, almost no other guest has exactly the same pair.",
+      "mapping": [
+        [
+          "Rooms",
+          "Workers"
+        ],
+        [
+          "Key pair",
+          "Shuffle shard"
+        ],
+        [
+          "Jammed rooms",
+          "Poisoned workers"
+        ]
+      ],
+      "breaks": "Guests pick which key to try; systems need client-side retry logic."
+    },
+    "mindmap": {
+      "center": "Shuffle Sharding",
+      "branches": [
+        {
+          "label": "Setup",
+          "children": [
+            "n workers",
+            "k per customer"
+          ]
+        },
+        {
+          "label": "Maths",
+          "children": [
+            "C(n,k) combinations",
+            "Overlap 1/C(n,k)"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "Retries within shard"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Route 53",
+            "Multi-tenant APIs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Combinatorics",
+      "scenario": "Numbers.",
+      "flow": [
+        "n = 8, k = 2 → 28 shards",
+        "n = 100, k = 5 → ~75 million shards",
+        "Odds another customer fully shares a poison shard: 1 in 75M"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Near-complete isolation from noisy neighbours."
+        }
+      ],
+      "code": [],
+      "outcome": "dramatic isolation with modest resources."
+    },
+    "summary": {
+      "points": [
+        "Random subsets.",
+        "Combinatorial isolation.",
+        "Retry within shard."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many shuffle shards are possible with 8 workers and 2 per customer?",
+        "a": "28."
+      }
+    ]
+  },
+  "cell-lifecycle-and-operations": {
+    "core": "Operating cells means automating everything: provisioning new cells from templates (IaC), placing and migrating customers between cells (with data migration and dual-write or cut-over), deploying in waves with automated rollback, monitoring per cell, and retiring or splitting cells as they reach capacity. Without automation, cells multiply toil.",
+    "first_principles": {
+      "problem": "A team builds 10 cells by hand, and now every change takes ten times as long.",
+      "truths": [
+        "Repetition demands automation.",
+        "Customers sometimes need moving.",
+        "Per-cell visibility is essential."
+      ],
+      "derivation": [
+        "**IaC templates** for cells.",
+        "**Placement service** for new customers.",
+        "**Migration tooling** for moving customers.",
+        "**Wave deployments** with bake time.",
+        "**Per-cell dashboards and alarms**."
+      ]
+    },
+    "analogy": {
+      "title": "Running a franchise network",
+      "story": "Standard store blueprints, a system for assigning customers to stores, and the ability to open or move stores.",
+      "mapping": [
+        [
+          "Store blueprint",
+          "Cell template"
+        ],
+        [
+          "Customer assignment",
+          "Placement"
+        ],
+        [
+          "Moving customers",
+          "Migration"
+        ]
+      ],
+      "breaks": "Franchises open stores over months; cells should be created in hours."
+    },
+    "mindmap": {
+      "center": "Cell Operations",
+      "branches": [
+        {
+          "label": "Provisioning",
+          "children": [
+            "IaC templates"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Router mapping",
+            "Capacity-aware"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "Data move",
+            "Cut-over"
+          ]
+        },
+        {
+          "label": "Deployment",
+          "children": [
+            "Waves",
+            "Bake",
+            "Rollback"
+          ]
+        },
+        {
+          "label": "Observability",
+          "children": [
+            "Per-cell metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adding a cell",
+      "scenario": "Workflow.",
+      "flow": [
+        "Cell 14 reaches 80% capacity",
+        "Pipeline provisions cell 21 from template",
+        "Placement sends new tenants to cell 21",
+        "Optionally migrate large tenants"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Growth handled routinely."
+        }
+      ],
+      "code": [],
+      "outcome": "cells at scale without toil."
+    },
+    "summary": {
+      "points": [
+        "Automate cell creation.",
+        "Place and migrate customers.",
+        "Observe per cell."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is automation essential for cell-based architecture?",
+        "a": "Every operation repeats across many cells, so manual work multiplies toil and inconsistency."
+      }
+    ]
+  }
+}

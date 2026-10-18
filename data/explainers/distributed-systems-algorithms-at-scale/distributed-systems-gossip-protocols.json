@@ -1,0 +1,621 @@
+{
+  "introduction-how-do-you-talk-to-10000-nodes": {
+    "core": "Broadcasting membership or state from a central server to thousands of nodes doesn't scale and is a single point of failure. Gossip protocols have each node periodically exchange information with a few random peers; information spreads epidemically to the whole cluster in O(log N) rounds with bounded per-node load, tolerating failures naturally.",
+    "first_principles": {
+      "problem": "A central health-check service for 10,000 nodes is overloaded and its outage blinds the cluster.",
+      "truths": [
+        "Random peer exchanges spread information fast.",
+        "Per-node load stays constant.",
+        "No central component means no single failure point."
+      ],
+      "derivation": [
+        "Each round, pick **k random peers**.",
+        "Exchange **state digests**.",
+        "Merge **newer information**.",
+        "Spread in **O(log N)** rounds.",
+        "Use for **membership, failure detection, metadata**."
+      ]
+    },
+    "analogy": {
+      "title": "Office gossip",
+      "story": "Tell two colleagues at coffee; soon the whole building knows, without an announcement.",
+      "mapping": [
+        [
+          "Colleagues",
+          "Peers"
+        ],
+        [
+          "Coffee chats",
+          "Gossip rounds"
+        ],
+        [
+          "Whole building knows",
+          "Convergence"
+        ]
+      ],
+      "breaks": "Office gossip distorts; gossip protocols carry versioned, verifiable data."
+    },
+    "mindmap": {
+      "center": "Gossip Protocols",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Random peers",
+            "Periodic rounds",
+            "Digests"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "O(log N) spread",
+            "Constant load",
+            "Fault tolerant"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Membership",
+            "Failure detection",
+            "Metadata",
+            "Anti-entropy"
+          ]
+        },
+        {
+          "label": "Systems",
+          "children": [
+            "Cassandra",
+            "Consul",
+            "Serf",
+            "Redis Cluster"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spread speed",
+      "scenario": "Numbers.",
+      "flow": [
+        "10,000 nodes, fanout 3",
+        "Rounds to reach all ≈ log3(10,000) + few ≈ 10–12",
+        "1 s rounds → cluster-wide in ~12 s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fast, decentralised dissemination."
+        }
+      ],
+      "code": [],
+      "outcome": "scalable cluster communication."
+    },
+    "summary": {
+      "points": [
+        "Talk to random peers.",
+        "Logarithmic spread.",
+        "No central point."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many rounds does gossip need to reach N nodes, roughly?",
+        "a": "O(log N)."
+      }
+    ]
+  },
+  "epidemic-propagation-the-math-of-rumors": {
+    "core": "Gossip follows epidemic models: infected nodes (that have the update) spread it to random peers. Push spreads fast early, pull finishes fast late, and push-pull combines both. The infected fraction follows a logistic curve, reaching nearly all nodes in O(log N) rounds. Rumour-mongering stops spreading after a while, while anti-entropy keeps reconciling to guarantee eventual delivery.",
+    "first_principles": {
+      "problem": "Updates sometimes never reach a few nodes in a simple push-only gossip.",
+      "truths": [
+        "Push is efficient when few know.",
+        "Pull is efficient when most know.",
+        "Some redundancy guarantees coverage."
+      ],
+      "derivation": [
+        "Use **push-pull** exchanges.",
+        "Choose **fanout** (2–4).",
+        "**Rumour-mongering** with stop probability.",
+        "Periodic **anti-entropy** for stragglers.",
+        "Model with **logistic growth**."
+      ]
+    },
+    "analogy": {
+      "title": "A rumour spreading through a town",
+      "story": "Slow at first, explosive in the middle and slow to reach the last few hermits.",
+      "mapping": [
+        [
+          "Rumour",
+          "Update"
+        ],
+        [
+          "Hermits",
+          "Straggler nodes"
+        ],
+        [
+          "Visiting hermits",
+          "Pull/anti-entropy"
+        ]
+      ],
+      "breaks": "Rumours fade naturally; protocols tune exactly when to stop spreading."
+    },
+    "mindmap": {
+      "center": "Epidemic Maths",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "Push",
+            "Pull",
+            "Push-pull"
+          ]
+        },
+        {
+          "label": "Curve",
+          "children": [
+            "Logistic",
+            "O(log N)"
+          ]
+        },
+        {
+          "label": "Strategies",
+          "children": [
+            "Rumour-mongering",
+            "Anti-entropy"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Fanout",
+            "Interval",
+            "Stop probability"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Push vs pull",
+      "scenario": "Behaviour.",
+      "flow": [
+        "Early: 1% infected, push doubles quickly",
+        "Late: 99% infected, push wastes messages",
+        "Pull: uninfected nodes ask and get it fast",
+        "Push-pull: fast throughout"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Full coverage with modest messages."
+        }
+      ],
+      "code": [],
+      "outcome": "tuned dissemination."
+    },
+    "summary": {
+      "points": [
+        "Logistic spread.",
+        "Push-pull is best.",
+        "Anti-entropy guarantees delivery."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why combine push and pull in gossip?",
+        "a": "Push spreads fast while few nodes have the update; pull finishes fast when most do."
+      }
+    ]
+  },
+  "swim-a-better-way-to-detect-failures": {
+    "core": "SWIM (Scalable Weakly-consistent Infection-style Membership) separates failure detection from dissemination. Each period, a node pings one random member; if no ack, it asks k others to ping it indirectly (ping-req) to rule out a local network issue. Confirmed failures are disseminated by piggybacking on these messages. Load per node is constant and detection time is independent of cluster size.",
+    "first_principles": {
+      "problem": "All-to-all heartbeats among 5,000 nodes create 25 million messages per interval.",
+      "truths": [
+        "Heartbeating everyone is O(N²).",
+        "One random probe per period suffices statistically.",
+        "Indirect probes reduce false positives."
+      ],
+      "derivation": [
+        "**Ping** one random member per period.",
+        "On timeout, **ping-req** via k members.",
+        "Declare **suspect/failed** if all fail.",
+        "**Piggyback** membership updates.",
+        "Use **round-robin** target selection for bounded detection time."
+      ]
+    },
+    "analogy": {
+      "title": "Checking on neighbours",
+      "story": "Each day you knock on one random neighbour's door; if no answer, ask two others to try before calling for help.",
+      "mapping": [
+        [
+          "Knocking",
+          "Ping"
+        ],
+        [
+          "Asking others to try",
+          "ping-req"
+        ],
+        [
+          "Calling for help",
+          "Declaring failure"
+        ]
+      ],
+      "breaks": "Neighbours can phone; SWIM relies on network probes with timeouts."
+    },
+    "mindmap": {
+      "center": "SWIM",
+      "branches": [
+        {
+          "label": "Detection",
+          "children": [
+            "Ping",
+            "ping-req (indirect)",
+            "Timeouts"
+          ]
+        },
+        {
+          "label": "Dissemination",
+          "children": [
+            "Piggybacking",
+            "Infection-style"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Constant load",
+            "Size-independent detection time"
+          ]
+        },
+        {
+          "label": "Improvements",
+          "children": [
+            "Suspicion",
+            "Round-robin targets"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Probe sequence",
+      "scenario": "Trace.",
+      "flow": [
+        "A pings D → no ack",
+        "A asks B and C to ping D",
+        "C reaches D → ack relayed",
+        "D is alive (A's link was the problem)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No false failure from a flaky link."
+        }
+      ],
+      "code": [],
+      "outcome": "scalable, accurate failure detection."
+    },
+    "summary": {
+      "points": [
+        "Probe one random member.",
+        "Indirect probes.",
+        "Piggyback updates."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does SWIM's ping-req do?",
+        "a": "Asks other members to probe a suspected node indirectly, reducing false positives from local network issues."
+      }
+    ]
+  },
+  "swim-refinement-the-suspicion-mechanism": {
+    "core": "Instead of declaring a node dead immediately, SWIM's suspicion mechanism marks it suspect and gossips that state. If the suspected node hears it is suspected, it refutes by gossiping an alive message with a higher incarnation number. Only if no refutation arrives within a timeout is it declared dead, greatly reducing false positives from transient slowness.",
+    "first_principles": {
+      "problem": "A node stalled by a 3-second GC pause is wrongly declared dead and removed from the cluster.",
+      "truths": [
+        "Slow isn't dead.",
+        "Nodes can defend themselves.",
+        "Version numbers resolve conflicting claims."
+      ],
+      "derivation": [
+        "Mark **suspect** first.",
+        "Gossip **suspicion** with incarnation.",
+        "Node **refutes** with higher incarnation.",
+        "Declare **dead after timeout**.",
+        "Tune **suspicion timeout** (Lifeguard adds local health awareness)."
+      ]
+    },
+    "analogy": {
+      "title": "A 'missing' notice that the person can cancel",
+      "story": "If they see the notice and reply 'I'm fine', it's withdrawn before anyone panics.",
+      "mapping": [
+        [
+          "Missing notice",
+          "Suspect state"
+        ],
+        [
+          "'I'm fine' reply",
+          "Refutation"
+        ],
+        [
+          "Notice number",
+          "Incarnation"
+        ]
+      ],
+      "breaks": "People see notices on TV; nodes learn of suspicion through gossip, which takes time."
+    },
+    "mindmap": {
+      "center": "Suspicion",
+      "branches": [
+        {
+          "label": "States",
+          "children": [
+            "Alive",
+            "Suspect",
+            "Dead"
+          ]
+        },
+        {
+          "label": "Refutation",
+          "children": [
+            "Incarnation number",
+            "Alive message"
+          ]
+        },
+        {
+          "label": "Timeout",
+          "children": [
+            "Suspicion timeout"
+          ]
+        },
+        {
+          "label": "Extensions",
+          "children": [
+            "Lifeguard (HashiCorp)",
+            "Local health multipliers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Refutation",
+      "scenario": "Trace.",
+      "flow": [
+        "D suspected (incarnation 4)",
+        "Gossip reaches D after GC pause",
+        "D gossips alive, incarnation 5",
+        "Cluster keeps D as alive"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No unnecessary rebalancing."
+        }
+      ],
+      "code": [],
+      "outcome": "robust membership under transient issues."
+    },
+    "summary": {
+      "points": [
+        "Suspect before dead.",
+        "Nodes refute.",
+        "Incarnations order claims."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a suspected node refute a SWIM suspicion?",
+        "a": "By gossiping an alive message with a higher incarnation number."
+      }
+    ]
+  },
+  "memberlist-gossip-in-the-real-world": {
+    "core": "HashiCorp's memberlist library (used by Consul, Nomad, Serf and others) implements SWIM with suspicion, Lifeguard improvements, push-pull full state syncs over TCP, encryption, and tunable profiles for LAN versus WAN. Cassandra, ScyllaDB and Redis Cluster use their own gossip for membership and metadata.",
+    "first_principles": {
+      "problem": "A team wants cluster membership in its Go service without building gossip from scratch.",
+      "truths": [
+        "Gossip is subtle to implement well.",
+        "Production needs tuning and encryption.",
+        "LAN and WAN latencies differ."
+      ],
+      "derivation": [
+        "Use **memberlist/Serf** libraries.",
+        "Choose **LAN or WAN config**.",
+        "Enable **encryption** (shared key).",
+        "Tune **probe interval, suspicion multiplier**.",
+        "Use **push-pull sync** to fix drift."
+      ]
+    },
+    "analogy": {
+      "title": "Buying a tested intercom system instead of wiring your own",
+      "story": "It's already handled the edge cases you'd discover painfully.",
+      "mapping": [
+        [
+          "Intercom",
+          "memberlist"
+        ],
+        [
+          "Wiring",
+          "Custom gossip"
+        ],
+        [
+          "Edge cases",
+          "Partitions, GC, packet loss"
+        ]
+      ],
+      "breaks": "Intercoms are plug-and-play; memberlist still needs config for your network."
+    },
+    "mindmap": {
+      "center": "Gossip in Practice",
+      "branches": [
+        {
+          "label": "Libraries",
+          "children": [
+            "memberlist",
+            "Serf"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "Consul",
+            "Nomad",
+            "Cassandra",
+            "Redis Cluster"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "SWIM",
+            "Suspicion",
+            "Lifeguard",
+            "Push-pull TCP",
+            "Encryption"
+          ]
+        },
+        {
+          "label": "Configs",
+          "children": [
+            "LAN",
+            "WAN"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Joining a memberlist",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Encrypted, self-healing membership in a few lines."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "cfg := memberlist.DefaultLANConfig()\ncfg.Name = hostname\ncfg.SecretKey = key   // 32-byte AES key\nlist, _ := memberlist.Create(cfg)\nlist.Join([]string{\"10.0.1.10\", \"10.0.1.11\"})\nfor _, m := range list.Members() { fmt.Println(m.Name, m.Addr) }"
+        }
+      ],
+      "outcome": "production gossip without reinvention."
+    },
+    "summary": {
+      "points": [
+        "Use proven libraries.",
+        "Tune for network.",
+        "Encrypt gossip."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which library implements SWIM for Consul and Nomad?",
+        "a": "HashiCorp memberlist."
+      }
+    ]
+  },
+  "the-piggyback-strategy-getting-information-for-free": {
+    "core": "Gossip systems piggyback membership updates, metadata and small state changes onto messages they're already sending (pings and acks), so dissemination costs almost no extra messages. Each update is retransmitted a bounded number of times (λ·log N) before being dropped, guaranteeing spread with high probability while keeping message sizes small.",
+    "first_principles": {
+      "problem": "Sending separate broadcast messages for every membership change doubles network chatter.",
+      "truths": [
+        "Protocol messages already flow constantly.",
+        "Small updates fit into existing packets.",
+        "A few retransmissions reach everyone."
+      ],
+      "derivation": [
+        "Keep an **update buffer**.",
+        "Attach updates to **pings/acks**.",
+        "Retransmit each **λ·log N times**.",
+        "Prioritise **least-sent** updates.",
+        "Cap **payload size** per message."
+      ]
+    },
+    "analogy": {
+      "title": "Adding a note to a letter you're already posting",
+      "story": "No extra stamp needed.",
+      "mapping": [
+        [
+          "Letter",
+          "Ping/ack"
+        ],
+        [
+          "Extra note",
+          "Piggybacked update"
+        ],
+        [
+          "No stamp",
+          "No extra messages"
+        ]
+      ],
+      "breaks": "Letters can hold many notes; packets have size limits, so updates queue."
+    },
+    "mindmap": {
+      "center": "Piggybacking",
+      "branches": [
+        {
+          "label": "Carrier",
+          "children": [
+            "Pings",
+            "Acks",
+            "ping-reqs"
+          ]
+        },
+        {
+          "label": "Buffer",
+          "children": [
+            "Pending updates",
+            "Retransmit counts"
+          ]
+        },
+        {
+          "label": "Bounds",
+          "children": [
+            "λ·log N retransmissions",
+            "Payload caps"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Near-free dissemination"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Update lifecycle",
+      "scenario": "Trace.",
+      "flow": [
+        "Node learns 'E left'",
+        "Adds to buffer with count 0",
+        "Attached to next ~4·log N pings/acks",
+        "Dropped after limit; cluster knows"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Membership spreads with no extra messages."
+        }
+      ],
+      "code": [],
+      "outcome": "efficient dissemination."
+    },
+    "summary": {
+      "points": [
+        "Ride existing messages.",
+        "Bounded retransmissions.",
+        "Small payloads."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do gossip protocols piggyback updates on pings?",
+        "a": "To spread information without sending extra messages, keeping network overhead low."
+      }
+    ]
+  }
+}

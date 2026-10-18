@@ -1,0 +1,619 @@
+{
+  "introduction-the-illusion-of-a-single-copy": {
+    "core": "Replication keeps multiple copies for availability and performance, but clients would ideally see a single, up-to-date copy. Consistency models define what clients may observe when reading replicated data: from linearizability (looks like one copy in real time) through sequential and causal consistency to eventual consistency. Stronger models cost latency and availability (CAP/PACELC).",
+    "first_principles": {
+      "problem": "A user updates their profile, refreshes and sees the old version, and support tickets pile up.",
+      "truths": [
+        "Replicas lag.",
+        "Stronger guarantees need coordination.",
+        "Applications differ in what they tolerate."
+      ],
+      "derivation": [
+        "Know the **spectrum** of models.",
+        "Pick **per operation** (balances vs likes).",
+        "Understand **CAP/PACELC** trade-offs.",
+        "Use **client-centric guarantees** for UX.",
+        "Test with **Jepsen-style** checks."
+      ]
+    },
+    "analogy": {
+      "title": "Copies of a shared document",
+      "story": "Ideally everyone sees the latest edit instantly; in practice some copies are a few seconds behind.",
+      "mapping": [
+        [
+          "Copies",
+          "Replicas"
+        ],
+        [
+          "Latest edit",
+          "Most recent write"
+        ],
+        [
+          "Seconds behind",
+          "Replication lag"
+        ]
+      ],
+      "breaks": "Documents sync visibly; replicas lag invisibly."
+    },
+    "mindmap": {
+      "center": "Consistency Models",
+      "branches": [
+        {
+          "label": "Strong",
+          "children": [
+            "Linearizable",
+            "Sequential"
+          ]
+        },
+        {
+          "label": "Middle",
+          "children": [
+            "Causal"
+          ]
+        },
+        {
+          "label": "Weak",
+          "children": [
+            "Eventual"
+          ]
+        },
+        {
+          "label": "Client-centric",
+          "children": [
+            "Read-your-writes",
+            "Monotonic reads"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "CAP",
+            "PACELC",
+            "Latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Model per feature",
+      "scenario": "Mapping.",
+      "flow": [
+        "Bank balance → linearizable",
+        "Comments thread → causal",
+        "Like counts → eventual",
+        "Profile edits → read-your-writes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Coordination cost only where needed."
+        }
+      ],
+      "code": [],
+      "outcome": "informed consistency choices."
+    },
+    "summary": {
+      "points": [
+        "Replication creates lag.",
+        "Models define visibility.",
+        "Choose per use case."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does PACELC add to CAP?",
+        "a": "Even without partitions (Else), systems trade Latency against Consistency."
+      }
+    ]
+  },
+  "strong-consistency-linearizability": {
+    "core": "Linearizability means every operation appears to take effect atomically at a single point between its start and end, consistent with real-time order: once a write completes, all later reads see it (or something newer). It's what 'behaves like a single copy' means, and it's needed for locks, leader election, uniqueness constraints and balances. It requires coordination (consensus, quorum reads) and suffers during partitions.",
+    "first_principles": {
+      "problem": "Two users register the same username because each replica checked uniqueness independently.",
+      "truths": [
+        "Real-time order matters for some invariants.",
+        "Coordination provides it.",
+        "Partitions force a choice."
+      ],
+      "derivation": [
+        "Use **consensus-backed** stores (etcd, Spanner).",
+        "Use **quorum reads/writes** or **leader reads with leases**.",
+        "Accept **latency** costs.",
+        "Expect **unavailability** in minority partitions.",
+        "Reserve for **invariants that need it**."
+      ]
+    },
+    "analogy": {
+      "title": "A single ledger book on one desk",
+      "story": "Everyone writes and reads the same physical book, so nobody ever sees an outdated page.",
+      "mapping": [
+        [
+          "Single book",
+          "Linearizable store"
+        ],
+        [
+          "Queue at the desk",
+          "Coordination latency"
+        ],
+        [
+          "Desk unreachable",
+          "Partition unavailability"
+        ]
+      ],
+      "breaks": "One book can only serve one person at a time; linearizable systems still serve many clients concurrently."
+    },
+    "mindmap": {
+      "center": "Linearizability",
+      "branches": [
+        {
+          "label": "Definition",
+          "children": [
+            "Atomic point in time",
+            "Real-time order"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "Consensus",
+            "Quorums",
+            "Leases"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Locks",
+            "Elections",
+            "Uniqueness",
+            "Balances"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Latency",
+            "Partition unavailability"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Unique username",
+      "scenario": "Linearizable check.",
+      "flow": [
+        "Conditional put 'username:ada' with create-if-absent in etcd",
+        "First request commits via Raft",
+        "Second sees existing key → rejected"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Uniqueness guaranteed."
+        }
+      ],
+      "code": [],
+      "outcome": "correctness where it matters."
+    },
+    "summary": {
+      "points": [
+        "Looks like one copy.",
+        "Real-time order.",
+        "Costs latency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does linearizability guarantee after a write completes?",
+        "a": "Every subsequent read (by anyone) returns that value or a newer one."
+      }
+    ]
+  },
+  "sequential-consistency-order-matters-time-doesnt": {
+    "core": "Sequential consistency requires that all processes see operations in the same total order, consistent with each process's own program order, but not necessarily matching real time. A write might become visible 'late' as long as everyone agrees on the order. It's weaker than linearizability and historically relevant to multiprocessor memory models.",
+    "first_principles": {
+      "problem": "Engineers confuse 'everyone sees the same order' with 'everyone sees the latest value immediately'.",
+      "truths": [
+        "Agreement on order differs from real-time recency.",
+        "Per-process order is preserved.",
+        "Hardware memory models use such definitions."
+      ],
+      "derivation": [
+        "Ensure a **single global order**.",
+        "Respect **program order** per process.",
+        "Allow **real-time lag**.",
+        "Contrast with **linearizability**.",
+        "Relevant to **CPU memory models** and some replicated logs."
+      ]
+    },
+    "analogy": {
+      "title": "A sports replay everyone watches in the same order, delayed",
+      "story": "All viewers see goals in the same sequence, though some streams are behind live.",
+      "mapping": [
+        [
+          "Same sequence",
+          "Total order"
+        ],
+        [
+          "Delayed stream",
+          "Real-time lag"
+        ],
+        [
+          "Live match",
+          "Real time"
+        ]
+      ],
+      "breaks": "Viewers notice delays vs live; processes can't tell how far behind real time they are."
+    },
+    "mindmap": {
+      "center": "Sequential Consistency",
+      "branches": [
+        {
+          "label": "Guarantees",
+          "children": [
+            "Global total order",
+            "Program order"
+          ]
+        },
+        {
+          "label": "Doesn't guarantee",
+          "children": [
+            "Real-time recency"
+          ]
+        },
+        {
+          "label": "vs Linearizable",
+          "children": [
+            "Weaker"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "Memory models",
+            "Replicated logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Allowed history",
+      "scenario": "Example.",
+      "flow": [
+        "P1 writes x=1 at t=1 (completes)",
+        "P2 reads x=0 at t=2",
+        "Allowed under sequential (order: P2 read, then write)",
+        "Not allowed under linearizability"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Order agreement ≠ freshness."
+        }
+      ],
+      "code": [],
+      "outcome": "precise model distinctions."
+    },
+    "summary": {
+      "points": [
+        "Same order for all.",
+        "Program order kept.",
+        "No real-time promise."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key difference between sequential consistency and linearizability?",
+        "a": "Sequential consistency doesn't require the global order to respect real-time ordering of non-overlapping operations."
+      }
+    ]
+  },
+  "eventual-consistency-the-optimists-choice": {
+    "core": "Eventual consistency only promises that if writes stop, all replicas will converge to the same value. Reads may return stale data in the meantime, and concurrent writes need conflict resolution (last-write-wins, vector clocks with merges, CRDTs). It maximises availability and low latency and suits DNS, caches, counters and social feeds.",
+    "first_principles": {
+      "problem": "A globally distributed shopping cart must accept writes in every region even during partitions.",
+      "truths": [
+        "Coordination-free writes are fast and available.",
+        "Replicas converge through anti-entropy.",
+        "Conflicts must be resolved."
+      ],
+      "derivation": [
+        "Accept **stale reads**.",
+        "Replicate **asynchronously** (anti-entropy, gossip, hinted handoff).",
+        "Resolve conflicts with **LWW, merges or CRDTs**.",
+        "Add **session guarantees** for UX.",
+        "Measure **convergence time**."
+      ]
+    },
+    "analogy": {
+      "title": "News spreading by word of mouth",
+      "story": "Eventually everyone hears, though some hear later or briefly hear an outdated version.",
+      "mapping": [
+        [
+          "Word of mouth",
+          "Asynchronous replication"
+        ],
+        [
+          "Everyone hears",
+          "Convergence"
+        ],
+        [
+          "Outdated version",
+          "Stale read"
+        ]
+      ],
+      "breaks": "Rumours can mutate; replicas converge to a deterministic result if conflicts are resolved correctly."
+    },
+    "mindmap": {
+      "center": "Eventual Consistency",
+      "branches": [
+        {
+          "label": "Guarantee",
+          "children": [
+            "Convergence when writes stop"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Async replication",
+            "Anti-entropy",
+            "Read repair",
+            "Hinted handoff"
+          ]
+        },
+        {
+          "label": "Conflicts",
+          "children": [
+            "LWW",
+            "Vector clocks",
+            "CRDTs"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "DNS",
+            "Caches",
+            "Carts",
+            "Feeds"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dynamo-style cart",
+      "scenario": "Behaviour.",
+      "flow": [
+        "Partition: EU and US replicas both accept cart edits",
+        "Vector clocks detect concurrent versions",
+        "Merge: union of items",
+        "Replicas converge after heal"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Always writable; occasional merged surprises."
+        }
+      ],
+      "code": [],
+      "outcome": "availability-first data."
+    },
+    "summary": {
+      "points": [
+        "Converges eventually.",
+        "Stale reads allowed.",
+        "Resolve conflicts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does eventual consistency guarantee?",
+        "a": "That replicas converge to the same value if no new updates are made."
+      }
+    ]
+  },
+  "causal-consistency-the-middle-ground": {
+    "core": "Causal consistency guarantees that causally related operations are seen by everyone in the same order (a reply is never seen before the post it answers), while concurrent operations may be seen in different orders. It's the strongest model that remains available during partitions and is implemented with dependency tracking or vector clocks (e.g. COPS, MongoDB causal sessions).",
+    "first_principles": {
+      "problem": "Users see replies to comments that don't appear yet, because the reply replicated faster than the original.",
+      "truths": [
+        "Cause must precede effect.",
+        "Unrelated events need no ordering.",
+        "Tracking dependencies is cheaper than global order."
+      ],
+      "derivation": [
+        "Track **dependencies** (vector clocks, explicit deps).",
+        "Delay visibility until **dependencies arrive**.",
+        "Allow **concurrent** ops in any order.",
+        "Use **causal sessions** in databases.",
+        "Combine with **convergent conflict handling**."
+      ]
+    },
+    "analogy": {
+      "title": "Email threads",
+      "story": "You'll never see a reply before the email it replies to, but unrelated emails can arrive in any order.",
+      "mapping": [
+        [
+          "Original email",
+          "Cause"
+        ],
+        [
+          "Reply",
+          "Effect"
+        ],
+        [
+          "Unrelated emails",
+          "Concurrent operations"
+        ]
+      ],
+      "breaks": "Email clients show threads visually; replicas must buffer effects until causes arrive."
+    },
+    "mindmap": {
+      "center": "Causal Consistency",
+      "branches": [
+        {
+          "label": "Guarantee",
+          "children": [
+            "Causal order preserved"
+          ]
+        },
+        {
+          "label": "Allows",
+          "children": [
+            "Concurrent reordering"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Vector clocks",
+            "Dependency tracking",
+            "Causal sessions"
+          ]
+        },
+        {
+          "label": "Property",
+          "children": [
+            "Available under partition"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Social apps",
+            "Collaboration"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Comment then reply",
+      "scenario": "Behaviour.",
+      "flow": [
+        "Alice posts C1 (EU)",
+        "Bob reads C1, replies R1 (US) with dependency on C1",
+        "Asia replica receives R1 first → waits for C1",
+        "Shows C1 then R1"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No orphaned replies."
+        }
+      ],
+      "code": [],
+      "outcome": "intuitive ordering without global coordination."
+    },
+    "summary": {
+      "points": [
+        "Causes before effects.",
+        "Concurrent ops free.",
+        "Available under partition."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is causal consistency attractive for geo-distributed apps?",
+        "a": "It preserves intuitive cause-effect order while remaining available during partitions."
+      }
+    ]
+  },
+  "client-centric-consistency-models": {
+    "core": "Client-centric (session) guarantees give each user a sensible view even on weakly consistent systems: read-your-writes (you see your own updates), monotonic reads (you never see older data after newer), monotonic writes (your writes apply in order) and writes-follow-reads (your write after reading X is ordered after X). They're implemented with sticky routing, session tokens or version vectors.",
+    "first_principles": {
+      "problem": "A user posts a comment, refreshes and it's gone because the read hit a lagging replica.",
+      "truths": [
+        "Users notice their own changes most.",
+        "Going back in time feels broken.",
+        "Sessions can carry version information."
+      ],
+      "derivation": [
+        "**Read-your-writes**: route to leader or wait for session version.",
+        "**Monotonic reads**: stick to a replica or track a version.",
+        "**Monotonic writes**: order a client's writes.",
+        "Carry **session tokens** (e.g. Cosmos DB, MongoDB causal sessions).",
+        "Use **sticky load balancing** as a simple approach."
+      ]
+    },
+    "analogy": {
+      "title": "A personal assistant who remembers what you just told them",
+      "story": "Even if the office files are behind, they won't contradict what you said a minute ago.",
+      "mapping": [
+        [
+          "Assistant's memory",
+          "Session token"
+        ],
+        [
+          "Office files",
+          "Replicas"
+        ],
+        [
+          "Contradicting you",
+          "Stale read of own write"
+        ]
+      ],
+      "breaks": "Assistants remember everything; session guarantees cover only that client's view, not others'."
+    },
+    "mindmap": {
+      "center": "Session Guarantees",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Read-your-writes",
+            "Monotonic reads",
+            "Monotonic writes",
+            "Writes-follow-reads"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Sticky routing",
+            "Session tokens",
+            "Version vectors",
+            "Leader reads"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Good UX on eventual systems"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Session token",
+      "scenario": "Flow.",
+      "flow": [
+        "Write returns version token v=1042",
+        "Client sends token with next read",
+        "Replica waits until it has v ≥ 1042 (or forwards)",
+        "User always sees their own comment"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Personal consistency without global cost."
+        }
+      ],
+      "code": [],
+      "outcome": "intuitive behaviour per user."
+    },
+    "summary": {
+      "points": [
+        "Four session guarantees.",
+        "Tokens or stickiness.",
+        "Cheap UX fix."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does read-your-writes guarantee?",
+        "a": "A client always sees its own previous writes in subsequent reads."
+      }
+    ]
+  }
+}

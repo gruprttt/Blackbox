@@ -1,0 +1,538 @@
+{
+  "introduction-marketing-vs-reality": {
+    "core": "Database vendors advertise guarantees such as 'strongly consistent', 'ACID' and 'linearizable', but those claims are rarely tested under partitions, clock skew and crashes. Jepsen, created by Kyle Kingsbury, puts a system under realistic faults, records every operation, and checks whether the history actually satisfies the claimed consistency model. It has found violations in most systems it has tested.",
+    "first_principles": {
+      "problem": "A team picks a database for 'strong consistency' and later loses acknowledged writes during a network partition.",
+      "truths": [
+        "Claims are often untested under faults.",
+        "Faults are where guarantees matter.",
+        "Histories can be checked objectively."
+      ],
+      "derivation": [
+        "Read the **claimed model** precisely.",
+        "Run **concurrent clients** recording ops.",
+        "Inject **faults** during the run.",
+        "**Check** the history against the model.",
+        "Report **anomalies** with evidence."
+      ]
+    },
+    "analogy": {
+      "title": "Crash-testing cars instead of reading brochures",
+      "story": "The brochure says 'safe'; the crash test shows what happens at 60 km/h into a wall.",
+      "mapping": [
+        [
+          "Brochure",
+          "Vendor docs"
+        ],
+        [
+          "Crash test",
+          "Jepsen run"
+        ],
+        [
+          "Dummy sensors",
+          "Operation history"
+        ]
+      ],
+      "breaks": "Cars crash once; Jepsen replays many random fault schedules."
+    },
+    "mindmap": {
+      "center": "Why Jepsen",
+      "branches": [
+        {
+          "label": "Claims",
+          "children": [
+            "Linearizable",
+            "Serializable",
+            "ACID"
+          ]
+        },
+        {
+          "label": "Reality",
+          "children": [
+            "Untested faults",
+            "Lost writes",
+            "Stale reads"
+          ]
+        },
+        {
+          "label": "Method",
+          "children": [
+            "Workload",
+            "Faults",
+            "History check"
+          ]
+        },
+        {
+          "label": "Outcome",
+          "children": [
+            "Public analyses",
+            "Fixed bugs",
+            "Corrected docs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Classic finding",
+      "scenario": "Pattern.",
+      "flow": [
+        "Clients write to a 5-node cluster",
+        "Network partitions isolate the primary",
+        "Old primary acknowledges writes",
+        "After heal, those writes vanish"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Acknowledged ≠ durable without proper quorums."
+        }
+      ],
+      "code": [],
+      "outcome": "trust verified, not assumed."
+    },
+    "summary": {
+      "points": [
+        "Claims need verification.",
+        "Faults reveal truth.",
+        "Histories are checkable."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why test consistency under faults specifically?",
+        "a": "Most systems behave correctly when healthy; guarantees only matter, and most often break, during partitions, crashes and clock problems."
+      }
+    ]
+  },
+  "how-jepsen-works-the-architecture": {
+    "core": "Jepsen is a Clojure framework: a control node SSHes into (typically) five database nodes to install and start the system. Client processes run a workload, generating operations such as reads, writes and compare-and-sets, and each records invoke and complete events with timestamps. A nemesis process injects faults concurrently, and a checker analyses the full history afterwards.",
+    "first_principles": {
+      "problem": "Engineers want to test their own system Jepsen-style but don't understand its parts.",
+      "truths": [
+        "Tests must be reproducible.",
+        "Every op needs invoke and completion.",
+        "Faults run alongside the workload."
+      ],
+      "derivation": [
+        "**Control node** orchestrates via SSH.",
+        "**DB** layer installs and tears down.",
+        "**Client** turns ops into DB calls.",
+        "**Generator** schedules ops and faults.",
+        "**Checker** analyses the history."
+      ]
+    },
+    "analogy": {
+      "title": "A lab experiment",
+      "story": "A technician sets up equipment, a script feeds samples, a saboteur shakes the bench, and an analyst reviews the logbook.",
+      "mapping": [
+        [
+          "Technician",
+          "Control node"
+        ],
+        [
+          "Samples",
+          "Workload ops"
+        ],
+        [
+          "Saboteur",
+          "Nemesis"
+        ],
+        [
+          "Logbook",
+          "History"
+        ]
+      ],
+      "breaks": "Lab results are measurements; Jepsen results are proofs of violation."
+    },
+    "mindmap": {
+      "center": "Jepsen Architecture",
+      "branches": [
+        {
+          "label": "Control",
+          "children": [
+            "SSH",
+            "Orchestration"
+          ]
+        },
+        {
+          "label": "Nodes",
+          "children": [
+            "n1..n5",
+            "DB install"
+          ]
+        },
+        {
+          "label": "Client",
+          "children": [
+            "invoke/ok/fail/info"
+          ]
+        },
+        {
+          "label": "Generator",
+          "children": [
+            "Op schedule",
+            "Fault schedule"
+          ]
+        },
+        {
+          "label": "Checker",
+          "children": [
+            "Linearizability",
+            "Set",
+            "Bank",
+            "Elle"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Test definition",
+      "scenario": "Clojure skeleton.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "120 s of mixed ops with partitions every 5 s, then a linearizability check."
+        }
+      ],
+      "code": [
+        {
+          "lang": "clojure",
+          "text": "(defn my-test [opts]\n  (merge tests/noop-test opts\n    {:name      \"mydb-register\"\n     :db        (db \"1.4.2\")\n     :client    (->RegisterClient nil)\n     :nemesis   (nemesis/partition-random-halves)\n     :generator (->> (gen/mix [r w cas])\n                     (gen/nemesis (cycle [(gen/sleep 5) {:f :start} (gen/sleep 5) {:f :stop}]))\n                     (gen/time-limit 120))\n     :checker   (checker/linearizable {:model (model/cas-register)})}))"
+        }
+      ],
+      "outcome": "the moving parts of a Jepsen test."
+    },
+    "summary": {
+      "points": [
+        "Control node + DB nodes.",
+        "Clients record histories.",
+        "Nemesis and checker."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an ':info' completion mean in a Jepsen history?",
+        "a": "The outcome is indeterminate (for example a timeout); the op may or may not have taken effect, so the checker must consider both."
+      }
+    ]
+  },
+  "the-nemesis-chaos-on-demand": {
+    "core": "The nemesis is Jepsen's fault injector. It partitions networks with iptables (random halves, isolate the primary, bridges, rings), kills or pauses processes with SIGKILL and SIGSTOP, skews or strobes clocks, and can corrupt or truncate files. Faults are scheduled alongside client operations so the system is exercised while it is degraded and while it recovers.",
+    "first_principles": {
+      "problem": "Tests that only kill nodes never trigger the asymmetric partition that causes split-brain.",
+      "truths": [
+        "Different faults reveal different bugs.",
+        "Recovery is as risky as failure.",
+        "Partitions can be partial."
+      ],
+      "derivation": [
+        "Use **network partitions** (halves, majorities-ring, bridge).",
+        "Use **process faults** (kill, pause).",
+        "Use **clock faults** (bump, strobe).",
+        "Use **disk faults** (corrupt, lose unfsynced writes).",
+        "**Combine** and schedule repeatedly."
+      ]
+    },
+    "analogy": {
+      "title": "A fire drill run by a mischievous examiner",
+      "story": "They block different exits, cut power and fake alarms at random times to see if procedures really work.",
+      "mapping": [
+        [
+          "Blocked exits",
+          "Partitions"
+        ],
+        [
+          "Power cut",
+          "Process kill"
+        ],
+        [
+          "Wrong clocks",
+          "Clock skew"
+        ]
+      ],
+      "breaks": "Drills are announced; nemesis faults hit mid-operation."
+    },
+    "mindmap": {
+      "center": "Nemesis",
+      "branches": [
+        {
+          "label": "Network",
+          "children": [
+            "Random halves",
+            "Isolate leader",
+            "Bridge",
+            "Majorities ring"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "SIGKILL",
+            "SIGSTOP pause"
+          ]
+        },
+        {
+          "label": "Clock",
+          "children": [
+            "Bump",
+            "Strobe",
+            "Skew"
+          ]
+        },
+        {
+          "label": "Disk",
+          "children": [
+            "Corrupt",
+            "Lose unfsynced writes"
+          ]
+        },
+        {
+          "label": "Schedule",
+          "children": [
+            "Interleaved with ops",
+            "Heal and repeat"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bridge partition",
+      "scenario": "Why it's nasty.",
+      "flow": [
+        "Nodes {n1,n2} | n3 | {n4,n5}",
+        "n3 can see both sides",
+        "Both sides can form 'majorities' with n3",
+        "Two leaders may emerge if quorum logic is wrong"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exposes bugs that clean splits never trigger."
+        }
+      ],
+      "code": [],
+      "outcome": "realistic, adversarial faults."
+    },
+    "summary": {
+      "points": [
+        "Network, process, clock, disk.",
+        "Asymmetric partitions matter.",
+        "Faults during ops and recovery."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a SIGSTOP pause more dangerous than a SIGKILL?",
+        "a": "A paused process resumes believing its state and leases are still valid, potentially acting as a stale leader; a killed one restarts cleanly."
+      }
+    ]
+  },
+  "the-analysis-linearizability-checking": {
+    "core": "After the run, the checker asks: is there any order of operations, consistent with real-time (an op that completed before another began must come first) and with the data type's semantics, that explains every observed result? Knossos searches that space for linearizability (NP-complete in general, so histories are kept small), while Elle infers dependency cycles in transactional histories to detect serializability anomalies such as G2 and lost updates.",
+    "first_principles": {
+      "problem": "A reviewer can't tell whether an odd read is a bug or just concurrency.",
+      "truths": [
+        "Concurrent ops can linearize in many orders.",
+        "Real-time order constrains choices.",
+        "No valid order means a violation."
+      ],
+      "derivation": [
+        "Record **invoke/complete** intervals.",
+        "Search for a **legal sequential order**.",
+        "Respect **real-time precedence**.",
+        "Treat **info** ops as maybe-happened.",
+        "For transactions, find **dependency cycles** (Elle)."
+      ]
+    },
+    "analogy": {
+      "title": "A detective reconstructing a timeline",
+      "story": "Given witness statements with time windows, is there any sequence of events consistent with all of them? If not, someone's story is impossible.",
+      "mapping": [
+        [
+          "Witness windows",
+          "Op intervals"
+        ],
+        [
+          "Consistent sequence",
+          "Linearization"
+        ],
+        [
+          "Impossible story",
+          "Anomaly"
+        ]
+      ],
+      "breaks": "Witnesses lie; histories are precise but timeouts leave ambiguity."
+    },
+    "mindmap": {
+      "center": "History Checking",
+      "branches": [
+        {
+          "label": "Linearizability",
+          "children": [
+            "Knossos",
+            "Real-time order",
+            "NP-complete"
+          ]
+        },
+        {
+          "label": "Transactions",
+          "children": [
+            "Elle",
+            "Dependency graph",
+            "Cycles = anomalies"
+          ]
+        },
+        {
+          "label": "Anomalies",
+          "children": [
+            "Stale read",
+            "Lost update",
+            "G2 write skew"
+          ]
+        },
+        {
+          "label": "Inputs",
+          "children": [
+            "ok",
+            "fail",
+            "info"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Non-linearizable history",
+      "scenario": "Register.",
+      "flow": [
+        "A: write(1) completes at t=2",
+        "B: read starts at t=3, returns 0",
+        "Real time says write(1) precedes read",
+        "No legal order → stale read violation"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Proof that the system served stale data."
+        }
+      ],
+      "code": [],
+      "outcome": "objective verdicts on consistency."
+    },
+    "summary": {
+      "points": [
+        "Search for a legal order.",
+        "Respect real time.",
+        "Elle finds transactional cycles."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does Jepsen keep linearizability histories short?",
+        "a": "Checking linearizability is NP-complete in general, so search cost explodes with history length and concurrency."
+      }
+    ]
+  },
+  "real-world-findings-what-jepsen-actually-discovered": {
+    "core": "Jepsen analyses have found lost acknowledged writes in early MongoDB and Elasticsearch, split-brain in Redis Sentinel, stale reads in etcd and Consul before their linearizable-read fixes, serializability violations in several SQL and NewSQL databases, and misleading documentation almost everywhere. Vendors typically fix the bugs and correct the docs, and many now run Jepsen in CI.",
+    "first_principles": {
+      "problem": "A team assumes mature, popular databases must already be correct under partitions.",
+      "truths": [
+        "Popularity doesn't prove correctness.",
+        "Defaults are often unsafe.",
+        "Docs often overstate guarantees."
+      ],
+      "derivation": [
+        "Read the **Jepsen report** for your DB and version.",
+        "Check which **settings** were needed for safety.",
+        "Prefer **safe defaults** (majority write concern, linearizable reads).",
+        "Re-test after **upgrades**.",
+        "Add **Jepsen-style tests** to your own CI."
+      ]
+    },
+    "analogy": {
+      "title": "Food inspection reports",
+      "story": "Even famous restaurants fail inspections; the report tells you what was wrong and whether it was fixed.",
+      "mapping": [
+        [
+          "Inspection report",
+          "Jepsen analysis"
+        ],
+        [
+          "Fix and re-inspect",
+          "Patch and re-test"
+        ]
+      ],
+      "breaks": "Restaurants are re-inspected yearly; DB versions change behaviour with each release."
+    },
+    "mindmap": {
+      "center": "Jepsen Findings",
+      "branches": [
+        {
+          "label": "Lost writes",
+          "children": [
+            "Early MongoDB",
+            "Elasticsearch"
+          ]
+        },
+        {
+          "label": "Split-brain",
+          "children": [
+            "Redis Sentinel"
+          ]
+        },
+        {
+          "label": "Stale reads",
+          "children": [
+            "etcd/Consul pre-fix"
+          ]
+        },
+        {
+          "label": "Txn anomalies",
+          "children": [
+            "Various SQL/NewSQL"
+          ]
+        },
+        {
+          "label": "Outcomes",
+          "children": [
+            "Bug fixes",
+            "Doc corrections",
+            "Jepsen in CI"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe MongoDB settings",
+      "scenario": "From the lessons.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Avoids the rollback-of-acknowledged-writes class of bugs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "// require majority acknowledgement and majority reads\ndb.orders.insertOne(doc, { writeConcern: { w: 'majority', j: true } })\ndb.orders.find(q).readConcern('linearizable')"
+        }
+      ],
+      "outcome": "informed configuration choices."
+    },
+    "summary": {
+      "points": [
+        "Most systems had bugs.",
+        "Safe settings matter.",
+        "Read reports, test yourself."
+      ]
+    },
+    "check": [
+      {
+        "q": "What practical step should you take after reading a Jepsen report for your database?",
+        "a": "Check which version and settings were tested, adopt the safe configuration (e.g. majority writes/reads), and verify after upgrades."
+      }
+    ]
+  }
+}

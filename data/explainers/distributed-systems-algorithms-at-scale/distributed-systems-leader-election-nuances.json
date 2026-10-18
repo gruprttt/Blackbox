@@ -1,0 +1,412 @@
+{
+  "introduction-the-heavy-crown": {
+    "core": "A leader serialises decisions (who writes, who runs the cron job, who owns a shard), simplifying coordination. But leadership is dangerous: a node can believe it's still leader after it has been replaced (pauses, partitions), so systems must make stale leaders harmless. Elect via consensus (etcd, ZooKeeper, Raft), and protect resources with fencing.",
+    "first_principles": {
+      "problem": "Two instances of a scheduler both think they're leader and run every job twice.",
+      "truths": [
+        "Single writers simplify logic.",
+        "Nodes can't know they've been deposed.",
+        "Resources must reject stale leaders."
+      ],
+      "derivation": [
+        "Elect using a **consensus store**.",
+        "Use **leases** with renewal.",
+        "Attach **fencing tokens** (terms) to actions.",
+        "Make side effects **idempotent**.",
+        "Step down on **lost contact**."
+      ]
+    },
+    "analogy": {
+      "title": "A crown that can be secretly passed on",
+      "story": "If the old king doesn't know he's been replaced, his orders must be ignored by the guards.",
+      "mapping": [
+        [
+          "Crown",
+          "Leadership"
+        ],
+        [
+          "Old king",
+          "Stale leader"
+        ],
+        [
+          "Guards checking",
+          "Fencing"
+        ]
+      ],
+      "breaks": "Kings get told; paused processes literally can't notice time passed."
+    },
+    "mindmap": {
+      "center": "Leader Election",
+      "branches": [
+        {
+          "label": "Benefits",
+          "children": [
+            "Serialised decisions",
+            "Simplicity"
+          ]
+        },
+        {
+          "label": "Dangers",
+          "children": [
+            "Stale leaders",
+            "Split-brain"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Consensus stores",
+            "Leases",
+            "Terms"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "Fencing tokens",
+            "Idempotency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scheduler leadership",
+      "scenario": "Design.",
+      "flow": [
+        "Candidates race to create lease key in etcd",
+        "Winner renews every 5 s with TTL 15 s",
+        "Jobs record term number",
+        "Workers reject jobs with older terms"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No duplicate job runs."
+        }
+      ],
+      "code": [],
+      "outcome": "leadership with safety rails."
+    },
+    "summary": {
+      "points": [
+        "Leaders simplify.",
+        "Stale leaders are dangerous.",
+        "Fence their actions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a leader simply know it has been replaced?",
+        "a": "It may be paused or partitioned and has no way to observe the election that happened meanwhile."
+      }
+    ]
+  },
+  "the-physics-of-split-brain": {
+    "core": "Split-brain arises from asymmetric knowledge: during a partition, a minority-side leader keeps acting while the majority elects a new one, or a GC/VM pause freezes a leader past its lease. Clocks and timeouts can't fully prevent it, because the old leader doesn't experience the passage of time. Only majority quorums plus fencing at the resource make it safe.",
+    "first_principles": {
+      "problem": "A 40-second GC pause lets a stale primary write after failover, corrupting data.",
+      "truths": [
+        "Pauses are invisible to the paused process.",
+        "Partitions split knowledge.",
+        "Only the resource sees both writers."
+      ],
+      "derivation": [
+        "Require **majority** for leadership.",
+        "Accept that **timeouts can't guarantee** exclusivity.",
+        "Enforce **fencing at storage**.",
+        "Minimise **pause risk** (GC tuning).",
+        "Detect **dual writers** via monitoring."
+      ]
+    },
+    "analogy": {
+      "title": "Rip Van Winkle waking and giving orders",
+      "story": "He thinks no time has passed; everyone else knows things have changed.",
+      "mapping": [
+        [
+          "Rip's sleep",
+          "GC pause"
+        ],
+        [
+          "Outdated orders",
+          "Stale writes"
+        ],
+        [
+          "Villagers ignoring him",
+          "Fencing"
+        ]
+      ],
+      "breaks": "Rip notices his beard; processes have no such cue."
+    },
+    "mindmap": {
+      "center": "Split-Brain Physics",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Partitions",
+            "GC pauses",
+            "VM freezes",
+            "Clock jumps"
+          ]
+        },
+        {
+          "label": "Why hard",
+          "children": [
+            "Pauses invisible",
+            "Knowledge asymmetric"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Majority quorum",
+            "Fencing at resource",
+            "Monitoring"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pause timeline",
+      "scenario": "Trace.",
+      "flow": [
+        "Leader A holds lease to t=30",
+        "A pauses at t=25 for 40 s",
+        "B elected at t=31, writes",
+        "A wakes at t=65, believes lease valid → writes"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Without fencing, A corrupts data."
+        }
+      ],
+      "code": [],
+      "outcome": "why fencing is mandatory."
+    },
+    "summary": {
+      "points": [
+        "Pauses and partitions.",
+        "Timeouts aren't enough.",
+        "Fence at the resource."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't leases alone prevent split-brain?",
+        "a": "A paused leader may wake after its lease expired and act without realising, so the resource must reject it."
+      }
+    ]
+  },
+  "fencing-tokens-the-zombie-defense": {
+    "core": "A fencing token is a monotonically increasing number (e.g. the lease revision or Raft term) issued with each grant of leadership or lock. Every write to the protected resource includes the token, and the resource rejects any token lower than the highest it has seen. Zombie leaders with old tokens are blocked no matter how long they were paused.",
+    "first_principles": {
+      "problem": "A lock holder pauses, its lock expires, another client takes the lock, and both write to storage.",
+      "truths": [
+        "Monotonic numbers order grants.",
+        "Resources can remember the highest seen.",
+        "Stale tokens are detectable."
+      ],
+      "derivation": [
+        "Get **token with lock/lease** (etcd revision, ZK zxid).",
+        "Send token with **every write**.",
+        "Storage **rejects lower tokens**.",
+        "Persist the **highest token** durably.",
+        "Use **conditional writes** where storage lacks native support."
+      ]
+    },
+    "analogy": {
+      "title": "Numbered parking permits",
+      "story": "The car park only accepts the latest permit number, so old permits are useless even if they look valid.",
+      "mapping": [
+        [
+          "Permit number",
+          "Fencing token"
+        ],
+        [
+          "Car park",
+          "Storage"
+        ],
+        [
+          "Old permit",
+          "Zombie leader's token"
+        ]
+      ],
+      "breaks": "Permits are checked by attendants; resources must implement the check."
+    },
+    "mindmap": {
+      "center": "Fencing Tokens",
+      "branches": [
+        {
+          "label": "Source",
+          "children": [
+            "Lease revision",
+            "Raft term",
+            "ZK zxid"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Attach to writes"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "Reject lower than max seen"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Native support",
+            "Conditional writes"
+          ]
+        },
+        {
+          "label": "Protects",
+          "children": [
+            "From zombies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Token-checked write",
+      "scenario": "Pseudo-code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Zombie with token 33 rejected after token 34 was used."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def write(key, value, token):\n    current = store.get_meta(key, 'max_token', default=0)\n    if token < current:\n        raise StaleLeader(token, current)\n    store.cas_put(key, value, meta={'max_token': token}, expect_token=current)"
+        }
+      ],
+      "outcome": "stale leaders rendered harmless."
+    },
+    "summary": {
+      "points": [
+        "Monotonic tokens.",
+        "Checked by the resource.",
+        "Zombies blocked."
+      ]
+    },
+    "check": [
+      {
+        "q": "Who must check fencing tokens: the leader or the resource?",
+        "a": "The resource (storage or service), because the stale leader can't know it's stale."
+      }
+    ]
+  },
+  "lease-based-election-and-clock-skew": {
+    "core": "Leases grant leadership for a time period, renewed periodically. They rely on bounded clock drift: the leader must stop acting before the lease expires by its own clock, with a safety margin, while others wait the full duration plus drift before taking over. Pauses and clock jumps break naive leases, so use monotonic clocks, margins and fencing together.",
+    "first_principles": {
+      "problem": "A leader with a slow clock keeps acting after others think its lease expired.",
+      "truths": [
+        "Clocks drift at different rates.",
+        "Pauses stop renewal but not belief.",
+        "Margins absorb bounded drift."
+      ],
+      "derivation": [
+        "Measure lease with **monotonic clocks**.",
+        "Leader stops **early** (lease − margin).",
+        "Followers wait **lease + max drift**.",
+        "Renew **well before** expiry.",
+        "Always add **fencing**."
+      ]
+    },
+    "analogy": {
+      "title": "Borrowing a meeting room until 3 pm by your watch",
+      "story": "If your watch is slow you overstay, so you leave five minutes early and others wait five minutes extra.",
+      "mapping": [
+        [
+          "Room booking",
+          "Lease"
+        ],
+        [
+          "Slow watch",
+          "Clock drift"
+        ],
+        [
+          "Leaving early",
+          "Safety margin"
+        ]
+      ],
+      "breaks": "People notice others waiting; processes don't notice anything during pauses."
+    },
+    "mindmap": {
+      "center": "Leases & Clocks",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Time-bound grant",
+            "Renewal"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Drift",
+            "Pauses",
+            "Clock jumps"
+          ]
+        },
+        {
+          "label": "Safeguards",
+          "children": [
+            "Monotonic clocks",
+            "Margins",
+            "Early renewal",
+            "Fencing"
+          ]
+        },
+        {
+          "label": "Systems",
+          "children": [
+            "etcd leases",
+            "Chubby",
+            "Kubernetes Lease objects"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lease timing",
+      "scenario": "Numbers.",
+      "flow": [
+        "Lease 15 s, max drift 1 s",
+        "Leader acts only until 13 s since grant (monotonic)",
+        "Followers take over after 16 s",
+        "Renew every 5 s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Overlap avoided under bounded drift; fencing covers pauses."
+        }
+      ],
+      "code": [],
+      "outcome": "safer lease-based leadership."
+    },
+    "summary": {
+      "points": [
+        "Leases assume bounded drift.",
+        "Margins on both sides.",
+        "Fence anyway."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should a lease holder stop acting before the lease's nominal expiry?",
+        "a": "To account for clock drift between itself and others, avoiding overlap with a new leader."
+      }
+    ]
+  }
+}

@@ -1,0 +1,625 @@
+{
+  "introduction-driving-the-system": {
+    "core": "Control theory studies how to keep a system at a desired state despite disturbances by measuring outputs and adjusting inputs. Distributed systems are full of controllers: autoscalers, rate limiters, congestion control, retries and load balancers. Understanding feedback, delay and gain explains why they oscillate, overshoot or collapse.",
+    "first_principles": {
+      "problem": "An autoscaler keeps flipping between 5 and 40 replicas every few minutes.",
+      "truths": [
+        "Systems respond with delay.",
+        "Overreaction causes oscillation.",
+        "Measurement noise misleads controllers."
+      ],
+      "derivation": [
+        "Identify **setpoint, measurement, actuator**.",
+        "Account for **delay** (lag).",
+        "Tune **gain** (how strongly to react).",
+        "Add **damping** (smoothing, cooldowns).",
+        "Watch for **positive feedback** loops."
+      ]
+    },
+    "analogy": {
+      "title": "Driving a car",
+      "story": "You watch the road, adjust the wheel, and correct gently rather than jerking it.",
+      "mapping": [
+        [
+          "Desired lane position",
+          "Setpoint"
+        ],
+        [
+          "Eyes",
+          "Measurement"
+        ],
+        [
+          "Steering",
+          "Actuator"
+        ],
+        [
+          "Jerking",
+          "High gain"
+        ]
+      ],
+      "breaks": "Drivers anticipate curves; most system controllers only react to past data."
+    },
+    "mindmap": {
+      "center": "Control Theory",
+      "branches": [
+        {
+          "label": "Elements",
+          "children": [
+            "Setpoint",
+            "Sensor",
+            "Controller",
+            "Actuator"
+          ]
+        },
+        {
+          "label": "Dynamics",
+          "children": [
+            "Delay",
+            "Gain",
+            "Damping"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "Oscillation",
+            "Overshoot",
+            "Instability"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Autoscaling",
+            "Congestion control",
+            "Rate limiting"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Oscillating autoscaler",
+      "scenario": "Diagnosis.",
+      "flow": [
+        "Scale-up decision every 30 s",
+        "New Pods take 2 min to help",
+        "Controller keeps adding → overshoot",
+        "Then removes too many → undershoot"
+      ],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Stabilisation windows and slower scale-down."
+        }
+      ],
+      "code": [],
+      "outcome": "control-loop thinking."
+    },
+    "summary": {
+      "points": [
+        "Measure, decide, act.",
+        "Delay causes overshoot.",
+        "Damp the response."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do controllers with long delays tend to oscillate?",
+        "a": "They keep reacting to stale measurements, overcorrecting before earlier actions take effect."
+      }
+    ]
+  },
+  "the-feedback-loop": {
+    "core": "A closed-loop (feedback) controller continuously compares the measured output to the setpoint and adjusts the input based on the error. Negative feedback reduces error and stabilises; positive feedback amplifies deviations and causes runaway behaviour, like retry storms or cache stampedes.",
+    "first_principles": {
+      "problem": "When a service slows down, clients retry, adding load that slows it further until it collapses.",
+      "truths": [
+        "Error drives correction.",
+        "Some feedback amplifies problems.",
+        "Open loops can't adapt."
+      ],
+      "derivation": [
+        "Prefer **negative feedback**.",
+        "Detect **positive feedback** (retries, timeouts, queue growth).",
+        "Break loops with **backoff, budgets, shedding**.",
+        "Measure the **right signal**.",
+        "Keep loops **observable**."
+      ]
+    },
+    "analogy": {
+      "title": "A thermostat versus a microphone near a speaker",
+      "story": "The thermostat calms the temperature; the microphone squeals louder and louder.",
+      "mapping": [
+        [
+          "Thermostat",
+          "Negative feedback"
+        ],
+        [
+          "Mic squeal",
+          "Positive feedback"
+        ],
+        [
+          "Room temperature",
+          "System state"
+        ]
+      ],
+      "breaks": "Squeals are obvious instantly; retry storms build quietly before collapse."
+    },
+    "mindmap": {
+      "center": "Feedback Loops",
+      "branches": [
+        {
+          "label": "Negative",
+          "children": [
+            "Stabilising",
+            "Thermostats",
+            "Autoscalers"
+          ]
+        },
+        {
+          "label": "Positive",
+          "children": [
+            "Amplifying",
+            "Retry storms",
+            "Stampedes"
+          ]
+        },
+        {
+          "label": "Breakers",
+          "children": [
+            "Backoff",
+            "Retry budgets",
+            "Load shedding"
+          ]
+        },
+        {
+          "label": "Open loop",
+          "children": [
+            "No adaptation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Retry storm",
+      "scenario": "Loop.",
+      "flow": [
+        "Latency rises → timeouts",
+        "Clients retry ×3 → 3× load",
+        "Latency rises further → more retries",
+        "Collapse"
+      ],
+      "steps": [
+        {
+          "label": "Fix",
+          "detail": "Retry budgets + jittered backoff + shedding."
+        }
+      ],
+      "code": [],
+      "outcome": "stabilising, not amplifying, loops."
+    },
+    "summary": {
+      "points": [
+        "Negative feedback stabilises.",
+        "Positive feedback amplifies.",
+        "Break runaway loops."
+      ]
+    },
+    "check": [
+      {
+        "q": "Give an example of positive feedback in distributed systems.",
+        "a": "Retry storms, where slowness causes retries that add load and cause more slowness."
+      }
+    ]
+  },
+  "the-pid-controller-past-present-and-future": {
+    "core": "A PID controller computes its output from the error's Proportional (present size), Integral (accumulated past error, removes steady-state offset) and Derivative (rate of change, dampens overshoot) terms. Tuning the three gains trades speed against stability. Many system controllers are effectively P or PI controllers.",
+    "first_principles": {
+      "problem": "A proportional-only autoscaler never quite reaches target utilisation, and a naive aggressive one overshoots.",
+      "truths": [
+        "Present error suggests correction size.",
+        "Persistent error needs accumulated push.",
+        "Fast change needs damping."
+      ],
+      "derivation": [
+        "**P**: output ∝ current error.",
+        "**I**: output ∝ sum of past error (watch windup).",
+        "**D**: output ∝ error change rate (sensitive to noise).",
+        "**Tune** gains (Ziegler–Nichols or experimentation).",
+        "**Clamp** outputs and integrals."
+      ]
+    },
+    "analogy": {
+      "title": "Steering with present position, past drift and current swerve",
+      "story": "You correct for how far you are off, how long you've been off and how fast you're drifting.",
+      "mapping": [
+        [
+          "How far off",
+          "Proportional"
+        ],
+        [
+          "How long off",
+          "Integral"
+        ],
+        [
+          "How fast drifting",
+          "Derivative"
+        ]
+      ],
+      "breaks": "Drivers adapt gains naturally; software gains are fixed unless retuned."
+    },
+    "mindmap": {
+      "center": "PID",
+      "branches": [
+        {
+          "label": "P",
+          "children": [
+            "Present error"
+          ]
+        },
+        {
+          "label": "I",
+          "children": [
+            "Past error",
+            "Windup risk"
+          ]
+        },
+        {
+          "label": "D",
+          "children": [
+            "Future trend",
+            "Noise sensitivity"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Gains",
+            "Clamping",
+            "Anti-windup"
+          ]
+        },
+        {
+          "label": "Systems",
+          "children": [
+            "Autoscaling",
+            "Rate control",
+            "Queue control"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "PI controller for concurrency",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reaches target without lingering offset."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class PI:\n    def __init__(self, kp, ki): self.kp, self.ki, self.acc = kp, ki, 0.0\n    def step(self, setpoint, measured):\n        err = setpoint - measured\n        self.acc = max(-100, min(100, self.acc + err))   # anti-windup clamp\n        return self.kp * err + self.ki * self.acc"
+        }
+      ],
+      "outcome": "principled controller design."
+    },
+    "summary": {
+      "points": [
+        "Present, past, future.",
+        "Tune gains.",
+        "Clamp to avoid windup."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the integral term in a PID controller fix?",
+        "a": "Steady-state error, where proportional control alone settles slightly off the setpoint."
+      }
+    ]
+  },
+  "applying-control-theory-autoscaling": {
+    "core": "Autoscalers are feedback controllers: the setpoint is target utilisation or latency, measurement is metrics (often delayed and noisy), and the actuator adds or removes capacity with startup delay. Good autoscaling uses proportional scaling (desired = current × metric/target), tolerance bands, stabilisation windows, rate limits on changes and predictive or scheduled components for known patterns.",
+    "first_principles": {
+      "problem": "An HPA flaps because CPU metrics are noisy and Pods take minutes to become ready.",
+      "truths": [
+        "Metrics lag reality.",
+        "Capacity takes time to arrive.",
+        "Noise triggers false actions."
+      ],
+      "derivation": [
+        "Use **proportional** formula with **tolerance** (±10%).",
+        "Add **stabilisation windows** (longer for scale-down).",
+        "Limit **scale rate** (percent per minute).",
+        "Use **predictive/scheduled** scaling.",
+        "Reduce **startup time** (warm pools, smaller images)."
+      ]
+    },
+    "analogy": {
+      "title": "Adjusting a shower's temperature with a long pipe",
+      "story": "Turn the tap a little and wait, or you'll swing between freezing and scalding.",
+      "mapping": [
+        [
+          "Long pipe",
+          "Startup delay"
+        ],
+        [
+          "Tap",
+          "Replica count"
+        ],
+        [
+          "Waiting",
+          "Stabilisation window"
+        ]
+      ],
+      "breaks": "Shower pipes have fixed delay; Pod startup varies with image size and readiness."
+    },
+    "mindmap": {
+      "center": "Autoscaling as Control",
+      "branches": [
+        {
+          "label": "Setpoint",
+          "children": [
+            "Utilisation",
+            "Latency",
+            "Queue depth"
+          ]
+        },
+        {
+          "label": "Delays",
+          "children": [
+            "Metrics lag",
+            "Startup"
+          ]
+        },
+        {
+          "label": "Damping",
+          "children": [
+            "Tolerance",
+            "Stabilisation",
+            "Rate limits"
+          ]
+        },
+        {
+          "label": "Proactive",
+          "children": [
+            "Predictive",
+            "Scheduled"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "HPA proportional formula",
+      "scenario": "Maths.",
+      "flow": [
+        "Current 10 replicas, CPU 90%, target 60%",
+        "Desired = ceil(10 × 90/60) = 15",
+        "Scale-down window 5 min prevents flapping"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Smooth, proportional response."
+        }
+      ],
+      "code": [],
+      "outcome": "stable autoscaling."
+    },
+    "summary": {
+      "points": [
+        "Proportional decisions.",
+        "Damp with windows.",
+        "Plan for delay."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use a longer stabilisation window for scale-down than scale-up?",
+        "a": "Removing capacity too early risks overload, while adding it early only costs a little money."
+      }
+    ]
+  },
+  "the-thundering-herd-problem": {
+    "core": "A thundering herd happens when many clients act at the same moment: cache keys expiring together, clients reconnecting after an outage, cron jobs on the hour or retries without jitter. The synchronised spike overwhelms a backend that could handle the same load spread over time.",
+    "first_principles": {
+      "problem": "After a 30-second outage, 100,000 clients reconnect simultaneously and knock the service down again.",
+      "truths": [
+        "Synchronised actions create spikes.",
+        "Randomness spreads load.",
+        "Recovery traffic can exceed normal traffic."
+      ],
+      "derivation": [
+        "Add **jitter** to retries, TTLs and schedules.",
+        "Use **exponential backoff**.",
+        "**Coalesce** requests (single-flight) for the same key.",
+        "**Rate-limit reconnects** (token buckets, admission).",
+        "**Stagger** cron and batch jobs."
+      ]
+    },
+    "analogy": {
+      "title": "Everyone leaving a stadium through one gate at the final whistle",
+      "story": "Staggered exits or more gates prevent the crush.",
+      "mapping": [
+        [
+          "Final whistle",
+          "Synchronised trigger"
+        ],
+        [
+          "One gate",
+          "Backend"
+        ],
+        [
+          "Staggered exits",
+          "Jitter"
+        ]
+      ],
+      "breaks": "Crowds self-organise somewhat; clients follow code exactly, all at once."
+    },
+    "mindmap": {
+      "center": "Thundering Herd",
+      "branches": [
+        {
+          "label": "Triggers",
+          "children": [
+            "Cache expiry",
+            "Reconnects",
+            "Cron on the hour",
+            "Synchronised retries"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Jitter",
+            "Backoff",
+            "Request coalescing",
+            "Admission control",
+            "Staggering"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Jittered reconnect",
+      "scenario": "Code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reconnects spread over a minute instead of one second."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import random, time\ndef reconnect(attempt):\n    base = min(60, 2 ** attempt)\n    time.sleep(random.uniform(0, base))   # full jitter"
+        }
+      ],
+      "outcome": "spikes smoothed into manageable load."
+    },
+    "summary": {
+      "points": [
+        "Synchrony causes spikes.",
+        "Jitter spreads them.",
+        "Coalesce and admit gradually."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the simplest defence against a thundering herd of retries?",
+        "a": "Exponential backoff with random jitter."
+      }
+    ]
+  },
+  "backpressure-dont-let-the-sink-overflow": {
+    "core": "Backpressure is a signal from a slower consumer to a faster producer to slow down, preventing unbounded queues, memory exhaustion and latency explosions. Mechanisms include bounded queues that block or reject, TCP flow control windows, reactive streams' request(n), HTTP 429/503 with Retry-After and consumer-controlled pull models.",
+    "first_principles": {
+      "problem": "A producer floods an in-memory queue faster than consumers process it, and the service runs out of memory.",
+      "truths": [
+        "Unbounded buffers hide problems until they explode.",
+        "Producers must know consumer capacity.",
+        "Rejecting early is better than failing late."
+      ],
+      "derivation": [
+        "Use **bounded queues**.",
+        "**Block or reject** when full.",
+        "Propagate **429/503** upstream.",
+        "Use **pull-based** consumption.",
+        "Monitor **queue depth and age**."
+      ]
+    },
+    "analogy": {
+      "title": "A sink with a slow drain",
+      "story": "If you keep the tap at full, it overflows; turn the tap down to match the drain.",
+      "mapping": [
+        [
+          "Tap",
+          "Producer"
+        ],
+        [
+          "Drain",
+          "Consumer"
+        ],
+        [
+          "Sink capacity",
+          "Buffer"
+        ],
+        [
+          "Turning down the tap",
+          "Backpressure"
+        ]
+      ],
+      "breaks": "Sinks overflow visibly; queues grow silently until memory runs out."
+    },
+    "mindmap": {
+      "center": "Backpressure",
+      "branches": [
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Bounded queues",
+            "TCP windows",
+            "Reactive streams",
+            "429/503",
+            "Pull consumers"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Bounded memory",
+            "Bounded latency"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Queue depth",
+            "Queue age"
+          ]
+        },
+        {
+          "label": "Anti-pattern",
+          "children": [
+            "Unbounded buffers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bounded queue",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Overload becomes fast rejections, not OOM."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import queue\nq = queue.Queue(maxsize=1000)\ntry:\n    q.put(item, timeout=0.05)\nexcept queue.Full:\n    return Response(status=503, headers={'Retry-After': '1'})"
+        }
+      ],
+      "outcome": "stable systems under pressure."
+    },
+    "summary": {
+      "points": [
+        "Bound every buffer.",
+        "Signal upstream.",
+        "Reject early."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are unbounded queues dangerous?",
+        "a": "They hide overload until memory or latency explodes, instead of signalling producers to slow down."
+      }
+    ]
+  }
+}

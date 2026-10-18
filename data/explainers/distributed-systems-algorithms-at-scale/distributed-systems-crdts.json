@@ -1,0 +1,639 @@
+{
+  "introduction-the-multiplayer-problem": {
+    "core": "Collaborative and offline-first apps (documents, whiteboards, shopping lists) let many replicas edit concurrently without coordination. Conflict-free Replicated Data Types are data structures designed so concurrent updates always merge deterministically to the same result on every replica, giving strong eventual consistency without locks or central servers.",
+    "first_principles": {
+      "problem": "Two users edit a shared list offline, and syncing loses one person's changes.",
+      "truths": [
+        "Coordination-free edits are fast and available.",
+        "Concurrent edits must merge.",
+        "Merge rules can be mathematically guaranteed."
+      ],
+      "derivation": [
+        "Choose **CRDT types** matching data (counters, sets, maps, sequences).",
+        "Ensure **merge is commutative, associative, idempotent**.",
+        "Sync **state or operations**.",
+        "Use libraries (**Automerge, Yjs**).",
+        "Plan **metadata growth/garbage collection**."
+      ]
+    },
+    "analogy": {
+      "title": "Several people editing their own copy of a recipe",
+      "story": "When copies are combined, clear rules decide the final version, and everyone ends up identical.",
+      "mapping": [
+        [
+          "Personal copies",
+          "Replicas"
+        ],
+        [
+          "Combining rules",
+          "Merge function"
+        ],
+        [
+          "Identical final recipe",
+          "Convergence"
+        ]
+      ],
+      "breaks": "People can discuss conflicts; CRDTs resolve them automatically by rule, which may not match intent."
+    },
+    "mindmap": {
+      "center": "CRDTs",
+      "branches": [
+        {
+          "label": "Goal",
+          "children": [
+            "Coordination-free",
+            "Convergence"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Commutative",
+            "Associative",
+            "Idempotent"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Counters",
+            "Sets",
+            "Registers",
+            "Maps",
+            "Sequences"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "Automerge",
+            "Yjs",
+            "Riak DT"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Collaboration",
+            "Offline-first",
+            "Geo-replication"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Offline shopping list",
+      "scenario": "Behaviour.",
+      "flow": [
+        "Alice adds milk offline",
+        "Bob adds eggs and removes bread offline",
+        "Sync: merge both",
+        "Both see milk, eggs, no bread"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No lost edits, no conflicts dialog."
+        }
+      ],
+      "code": [],
+      "outcome": "multiplayer data that just merges."
+    },
+    "summary": {
+      "points": [
+        "Concurrent edits.",
+        "Deterministic merge.",
+        "Strong eventual consistency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'strong eventual consistency' mean for CRDTs?",
+        "a": "Replicas that have received the same updates are in the same state, regardless of order."
+      }
+    ]
+  },
+  "the-secret-sauce-commutativity-associativity-and-idempotency": {
+    "core": "A state-based CRDT's merge function must be commutative (merge(a,b) = merge(b,a)), associative (order of grouping doesn't matter) and idempotent (merging the same state twice changes nothing). Formally, states form a join semilattice and merge is the least upper bound. These properties make convergence independent of message order, duplication or delay.",
+    "first_principles": {
+      "problem": "A custom merge function gives different results depending on sync order.",
+      "truths": [
+        "Networks reorder messages.",
+        "Networks duplicate messages.",
+        "Order-independent merges converge."
+      ],
+      "derivation": [
+        "Design merge as a **join (least upper bound)**.",
+        "Check **commutativity**.",
+        "Check **associativity**.",
+        "Check **idempotency**.",
+        "Ensure states only **grow** (monotonic)."
+      ]
+    },
+    "analogy": {
+      "title": "Combining stamp collections by taking the union",
+      "story": "Whatever order you merge albums in, or if you merge one twice, you get the same collection.",
+      "mapping": [
+        [
+          "Albums",
+          "Replica states"
+        ],
+        [
+          "Union",
+          "Merge/join"
+        ],
+        [
+          "Same collection",
+          "Convergence"
+        ]
+      ],
+      "breaks": "Stamp collections only grow; removals need extra structure (tombstones, tags)."
+    },
+    "mindmap": {
+      "center": "Merge Properties",
+      "branches": [
+        {
+          "label": "Commutative",
+          "children": [
+            "a⊔b = b⊔a"
+          ]
+        },
+        {
+          "label": "Associative",
+          "children": [
+            "(a⊔b)⊔c = a⊔(b⊔c)"
+          ]
+        },
+        {
+          "label": "Idempotent",
+          "children": [
+            "a⊔a = a"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "Join semilattice",
+            "Monotonic growth"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Max",
+            "Set union"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Max register",
+      "scenario": "Merge check.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any sync order converges."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def merge(a, b): return max(a, b)\nassert merge(3, 5) == merge(5, 3)              # commutative\nassert merge(merge(1, 5), 3) == merge(1, merge(5, 3))   # associative\nassert merge(5, 5) == 5                         # idempotent"
+        }
+      ],
+      "outcome": "provably convergent merges."
+    },
+    "summary": {
+      "points": [
+        "Commutative.",
+        "Associative.",
+        "Idempotent."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must CRDT merge be idempotent?",
+        "a": "Networks can deliver the same state or update more than once, and duplicates must not change the result."
+      }
+    ]
+  },
+  "the-lww-element-set-last-write-wins": {
+    "core": "A Last-Write-Wins element set keeps add and remove timestamps per element; an element is present if its latest add is newer than its latest remove. It's simple and compact, but relies on timestamps (clock skew can make the 'wrong' write win) and silently discards one of truly concurrent operations.",
+    "first_principles": {
+      "problem": "A user re-adds an item after removing it, but a replica with a fast clock keeps it removed.",
+      "truths": [
+        "Timestamps order operations simply.",
+        "Clocks skew across devices.",
+        "Concurrent intent can be lost."
+      ],
+      "derivation": [
+        "Track **add/remove timestamps**.",
+        "Present if **add > remove**.",
+        "Use **HLC or logical timestamps** to reduce skew.",
+        "Choose **bias** for ties (add-wins or remove-wins).",
+        "Accept **lost concurrent intent**."
+      ]
+    },
+    "analogy": {
+      "title": "A noticeboard where the most recent note wins",
+      "story": "If two notes conflict, the later timestamp stays, even if someone's watch was wrong.",
+      "mapping": [
+        [
+          "Notes",
+          "Add/remove ops"
+        ],
+        [
+          "Latest timestamp",
+          "LWW rule"
+        ],
+        [
+          "Wrong watch",
+          "Clock skew"
+        ]
+      ],
+      "breaks": "Noticeboards show both notes; LWW sets keep only one decision per element."
+    },
+    "mindmap": {
+      "center": "LWW-Element-Set",
+      "branches": [
+        {
+          "label": "State",
+          "children": [
+            "Add timestamps",
+            "Remove timestamps"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Latest wins"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Simple",
+            "Compact"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Clock skew",
+            "Lost concurrent intent"
+          ]
+        },
+        {
+          "label": "Mitigation",
+          "children": [
+            "HLC",
+            "Tie bias"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Skew problem",
+      "scenario": "Trace.",
+      "flow": [
+        "Phone (clock +30 s) removes 'milk' at t=100",
+        "Laptop adds 'milk' at real t=110 (its clock t=110)",
+        "Remove ts 130 > add ts 110 → milk stays removed"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "LWW trusts clocks."
+        }
+      ],
+      "code": [],
+      "outcome": "LWW trade-offs understood."
+    },
+    "summary": {
+      "points": [
+        "Timestamps decide.",
+        "Simple but skew-prone.",
+        "Concurrent intent lost."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main weakness of LWW sets?",
+        "a": "They depend on timestamps, so clock skew and concurrent operations can produce surprising outcomes."
+      }
+    ]
+  },
+  "the-or-set-observed-remove-set": {
+    "core": "An Observed-Remove Set tags each add with a unique ID. A remove deletes only the tags it has observed. If another replica concurrently adds the same element with a new tag, that add survives the merge (add-wins semantics). It avoids timestamp reliance at the cost of storing tags or tombstones (optimised versions use version vectors).",
+    "first_principles": {
+      "problem": "Users expect an item re-added on one device to survive a concurrent remove on another.",
+      "truths": [
+        "Unique tags distinguish adds.",
+        "Removes should affect only what was seen.",
+        "Concurrent adds express intent to keep."
+      ],
+      "derivation": [
+        "Add element with **unique tag** (replica ID + counter).",
+        "Remove **observed tags** only.",
+        "Merge = **union of adds minus removed tags**.",
+        "**Add-wins** on concurrency.",
+        "Compact with **version vectors** (optimised OR-Set)."
+      ]
+    },
+    "analogy": {
+      "title": "Removing only the sticky notes you've actually seen",
+      "story": "If someone added a new note you hadn't seen, it stays.",
+      "mapping": [
+        [
+          "Sticky notes",
+          "Tagged adds"
+        ],
+        [
+          "Notes you saw",
+          "Observed tags"
+        ],
+        [
+          "New unseen note",
+          "Concurrent add"
+        ]
+      ],
+      "breaks": "Sticky notes are visible; tags are hidden metadata that grows without compaction."
+    },
+    "mindmap": {
+      "center": "OR-Set",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Unique tags per add",
+            "Remove observed tags"
+          ]
+        },
+        {
+          "label": "Semantics",
+          "children": [
+            "Add-wins"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "No clocks",
+            "Intuitive"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Metadata",
+            "Tombstones"
+          ]
+        },
+        {
+          "label": "Optimised",
+          "children": [
+            "Version vectors",
+            "Dots"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Concurrent add/remove",
+      "scenario": "Trace.",
+      "flow": [
+        "A adds milk (tag a1)",
+        "B sees a1, removes milk (removes a1)",
+        "Concurrently A adds milk again (tag a2)",
+        "Merge: a2 not removed → milk present"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Re-add intent preserved."
+        }
+      ],
+      "code": [],
+      "outcome": "intuitive set semantics without clocks."
+    },
+    "summary": {
+      "points": [
+        "Tag every add.",
+        "Remove what you saw.",
+        "Concurrent add wins."
+      ]
+    },
+    "check": [
+      {
+        "q": "In an OR-Set, what happens with a concurrent add and remove of the same element?",
+        "a": "The add wins, because the remove only deletes tags it observed, not the new tag."
+      }
+    ]
+  },
+  "the-g-counter-and-pn-counter": {
+    "core": "A G-Counter (grow-only) keeps one count per replica; increment your own entry, merge by element-wise max, value = sum. A PN-Counter pairs two G-Counters (increments P and decrements N) with value = sum(P) − sum(N). They give exact, coordination-free counters for likes, views and inventory deltas across replicas.",
+    "first_principles": {
+      "problem": "Like counts incremented on many replicas collide and lose updates when using a single shared integer.",
+      "truths": [
+        "Each replica's own count only grows.",
+        "Max merges per-replica counts safely.",
+        "Decrements need a separate grow-only track."
+      ],
+      "derivation": [
+        "**Vector of counts** per replica.",
+        "**Increment own entry**.",
+        "**Merge**: element-wise max.",
+        "**Value**: sum.",
+        "**PN** = P − N for decrements."
+      ]
+    },
+    "analogy": {
+      "title": "Each cashier keeping their own tally",
+      "story": "Totals are sums of all tallies; combining copies takes each cashier's highest tally.",
+      "mapping": [
+        [
+          "Cashier tally",
+          "Per-replica entry"
+        ],
+        [
+          "Highest tally",
+          "Max merge"
+        ],
+        [
+          "Grand total",
+          "Sum"
+        ]
+      ],
+      "breaks": "Cashiers count physical sales; replicas can be added, growing the vector."
+    },
+    "mindmap": {
+      "center": "Counters",
+      "branches": [
+        {
+          "label": "G-Counter",
+          "children": [
+            "Per-replica counts",
+            "Max merge",
+            "Sum value"
+          ]
+        },
+        {
+          "label": "PN-Counter",
+          "children": [
+            "P and N G-Counters",
+            "P − N"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Likes",
+            "Views",
+            "Rate stats"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Vector grows with replicas",
+            "No lower bound guarantee"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "G-Counter",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exact counts with concurrent increments."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class GCounter:\n    def __init__(self, me): self.me, self.c = me, {}\n    def inc(self, n=1): self.c[self.me] = self.c.get(self.me, 0) + n\n    def merge(self, other):\n        for k, v in other.c.items(): self.c[k] = max(self.c.get(k, 0), v)\n    def value(self): return sum(self.c.values())"
+        }
+      ],
+      "outcome": "conflict-free counting."
+    },
+    "summary": {
+      "points": [
+        "Count per replica.",
+        "Merge by max.",
+        "PN for decrements."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a PN-Counter enforce 'never below zero' by itself?",
+        "a": "Replicas decrement independently without coordination, so concurrent decrements can overshoot."
+      }
+    ]
+  },
+  "state-based-vs-operation-based-crdts": {
+    "core": "State-based CRDTs (CvRDTs) send full (or delta) state and merge with a join, tolerating message loss, duplication and reordering but using more bandwidth. Operation-based CRDTs (CmRDTs) broadcast operations that must commute and require reliable, causally ordered, exactly-once delivery, which is lighter on the wire but needs a stronger transport. Delta-state CRDTs combine the strengths.",
+    "first_principles": {
+      "problem": "A collaborative editor syncing full document state on every keystroke saturates mobile bandwidth.",
+      "truths": [
+        "Full state is robust but heavy.",
+        "Operations are light but need delivery guarantees.",
+        "Deltas send only what changed."
+      ],
+      "derivation": [
+        "**State-based**: simple transport, heavy payloads.",
+        "**Op-based**: small messages, needs causal broadcast.",
+        "**Delta-state**: send deltas, merge like state.",
+        "Choose by **network and scale**.",
+        "Use libraries that **handle sync** (Yjs, Automerge)."
+      ]
+    },
+    "analogy": {
+      "title": "Mailing the whole notebook versus mailing the latest edits",
+      "story": "The whole notebook always works but is heavy; edits are light but must all arrive in order.",
+      "mapping": [
+        [
+          "Whole notebook",
+          "State-based"
+        ],
+        [
+          "Edit list",
+          "Op-based"
+        ],
+        [
+          "Changed pages only",
+          "Delta-state"
+        ]
+      ],
+      "breaks": "Mail can be resent; op-based CRDTs fail if an operation is lost without a reliable transport."
+    },
+    "mindmap": {
+      "center": "State vs Op-Based",
+      "branches": [
+        {
+          "label": "State (CvRDT)",
+          "children": [
+            "Join merge",
+            "Tolerates loss/dupes",
+            "Heavier"
+          ]
+        },
+        {
+          "label": "Op (CmRDT)",
+          "children": [
+            "Commuting ops",
+            "Causal exactly-once delivery",
+            "Lighter"
+          ]
+        },
+        {
+          "label": "Delta-state",
+          "children": [
+            "Small deltas",
+            "State-like merge"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "Yjs",
+            "Automerge"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Editor sync choice",
+      "scenario": "Decision.",
+      "flow": [
+        "Peer-to-peer over flaky links → delta-state",
+        "Server-mediated with reliable log → op-based",
+        "Small configs → full state"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bandwidth matched to network reality."
+        }
+      ],
+      "code": [],
+      "outcome": "right CRDT flavour per context."
+    },
+    "summary": {
+      "points": [
+        "State: robust, heavy.",
+        "Ops: light, needs reliable delivery.",
+        "Deltas: middle ground."
+      ]
+    },
+    "check": [
+      {
+        "q": "What delivery guarantee do operation-based CRDTs need?",
+        "a": "Reliable, causally ordered, exactly-once delivery of operations."
+      }
+    ]
+  }
+}

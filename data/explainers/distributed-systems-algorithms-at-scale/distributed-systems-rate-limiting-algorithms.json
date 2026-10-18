@@ -1,0 +1,417 @@
+{
+  "introduction-the-bouncer-at-the-door": {
+    "core": "A rate limiter caps how many requests a client may make in a time window, protecting shared capacity from abuse, runaway clients and accidental floods. It needs an identity to key on (API key, user, IP), a rule (for example 100 requests per minute), an algorithm to count, and a response for violators, usually HTTP 429 with Retry-After.",
+    "first_principles": {
+      "problem": "One customer's buggy retry loop sends 50,000 requests per second and degrades the API for everyone.",
+      "truths": [
+        "Capacity is shared and finite.",
+        "Clients misbehave, maliciously or accidentally.",
+        "Limits need identity and a clock."
+      ],
+      "derivation": [
+        "Choose the **key** (user, API key, IP).",
+        "Define **rate and burst**.",
+        "Pick an **algorithm** (fixed window, sliding, buckets).",
+        "Return **429 + Retry-After**.",
+        "Enforce at the **edge** and per **service**."
+      ]
+    },
+    "analogy": {
+      "title": "A bouncer counting people in",
+      "story": "He lets people in at a steady pace and turns away anyone once the room is full, telling them when to try again.",
+      "mapping": [
+        [
+          "Bouncer",
+          "Rate limiter"
+        ],
+        [
+          "Guest list name",
+          "Client key"
+        ],
+        [
+          "Come back later",
+          "Retry-After"
+        ]
+      ],
+      "breaks": "Bouncers judge faces; limiters apply exact rules per key."
+    },
+    "mindmap": {
+      "center": "Rate Limiting",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Fairness",
+            "Protection",
+            "Cost control"
+          ]
+        },
+        {
+          "label": "Inputs",
+          "children": [
+            "Key",
+            "Rate",
+            "Burst"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "Fixed window",
+            "Sliding window",
+            "Leaky bucket",
+            "Token bucket"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "429",
+            "Retry-After",
+            "X-RateLimit headers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixed window counter",
+      "scenario": "Redis.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Weakness",
+          "detail": "200 requests can pass across a window boundary in 2 seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def allow(r, key, limit=100, window=60):\n    k = f'rl:{key}:{int(time.time() // window)}'\n    n = r.incr(k)\n    if n == 1: r.expire(k, window)\n    return n <= limit"
+        }
+      ],
+      "outcome": "a basic limiter and its flaw."
+    },
+    "summary": {
+      "points": [
+        "Protect shared capacity.",
+        "Key, rule, algorithm, response.",
+        "429 with Retry-After."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the boundary problem with fixed windows?",
+        "a": "A client can use the full limit at the end of one window and again at the start of the next, doubling the burst."
+      }
+    ]
+  },
+  "the-leaky-bucket-smooth-and-steady": {
+    "core": "The leaky bucket treats requests as water poured into a bucket with a hole: it drains at a fixed rate no matter how fast water arrives. Requests are queued (or counted) and processed at a constant outflow; when the bucket is full, new arrivals are dropped. The output is perfectly smooth, which protects downstream systems but adds queueing delay and doesn't allow bursts.",
+    "first_principles": {
+      "problem": "A legacy payment gateway falls over if it receives more than 10 calls per second, even briefly.",
+      "truths": [
+        "Downstream needs a steady rate.",
+        "Queues absorb short spikes.",
+        "Full queues must shed."
+      ],
+      "derivation": [
+        "Set **drain rate** = downstream capacity.",
+        "Set **bucket size** = acceptable queue.",
+        "**Enqueue** arrivals, **drop** when full.",
+        "Process at **constant intervals**.",
+        "Accept **added latency**."
+      ]
+    },
+    "analogy": {
+      "title": "A funnel into a bottle",
+      "story": "Pour as fast as you like; it only flows out at the funnel's rate, and it overflows if you pour too much.",
+      "mapping": [
+        [
+          "Funnel neck",
+          "Drain rate"
+        ],
+        [
+          "Funnel volume",
+          "Bucket capacity"
+        ],
+        [
+          "Overflow",
+          "Dropped requests"
+        ]
+      ],
+      "breaks": "Water spills messily; requests get a clean rejection."
+    },
+    "mindmap": {
+      "center": "Leaky Bucket",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Constant outflow",
+            "Finite capacity"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Smooth output",
+            "Drops on overflow"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Protects fragile downstream"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "No bursts",
+            "Queueing delay"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Traffic shaping",
+            "NGINX limit_req"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "NGINX limit_req",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Gateway sees a steady 10 req/s; excess beyond 20 queued gets 503/429."
+        }
+      ],
+      "code": [
+        {
+          "lang": "nginx",
+          "text": "limit_req_zone $binary_remote_addr zone=pay:10m rate=10r/s;\nserver {\n  location /pay {\n    limit_req zone=pay burst=20;   # queue up to 20, drain at 10/s\n  }\n}"
+        }
+      ],
+      "outcome": "smoothed traffic for a fragile backend."
+    },
+    "summary": {
+      "points": [
+        "Constant drain.",
+        "Queue up to capacity.",
+        "Smooth but no bursts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the leaky bucket trade for smooth output?",
+        "a": "Latency (requests wait in the queue) and the inability to serve legitimate bursts quickly."
+      }
+    ]
+  },
+  "the-token-bucket-bursts-allowed": {
+    "core": "A token bucket refills with tokens at a fixed rate up to a maximum capacity. Each request spends a token; if none are left it's rejected or delayed. An idle client accumulates tokens, so it can burst up to the capacity, while the long-run average stays bounded by the refill rate. It is easy to implement lazily: compute tokens from the elapsed time on each request.",
+    "first_principles": {
+      "problem": "A mobile app legitimately sends 20 requests at launch then goes quiet, but a strict 5 req/s limiter rejects most of them.",
+      "truths": [
+        "Average rate and burst are different needs.",
+        "Idle time can earn credit.",
+        "Lazy refill avoids timers."
+      ],
+      "derivation": [
+        "Set **refill rate** r and **capacity** b.",
+        "On request: tokens = min(b, tokens + r·Δt).",
+        "If tokens ≥ 1, **spend** and allow.",
+        "Else **reject** with wait = (1 − tokens)/r.",
+        "Store **(tokens, last_ts)** per key."
+      ]
+    },
+    "analogy": {
+      "title": "A transit card topped up automatically",
+      "story": "It gains credit every hour up to a cap; you can spend a lot at once if you've saved, but you can't exceed the cap.",
+      "mapping": [
+        [
+          "Credit",
+          "Tokens"
+        ],
+        [
+          "Auto top-up",
+          "Refill rate"
+        ],
+        [
+          "Card cap",
+          "Bucket capacity"
+        ]
+      ],
+      "breaks": "Cards hold money; tokens are just a computed number."
+    },
+    "mindmap": {
+      "center": "Token Bucket",
+      "branches": [
+        {
+          "label": "Params",
+          "children": [
+            "Refill rate",
+            "Capacity"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Bursts up to capacity",
+            "Average ≤ rate"
+          ]
+        },
+        {
+          "label": "Impl",
+          "children": [
+            "Lazy refill",
+            "(tokens, ts) state"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "AWS API Gateway",
+            "Stripe",
+            "Envoy local rate limit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lazy token bucket",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "rate=5, cap=20: app's 20-request launch burst passes, then 5/s sustained."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class TokenBucket:\n    def __init__(self, rate, cap):\n        self.rate, self.cap = rate, cap\n        self.tokens, self.ts = cap, time.monotonic()\n    def allow(self):\n        now = time.monotonic()\n        self.tokens = min(self.cap, self.tokens + (now - self.ts) * self.rate)\n        self.ts = now\n        if self.tokens >= 1:\n            self.tokens -= 1\n            return True\n        return False"
+        }
+      ],
+      "outcome": "bursts allowed, average bounded."
+    },
+    "summary": {
+      "points": [
+        "Tokens refill at a rate.",
+        "Capacity bounds bursts.",
+        "Lazy computation is cheap."
+      ]
+    },
+    "check": [
+      {
+        "q": "If rate=10/s and capacity=50, what's the max burst after a long idle period?",
+        "a": "50 requests at once, then 10 per second after that."
+      }
+    ]
+  },
+  "leaky-vs-token-the-comparison": {
+    "core": "Both buckets bound the long-run rate, but they shape traffic differently. The leaky bucket shapes output to a constant rate, queueing or dropping bursts: good in front of fragile systems. The token bucket polices input, letting bursts through up to capacity: good for user-facing APIs. Distributed enforcement adds another dimension, using a shared store such as Redis with atomic scripts, or approximate local limits.",
+    "first_principles": {
+      "problem": "A team picks the leaky bucket for a public API, and users complain about latency during normal bursty usage.",
+      "truths": [
+        "Shaping and policing differ.",
+        "Bursts are often legitimate.",
+        "Distributed counting needs atomicity."
+      ],
+      "derivation": [
+        "Fragile downstream → **leaky** (shaping).",
+        "Bursty clients → **token** (policing).",
+        "Need precision → **sliding window log**.",
+        "Across nodes → **Redis + Lua** atomic update.",
+        "At huge scale → **local limits** with periodic sync."
+      ]
+    },
+    "analogy": {
+      "title": "A metronome vs a savings account",
+      "story": "The metronome forces a steady beat; the savings account lets you spend saved credit in a lump.",
+      "mapping": [
+        [
+          "Metronome",
+          "Leaky bucket"
+        ],
+        [
+          "Savings",
+          "Token bucket"
+        ]
+      ],
+      "breaks": "Musicians can rush; limiters are exact."
+    },
+    "mindmap": {
+      "center": "Leaky vs Token",
+      "branches": [
+        {
+          "label": "Leaky",
+          "children": [
+            "Shapes output",
+            "Constant rate",
+            "Adds latency"
+          ]
+        },
+        {
+          "label": "Token",
+          "children": [
+            "Polices input",
+            "Allows bursts",
+            "No queueing"
+          ]
+        },
+        {
+          "label": "Others",
+          "children": [
+            "Fixed window",
+            "Sliding window log/counter"
+          ]
+        },
+        {
+          "label": "Distributed",
+          "children": [
+            "Redis Lua",
+            "Local + sync",
+            "Envoy global RLS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Redis atomic token bucket",
+      "scenario": "Lua script.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All API nodes share one consistent bucket per key."
+        }
+      ],
+      "code": [
+        {
+          "lang": "lua",
+          "text": "-- KEYS[1]=bucket ARGV: rate, cap, now, cost\nlocal b = redis.call('HMGET', KEYS[1], 't', 'ts')\nlocal t  = tonumber(b[1]) or tonumber(ARGV[2])\nlocal ts = tonumber(b[2]) or tonumber(ARGV[3])\nt = math.min(tonumber(ARGV[2]), t + (ARGV[3] - ts) * ARGV[1])\nlocal ok = t >= tonumber(ARGV[4])\nif ok then t = t - ARGV[4] end\nredis.call('HSET', KEYS[1], 't', t, 'ts', ARGV[3])\nredis.call('EXPIRE', KEYS[1], 3600)\nreturn ok and 1 or 0"
+        }
+      ],
+      "outcome": "right algorithm, enforced cluster-wide."
+    },
+    "summary": {
+      "points": [
+        "Leaky shapes; token polices.",
+        "Pick by downstream and clients.",
+        "Atomic shared state for clusters."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which bucket suits protecting a third-party API with a hard 10 req/s cap?",
+        "a": "The leaky bucket, because it guarantees a smooth outflow that never exceeds the cap."
+      }
+    ]
+  }
+}

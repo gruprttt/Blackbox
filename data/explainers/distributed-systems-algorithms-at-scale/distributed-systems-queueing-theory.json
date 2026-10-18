@@ -1,0 +1,515 @@
+{
+  "introduction-why-do-lines-form": {
+    "core": "Queues form whenever arrivals are variable and service takes time, even when average capacity exceeds average demand. Queueing theory relates arrival rate, service rate, utilisation and variability to waiting time, explaining why latency explodes as systems approach full utilisation and why burstiness hurts.",
+    "first_principles": {
+      "problem": "A service at 85% average CPU has terrible p99 latency, and the team doesn't understand why.",
+      "truths": [
+        "Arrivals are random and bursty.",
+        "Servers can't bank idle time.",
+        "Waiting grows non-linearly with load."
+      ],
+      "derivation": [
+        "Measure **arrival rate λ** and **service rate μ**.",
+        "Compute **utilisation ρ = λ/μ**.",
+        "Account for **variability**.",
+        "Keep **headroom**.",
+        "Reduce **variance** (batching, smoothing)."
+      ]
+    },
+    "analogy": {
+      "title": "A supermarket checkout",
+      "story": "Even if the cashier can handle the day's customers on average, clumps of shoppers create queues.",
+      "mapping": [
+        [
+          "Shoppers",
+          "Requests"
+        ],
+        [
+          "Cashier speed",
+          "Service rate"
+        ],
+        [
+          "Clumps",
+          "Burstiness"
+        ]
+      ],
+      "breaks": "Shoppers can leave; requests wait unless timed out or shed."
+    },
+    "mindmap": {
+      "center": "Queueing Theory",
+      "branches": [
+        {
+          "label": "Variables",
+          "children": [
+            "λ arrival rate",
+            "μ service rate",
+            "ρ utilisation"
+          ]
+        },
+        {
+          "label": "Laws",
+          "children": [
+            "Little's law",
+            "Kingman's formula"
+          ]
+        },
+        {
+          "label": "Effects",
+          "children": [
+            "Latency hockey stick",
+            "Variance hurts"
+          ]
+        },
+        {
+          "label": "Scaling",
+          "children": [
+            "USL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same average, different waits",
+      "scenario": "Comparison.",
+      "flow": [
+        "Steady arrivals at 80% load: short waits",
+        "Bursty arrivals at 80% load: long waits",
+        "Variance, not just load, drives queues"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Plan for variability."
+        }
+      ],
+      "code": [],
+      "outcome": "queues understood from first principles."
+    },
+    "summary": {
+      "points": [
+        "Variability creates queues.",
+        "Utilisation matters.",
+        "Keep headroom."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do queues form even when average capacity exceeds demand?",
+        "a": "Arrival and service times vary, so bursts temporarily exceed capacity."
+      }
+    ]
+  },
+  "littles-law-the-golden-rule": {
+    "core": "Little's law: L = λ × W. The average number of items in a system equals the arrival rate times the average time each spends in it. It holds for any stable system regardless of distribution, so you can derive concurrency, queue length or latency from the other two, e.g. needed threads or connections.",
+    "first_principles": {
+      "problem": "A team can't estimate how many database connections a service needs.",
+      "truths": [
+        "Throughput and latency imply concurrency.",
+        "The law needs no distribution assumptions.",
+        "Stable systems obey it on average."
+      ],
+      "derivation": [
+        "**Concurrency = throughput × latency**.",
+        "Size **thread/connection pools**.",
+        "Diagnose **queue growth** (W rising at fixed λ).",
+        "Estimate **latency** from in-flight counts.",
+        "Apply to **any boundary** (service, queue, DB)."
+      ]
+    },
+    "analogy": {
+      "title": "A coffee shop's occupancy",
+      "story": "If 30 customers arrive per hour and each stays 20 minutes, about 10 are inside at any time.",
+      "mapping": [
+        [
+          "Customers inside",
+          "L (in-flight)"
+        ],
+        [
+          "Arrivals per hour",
+          "λ"
+        ],
+        [
+          "Time spent",
+          "W"
+        ]
+      ],
+      "breaks": "Coffee shop capacity is visible; in-flight requests are hidden unless measured."
+    },
+    "mindmap": {
+      "center": "Little's Law",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "L = λ × W"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Pool sizing",
+            "Queue diagnosis",
+            "Latency estimation"
+          ]
+        },
+        {
+          "label": "Assumptions",
+          "children": [
+            "Stable system",
+            "Long-run averages"
+          ]
+        },
+        {
+          "label": "Applies",
+          "children": [
+            "Any boundary"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Connection pool sizing",
+      "scenario": "Maths.",
+      "flow": [
+        "2,000 queries/s × 5 ms average = 10 concurrent",
+        "Add headroom for p99 (×3) → ~30 connections",
+        "Pool of 200 was wasteful"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right-sized pools from simple maths."
+        }
+      ],
+      "code": [],
+      "outcome": "concurrency derived, not guessed."
+    },
+    "summary": {
+      "points": [
+        "L = λW.",
+        "No distribution needed.",
+        "Size pools and queues."
+      ]
+    },
+    "check": [
+      {
+        "q": "A service handles 500 req/s with 200 ms latency. How many requests are in flight on average?",
+        "a": "100 (500 × 0.2)."
+      }
+    ]
+  },
+  "utilization-how-busy-are-we": {
+    "core": "Utilisation ρ = λ/μ is the fraction of time a server is busy. In an M/M/1 queue, average waiting grows as ρ/(1−ρ): at 50% you wait about 1 service time, at 90% about 9, at 99% about 99. Running hot saves money but destroys tail latency, so target utilisation must reflect latency goals and variability.",
+    "first_principles": {
+      "problem": "Finance wants servers at 95% utilisation, and engineering knows latency will explode.",
+      "truths": [
+        "Busy servers make arrivals wait.",
+        "Waiting grows hyperbolically near 100%.",
+        "Multiple servers smooth this somewhat."
+      ],
+      "derivation": [
+        "Compute **ρ** per resource.",
+        "Set **targets** from latency SLOs (often 50–70%).",
+        "Use **pooling** (M/M/c) for efficiency.",
+        "Monitor **saturation** signals.",
+        "Explain **cost vs latency** trade-offs."
+      ]
+    },
+    "analogy": {
+      "title": "Motorway traffic",
+      "story": "Up to a point traffic flows; near full capacity, small additions cause huge jams.",
+      "mapping": [
+        [
+          "Road capacity",
+          "Service rate"
+        ],
+        [
+          "Traffic volume",
+          "Arrival rate"
+        ],
+        [
+          "Jams",
+          "Queueing delay"
+        ]
+      ],
+      "breaks": "Roads have physical lanes; servers can be added within minutes."
+    },
+    "mindmap": {
+      "center": "Utilisation",
+      "branches": [
+        {
+          "label": "Definition",
+          "children": [
+            "ρ = λ/μ"
+          ]
+        },
+        {
+          "label": "M/M/1 wait",
+          "children": [
+            "ρ/(1−ρ) × service time"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "50–70% for latency"
+          ]
+        },
+        {
+          "label": "Pooling",
+          "children": [
+            "M/M/c"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Saturation",
+            "Queue length"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Wait vs utilisation",
+      "scenario": "M/M/1.",
+      "flow": [
+        "ρ 0.5 → wait ≈ 1× service time",
+        "ρ 0.8 → 4×",
+        "ρ 0.9 → 9×",
+        "ρ 0.99 → 99×"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "The last 10% of utilisation is very expensive in latency."
+        }
+      ],
+      "code": [],
+      "outcome": "utilisation targets grounded in maths."
+    },
+    "summary": {
+      "points": [
+        "ρ = λ/μ.",
+        "Waits explode near 100%.",
+        "Target by SLO."
+      ]
+    },
+    "check": [
+      {
+        "q": "In an M/M/1 queue, how does waiting time change from 80% to 90% utilisation?",
+        "a": "It more than doubles, from about 4 to about 9 service times."
+      }
+    ]
+  },
+  "kingmans-formula-the-hockey-stick-curve": {
+    "core": "Kingman's formula approximates waiting time for general queues: W ≈ (ρ/(1−ρ)) × ((Ca² + Cs²)/2) × service time, where Ca and Cs are coefficients of variation of arrivals and service. Latency rises like a hockey stick near full utilisation, and variability multiplies it, so reducing variance helps as much as adding capacity.",
+    "first_principles": {
+      "problem": "A service with highly variable request sizes has awful latency at only 70% utilisation.",
+      "truths": [
+        "Utilisation and variability both drive waits.",
+        "They multiply, not add.",
+        "Variance can be engineered down."
+      ],
+      "derivation": [
+        "Measure **Ca** (arrival burstiness) and **Cs** (service variability).",
+        "Reduce **Cs**: split large jobs, separate queues for big/small.",
+        "Reduce **Ca**: smoothing, rate limiting.",
+        "Keep **ρ** below the knee.",
+        "Use **priority/size-based scheduling**."
+      ]
+    },
+    "analogy": {
+      "title": "A queue where some customers bring 100 items",
+      "story": "Variable basket sizes make the line far worse than steady small baskets.",
+      "mapping": [
+        [
+          "Basket sizes",
+          "Service time variability"
+        ],
+        [
+          "Express lane",
+          "Separate queue for small jobs"
+        ],
+        [
+          "Hockey stick",
+          "Latency curve"
+        ]
+      ],
+      "breaks": "Supermarkets add express lanes physically; systems can route by request size dynamically."
+    },
+    "mindmap": {
+      "center": "Kingman's Formula",
+      "branches": [
+        {
+          "label": "Factors",
+          "children": [
+            "Utilisation term ρ/(1−ρ)",
+            "Variability (Ca² + Cs²)/2",
+            "Service time"
+          ]
+        },
+        {
+          "label": "Shape",
+          "children": [
+            "Hockey stick"
+          ]
+        },
+        {
+          "label": "Levers",
+          "children": [
+            "Lower ρ",
+            "Lower Ca",
+            "Lower Cs"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Separate queues",
+            "Chunking",
+            "Smoothing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Separating heavy requests",
+      "scenario": "Effect.",
+      "flow": [
+        "Mixed queue: Cs = 3 → p99 1.8 s at 70%",
+        "Separate pools for exports vs page views",
+        "Page view queue Cs = 0.5 → p99 120 ms"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Latency fixed without more servers."
+        }
+      ],
+      "code": [],
+      "outcome": "variance-aware capacity planning."
+    },
+    "summary": {
+      "points": [
+        "Utilisation × variability.",
+        "Hockey stick.",
+        "Reduce variance."
+      ]
+    },
+    "check": [
+      {
+        "q": "According to Kingman, what two factors multiply queueing delay?",
+        "a": "Utilisation (ρ/(1−ρ)) and variability of arrivals and service times."
+      }
+    ]
+  },
+  "the-universal-scalability-law-usl": {
+    "core": "The Universal Scalability Law models throughput as C(N) = N / (1 + α(N−1) + βN(N−1)), where α is contention (serialised parts, Amdahl) and β is coherency (crosstalk, synchronising state). With β > 0, adding nodes eventually reduces throughput. Fitting USL to load tests predicts the peak and guides architecture changes.",
+    "first_principles": {
+      "problem": "Adding servers past 32 makes a database cluster slower, not faster.",
+      "truths": [
+        "Shared resources serialise work.",
+        "Coordination costs grow with pairs of nodes.",
+        "Linear scaling is the exception."
+      ],
+      "derivation": [
+        "Load-test at several **N**.",
+        "**Fit α and β**.",
+        "Find **peak N** ≈ √((1−α)/β).",
+        "Reduce **α** (less locking, sharding).",
+        "Reduce **β** (less cross-node chatter)."
+      ]
+    },
+    "analogy": {
+      "title": "Adding cooks to a kitchen",
+      "story": "More cooks help until they queue for the stove (contention) and spend time coordinating (coherency).",
+      "mapping": [
+        [
+          "Stove queue",
+          "Contention α"
+        ],
+        [
+          "Coordinating",
+          "Coherency β"
+        ],
+        [
+          "Too many cooks",
+          "Retrograde scaling"
+        ]
+      ],
+      "breaks": "Kitchens have fixed stoves; software can remove shared resources by redesign."
+    },
+    "mindmap": {
+      "center": "USL",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "N / (1 + α(N−1) + βN(N−1))"
+          ]
+        },
+        {
+          "label": "Parameters",
+          "children": [
+            "α contention",
+            "β coherency"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Sublinear",
+            "Peak",
+            "Retrograde"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Fit load tests",
+            "Predict peak",
+            "Guide design"
+          ]
+        },
+        {
+          "label": "Related",
+          "children": [
+            "Amdahl's law"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fitting a cluster",
+      "scenario": "Result.",
+      "flow": [
+        "Measured throughput at N = 1, 2, 4, 8, 16, 32",
+        "Fit: α = 0.03, β = 0.0008",
+        "Predicted peak ≈ 35 nodes",
+        "Sharding hot table cuts β → peak 120"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Data-driven scaling decisions."
+        }
+      ],
+      "code": [],
+      "outcome": "predictable scalability limits."
+    },
+    "summary": {
+      "points": [
+        "Contention and coherency.",
+        "Throughput can fall.",
+        "Fit and fix."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the β (coherency) term in USL represent?",
+        "a": "The cost of keeping nodes in sync, which grows with pairs of nodes and can make throughput decline."
+      }
+    ]
+  }
+}

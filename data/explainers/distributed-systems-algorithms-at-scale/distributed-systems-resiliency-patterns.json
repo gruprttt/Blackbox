@@ -1,0 +1,846 @@
+{
+  "introduction-embrace-the-failure": {
+    "core": "In distributed systems, partial failure is normal: networks drop packets, dependencies slow down, instances die. Resilience patterns (timeouts, retries with backoff and jitter, circuit breakers, bulkheads, fallbacks, rate limiting and load shedding) keep failures contained and services degrading gracefully instead of cascading.",
+    "first_principles": {
+      "problem": "One slow recommendation service makes the whole product page time out.",
+      "truths": [
+        "Every remote call can fail or hang.",
+        "Failures propagate through waiting.",
+        "Graceful degradation beats total failure."
+      ],
+      "derivation": [
+        "**Timeouts** on every call.",
+        "**Retries** with backoff and jitter.",
+        "**Circuit breakers** for failing dependencies.",
+        "**Bulkheads** to isolate resources.",
+        "**Fallbacks** for degraded responses."
+      ]
+    },
+    "analogy": {
+      "title": "A ship's safety systems",
+      "story": "Watertight doors, bilge pumps and lifeboats assume the hull will be breached somewhere.",
+      "mapping": [
+        [
+          "Watertight doors",
+          "Bulkheads"
+        ],
+        [
+          "Bilge pumps",
+          "Retries/shedding"
+        ],
+        [
+          "Lifeboats",
+          "Fallbacks"
+        ]
+      ],
+      "breaks": "Ships face one hazard at a time; systems face many partial failures at once."
+    },
+    "mindmap": {
+      "center": "Resiliency",
+      "branches": [
+        {
+          "label": "Assumption",
+          "children": [
+            "Failure is normal"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Timeouts",
+            "Retries",
+            "Circuit breakers",
+            "Bulkheads",
+            "Fallbacks",
+            "Rate limiting"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Contain",
+            "Degrade gracefully"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Product page with resilience",
+      "scenario": "Behaviour.",
+      "flow": [
+        "Recommendations call: 200 ms timeout",
+        "Circuit open after repeated failures",
+        "Fallback: show bestsellers",
+        "Page loads normally"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dependency failure invisible to most users."
+        }
+      ],
+      "code": [],
+      "outcome": "graceful degradation."
+    },
+    "summary": {
+      "points": [
+        "Expect failure.",
+        "Contain it.",
+        "Degrade gracefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the goal of resiliency patterns?",
+        "a": "To contain failures and let systems degrade gracefully instead of cascading."
+      }
+    ]
+  },
+  "the-retry-pattern-try-try-again": {
+    "core": "Retries recover from transient failures (network blips, brief overload, leader elections). Retry only idempotent operations (or use idempotency keys), only on retryable errors (timeouts, 503, connection resets, not 400s), with a bounded number of attempts, and only at one layer to avoid multiplicative retry storms.",
+    "first_principles": {
+      "problem": "Retries at client, gateway and service layers turn one failing call into 27 attempts.",
+      "truths": [
+        "Many failures are transient.",
+        "Repeating non-idempotent operations duplicates effects.",
+        "Layered retries multiply."
+      ],
+      "derivation": [
+        "Retry **retryable errors** only.",
+        "Ensure **idempotency** (keys, safe methods).",
+        "**Cap attempts** (e.g. 3).",
+        "Retry at **one layer**.",
+        "Use **retry budgets** (e.g. ≤10% extra traffic)."
+      ]
+    },
+    "analogy": {
+      "title": "Redialling a busy phone number",
+      "story": "Try again a couple of times, but don't redial forever or call from three phones at once.",
+      "mapping": [
+        [
+          "Busy tone",
+          "Transient error"
+        ],
+        [
+          "Redialling",
+          "Retry"
+        ],
+        [
+          "Three phones",
+          "Layered retries"
+        ]
+      ],
+      "breaks": "Redialling doesn't double-charge you; retrying a payment might, without idempotency."
+    },
+    "mindmap": {
+      "center": "Retries",
+      "branches": [
+        {
+          "label": "When",
+          "children": [
+            "Transient errors",
+            "Idempotent ops"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Max attempts",
+            "Retry budget",
+            "One layer"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Idempotency keys"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Retrying 4xx",
+            "Storms"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Retry with idempotency key",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Safe retries; no double charges."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "key = str(uuid.uuid4())\nfor attempt in range(3):\n    try:\n        return pay(amount, idempotency_key=key, timeout=2)\n    except (Timeout, ServiceUnavailable):\n        time.sleep(backoff(attempt))\nraise PaymentUnavailable()"
+        }
+      ],
+      "outcome": "transient failures absorbed."
+    },
+    "summary": {
+      "points": [
+        "Retry transient errors.",
+        "Idempotency first.",
+        "Bound and budget."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why retry at only one layer?",
+        "a": "Retries multiply across layers, turning one failure into many requests and amplifying overload."
+      }
+    ]
+  },
+  "smarter-retries-backoff-and-jitter": {
+    "core": "Immediate retries hammer a struggling service. Exponential backoff waits progressively longer (base × 2^attempt, capped), and jitter randomises the wait so clients don't retry in sync. 'Full jitter' (sleep = random(0, min(cap, base × 2^attempt))) spreads load best, per AWS's analysis.",
+    "first_principles": {
+      "problem": "After a brief outage, all clients retry at exactly 1, 2 and 4 seconds, creating synchronised spikes.",
+      "truths": [
+        "Overloaded systems need breathing room.",
+        "Synchronised clients create waves.",
+        "Randomness desynchronises."
+      ],
+      "derivation": [
+        "**Exponential backoff** with a **cap**.",
+        "Add **full or decorrelated jitter**.",
+        "Respect **Retry-After** headers.",
+        "Combine with **max attempts/deadline**.",
+        "Use library defaults (AWS SDK, Polly, resilience4j)."
+      ]
+    },
+    "analogy": {
+      "title": "People leaving a cinema at staggered times",
+      "story": "If everyone stands up at the same second, the exits jam.",
+      "mapping": [
+        [
+          "Staggered exits",
+          "Jitter"
+        ],
+        [
+          "Waiting longer each time",
+          "Exponential backoff"
+        ],
+        [
+          "Exits",
+          "Service capacity"
+        ]
+      ],
+      "breaks": "Cinema crowds self-spread somewhat; code retries exactly on schedule without jitter."
+    },
+    "mindmap": {
+      "center": "Backoff & Jitter",
+      "branches": [
+        {
+          "label": "Backoff",
+          "children": [
+            "Exponential",
+            "Cap"
+          ]
+        },
+        {
+          "label": "Jitter",
+          "children": [
+            "Full",
+            "Equal",
+            "Decorrelated"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Retry-After"
+          ]
+        },
+        {
+          "label": "Bounds",
+          "children": [
+            "Max attempts",
+            "Deadline"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "AWS SDK",
+            "Polly",
+            "resilience4j",
+            "tenacity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Full jitter",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Retries spread evenly over time."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import random\ndef backoff(attempt, base=0.1, cap=10.0):\n    return random.uniform(0, min(cap, base * 2 ** attempt))"
+        }
+      ],
+      "outcome": "recovery without synchronised storms."
+    },
+    "summary": {
+      "points": [
+        "Wait longer each time.",
+        "Randomise.",
+        "Cap and bound."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does jitter solve?",
+        "a": "It prevents many clients from retrying at the same moments, avoiding synchronised load spikes."
+      }
+    ]
+  },
+  "the-circuit-breaker-stopping-the-bleeding": {
+    "core": "A circuit breaker wraps calls to a dependency and tracks failures. When failures exceed a threshold, it 'opens' and fails fast without calling the dependency, protecting both the caller (no threads stuck waiting) and the struggling dependency (no extra load), then periodically tests recovery.",
+    "first_principles": {
+      "problem": "A failing payment provider makes every checkout thread wait 30 seconds, exhausting the thread pool.",
+      "truths": [
+        "Waiting on a dead dependency wastes resources.",
+        "Failing fast frees capacity.",
+        "Dependencies need time to recover."
+      ],
+      "derivation": [
+        "Track **failure rate/slow calls** over a window.",
+        "**Open** above threshold → fail fast.",
+        "After timeout, **half-open** trial calls.",
+        "**Close** on success.",
+        "Pair with **fallbacks** and metrics."
+      ]
+    },
+    "analogy": {
+      "title": "An electrical circuit breaker",
+      "story": "When there's a fault, it trips to stop damage, and you reset it once the fault is fixed.",
+      "mapping": [
+        [
+          "Fault",
+          "Failing dependency"
+        ],
+        [
+          "Trip",
+          "Open"
+        ],
+        [
+          "Reset test",
+          "Half-open probe"
+        ]
+      ],
+      "breaks": "Household breakers need manual reset; software breakers test and reset automatically."
+    },
+    "mindmap": {
+      "center": "Circuit Breaker",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Fail fast",
+            "Protect caller",
+            "Protect dependency"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Failure rate",
+            "Slow call rate"
+          ]
+        },
+        {
+          "label": "States",
+          "children": [
+            "Closed",
+            "Open",
+            "Half-open"
+          ]
+        },
+        {
+          "label": "Pairs",
+          "children": [
+            "Fallbacks",
+            "Timeouts",
+            "Metrics"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "resilience4j",
+            "Polly",
+            "Envoy outlier detection"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Breaker config",
+      "scenario": "resilience4j.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Checkout fails fast with a clear message while payments recover."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "resilience4j.circuitbreaker.instances.payments:\n  slidingWindowSize: 50\n  failureRateThreshold: 50\n  slowCallDurationThreshold: 2s\n  slowCallRateThreshold: 50\n  waitDurationInOpenState: 30s\n  permittedNumberOfCallsInHalfOpenState: 5"
+        }
+      ],
+      "outcome": "contained dependency failures."
+    },
+    "summary": {
+      "points": [
+        "Trip on failures.",
+        "Fail fast.",
+        "Probe recovery."
+      ]
+    },
+    "check": [
+      {
+        "q": "What two parties does a circuit breaker protect?",
+        "a": "The caller (from wasted waiting) and the failing dependency (from extra load)."
+      }
+    ]
+  },
+  "circuit-breaker-states": {
+    "core": "Closed: calls pass through and failures are counted in a sliding window. Open: calls fail immediately (or use a fallback) for a wait duration. Half-open: a limited number of trial calls are allowed; if they succeed the breaker closes, and if they fail it reopens. Tuning window size, thresholds and wait time balances sensitivity against flapping.",
+    "first_principles": {
+      "problem": "A breaker trips on a handful of errors during low traffic, or never trips because the window is too large.",
+      "truths": [
+        "Statistics need enough samples.",
+        "Recovery must be tested carefully.",
+        "Thresholds trade sensitivity for stability."
+      ],
+      "derivation": [
+        "**Closed**: count failures in a window.",
+        "Set **minimumNumberOfCalls**.",
+        "**Open**: fail fast for waitDuration.",
+        "**Half-open**: allow N probes.",
+        "Emit **state-change metrics/alerts**."
+      ]
+    },
+    "analogy": {
+      "title": "A traffic light at a damaged bridge",
+      "story": "Green (closed), red while repairs happen (open), then let a few cars test it (half-open).",
+      "mapping": [
+        [
+          "Green",
+          "Closed"
+        ],
+        [
+          "Red",
+          "Open"
+        ],
+        [
+          "Test cars",
+          "Half-open probes"
+        ]
+      ],
+      "breaks": "Bridge inspections are thorough; half-open probes are a few real requests."
+    },
+    "mindmap": {
+      "center": "Breaker States",
+      "branches": [
+        {
+          "label": "Closed",
+          "children": [
+            "Pass through",
+            "Count failures"
+          ]
+        },
+        {
+          "label": "Open",
+          "children": [
+            "Fail fast",
+            "Wait duration"
+          ]
+        },
+        {
+          "label": "Half-open",
+          "children": [
+            "Limited probes",
+            "Close or reopen"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Window",
+            "Min calls",
+            "Thresholds",
+            "Wait"
+          ]
+        },
+        {
+          "label": "Observability",
+          "children": [
+            "State metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "State transitions",
+      "scenario": "Timeline.",
+      "flow": [
+        "Closed: 30/50 calls fail (60%) → Open",
+        "Open 30 s: all calls fail fast",
+        "Half-open: 5 probes, 5 succeed → Closed",
+        "If probes fail → Open again"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Automatic recovery detection."
+        }
+      ],
+      "code": [],
+      "outcome": "well-tuned breakers."
+    },
+    "summary": {
+      "points": [
+        "Three states.",
+        "Minimum call counts.",
+        "Monitor transitions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens in the half-open state?",
+        "a": "A limited number of trial requests are allowed; success closes the breaker, failure reopens it."
+      }
+    ]
+  },
+  "bulkheads-contain-the-failure": {
+    "core": "Bulkheads isolate resources (thread pools, connection pools, semaphores, even separate instances or cells) per dependency or workload, so a slow or failing dependency exhausts only its own compartment. Other features keep working with their own capacity.",
+    "first_principles": {
+      "problem": "One slow downstream API ties up all 200 shared HTTP worker threads, so even unrelated endpoints hang.",
+      "truths": [
+        "Shared pools spread failure.",
+        "Partitioned resources contain it.",
+        "Limits make failure visible early."
+      ],
+      "derivation": [
+        "Separate **thread/connection pools** per dependency.",
+        "Use **semaphores** to cap concurrency.",
+        "Separate **critical vs non-critical** workloads.",
+        "Isolate **tenants** (cells, shuffle sharding).",
+        "Size compartments from **capacity planning**."
+      ]
+    },
+    "analogy": {
+      "title": "Watertight compartments in a ship's hull",
+      "story": "A breach floods one compartment, not the whole ship.",
+      "mapping": [
+        [
+          "Compartments",
+          "Resource pools"
+        ],
+        [
+          "Breach",
+          "Slow dependency"
+        ],
+        [
+          "Ship afloat",
+          "Other features working"
+        ]
+      ],
+      "breaks": "Ship compartments are fixed; resource pools must be sized and tuned."
+    },
+    "mindmap": {
+      "center": "Bulkheads",
+      "branches": [
+        {
+          "label": "Resources",
+          "children": [
+            "Thread pools",
+            "Connection pools",
+            "Semaphores",
+            "Instances",
+            "Cells"
+          ]
+        },
+        {
+          "label": "Partition by",
+          "children": [
+            "Dependency",
+            "Criticality",
+            "Tenant"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Containment",
+            "Predictability"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Pool sizes",
+            "Queue limits"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Semaphore bulkhead",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Recommendations can use at most 20 concurrent slots."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import asyncio\nrecs_slots = asyncio.Semaphore(20)\nasync def get_recommendations(user):\n    if recs_slots.locked():\n        return FALLBACK_RECS\n    async with recs_slots:\n        return await asyncio.wait_for(recs_client.get(user), timeout=0.2)"
+        }
+      ],
+      "outcome": "failures contained to one compartment."
+    },
+    "summary": {
+      "points": [
+        "Partition resources.",
+        "Cap concurrency.",
+        "Protect critical paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a bulkhead prevent?",
+        "a": "A failure in one dependency or workload from exhausting shared resources and affecting others."
+      }
+    ]
+  },
+  "fallbacks-and-rate-limiting": {
+    "core": "Fallbacks provide a degraded but useful response when a dependency fails: cached or stale data, defaults, simplified results or queuing for later. Rate limiting protects services from overload by capping request rates per client or globally (token bucket), returning 429 with Retry-After so clients back off.",
+    "first_principles": {
+      "problem": "When the pricing service fails, the product page shows an error instead of last-known prices.",
+      "truths": [
+        "Some answer is often better than none.",
+        "Overload must be capped at the edge.",
+        "Clients need clear signals."
+      ],
+      "derivation": [
+        "Define **fallbacks** per dependency (cache, default, queue).",
+        "Mark **degraded** responses.",
+        "**Rate limit** per client and globally.",
+        "Return **429 + Retry-After**.",
+        "Avoid fallbacks that **hide** critical correctness failures."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant out of one ingredient",
+      "story": "They offer a substitute dish rather than closing, and limit bookings when fully booked.",
+      "mapping": [
+        [
+          "Substitute dish",
+          "Fallback"
+        ],
+        [
+          "Booking limit",
+          "Rate limit"
+        ],
+        [
+          "'Come back at 8'",
+          "Retry-After"
+        ]
+      ],
+      "breaks": "Substitutes are obvious to diners; degraded responses should be flagged in data too."
+    },
+    "mindmap": {
+      "center": "Fallbacks & Rate Limits",
+      "branches": [
+        {
+          "label": "Fallbacks",
+          "children": [
+            "Cache",
+            "Stale data",
+            "Defaults",
+            "Queue for later"
+          ]
+        },
+        {
+          "label": "Rate limiting",
+          "children": [
+            "Token bucket",
+            "Per client",
+            "Global"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "429",
+            "Retry-After"
+          ]
+        },
+        {
+          "label": "Caution",
+          "children": [
+            "Don't hide correctness failures"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stale price fallback",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Page shows last-known price with a degraded flag."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def price(sku):\n    try:\n        p = pricing.get(sku, timeout=0.3)\n        cache.set(f'price:{sku}', p, ttl=3600)\n        return p, False\n    except (Timeout, CircuitOpen):\n        cached = cache.get(f'price:{sku}')\n        if cached: return cached, True   # degraded\n        raise"
+        }
+      ],
+      "outcome": "useful responses under failure."
+    },
+    "summary": {
+      "points": [
+        "Degrade gracefully.",
+        "Rate-limit overload.",
+        "Signal clearly."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is a fallback inappropriate?",
+        "a": "When it would hide a correctness-critical failure, such as approving a payment without checking funds."
+      }
+    ]
+  },
+  "timeouts-the-forgotten-pattern": {
+    "core": "Without timeouts, a hung dependency holds threads, connections and memory forever, cascading failures upstream. Set connect and request timeouts on every network call, derive them from dependency latency (e.g. slightly above p99.9), propagate deadlines across services (gRPC deadlines) so downstream work stops when the caller has given up, and keep inner timeouts shorter than outer ones.",
+    "first_principles": {
+      "problem": "A database hang with default infinite timeouts freezes every API worker for minutes.",
+      "truths": [
+        "Default timeouts are often infinite or huge.",
+        "Waiting consumes resources.",
+        "Work after the caller gave up is wasted."
+      ],
+      "derivation": [
+        "Set **connect + read timeouts** everywhere.",
+        "Base on **measured latency** percentiles.",
+        "**Propagate deadlines**.",
+        "Ensure **inner < outer** timeouts.",
+        "Combine with **retries within the deadline**."
+      ]
+    },
+    "analogy": {
+      "title": "Hanging up on hold music after a reasonable wait",
+      "story": "You don't stay on hold forever; you try another route.",
+      "mapping": [
+        [
+          "Hold music",
+          "Hung dependency"
+        ],
+        [
+          "Hanging up",
+          "Timeout"
+        ],
+        [
+          "Another route",
+          "Fallback/retry"
+        ]
+      ],
+      "breaks": "Phone calls cost only time; hung requests also consume threads and memory."
+    },
+    "mindmap": {
+      "center": "Timeouts",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Connect",
+            "Read/request",
+            "Overall deadline"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "From p99/p99.9"
+          ]
+        },
+        {
+          "label": "Propagation",
+          "children": [
+            "gRPC deadlines",
+            "Context cancellation"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Inner < outer",
+            "Retries within deadline"
+          ]
+        },
+        {
+          "label": "Danger",
+          "children": [
+            "Infinite defaults"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deadline propagation",
+      "scenario": "Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Downstream stops work when the user request times out."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "ctx, cancel := context.WithTimeout(r.Context(), 800*time.Millisecond)\ndefer cancel()\nresp, err := inventoryClient.Check(ctx, req)   // gRPC carries the deadline downstream"
+        }
+      ],
+      "outcome": "bounded waits everywhere."
+    },
+    "summary": {
+      "points": [
+        "Timeout every call.",
+        "Base on latency data.",
+        "Propagate deadlines."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should inner service timeouts be shorter than outer ones?",
+        "a": "So inner calls fail (and can be retried or fall back) before the outer caller gives up."
+      }
+    ]
+  }
+}

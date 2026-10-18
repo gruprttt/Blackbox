@@ -1,0 +1,1078 @@
+{
+  "introduction-the-problem-of-agreement": {
+    "core": "Consensus is getting a group of nodes to agree on a value (or an ordered log of values) despite crashes and message delays, so the group acts like one reliable machine. It underpins leader election, replicated state machines, configuration stores (etcd, ZooKeeper, Consul) and distributed databases. Safety (never disagree) and liveness (eventually decide) are the two requirements.",
+    "first_principles": {
+      "problem": "Three database replicas each accept different writes during a network glitch and end up with conflicting data.",
+      "truths": [
+        "Nodes crash and messages are delayed.",
+        "Agreement must survive failures.",
+        "A replicated log makes many machines act as one."
+      ],
+      "derivation": [
+        "Require **safety**: no two nodes decide differently.",
+        "Aim for **liveness**: decide eventually.",
+        "Use **majority quorums**.",
+        "Elect a **leader** to order proposals.",
+        "Replicate a **log** → state machine replication."
+      ]
+    },
+    "analogy": {
+      "title": "A committee voting on minutes",
+      "story": "Members may be absent or late, but the official minutes must never contain contradictory decisions.",
+      "mapping": [
+        [
+          "Committee",
+          "Nodes"
+        ],
+        [
+          "Minutes",
+          "Replicated log"
+        ],
+        [
+          "Majority vote",
+          "Quorum"
+        ]
+      ],
+      "breaks": "Committees can wait for latecomers indefinitely; systems need timeouts to stay live."
+    },
+    "mindmap": {
+      "center": "Consensus",
+      "branches": [
+        {
+          "label": "Goal",
+          "children": [
+            "Agree on values",
+            "Ordered log"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Safety",
+            "Liveness"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Quorums",
+            "Leaders",
+            "Terms/ballots"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "Paxos",
+            "Raft",
+            "Zab"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "etcd",
+            "ZooKeeper",
+            "Spanner",
+            "Kafka KRaft"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Replicated state machine",
+      "scenario": "Flow.",
+      "flow": [
+        "Client sends 'SET x=5' to leader",
+        "Leader appends to log, replicates to followers",
+        "Majority acknowledges → committed",
+        "All apply in log order → identical state"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Three machines behave like one reliable one."
+        }
+      ],
+      "code": [],
+      "outcome": "consensus understood as the foundation."
+    },
+    "summary": {
+      "points": [
+        "Agree despite failures.",
+        "Safety and liveness.",
+        "Replicated log."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the two core properties a consensus algorithm must provide?",
+        "a": "Safety (never decide conflicting values) and liveness (eventually decide)."
+      }
+    ]
+  },
+  "the-flp-impossibility-and-why-it-matters": {
+    "core": "The FLP result (Fischer, Lynch, Paterson, 1985) proves no deterministic algorithm can guarantee consensus in a fully asynchronous system if even one process may crash, because you can't distinguish a crashed node from a slow one. Practical algorithms keep safety always and achieve liveness using timeouts and partial synchrony assumptions (or randomisation).",
+    "first_principles": {
+      "problem": "Engineers expect a consensus system to always make progress during severe network instability.",
+      "truths": [
+        "Slow and dead are indistinguishable without time bounds.",
+        "Safety can be guaranteed unconditionally.",
+        "Liveness needs timing assumptions."
+      ],
+      "derivation": [
+        "Accept **FLP**: no guaranteed liveness in pure asynchrony.",
+        "Keep **safety unconditional**.",
+        "Use **timeouts/failure detectors** for liveness.",
+        "Assume **partial synchrony** (eventually bounded delays).",
+        "Use **randomised timeouts** to avoid livelock."
+      ]
+    },
+    "analogy": {
+      "title": "Waiting for a friend who might have left",
+      "story": "You can never be sure they're not just running late, so you pick a time to stop waiting.",
+      "mapping": [
+        [
+          "Friend running late",
+          "Slow node"
+        ],
+        [
+          "Friend left",
+          "Crashed node"
+        ],
+        [
+          "Deciding to stop waiting",
+          "Timeout"
+        ]
+      ],
+      "breaks": "Friends can phone; nodes may be unreachable entirely during partitions."
+    },
+    "mindmap": {
+      "center": "FLP",
+      "branches": [
+        {
+          "label": "Result",
+          "children": [
+            "No deterministic guaranteed consensus with one crash in async"
+          ]
+        },
+        {
+          "label": "Reason",
+          "children": [
+            "Slow vs dead"
+          ]
+        },
+        {
+          "label": "Workarounds",
+          "children": [
+            "Timeouts",
+            "Partial synchrony",
+            "Randomisation",
+            "Failure detectors"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Safety always",
+            "Liveness usually"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Raft and FLP",
+      "scenario": "Behaviour.",
+      "flow": [
+        "Network chaos → elections keep timing out",
+        "No leader → no progress (liveness lost)",
+        "But no conflicting commits (safety kept)",
+        "Network stabilises → leader elected"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Stalls are possible; divergence isn't."
+        }
+      ],
+      "code": [],
+      "outcome": "realistic expectations of consensus."
+    },
+    "summary": {
+      "points": [
+        "FLP limits liveness.",
+        "Safety is guaranteed.",
+        "Timeouts restore progress."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the FLP impossibility result say?",
+        "a": "In a fully asynchronous system, no deterministic consensus algorithm can guarantee termination if even one process may crash."
+      }
+    ]
+  },
+  "the-core-concept-quorums": {
+    "core": "A quorum is a subset of nodes whose agreement is required for an action. With majority quorums (⌊n/2⌋+1), any two quorums overlap in at least one node, so a new decision always 'sees' the previous one. That overlap is what prevents split-brain. More generally, read quorum R and write quorum W must satisfy R + W > N for reads to see the latest write.",
+    "first_principles": {
+      "problem": "A 4-node cluster splits 2–2 and both halves accept writes.",
+      "truths": [
+        "Majorities intersect.",
+        "Intersection carries knowledge forward.",
+        "Even splits can't both have majorities."
+      ],
+      "derivation": [
+        "Use **majority quorums**.",
+        "Prefer **odd cluster sizes** (3, 5, 7).",
+        "Tolerate **f failures with 2f+1** nodes.",
+        "For replication: **R + W > N**.",
+        "Place members across **failure domains**."
+      ]
+    },
+    "analogy": {
+      "title": "A board requiring a majority vote",
+      "story": "Two different majorities must share at least one member, who remembers what was decided before.",
+      "mapping": [
+        [
+          "Board members",
+          "Nodes"
+        ],
+        [
+          "Majority",
+          "Quorum"
+        ],
+        [
+          "Shared member",
+          "Intersection"
+        ]
+      ],
+      "breaks": "Board members remember everything; nodes rely on persisted logs."
+    },
+    "mindmap": {
+      "center": "Quorums",
+      "branches": [
+        {
+          "label": "Majority",
+          "children": [
+            "⌊n/2⌋+1",
+            "Intersection"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "2f+1 for f failures",
+            "Odd counts"
+          ]
+        },
+        {
+          "label": "Dynamo-style",
+          "children": [
+            "R + W > N"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "No split-brain"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Across AZs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Failure tolerance table",
+      "scenario": "Sizes.",
+      "flow": [
+        "3 nodes: quorum 2, tolerates 1 failure",
+        "4 nodes: quorum 3, tolerates 1 (no gain)",
+        "5 nodes: quorum 3, tolerates 2"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Even sizes add cost, not tolerance."
+        }
+      ],
+      "code": [],
+      "outcome": "correctly sized clusters."
+    },
+    "summary": {
+      "points": [
+        "Majorities overlap.",
+        "Odd sizes.",
+        "R + W > N."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why don't 4-node consensus clusters tolerate more failures than 3-node ones?",
+        "a": "A 4-node majority is 3, so it still tolerates only one failure, like a 3-node cluster."
+      }
+    ]
+  },
+  "paxos-the-pioneer": {
+    "core": "Paxos (Lamport) reaches agreement in two phases. In Prepare/Promise, a proposer picks a ballot number and asks acceptors to promise not to accept lower ballots, learning any value already accepted. In Accept/Accepted, it proposes the highest previously accepted value (or its own) and is chosen once a majority accepts. Multi-Paxos elects a stable leader to skip phase 1 for a sequence of log entries.",
+    "first_principles": {
+      "problem": "Two proposers propose different values concurrently, and the system must choose exactly one.",
+      "truths": [
+        "Ballot numbers order proposals.",
+        "Promises block stale proposers.",
+        "Previously accepted values must be preserved."
+      ],
+      "derivation": [
+        "**Phase 1**: prepare(n) → promise + highest accepted value.",
+        "**Phase 2**: accept(n, v) with v = highest seen or own.",
+        "**Chosen** when a majority accepts.",
+        "**Multi-Paxos**: stable leader, skip phase 1.",
+        "Handle **duelling proposers** with backoff."
+      ]
+    },
+    "analogy": {
+      "title": "Reserving a meeting room with numbered requests",
+      "story": "Higher-numbered requests override older ones, but if a booking was already nearly confirmed, you must honour it.",
+      "mapping": [
+        [
+          "Request number",
+          "Ballot"
+        ],
+        [
+          "Room manager promise",
+          "Promise"
+        ],
+        [
+          "Confirmed booking",
+          "Chosen value"
+        ]
+      ],
+      "breaks": "Room managers are central; Paxos acceptors are many and independent."
+    },
+    "mindmap": {
+      "center": "Paxos",
+      "branches": [
+        {
+          "label": "Roles",
+          "children": [
+            "Proposer",
+            "Acceptor",
+            "Learner"
+          ]
+        },
+        {
+          "label": "Phase 1",
+          "children": [
+            "Prepare",
+            "Promise"
+          ]
+        },
+        {
+          "label": "Phase 2",
+          "children": [
+            "Accept",
+            "Accepted"
+          ]
+        },
+        {
+          "label": "Multi-Paxos",
+          "children": [
+            "Stable leader",
+            "Log slots"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "Chubby",
+            "Spanner",
+            "Cassandra LWT"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two proposers",
+      "scenario": "Trace.",
+      "flow": [
+        "P1 prepare(1) → majority promise",
+        "P2 prepare(2) → majority promise (overrides 1)",
+        "P1 accept(1, A) rejected",
+        "P2 accept(2, B) → chosen"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exactly one value chosen."
+        }
+      ],
+      "code": [],
+      "outcome": "the pioneering consensus protocol understood."
+    },
+    "summary": {
+      "points": [
+        "Two phases.",
+        "Ballots order proposals.",
+        "Preserve accepted values."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must a Paxos proposer adopt the highest-numbered value it learns in phase 1?",
+        "a": "That value may already have been chosen, and safety requires never choosing a different one."
+      }
+    ]
+  },
+  "raft-consensus-for-humans": {
+    "core": "Raft was designed for understandability. It decomposes consensus into leader election, log replication and safety, uses a strong leader (all writes go through it) and terms (logical epochs) to detect stale leaders. It's used by etcd, Consul, CockroachDB, TiKV and Kafka's KRaft.",
+    "first_principles": {
+      "problem": "Engineers struggle to implement and reason about Paxos correctly.",
+      "truths": [
+        "Understandable designs are implemented correctly more often.",
+        "A strong leader simplifies replication.",
+        "Terms identify stale authority."
+      ],
+      "derivation": [
+        "**Roles**: follower, candidate, leader.",
+        "**Terms** increase with each election.",
+        "**Leader election** via randomised timeouts.",
+        "**Log replication** via AppendEntries.",
+        "**Safety**: only up-to-date candidates win."
+      ]
+    },
+    "analogy": {
+      "title": "A classroom with a single elected class monitor",
+      "story": "The monitor records decisions; if they're absent too long, a new election is held.",
+      "mapping": [
+        [
+          "Class monitor",
+          "Leader"
+        ],
+        [
+          "Term of office",
+          "Term"
+        ],
+        [
+          "Record book",
+          "Log"
+        ]
+      ],
+      "breaks": "Class monitors serve a term length; Raft leaders serve until they fail or lose contact."
+    },
+    "mindmap": {
+      "center": "Raft",
+      "branches": [
+        {
+          "label": "Roles",
+          "children": [
+            "Follower",
+            "Candidate",
+            "Leader"
+          ]
+        },
+        {
+          "label": "Concepts",
+          "children": [
+            "Terms",
+            "Log",
+            "Commit index"
+          ]
+        },
+        {
+          "label": "RPCs",
+          "children": [
+            "RequestVote",
+            "AppendEntries"
+          ]
+        },
+        {
+          "label": "Subproblems",
+          "children": [
+            "Election",
+            "Replication",
+            "Safety"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "etcd",
+            "Consul",
+            "CockroachDB",
+            "KRaft"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Normal operation",
+      "scenario": "Flow.",
+      "flow": [
+        "Leader in term 5 receives write",
+        "Appends to log, sends AppendEntries",
+        "Majority acks → commit index advances",
+        "Followers apply committed entries"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Simple, leader-driven replication."
+        }
+      ],
+      "code": [],
+      "outcome": "Raft's design understood."
+    },
+    "summary": {
+      "points": [
+        "Strong leader.",
+        "Terms detect staleness.",
+        "Three subproblems."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a Raft 'term'?",
+        "a": "A monotonically increasing logical period, each starting with an election, used to detect stale leaders."
+      }
+    ]
+  },
+  "raft-concept-1-leader-election": {
+    "core": "Followers expect heartbeats from the leader. If none arrives within a randomised election timeout (e.g. 150–300 ms), a follower becomes a candidate, increments the term, votes for itself and requests votes. Nodes grant one vote per term, only to candidates whose log is at least as up to date. A majority wins; randomisation prevents repeated split votes.",
+    "first_principles": {
+      "problem": "Two followers time out simultaneously, split the vote and no leader emerges.",
+      "truths": [
+        "Silence suggests leader failure.",
+        "One vote per term prevents double leaders.",
+        "Random timeouts break ties."
+      ],
+      "derivation": [
+        "**Heartbeats** maintain leadership.",
+        "**Randomised timeouts** trigger elections.",
+        "**RequestVote** with last log index/term.",
+        "**Vote once per term**, only for up-to-date logs.",
+        "**Majority** wins; higher term deposes old leaders."
+      ]
+    },
+    "analogy": {
+      "title": "A group choosing a new leader when the old one goes quiet",
+      "story": "The first person to notice, at a slightly random moment, asks for votes, which avoids everyone shouting at once.",
+      "mapping": [
+        [
+          "Going quiet",
+          "No heartbeat"
+        ],
+        [
+          "Random moment",
+          "Randomised timeout"
+        ],
+        [
+          "Asking for votes",
+          "RequestVote"
+        ]
+      ],
+      "breaks": "People recognise each other's knowledge; Raft compares log index and term explicitly."
+    },
+    "mindmap": {
+      "center": "Leader Election",
+      "branches": [
+        {
+          "label": "Trigger",
+          "children": [
+            "Missed heartbeats",
+            "Election timeout"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Increment term",
+            "Vote for self",
+            "RequestVote"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "One vote per term",
+            "Up-to-date log check",
+            "Majority"
+          ]
+        },
+        {
+          "label": "Ties",
+          "children": [
+            "Randomised timeouts"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Pre-vote",
+            "Leader lease"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Election trace",
+      "scenario": "Timeline.",
+      "flow": [
+        "Leader (term 3) crashes",
+        "Node B times out at 210 ms → term 4 candidate",
+        "A and C grant votes (B's log up to date)",
+        "B becomes leader, sends heartbeats"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New leader in a few hundred ms."
+        }
+      ],
+      "code": [],
+      "outcome": "fast, safe elections."
+    },
+    "summary": {
+      "points": [
+        "Timeouts trigger elections.",
+        "One vote per term.",
+        "Randomness avoids splits."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are Raft election timeouts randomised?",
+        "a": "To make simultaneous candidacies and split votes unlikely."
+      }
+    ]
+  },
+  "raft-concept-2-log-replication": {
+    "core": "The leader appends client commands to its log and sends AppendEntries with the previous entry's index and term. Followers accept only if they have that previous entry (log matching), otherwise the leader backs up and retries. An entry is committed once stored on a majority (from the current term), and then every node applies committed entries to its state machine in order.",
+    "first_principles": {
+      "problem": "A follower missed several entries during a network blip and its log diverged from the leader's.",
+      "truths": [
+        "Logs must be identical up to the commit index.",
+        "Consistency checks detect divergence.",
+        "Majority storage makes entries durable."
+      ],
+      "derivation": [
+        "**AppendEntries** with prevLogIndex/prevLogTerm.",
+        "Followers **reject mismatches**.",
+        "Leader **decrements nextIndex** and resends.",
+        "**Overwrite** conflicting follower entries.",
+        "**Commit** on majority (current term); **apply** in order."
+      ]
+    },
+    "analogy": {
+      "title": "A teacher dictating notes",
+      "story": "Before each new line, students confirm they wrote the previous one correctly; if not, the teacher goes back.",
+      "mapping": [
+        [
+          "Dictation",
+          "AppendEntries"
+        ],
+        [
+          "Previous line check",
+          "Log matching"
+        ],
+        [
+          "Going back",
+          "Decrementing nextIndex"
+        ]
+      ],
+      "breaks": "Students keep their own notes; Raft followers' conflicting entries are overwritten by the leader."
+    },
+    "mindmap": {
+      "center": "Log Replication",
+      "branches": [
+        {
+          "label": "RPC",
+          "children": [
+            "AppendEntries",
+            "Heartbeats"
+          ]
+        },
+        {
+          "label": "Consistency",
+          "children": [
+            "prevLogIndex/term",
+            "Log matching"
+          ]
+        },
+        {
+          "label": "Repair",
+          "children": [
+            "nextIndex backoff",
+            "Overwrite conflicts"
+          ]
+        },
+        {
+          "label": "Commit",
+          "children": [
+            "Majority",
+            "Current term rule"
+          ]
+        },
+        {
+          "label": "Apply",
+          "children": [
+            "In order"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Repairing a follower",
+      "scenario": "Trace.",
+      "flow": [
+        "Follower log ends at index 5 (term 2)",
+        "Leader sends entry 9 with prev (8, term 4) → reject",
+        "Leader backs up to index 6 → accept",
+        "Entries 6–9 replicated"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Follower converges to leader's log."
+        }
+      ],
+      "code": [],
+      "outcome": "identical logs across replicas."
+    },
+    "summary": {
+      "points": [
+        "Consistency check on append.",
+        "Leader repairs followers.",
+        "Commit on majority."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is a Raft log entry considered committed?",
+        "a": "When the leader has replicated an entry from its current term to a majority of nodes."
+      }
+    ]
+  },
+  "zab-zookeeper-atomic-broadcast": {
+    "core": "ZooKeeper uses Zab: a leader-based atomic broadcast protocol guaranteeing that state changes are delivered in the same total order to all servers, with a recovery phase on leader change that synchronises followers to the new leader's history before new proposals. Transaction IDs (zxid) combine epoch and counter, similar to Raft's term and index.",
+    "first_principles": {
+      "problem": "Teams use ZooKeeper but don't know how it keeps ordering through leader failures.",
+      "truths": [
+        "Primary-backup ordering needs a single leader.",
+        "Leader changes must not lose committed state.",
+        "Epochs distinguish leaders."
+      ],
+      "derivation": [
+        "**Discovery**: pick leader, learn latest epoch.",
+        "**Synchronisation**: followers catch up.",
+        "**Broadcast**: propose → ack by quorum → commit.",
+        "**zxid** = epoch + counter.",
+        "**FIFO client order** guarantees."
+      ]
+    },
+    "analogy": {
+      "title": "A news agency's single editor-in-chief",
+      "story": "Every story is published in one order; a new editor first reviews everything already published before continuing.",
+      "mapping": [
+        [
+          "Editor-in-chief",
+          "Leader"
+        ],
+        [
+          "Story numbers",
+          "zxid"
+        ],
+        [
+          "Review before continuing",
+          "Synchronisation phase"
+        ]
+      ],
+      "breaks": "Editors choose stories; Zab leaders must preserve every committed proposal."
+    },
+    "mindmap": {
+      "center": "Zab",
+      "branches": [
+        {
+          "label": "Phases",
+          "children": [
+            "Discovery",
+            "Synchronisation",
+            "Broadcast"
+          ]
+        },
+        {
+          "label": "Ordering",
+          "children": [
+            "Total order",
+            "FIFO per client"
+          ]
+        },
+        {
+          "label": "IDs",
+          "children": [
+            "zxid (epoch, counter)"
+          ]
+        },
+        {
+          "label": "Comparison",
+          "children": [
+            "Similar to Raft",
+            "Primary-backup focus"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "ZooKeeper",
+            "Kafka (pre-KRaft)",
+            "HBase"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Leader change",
+      "scenario": "Flow.",
+      "flow": [
+        "Leader of epoch 7 fails",
+        "New leader elected with highest zxid",
+        "Followers synchronised to its history",
+        "Epoch 8 proposals begin"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No committed change lost or reordered."
+        }
+      ],
+      "code": [],
+      "outcome": "ZooKeeper's guarantees understood."
+    },
+    "summary": {
+      "points": [
+        "Leader-based broadcast.",
+        "Recovery before progress.",
+        "zxid ordering."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a ZooKeeper zxid consist of?",
+        "a": "An epoch (leader generation) and a counter within that epoch."
+      }
+    ]
+  },
+  "the-danger-split-brain-scenarios": {
+    "core": "Split-brain occurs when two nodes both believe they're the leader and accept conflicting writes, typically after a partition or a paused (GC, VM freeze) old leader that wakes up. Consensus prevents it with majority quorums and terms: an old leader can't get a majority and is rejected for its stale term. External systems need fencing tokens to reject stale leaders' actions.",
+    "first_principles": {
+      "problem": "An old leader paused by a 30-second GC wakes up and writes to storage after a new leader took over.",
+      "truths": [
+        "Nodes can't tell they've been paused.",
+        "Majorities can only exist on one side.",
+        "Stale authority must be rejected by resources."
+      ],
+      "derivation": [
+        "Require **majority** for leadership and commits.",
+        "Use **terms/epochs** to reject stale leaders.",
+        "Issue **fencing tokens** to external resources.",
+        "Avoid **two-node** clusters (or add a witness).",
+        "Use **leader leases** carefully with clock bounds."
+      ]
+    },
+    "analogy": {
+      "title": "Two captains issuing orders to the same crew",
+      "story": "Chaos follows unless orders carry a rank that crews check.",
+      "mapping": [
+        [
+          "Two captains",
+          "Two leaders"
+        ],
+        [
+          "Rank",
+          "Term/fencing token"
+        ],
+        [
+          "Crew checking rank",
+          "Storage rejecting stale tokens"
+        ]
+      ],
+      "breaks": "Crews can see both captains; systems may not know a second leader exists."
+    },
+    "mindmap": {
+      "center": "Split-Brain",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Partitions",
+            "GC pauses",
+            "VM freezes",
+            "Even splits"
+          ]
+        },
+        {
+          "label": "Prevention",
+          "children": [
+            "Majority quorums",
+            "Terms",
+            "Fencing tokens"
+          ]
+        },
+        {
+          "label": "Cluster design",
+          "children": [
+            "Odd sizes",
+            "Witnesses"
+          ]
+        },
+        {
+          "label": "Leases",
+          "children": [
+            "Clock-bound caution"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fencing token",
+      "scenario": "Flow.",
+      "flow": [
+        "Leader term 7 gets token 7",
+        "Paused; new leader term 8 gets token 8, writes",
+        "Old leader wakes, writes with token 7",
+        "Storage rejects (7 < 8)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stale leader can't corrupt data."
+        }
+      ],
+      "code": [],
+      "outcome": "split-brain prevented end to end."
+    },
+    "summary": {
+      "points": [
+        "Majorities stop dual leaders.",
+        "Terms expose staleness.",
+        "Fence external resources."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a fencing token prevent split-brain damage?",
+        "a": "Resources reject operations carrying a token older than the highest they've seen, blocking stale leaders."
+      }
+    ]
+  },
+  "practical-considerations-timeouts-performance-and-membership-changes": {
+    "core": "Running consensus in production means tuning election timeouts above network RTT and disk latency but low enough for fast failover, batching and pipelining log entries for throughput, keeping members in nearby zones (every commit waits for a majority round trip), snapshotting to bound log size, and changing membership safely (one node at a time or joint consensus, learners first).",
+    "first_principles": {
+      "problem": "A five-region Raft group commits slowly, and adding nodes carelessly breaks quorum.",
+      "truths": [
+        "Commits wait on majority latency.",
+        "Logs grow without bound.",
+        "Membership changes alter quorum math."
+      ],
+      "derivation": [
+        "Set **election timeout ≫ heartbeat** (e.g. 10×).",
+        "**Batch/pipeline** entries.",
+        "Place voters **close together** (latency).",
+        "**Snapshot and compact** logs.",
+        "Change membership **one at a time** or **joint consensus**; use **learners**."
+      ]
+    },
+    "analogy": {
+      "title": "Running a committee across time zones",
+      "story": "Meetings are slow when members are far apart, and adding members changes how many votes you need.",
+      "mapping": [
+        [
+          "Time zones",
+          "Network latency"
+        ],
+        [
+          "Minutes archive",
+          "Snapshots"
+        ],
+        [
+          "New members",
+          "Membership changes"
+        ]
+      ],
+      "breaks": "Committees can vote asynchronously by email; Raft commits always wait for a majority ack."
+    },
+    "mindmap": {
+      "center": "Consensus in Practice",
+      "branches": [
+        {
+          "label": "Timeouts",
+          "children": [
+            "Election",
+            "Heartbeat"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Batching",
+            "Pipelining",
+            "Latency to majority"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Snapshots",
+            "Compaction"
+          ]
+        },
+        {
+          "label": "Membership",
+          "children": [
+            "One-at-a-time",
+            "Joint consensus",
+            "Learners"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Nearby zones"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Latency budget",
+      "scenario": "Maths.",
+      "flow": [
+        "3 voters in one region across AZs: commit ~2 ms",
+        "5 voters across continents: commit ~100 ms+",
+        "Use regional groups + async replication across regions"
+      ],
+      "steps": [
+        {
+          "label": "Lesson",
+          "detail": "Topology decides performance."
+        }
+      ],
+      "code": [],
+      "outcome": "production-ready consensus."
+    },
+    "summary": {
+      "points": [
+        "Tune timeouts.",
+        "Mind latency.",
+        "Change membership carefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do geographically spread Raft groups commit slowly?",
+        "a": "Every commit waits for acknowledgements from a majority, so latency to the nearest majority dominates."
+      }
+    ]
+  }
+}

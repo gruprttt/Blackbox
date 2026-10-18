@@ -1,0 +1,408 @@
+{
+  "introduction-when-autoscaling-is-too-slow": {
+    "core": "Autoscaling takes minutes; traffic spikes take seconds. When demand exceeds capacity, a service that tries to serve everything slows down for everyone and can collapse into a metastable state. Load shedding deliberately rejects some requests quickly so the rest succeed, keeping goodput high until capacity catches up.",
+    "first_principles": {
+      "problem": "A flash sale triples traffic in 30 seconds, autoscaling needs 5 minutes, and the site goes down completely.",
+      "truths": [
+        "Capacity can't change instantly.",
+        "Overloaded servers serve everyone badly.",
+        "Fast rejection is cheap."
+      ],
+      "derivation": [
+        "Detect overload (**concurrency, latency, queue age**).",
+        "**Reject early** (429/503) with Retry-After.",
+        "**Prioritise** important traffic.",
+        "Keep **shedding cheap** (at the edge).",
+        "Let autoscaling **catch up**."
+      ]
+    },
+    "analogy": {
+      "title": "A nightclub at capacity",
+      "story": "The bouncer turns some people away so those inside stay safe, rather than letting everyone crush in.",
+      "mapping": [
+        [
+          "Bouncer",
+          "Load shedder"
+        ],
+        [
+          "Capacity",
+          "Service capacity"
+        ],
+        [
+          "Crush",
+          "Collapse"
+        ]
+      ],
+      "breaks": "Clubs have fixed capacity; services can scale up after a delay."
+    },
+    "mindmap": {
+      "center": "Load Shedding",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Autoscaling lag",
+            "Spikes"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Concurrency",
+            "Latency",
+            "Queue age",
+            "CPU"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "429/503",
+            "Retry-After",
+            "Priorities"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Maximise goodput"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Flash sale",
+      "scenario": "With shedding.",
+      "flow": [
+        "Traffic 3× capacity",
+        "Shed 60% of low-priority browsing",
+        "Checkout and logged-in users served",
+        "Autoscaling catches up in 5 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Partial service instead of total outage."
+        }
+      ],
+      "code": [],
+      "outcome": "survival under spikes."
+    },
+    "summary": {
+      "points": [
+        "Reject some to serve most.",
+        "Fail fast.",
+        "Prioritise."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is load shedding needed even with autoscaling?",
+        "a": "Autoscaling reacts in minutes, while spikes overwhelm capacity in seconds."
+      }
+    ]
+  },
+  "goodput-vs-throughput": {
+    "core": "Throughput counts all requests processed; goodput counts requests completed successfully within their deadline (useful work). Under overload, throughput can stay high while goodput collapses, because servers spend effort on requests that time out before responses arrive. Shedding and deadline awareness preserve goodput.",
+    "first_principles": {
+      "problem": "Dashboards show the service handling 10,000 rps during an incident, yet users see 90% failures.",
+      "truths": [
+        "Late responses are wasted work.",
+        "Clients abandon slow requests.",
+        "Measuring only throughput hides collapse."
+      ],
+      "derivation": [
+        "Measure **goodput** (success within SLO).",
+        "**Drop expired** requests (deadline checks).",
+        "**Shed** before queues grow.",
+        "Prefer **LIFO/CoDel** queues under overload.",
+        "Alert on **goodput drops**."
+      ]
+    },
+    "analogy": {
+      "title": "A pizza shop delivering cold pizzas",
+      "story": "It's busy making pizzas, but customers who've given up won't pay.",
+      "mapping": [
+        [
+          "Pizzas made",
+          "Throughput"
+        ],
+        [
+          "Pizzas paid for",
+          "Goodput"
+        ],
+        [
+          "Cold pizzas",
+          "Timed-out responses"
+        ]
+      ],
+      "breaks": "Cold pizzas are visible; wasted server work looks like normal activity."
+    },
+    "mindmap": {
+      "center": "Goodput",
+      "branches": [
+        {
+          "label": "Definitions",
+          "children": [
+            "Throughput: all processed",
+            "Goodput: useful, on time"
+          ]
+        },
+        {
+          "label": "Collapse",
+          "children": [
+            "Wasted work on abandoned requests"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Deadline checks",
+            "Shedding",
+            "CoDel/LIFO"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "Success within SLO"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Throughput vs goodput",
+      "scenario": "Graph description.",
+      "flow": [
+        "Load 0.5–1.0× capacity: goodput ≈ throughput",
+        "Load 1.5× without shedding: throughput flat, goodput → 20%",
+        "Load 1.5× with shedding: goodput ≈ capacity"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shedding keeps useful work at maximum."
+        }
+      ],
+      "code": [],
+      "outcome": "the right metric for overload."
+    },
+    "summary": {
+      "points": [
+        "Goodput is what matters.",
+        "Drop doomed work.",
+        "Measure success within SLO."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can throughput stay high while goodput collapses?",
+        "a": "Servers keep processing requests whose clients have already timed out, so the work is wasted."
+      }
+    ]
+  },
+  "priority-queues-who-gets-saved": {
+    "core": "When shedding, not all requests are equal: checkout matters more than recommendations, user-facing more than batch, retries less than first attempts. Assign criticality (e.g. Google's CRITICAL_PLUS, CRITICAL, SHEDDABLE) propagated across calls, and shed lowest priority first so the most valuable work survives.",
+    "first_principles": {
+      "problem": "During overload, shedding randomly drops checkout requests while background analytics continue.",
+      "truths": [
+        "Business value varies by request.",
+        "Priority must flow through call chains.",
+        "Some traffic can safely wait or fail."
+      ],
+      "derivation": [
+        "Define **criticality tiers**.",
+        "**Propagate** priority in headers.",
+        "**Shed lowest first**.",
+        "**Deprioritise retries**.",
+        "Reserve **capacity per tier**."
+      ]
+    },
+    "analogy": {
+      "title": "A hospital emergency department triage",
+      "story": "The most urgent patients are seen first; minor cases wait or are redirected.",
+      "mapping": [
+        [
+          "Triage levels",
+          "Criticality tiers"
+        ],
+        [
+          "Urgent patients",
+          "Checkout requests"
+        ],
+        [
+          "Minor cases",
+          "Background traffic"
+        ]
+      ],
+      "breaks": "Triage nurses assess each patient; systems rely on labels set by callers."
+    },
+    "mindmap": {
+      "center": "Priority Shedding",
+      "branches": [
+        {
+          "label": "Tiers",
+          "children": [
+            "Critical",
+            "Normal",
+            "Sheddable"
+          ]
+        },
+        {
+          "label": "Propagation",
+          "children": [
+            "Headers",
+            "Context"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Shed lowest first",
+            "Retries deprioritised"
+          ]
+        },
+        {
+          "label": "Capacity",
+          "children": [
+            "Reserved per tier"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tier mapping",
+      "scenario": "E-commerce.",
+      "flow": [
+        "CRITICAL: checkout, payments, login",
+        "NORMAL: product pages, search",
+        "SHEDDABLE: recommendations, analytics beacons, prefetch"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Revenue paths survive overload."
+        }
+      ],
+      "code": [],
+      "outcome": "value-aware shedding."
+    },
+    "summary": {
+      "points": [
+        "Not all requests equal.",
+        "Propagate priority.",
+        "Shed lowest first."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why deprioritise retries during overload?",
+        "a": "They're additional load caused by the overload, and first attempts usually have more value."
+      }
+    ]
+  },
+  "admission-control-the-bouncer": {
+    "core": "Admission control decides at the door whether to accept a request, based on current load: concurrency limits (adaptive algorithms like Netflix's concurrency-limits or TCP-Vegas/AIMD-style), queue time, CPU or token buckets. Rejecting at admission is cheap and keeps in-flight work within capacity, protecting latency for admitted requests.",
+    "first_principles": {
+      "problem": "A static rate limit is either too high (overload on slow days) or too low (rejects traffic on good days).",
+      "truths": [
+        "Capacity varies with request mix and dependencies.",
+        "Latency signals saturation.",
+        "Adaptive limits track real capacity."
+      ],
+      "derivation": [
+        "Track **in-flight requests**.",
+        "Use **adaptive concurrency limits** (gradient/AIMD).",
+        "Reject when **limit reached** or **queue time too high**.",
+        "Return **fast 503/429**.",
+        "Apply at **edge and per service**."
+      ]
+    },
+    "analogy": {
+      "title": "A bouncer who watches how crowded the room feels",
+      "story": "Instead of a fixed headcount, they let people in while the room still feels comfortable.",
+      "mapping": [
+        [
+          "Room comfort",
+          "Latency"
+        ],
+        [
+          "Headcount",
+          "Concurrency"
+        ],
+        [
+          "Bouncer's judgement",
+          "Adaptive limit"
+        ]
+      ],
+      "breaks": "Bouncers judge intuitively; algorithms need tuning to avoid oscillation."
+    },
+    "mindmap": {
+      "center": "Admission Control",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "In-flight",
+            "Latency",
+            "Queue time",
+            "CPU"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "Static limits",
+            "Token bucket",
+            "AIMD",
+            "Gradient (Netflix)"
+          ]
+        },
+        {
+          "label": "Responses",
+          "children": [
+            "Fast 429/503"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "Edge",
+            "Per service"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Adaptive concurrency limit",
+      "scenario": "Concept.",
+      "flow": [
+        "Start limit 100 in-flight",
+        "Latency stable → limit grows +1",
+        "Latency rises > 2× baseline → limit × 0.9",
+        "Requests beyond limit rejected instantly"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Limit tracks real capacity automatically."
+        }
+      ],
+      "code": [],
+      "outcome": "self-tuning protection."
+    },
+    "summary": {
+      "points": [
+        "Gate at the door.",
+        "Adapt to capacity.",
+        "Reject fast."
+      ]
+    },
+    "check": [
+      {
+        "q": "What advantage does an adaptive concurrency limit have over a fixed rate limit?",
+        "a": "It adjusts to the service's real, changing capacity based on observed latency."
+      }
+    ]
+  }
+}
