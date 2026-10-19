@@ -124,8 +124,8 @@ topic page, under its lesson list. The lessons are not changed. Each topic gets:
 Every lesson also gets its own explainer from `data/explainers/<track-slug>/<topic-slug>.json` (keys are
 lesson folder names), folded at the end of the page under *Explain this lesson from first principles*
 (open it there or from the sidebar link). A lesson without one shows its topic's explainer instead. Keys in the file are topic
-folder names. Text accepts `**bold**`, `*italic*` and `` `code` ``. Database Reliability (DBRE) is
-done for all 20 topics and all 128 lessons.
+folder names. Text accepts `**bold**`, `*italic*` and `` `code` ``. All 18 DevOps & SRE
+tracks are done: 401 topics and 2,411 lessons each have their own explainer.
 
 ## Reading a chapter
 
