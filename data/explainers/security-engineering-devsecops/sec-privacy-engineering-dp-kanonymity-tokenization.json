@@ -1,0 +1,754 @@
+{
+  "introduction-compliance-by-design": {
+    "core": "Privacy engineering builds data protection into systems rather than bolting it on (GDPR Article 25: data protection by design and by default). It starts with data minimisation, collecting only what's needed, then applies technical controls matched to the use: tokenisation and encryption for operational systems, pseudonymisation for internal analytics, and anonymisation techniques (k-anonymity, differential privacy) for sharing or publishing. The goal is useful data with provably limited risk to individuals.",
+    "first_principles": {
+      "problem": "An analytics team receives full production customer tables 'just in case', and a laptop theft becomes a reportable breach.",
+      "truths": [
+        "Data you don't hold can't leak.",
+        "Different uses need different protection.",
+        "Naive 'anonymisation' often fails."
+      ],
+      "derivation": [
+        "**Minimise** collection and retention.",
+        "**Tokenise** identifiers in operational flows.",
+        "**Pseudonymise** for internal analytics.",
+        "Use **formal anonymisation** for sharing.",
+        "Default to **privacy-protective settings**."
+      ]
+    },
+    "analogy": {
+      "title": "Designing a house with frosted bathroom windows from the start",
+      "story": "Privacy is part of the blueprint, not curtains added after the neighbours complain.",
+      "mapping": [
+        [
+          "Blueprint",
+          "System design"
+        ],
+        [
+          "Frosted glass",
+          "Privacy controls"
+        ],
+        [
+          "Neighbours",
+          "Data recipients"
+        ]
+      ],
+      "breaks": "Windows are fixed; data flows change with each new feature, so privacy reviews must recur."
+    },
+    "mindmap": {
+      "center": "Privacy by Design",
+      "branches": [
+        {
+          "label": "Principles",
+          "children": [
+            "Minimisation",
+            "Purpose limitation",
+            "Default privacy"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Tokenisation",
+            "Pseudonymisation",
+            "k-anonymity",
+            "Differential privacy"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "DPIA",
+            "Data maps",
+            "Retention"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Utility",
+            "Limited risk"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Matching technique to use",
+      "scenario": "Decision table.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each data flow gets proportionate protection."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "| Use                       | Technique                    |\n|---------------------------|------------------------------|\n| Payments service          | Tokenisation (vault)         |\n| Internal BI dashboards    | Pseudonymised IDs + RBAC     |\n| Sharing with researchers  | k-anonymity / generalisation |\n| Publishing statistics     | Differential privacy         |"
+        }
+      ],
+      "outcome": "privacy designed in."
+    },
+    "summary": {
+      "points": [
+        "Build it in.",
+        "Minimise first.",
+        "Match technique to use."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the most effective privacy control?",
+        "a": "Data minimisation: not collecting or keeping data you don't need."
+      }
+    ]
+  },
+  "data-minimization-and-the-right-to-be-forgotten": {
+    "core": "Data minimisation means collecting, processing and retaining only the personal data needed for a stated purpose. The right to erasure (GDPR Art. 17) means deleting a person's data on request across every system: primary DBs, replicas, caches, search indices, analytics, logs and backups. That's only feasible if you know where the data lives (a data map), key it consistently by subject ID, enforce retention TTLs, and use techniques like crypto-shredding for immutable stores and backups.",
+    "first_principles": {
+      "problem": "A deletion request removes a user from Postgres, but their data lives on in Elasticsearch, S3 exports, Kafka topics and three years of backups.",
+      "truths": [
+        "Data copies spread.",
+        "Backups are hard to edit.",
+        "Deletion needs an inventory."
+      ],
+      "derivation": [
+        "**Collect less**; drop unused fields.",
+        "Maintain a **data map** by subject ID.",
+        "Enforce **retention TTLs**.",
+        "Orchestrate **erasure** across systems.",
+        "**Crypto-shred** per-user keys for backups/logs."
+      ]
+    },
+    "analogy": {
+      "title": "Shredding a document means finding every photocopy",
+      "story": "If copies were made and filed everywhere, shredding the original isn't enough.",
+      "mapping": [
+        [
+          "Original",
+          "Primary DB row"
+        ],
+        [
+          "Photocopies",
+          "Replicas, caches, exports"
+        ],
+        [
+          "Burning the key to a locked box",
+          "Crypto-shredding"
+        ]
+      ],
+      "breaks": "Photocopies are physical; digital copies multiply silently through pipelines."
+    },
+    "mindmap": {
+      "center": "Minimisation & Erasure",
+      "branches": [
+        {
+          "label": "Minimise",
+          "children": [
+            "Fewer fields",
+            "Shorter retention",
+            "Aggregation"
+          ]
+        },
+        {
+          "label": "Erasure",
+          "children": [
+            "Data map",
+            "Orchestration",
+            "Verification"
+          ]
+        },
+        {
+          "label": "Hard places",
+          "children": [
+            "Backups",
+            "Logs",
+            "Event streams",
+            "ML models"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "TTL",
+            "Crypto-shredding",
+            "Tombstones"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Crypto-shredding",
+      "scenario": "Per-user data keys.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Erasure covers immutable copies without editing backups."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "# each user's PII is encrypted with their own data key\nct = encrypt(kms_data_key(user_id), pii)\n# erasure: destroy the key; every copy (backups, Kafka, S3) becomes unreadable\nkey_store.delete(user_id)\naudit.log(\"erasure\", user_id, systems=[\"pg\", \"es\", \"s3\", \"kafka\", \"backups\"])"
+        }
+      ],
+      "outcome": "erasure that actually works."
+    },
+    "summary": {
+      "points": [
+        "Collect less.",
+        "Map where data lives.",
+        "Crypto-shred the hard copies."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does crypto-shredding handle data in backups?",
+        "a": "Destroying the per-user encryption key makes all encrypted copies, including backups, unreadable."
+      }
+    ]
+  },
+  "pseudonymization-vs-anonymization-a-legal-minefield": {
+    "core": "Pseudonymisation replaces direct identifiers with tokens or hashes, but the data can still be linked back to a person using additional information (a key or lookup table), so it is still personal data under GDPR, though it reduces risk. Anonymisation means individuals can no longer be identified by any reasonably likely means, and only then does GDPR stop applying. Hashing emails is not anonymisation: hashes can be reversed by dictionary attack, and the remaining attributes can re-identify people.",
+    "first_principles": {
+      "problem": "A company shares 'anonymised' data with SHA-256 hashed emails, and a partner re-identifies users by hashing its own customer list.",
+      "truths": [
+        "Hashes of known values are reversible by guessing.",
+        "Quasi-identifiers can re-identify.",
+        "Legal status depends on re-identifiability."
+      ],
+      "derivation": [
+        "Treat pseudonymised data as **personal data**.",
+        "Use **keyed HMAC/tokens**, with keys held separately.",
+        "Assess **quasi-identifiers**.",
+        "Use **formal methods** for true anonymisation.",
+        "Document a **re-identification risk** assessment."
+      ]
+    },
+    "analogy": {
+      "title": "Removing name tags at a party versus making guests truly unrecognisable",
+      "story": "Without name tags, friends still recognise faces; true anonymity needs masks, height changes and voice changers.",
+      "mapping": [
+        [
+          "Removing name tags",
+          "Pseudonymisation"
+        ],
+        [
+          "Recognisable faces",
+          "Quasi-identifiers"
+        ],
+        [
+          "Full disguise",
+          "Anonymisation"
+        ]
+      ],
+      "breaks": "Disguises are visible; re-identification risk in data is invisible without analysis."
+    },
+    "mindmap": {
+      "center": "Pseudo vs Anon",
+      "branches": [
+        {
+          "label": "Pseudonymisation",
+          "children": [
+            "Tokens",
+            "Keyed hashes",
+            "Still personal data",
+            "Reduces risk"
+          ]
+        },
+        {
+          "label": "Anonymisation",
+          "children": [
+            "Not identifiable",
+            "Outside GDPR",
+            "Hard to achieve"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Plain hashes",
+            "Quasi-identifiers",
+            "Linkage"
+          ]
+        },
+        {
+          "label": "Methods",
+          "children": [
+            "k-anonymity",
+            "Differential privacy",
+            "Aggregation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Plain hash vs keyed token",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Partners can't reverse tokens, but GDPR still applies."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import hashlib, hmac\nhashlib.sha256(b\"alice@example.com\").hexdigest()     # anyone can recompute → linkable\nhmac.new(SECRET_KEY, b\"alice@example.com\", \"sha256\").hexdigest()\n# keyed: not recomputable without the key, but still pseudonymous (key holder can link)"
+        }
+      ],
+      "outcome": "correct legal classification."
+    },
+    "summary": {
+      "points": [
+        "Pseudonymised is still personal data.",
+        "Plain hashes are reversible.",
+        "Anonymisation is a high bar."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a SHA-256 hash of an email not anonymous?",
+        "a": "Anyone with a list of emails can hash them and match, re-identifying people."
+      }
+    ]
+  },
+  "k-anonymity-hiding-in-the-crowd": {
+    "core": "Most people can be uniquely identified by a few quasi-identifiers: ZIP code, birth date and sex identify about 87% of Americans (Sweeney). k-anonymity requires that every record be indistinguishable from at least k−1 others on its quasi-identifiers, achieved by generalisation (exact age to 30–39, ZIP 02139 to 021**) and suppression (removing outliers). An attacker who knows someone's quasi-identifiers can then narrow them down only to a group of k.",
+    "first_principles": {
+      "problem": "A hospital releases visit records without names, and a journalist identifies the governor's record from his ZIP, birth date and sex.",
+      "truths": [
+        "Quasi-identifiers combine to be unique.",
+        "Generalisation creates crowds.",
+        "More generalisation reduces utility."
+      ],
+      "derivation": [
+        "Identify **quasi-identifiers**.",
+        "Choose **k** (such as 5 or 10).",
+        "**Generalise** values into ranges.",
+        "**Suppress** outlier records.",
+        "Measure **utility loss**."
+      ]
+    },
+    "analogy": {
+      "title": "Hiding in a crowd wearing the same uniform",
+      "story": "If at least five people look identical, a witness can't say which one you are.",
+      "mapping": [
+        [
+          "Uniform",
+          "Generalised attributes"
+        ],
+        [
+          "Crowd size",
+          "k"
+        ],
+        [
+          "Witness description",
+          "Attacker's background knowledge"
+        ]
+      ],
+      "breaks": "If everyone in the crowd shares the same secret, hiding among them doesn't protect the secret."
+    },
+    "mindmap": {
+      "center": "k-Anonymity",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Quasi-identifiers",
+            "Equivalence classes",
+            "k"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Generalisation",
+            "Suppression"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ARX",
+            "sdcMicro"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Privacy vs utility"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Generalisation",
+      "scenario": "Table before and after (k=3).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Linking by ZIP + age + sex now finds three candidates, not one."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "Before:  ZIP 02139, age 34, F, flu\n         ZIP 02138, age 36, F, asthma\n         ZIP 02141, age 31, F, diabetes\nAfter:   ZIP 021**, age 30-39, F, {flu | asthma | diabetes}\n         → each person hides among 3 identical-looking rows"
+        }
+      ],
+      "outcome": "re-identification harder."
+    },
+    "summary": {
+      "points": [
+        "Quasi-identifiers are unique together.",
+        "Generalise into groups of k.",
+        "Costs utility."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is an equivalence class in k-anonymity?",
+        "a": "A group of records sharing identical quasi-identifier values, which must contain at least k records."
+      }
+    ]
+  },
+  "the-failure-of-k-anonymity-homogeneity-and-linkage-attacks": {
+    "core": "k-anonymity hides who you are within a group but not what the group reveals. In a homogeneity attack, all k records in a group share the same sensitive value (everyone has cancer), so membership reveals it. In a background knowledge attack, an attacker rules out values. Linkage across multiple releases or auxiliary datasets (as in the Netflix Prize de-anonymisation) can shrink groups. l-diversity and t-closeness patch some gaps, but these syntactic methods lack formal guarantees, which motivates differential privacy.",
+    "first_principles": {
+      "problem": "A 5-anonymous dataset still reveals a neighbour's HIV status, because all five records in her group are HIV-positive.",
+      "truths": [
+        "Groups can share sensitive values.",
+        "Attackers have auxiliary data.",
+        "Multiple releases compound leakage."
+      ],
+      "derivation": [
+        "Check **l-diversity** of sensitive values.",
+        "Consider **t-closeness** to the overall distribution.",
+        "Account for **auxiliary data** and repeated releases.",
+        "Prefer **formal guarantees** (DP) for publishing.",
+        "Limit **release frequency and detail**."
+      ]
+    },
+    "analogy": {
+      "title": "A crowd where everyone wears the same badge saying 'Patient, Oncology Ward'",
+      "story": "You can't tell which person is your neighbour, but you know she's an oncology patient.",
+      "mapping": [
+        [
+          "Identical badges",
+          "Homogeneous sensitive values"
+        ],
+        [
+          "Knowing she's in the crowd",
+          "Background knowledge"
+        ],
+        [
+          "Comparing two crowd photos",
+          "Linkage across releases"
+        ]
+      ],
+      "breaks": "Real crowds change; static datasets can be cross-referenced forever."
+    },
+    "mindmap": {
+      "center": "k-Anonymity Failures",
+      "branches": [
+        {
+          "label": "Attacks",
+          "children": [
+            "Homogeneity",
+            "Background knowledge",
+            "Linkage",
+            "Composition"
+          ]
+        },
+        {
+          "label": "Patches",
+          "children": [
+            "l-diversity",
+            "t-closeness"
+          ]
+        },
+        {
+          "label": "Case studies",
+          "children": [
+            "Netflix Prize",
+            "AOL search logs",
+            "Massachusetts GIC"
+          ]
+        },
+        {
+          "label": "Lesson",
+          "children": [
+            "Need formal guarantees",
+            "Differential privacy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Homogeneity check",
+      "scenario": "Python (pandas).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Leaky groups are found before release."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "qi = [\"zip3\", \"age_band\", \"sex\"]\ng = df.groupby(qi)[\"diagnosis\"].nunique()\nprint(g[g < 2])   # groups where every record has the same diagnosis\n# any row printed = membership reveals the diagnosis (l-diversity < 2)"
+        }
+      ],
+      "outcome": "limits of k-anonymity understood."
+    },
+    "summary": {
+      "points": [
+        "Hides who, not what.",
+        "Auxiliary data breaks it.",
+        "Formal privacy is needed."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does l-diversity require?",
+        "a": "Each equivalence class must contain at least l well-represented distinct sensitive values."
+      }
+    ]
+  },
+  "differential-privacy-the-gold-standard": {
+    "core": "Differential privacy (DP) is a mathematical guarantee: the output of an analysis is almost equally likely whether or not any single individual's data is included, so nothing specific about one person can be learned, regardless of the attacker's auxiliary knowledge. It works by adding calibrated random noise (Laplace or Gaussian) scaled to the query's sensitivity divided by ε (epsilon). Smaller ε means more privacy and more noise. A privacy budget limits cumulative ε across queries. It's used by the US Census, Apple and Google.",
+    "first_principles": {
+      "problem": "A company wants to publish usage statistics, but repeated, precise queries could reveal individual users' behaviour.",
+      "truths": [
+        "Exact answers leak through differences.",
+        "Calibrated noise hides individuals.",
+        "Privacy loss accumulates across queries."
+      ],
+      "derivation": [
+        "Define **sensitivity** of each query.",
+        "Choose **ε** (privacy budget).",
+        "Add **Laplace/Gaussian noise**.",
+        "Track a **cumulative budget**.",
+        "Use vetted **DP libraries**."
+      ]
+    },
+    "analogy": {
+      "title": "Asking a survey question where each person flips a coin to decide whether to answer truthfully",
+      "story": "Overall percentages are still accurate, but no single answer can be trusted to reveal that person (randomised response).",
+      "mapping": [
+        [
+          "Coin flip",
+          "Random noise"
+        ],
+        [
+          "Overall percentage",
+          "Aggregate statistic"
+        ],
+        [
+          "Deniability",
+          "Privacy guarantee"
+        ]
+      ],
+      "breaks": "Coin flips are simple; real DP calibrates noise mathematically to each query's sensitivity."
+    },
+    "mindmap": {
+      "center": "Differential Privacy",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "ε (epsilon)",
+            "Sensitivity",
+            "Neighbouring datasets"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Laplace",
+            "Gaussian",
+            "Randomised response"
+          ]
+        },
+        {
+          "label": "Budget",
+          "children": [
+            "Composition",
+            "Accounting"
+          ]
+        },
+        {
+          "label": "Models",
+          "children": [
+            "Central DP",
+            "Local DP"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "US Census",
+            "Apple",
+            "Google"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "OpenDP",
+            "Google DP lib",
+            "Tumult"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Noisy count",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Useful aggregates without individual leakage."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import numpy as np\ndef dp_count(values, epsilon=0.5):\n    sensitivity = 1                       # one person changes a count by ≤1\n    return len(values) + np.random.laplace(0, sensitivity / epsilon)\nprint(dp_count(users_in_city))           # e.g. 1043.7 instead of exact 1041\n# differencing two queries no longer reveals one person"
+        }
+      ],
+      "outcome": "provable privacy."
+    },
+    "summary": {
+      "points": [
+        "Mathematical guarantee.",
+        "Noise scaled to sensitivity/ε.",
+        "Budget across queries."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to privacy as more DP queries are answered on the same data?",
+        "a": "Privacy loss adds up (composition), so a total budget must cap the number or precision of queries."
+      }
+    ]
+  },
+  "tokenization-protecting-data-at-rest": {
+    "core": "Tokenisation replaces a sensitive value (card number, SSN, email) with a non-sensitive surrogate token that has no mathematical relationship to it. The mapping lives only in a secured token vault, or is derived with format-preserving encryption in vaultless designs. Downstream systems store and process tokens, keeping real data out of most of the stack and out of compliance scope. Only a few authorised services can detokenise. Tokens can preserve format (last four digits) for usability.",
+    "first_principles": {
+      "problem": "SSNs stored in 40 tables across 12 services mean every one is a breach risk and in audit scope.",
+      "truths": [
+        "Tokens have no exploitable relationship to data.",
+        "Few services need real values.",
+        "Scope follows sensitive data."
+      ],
+      "derivation": [
+        "**Tokenise at ingestion**.",
+        "Store mappings in a **hardened vault**.",
+        "Restrict **detokenisation** to few services.",
+        "Use **format-preserving** tokens where needed.",
+        "**Audit** every detokenise call."
+      ]
+    },
+    "analogy": {
+      "title": "A cloakroom ticket",
+      "story": "You hand over your valuable coat and get a numbered ticket that's worthless to a thief; only the cloakroom can swap it back.",
+      "mapping": [
+        [
+          "Coat",
+          "Sensitive value"
+        ],
+        [
+          "Ticket",
+          "Token"
+        ],
+        [
+          "Cloakroom",
+          "Token vault"
+        ]
+      ],
+      "breaks": "Cloakroom tickets are random; vaultless tokenisation uses keyed encryption, so key security matters."
+    },
+    "mindmap": {
+      "center": "Tokenisation",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Vaulted",
+            "Vaultless (FPE)",
+            "Format-preserving"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Scope reduction",
+            "Breach impact ↓"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Vault hardening",
+            "Detokenise authz",
+            "Audit"
+          ]
+        },
+        {
+          "label": "vs Encryption",
+          "children": [
+            "No key in data path",
+            "No maths link"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Vault Transform",
+            "Cloud DLP",
+            "Payment providers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Vault Transform",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Most systems handle only tokens; the real values stay in one place."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "vault write transform/encode/payments value=4111-1111-1111-1111 transformation=card\n# encoded_value: 5732-8810-4471-1111   (format kept, last 4 preserved)\nvault write transform/decode/payments value=5732-8810-4471-1111 transformation=card\n# only the payments service's policy allows decode"
+        }
+      ],
+      "outcome": "sensitive data contained."
+    },
+    "summary": {
+      "points": [
+        "Surrogates with no relation.",
+        "Vault holds the mapping.",
+        "Tight detokenisation."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does tokenisation differ from encryption for scope reduction?",
+        "a": "Systems holding tokens have no key or mathematical way to recover data, so they can be out of scope; encrypted data with accessible keys usually isn't."
+      }
+    ]
+  }
+}

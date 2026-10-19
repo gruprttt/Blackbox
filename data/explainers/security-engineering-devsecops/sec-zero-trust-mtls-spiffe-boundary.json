@@ -1,0 +1,544 @@
+{
+  "introduction-the-castle-and-moat-is-dead": {
+    "core": "The castle-and-moat model trusts anything inside the network perimeter. Cloud, remote work, SaaS and lateral movement after a single phished laptop have made that untenable. Zero Trust (NIST SP 800-207) removes implicit trust based on network location: every request, from a user or a workload, is authenticated, authorised against policy and encrypted, using strong identity and device posture, with least privilege and continuous verification. Assume breach.",
+    "first_principles": {
+      "problem": "An attacker phishes one VPN user and then reaches every internal database, because 'inside' meant trusted.",
+      "truths": [
+        "Perimeters are porous.",
+        "Network location isn't identity.",
+        "Breaches will happen."
+      ],
+      "derivation": [
+        "**Authenticate** every request (user and workload).",
+        "**Authorise** per request with policy.",
+        "**Encrypt** everywhere (mTLS).",
+        "Check **device posture**.",
+        "**Segment** and log everything."
+      ]
+    },
+    "analogy": {
+      "title": "An office where every room has its own badge reader",
+      "story": "Getting past reception doesn't open the server room; each door checks you again.",
+      "mapping": [
+        [
+          "Reception",
+          "Perimeter"
+        ],
+        [
+          "Badge reader per door",
+          "Per-request authz"
+        ],
+        [
+          "Badge",
+          "Identity + device posture"
+        ]
+      ],
+      "breaks": "Badge readers check a card; zero trust also checks context such as device health, time and risk."
+    },
+    "mindmap": {
+      "center": "Zero Trust",
+      "branches": [
+        {
+          "label": "Principles",
+          "children": [
+            "Never trust, always verify",
+            "Least privilege",
+            "Assume breach"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Users (SSO, MFA)",
+            "Workloads (SPIFFE)",
+            "Devices"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "Identity-aware proxy",
+            "Service mesh mTLS",
+            "Policy engine"
+          ]
+        },
+        {
+          "label": "Frameworks",
+          "children": [
+            "NIST 800-207",
+            "BeyondCorp"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Old vs new",
+      "scenario": "Access decision.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Network location no longer grants access."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "Castle:     src_ip in 10.0.0.0/8            → ALLOW\nZero trust: user=alice@corp (MFA, FIDO2)\n            device=managed, disk-encrypted, patched\n            resource=payroll-db, action=read\n            policy: hr-team AND managed-device → ALLOW (log)"
+        }
+      ],
+      "outcome": "identity-based access."
+    },
+    "summary": {
+      "points": [
+        "Location isn't trust.",
+        "Verify every request.",
+        "Assume breach."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does zero trust mean getting rid of firewalls?",
+        "a": "No. Segmentation remains defence in depth, but access decisions are driven by identity and policy, not location."
+      }
+    ]
+  },
+  "machine-to-machine-security-standard-tls-vs-mtls": {
+    "core": "Standard TLS authenticates only the server: the client checks the server's certificate, but the server learns nothing cryptographic about the client. Mutual TLS (mTLS) adds a client certificate, so both sides prove their identity during the handshake and the connection is encrypted. For service-to-service traffic, mTLS gives strong workload identity without passwords or API keys, as long as certificates are issued, rotated and revoked automatically, usually by a service mesh or SPIFFE.",
+    "first_principles": {
+      "problem": "Internal services trust any caller on the network, so a compromised pod can call the payments service freely.",
+      "truths": [
+        "TLS verifies one side by default.",
+        "Certificates can prove client identity.",
+        "Manual cert management doesn't scale."
+      ],
+      "derivation": [
+        "Enable **mTLS** between services.",
+        "Identify workloads by **cert identity** (SPIFFE ID).",
+        "**Authorise** on that identity.",
+        "**Rotate** certs automatically (short TTL).",
+        "Use a **mesh** to automate it."
+      ]
+    },
+    "analogy": {
+      "title": "Both people showing ID at a meeting rather than just one",
+      "story": "In normal TLS only the shop shows its licence; in mTLS the customer shows ID too.",
+      "mapping": [
+        [
+          "Shop licence",
+          "Server cert"
+        ],
+        [
+          "Customer ID",
+          "Client cert"
+        ],
+        [
+          "Checking both",
+          "Mutual authentication"
+        ]
+      ],
+      "breaks": "IDs are checked once; mTLS re-proves identity on every new connection."
+    },
+    "mindmap": {
+      "center": "TLS vs mTLS",
+      "branches": [
+        {
+          "label": "TLS",
+          "children": [
+            "Server cert",
+            "Client anonymous",
+            "Encryption"
+          ]
+        },
+        {
+          "label": "mTLS",
+          "children": [
+            "Both certs",
+            "Workload identity",
+            "No passwords"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "CA",
+            "Short-lived certs",
+            "Rotation"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Istio",
+            "Linkerd",
+            "SPIRE",
+            "cert-manager"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Istio strict mTLS + authz",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only the orders service identity can call payments."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata: { name: default, namespace: payments }\nspec: { mtls: { mode: STRICT } }\n---\napiVersion: security.istio.io/v1\nkind: AuthorizationPolicy\nmetadata: { name: allow-orders, namespace: payments }\nspec:\n  rules:\n    - from: [{ source: { principals: [\"cluster.local/ns/orders/sa/orders\"] } }]"
+        }
+      ],
+      "outcome": "authenticated service calls."
+    },
+    "summary": {
+      "points": [
+        "TLS verifies the server.",
+        "mTLS verifies both.",
+        "Automate certs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the server gain from mTLS that it doesn't get from TLS?",
+        "a": "Cryptographic proof of the client's identity, which it can use for authorisation."
+      }
+    ]
+  },
+  "the-challenge-who-issues-the-passports": {
+    "core": "mTLS requires every workload to have a certificate, and that raises the bootstrapping question: how does a newly started pod or VM prove who it is to get its first certificate, without a pre-shared secret (secret zero)? The answer is attestation by the platform: the issuer verifies facts it can trust independently, such as Kubernetes service-account tokens, AWS instance identity documents, or TPM quotes, and issues a short-lived identity based on them. SPIFFE standardises the format; SPIRE implements the issuer.",
+    "first_principles": {
+      "problem": "Teams copy a shared client certificate into every service so that mTLS 'works', which defeats per-workload identity.",
+      "truths": [
+        "Identity issuance needs proof.",
+        "Pre-shared secrets recreate sprawl.",
+        "Platforms can vouch for workloads."
+      ],
+      "derivation": [
+        "Use **platform attestation** for first identity.",
+        "Issue **unique, short-lived** certs.",
+        "Standardise **identity format** (SPIFFE IDs).",
+        "**Federate** trust across domains.",
+        "Never share **certs** between services."
+      ]
+    },
+    "analogy": {
+      "title": "A passport office that issues passports based on birth certificates from the hospital",
+      "story": "You don't bring a password; a trusted authority vouches for facts about you.",
+      "mapping": [
+        [
+          "Birth certificate",
+          "Platform attestation (SA token, IID)"
+        ],
+        [
+          "Passport office",
+          "SPIRE server"
+        ],
+        [
+          "Passport",
+          "X.509 SVID"
+        ]
+      ],
+      "breaks": "Passports last ten years; workload identities last minutes to hours."
+    },
+    "mindmap": {
+      "center": "Identity Bootstrap",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Secret zero",
+            "Shared certs"
+          ]
+        },
+        {
+          "label": "Evidence",
+          "children": [
+            "K8s SA token",
+            "AWS IID",
+            "TPM quote",
+            "Process attributes"
+          ]
+        },
+        {
+          "label": "Issuer",
+          "children": [
+            "SPIRE",
+            "Mesh CA",
+            "Cloud identity"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Unique",
+            "Short-lived",
+            "Auto-rotated"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bootstrapping flow",
+      "scenario": "Steps.",
+      "flow": [
+        "Pod starts",
+        "Agent attests node (cloud IID)",
+        "Agent attests pod (K8s API: ns, SA)",
+        "Matches registration entry",
+        "Issue SVID (1h TTL)",
+        "Auto-rotate"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each pod gets its own identity with no pre-shared secret."
+        }
+      ],
+      "code": [],
+      "outcome": "secret zero solved."
+    },
+    "summary": {
+      "points": [
+        "Identity needs evidence.",
+        "Platform vouches.",
+        "Unique and short-lived."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is copying one client cert into every service bad?",
+        "a": "Every service looks identical, so you lose per-service authorisation and a leak compromises all of them."
+      }
+    ]
+  },
+  "workload-identity-spiffe-and-spire": {
+    "core": "SPIFFE (Secure Production Identity Framework for Everyone) is a standard for workload identity: a SPIFFE ID URI such as spiffe://prod.example.com/ns/payments/sa/api, carried in an SVID (an X.509 certificate or JWT), delivered via a local Workload API. SPIRE is the reference implementation. A server acts as CA and policy store, and agents on each node attest nodes and workloads (by K8s, AWS, Docker or Unix attributes) and deliver auto-rotating SVIDs. Trust bundles can be federated across clusters and clouds.",
+    "first_principles": {
+      "problem": "Services across Kubernetes, VMs and two clouds need one consistent identity system for mTLS and authorisation.",
+      "truths": [
+        "Identity should be platform-agnostic.",
+        "Workloads shouldn't handle key generation themselves.",
+        "Trust must span domains."
+      ],
+      "derivation": [
+        "Define **SPIFFE IDs** per workload.",
+        "Run **SPIRE server + agents**.",
+        "Register **selectors** (ns, SA, image).",
+        "Apps fetch SVIDs from the **Workload API**.",
+        "**Federate** trust domains."
+      ]
+    },
+    "analogy": {
+      "title": "An international passport standard",
+      "story": "Every country issues passports differently, but the format is the same, so any border can read them.",
+      "mapping": [
+        [
+          "Passport format",
+          "SPIFFE spec"
+        ],
+        [
+          "Passport",
+          "SVID"
+        ],
+        [
+          "Issuing office",
+          "SPIRE"
+        ],
+        [
+          "Mutual recognition",
+          "Federation"
+        ]
+      ],
+      "breaks": "Passports are manually checked; SVIDs are verified automatically on each connection."
+    },
+    "mindmap": {
+      "center": "SPIFFE / SPIRE",
+      "branches": [
+        {
+          "label": "SPIFFE",
+          "children": [
+            "SPIFFE ID",
+            "SVID (X.509/JWT)",
+            "Workload API",
+            "Trust bundle"
+          ]
+        },
+        {
+          "label": "SPIRE",
+          "children": [
+            "Server (CA)",
+            "Agent",
+            "Node attestors",
+            "Workload attestors"
+          ]
+        },
+        {
+          "label": "Selectors",
+          "children": [
+            "k8s:ns",
+            "k8s:sa",
+            "unix:uid",
+            "docker:image"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "Envoy",
+            "Istio",
+            "Vault",
+            "AWS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Registration entry",
+      "scenario": "SPIRE CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each matching pod gets a unique, rotating identity."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "spire-server entry create \\\n  -spiffeID spiffe://prod.example.com/ns/payments/sa/api \\\n  -parentID spiffe://prod.example.com/agent/k8s-node \\\n  -selector k8s:ns:payments -selector k8s:sa:api -x509SVIDTTL 3600\n# the pod's Envoy fetches its SVID over the Workload API socket"
+        }
+      ],
+      "outcome": "universal workload identity."
+    },
+    "summary": {
+      "points": [
+        "Standard ID format.",
+        "Attested issuance.",
+        "Federation across domains."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are selectors in SPIRE?",
+        "a": "Attributes, such as namespace, service account or image, that a workload must match to receive a given SPIFFE ID."
+      }
+    ]
+  },
+  "human-access-the-problem-with-vpns-and-the-boundary-model": {
+    "core": "VPNs put a user's device onto the network, granting broad reach after a single authentication. That's the castle model again: compromised laptops can scan and pivot, credentials are long-lived, and access is coarse. Identity-aware access proxies (HashiCorp Boundary, Teleport, Cloudflare Access, Google IAP) instead broker per-session access to specific targets based on SSO identity, device posture and policy, inject short-lived credentials, never expose the network, and record sessions.",
+    "first_principles": {
+      "problem": "A contractor's VPN access, meant for one database, lets their infected laptop scan the whole 10.0.0.0/8 range.",
+      "truths": [
+        "Network access is broader than needed.",
+        "Credentials on endpoints leak.",
+        "Sessions should be auditable."
+      ],
+      "derivation": [
+        "Replace VPN with an **identity-aware proxy**.",
+        "Grant access per **target**, not network.",
+        "Authenticate via **SSO + MFA + device posture**.",
+        "**Inject** short-lived creds (Vault).",
+        "**Record** and audit sessions."
+      ]
+    },
+    "analogy": {
+      "title": "A concierge who escorts you to one room versus giving you a master building key",
+      "story": "You reach the room you need, the concierge logs the visit, and you never wander the corridors.",
+      "mapping": [
+        [
+          "Master key",
+          "VPN"
+        ],
+        [
+          "Concierge escort",
+          "Access proxy"
+        ],
+        [
+          "Visit log",
+          "Session recording"
+        ]
+      ],
+      "breaks": "An escort is a person; proxies enforce this programmatically for thousands of sessions."
+    },
+    "mindmap": {
+      "center": "Human Access",
+      "branches": [
+        {
+          "label": "VPN problems",
+          "children": [
+            "Broad network",
+            "Lateral movement",
+            "Static creds"
+          ]
+        },
+        {
+          "label": "Proxies",
+          "children": [
+            "Boundary",
+            "Teleport",
+            "IAP",
+            "Cloudflare Access"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "SSO/MFA",
+            "Device posture",
+            "Per-target policy"
+          ]
+        },
+        {
+          "label": "Creds",
+          "children": [
+            "Brokered",
+            "Injected",
+            "Short-lived"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "Session recording"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Boundary connect",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One target, short-lived creds, full audit, no network exposure."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "boundary authenticate oidc            # SSO + MFA\nboundary connect postgres -target-id ttcp_orders_db -dbname orders\n# Vault-brokered DB creds injected for this session only;\n# no network route to the DB from the laptop"
+        }
+      ],
+      "outcome": "least-privilege human access."
+    },
+    "summary": {
+      "points": [
+        "VPNs grant networks.",
+        "Proxies grant targets.",
+        "Inject and record."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why don't users need DB passwords with Boundary + Vault?",
+        "a": "Credentials are generated and injected per session by the broker, so users never see or keep them."
+      }
+    ]
+  }
+}

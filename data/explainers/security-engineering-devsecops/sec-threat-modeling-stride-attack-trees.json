@@ -1,0 +1,652 @@
+{
+  "introduction-why-we-model-threats": {
+    "core": "Threat modeling is structured thinking about what can go wrong before you build. Adam Shostack's four questions frame it: What are we working on? What can go wrong? What are we going to do about it? Did we do a good job? It catches design flaws (missing auth between services, trusting a header) that no scanner finds, and is cheapest during design. The output is a list of threats with mitigations, owners and tracked decisions.",
+    "first_principles": {
+      "problem": "A new microservice trusts an `X-User-Id` header from the gateway, but it's also reachable directly, so anyone can impersonate users.",
+      "truths": [
+        "Design flaws are invisible to scanners.",
+        "Fixing design late is expensive.",
+        "Structured questions beat ad-hoc worry."
+      ],
+      "derivation": [
+        "Model at **design time**.",
+        "Ask the **four questions**.",
+        "Draw a **DFD**.",
+        "Enumerate with **STRIDE**.",
+        "Track **mitigations** as tickets."
+      ]
+    },
+    "analogy": {
+      "title": "A pre-flight checklist",
+      "story": "Pilots don't wait for something to fail mid-air; they systematically ask what could go wrong before take-off.",
+      "mapping": [
+        [
+          "Checklist",
+          "Four questions / STRIDE"
+        ],
+        [
+          "Aircraft systems",
+          "System components"
+        ],
+        [
+          "Fix before take-off",
+          "Mitigate in design"
+        ]
+      ],
+      "breaks": "Aircraft checklists are fixed; each system's threat model is unique."
+    },
+    "mindmap": {
+      "center": "Threat Modeling",
+      "branches": [
+        {
+          "label": "Questions",
+          "children": [
+            "What are we building?",
+            "What can go wrong?",
+            "What will we do?",
+            "Did we do well?"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "DFD",
+            "STRIDE",
+            "Attack trees"
+          ]
+        },
+        {
+          "label": "When",
+          "children": [
+            "Design",
+            "Major changes"
+          ]
+        },
+        {
+          "label": "Output",
+          "children": [
+            "Threats",
+            "Mitigations",
+            "Owners"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A lightweight session",
+      "scenario": "60-minute agenda.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The header-trust flaw is found before code is written."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "1. (10m) Draw the DFD on a whiteboard\n2. (25m) Walk each trust boundary with STRIDE\n3. (15m) Rank: likelihood x impact\n4. (10m) File tickets with owners\n\nThreat: service reachable bypassing gateway (Spoofing)\nMitigation: NetworkPolicy + verify signed JWT, not header"
+        }
+      ],
+      "outcome": "design flaws caught early."
+    },
+    "summary": {
+      "points": [
+        "Think before building.",
+        "Four questions.",
+        "Track outcomes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't scanners replace threat modeling?",
+        "a": "Scanners find implementation bugs; threat modeling finds flawed design assumptions and missing controls."
+      }
+    ]
+  },
+  "data-flow-diagrams-the-foundation-of-threat-modeling": {
+    "core": "A data flow diagram (DFD) shows how data moves through a system using four elements: external entities (users, third parties), processes (services), data stores (databases, queues) and data flows (arrows), plus trust boundaries where privilege or ownership changes. Threats cluster at trust boundaries, because that is where data crosses from less to more trusted zones. A DFD keeps the threat discussion concrete and reveals forgotten flows.",
+    "first_principles": {
+      "problem": "A team threat-models from memory and forgets the nightly export to a vendor's SFTP server.",
+      "truths": [
+        "You can't protect what you haven't drawn.",
+        "Threats concentrate at boundaries.",
+        "Shared pictures align teams."
+      ],
+      "derivation": [
+        "Draw **entities, processes, stores, flows**.",
+        "Mark **trust boundaries**.",
+        "Label flows with **protocol and data type**.",
+        "Keep it at the **right level**.",
+        "Store it **as code** to keep it current."
+      ]
+    },
+    "analogy": {
+      "title": "A plumbing schematic",
+      "story": "Before finding leaks, you need a map of where water enters, which pipes it flows through, and where tanks and valves sit.",
+      "mapping": [
+        [
+          "Pipes",
+          "Data flows"
+        ],
+        [
+          "Tanks",
+          "Data stores"
+        ],
+        [
+          "Valves between zones",
+          "Trust boundaries"
+        ]
+      ],
+      "breaks": "Pipes are fixed; software flows change with each release, so DFDs must be updated."
+    },
+    "mindmap": {
+      "center": "DFD",
+      "branches": [
+        {
+          "label": "Elements",
+          "children": [
+            "External entity",
+            "Process",
+            "Data store",
+            "Data flow"
+          ]
+        },
+        {
+          "label": "Boundaries",
+          "children": [
+            "Internet/DMZ",
+            "Service/DB",
+            "Tenant",
+            "Third party"
+          ]
+        },
+        {
+          "label": "Labels",
+          "children": [
+            "Protocol",
+            "Auth",
+            "Data class"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Threat Dragon",
+            "draw.io",
+            "pytm"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "DFD as code",
+      "scenario": "Mermaid.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The vendor flow is visible and gets its own review."
+        }
+      ],
+      "code": [
+        {
+          "lang": "mermaid",
+          "text": "flowchart LR\n  U[User] -->|HTTPS + JWT| G(API Gateway)\n  subgraph VPC[Trust boundary: VPC]\n    G -->|mTLS| S(Orders svc)\n    S -->|SQL/TLS| D[(Orders DB)]\n  end\n  S -->|SFTP nightly| V[Vendor]"
+        }
+      ],
+      "outcome": "complete system picture."
+    },
+    "summary": {
+      "points": [
+        "Four elements plus boundaries.",
+        "Threats live at boundaries.",
+        "Keep as code."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why focus threat analysis on trust boundaries?",
+        "a": "That's where data moves between different privilege levels, so it's where checks are needed and often missing."
+      }
+    ]
+  },
+  "stride-a-framework-for-categorizing-threats": {
+    "core": "STRIDE is a mnemonic for six threat categories, each the violation of a security property: Spoofing (authenticity), Tampering (integrity), Repudiation (non-repudiation), Information disclosure (confidentiality), Denial of service (availability) and Elevation of privilege (authorization). Walking each DFD element and boundary through STRIDE turns 'what could go wrong?' into a systematic checklist, and each category maps to typical mitigations.",
+    "first_principles": {
+      "problem": "Brainstorming finds only the threats people already know about, leaving gaps like missing audit logs.",
+      "truths": [
+        "Each threat breaks a property.",
+        "Checklists beat recall.",
+        "Categories suggest mitigations."
+      ],
+      "derivation": [
+        "For each element, ask **S-T-R-I-D-E**.",
+        "Map to **properties**.",
+        "Pick **standard mitigations**.",
+        "Skip categories that **don't apply**.",
+        "Record in a **threat register**."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor's systematic examination",
+      "story": "Instead of guessing, they check heart, lungs, reflexes and so on, so nothing is missed.",
+      "mapping": [
+        [
+          "Body systems",
+          "STRIDE categories"
+        ],
+        [
+          "Each organ",
+          "Each DFD element"
+        ],
+        [
+          "Treatment",
+          "Mitigation"
+        ]
+      ],
+      "breaks": "Bodies are similar; systems differ, so some categories need creative thinking."
+    },
+    "mindmap": {
+      "center": "STRIDE",
+      "branches": [
+        {
+          "label": "Spoofing",
+          "children": [
+            "AuthN",
+            "mTLS",
+            "MFA"
+          ]
+        },
+        {
+          "label": "Tampering",
+          "children": [
+            "Signatures",
+            "MACs",
+            "Integrity checks"
+          ]
+        },
+        {
+          "label": "Repudiation",
+          "children": [
+            "Audit logs",
+            "Signing"
+          ]
+        },
+        {
+          "label": "Info disclosure",
+          "children": [
+            "Encryption",
+            "Access control"
+          ]
+        },
+        {
+          "label": "DoS",
+          "children": [
+            "Rate limits",
+            "Quotas"
+          ]
+        },
+        {
+          "label": "EoP",
+          "children": [
+            "Least privilege",
+            "AuthZ"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "STRIDE on one flow",
+      "scenario": "Gateway → Orders service.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Six concrete threats from one arrow."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "| Cat | Threat                                  | Mitigation                |\n|-----|-----------------------------------------|---------------------------|\n| S   | Caller fakes X-User-Id header           | Verify signed JWT         |\n| T   | Body altered in transit                 | mTLS                      |\n| R   | User denies placing order               | Immutable audit log       |\n| I   | Error leaks stack trace                 | Generic errors            |\n| D   | Flood of large orders                   | Rate limit + size limits  |\n| E   | Normal user calls /admin/refund         | Role check in service     |"
+        }
+      ],
+      "outcome": "systematic coverage."
+    },
+    "summary": {
+      "points": [
+        "Six categories, six properties.",
+        "Walk every element.",
+        "Map to mitigations."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which STRIDE category does a missing audit log enable?",
+        "a": "Repudiation: a user can deny an action because there's no reliable record."
+      }
+    ]
+  },
+  "visualizing-attacks-attack-trees": {
+    "core": "An attack tree puts an attacker's goal at the root (such as 'read customer PII') and decomposes it into sub-goals and concrete steps, using OR nodes (any child works) and AND nodes (all children are needed). Annotating leaves with cost, skill or likelihood shows the cheapest path, which is where defences matter most. Trees complement STRIDE by thinking from the attacker's objective rather than the system's components.",
+    "first_principles": {
+      "problem": "A team hardens the database heavily while the easiest route to the data is phishing an admin with no MFA.",
+      "truths": [
+        "Attackers take the cheapest path.",
+        "Goals can be decomposed.",
+        "Defences should target likely paths."
+      ],
+      "derivation": [
+        "Set an **attacker goal** as root.",
+        "Decompose with **OR/AND** nodes.",
+        "Annotate **cost/likelihood**.",
+        "Find the **cheapest path**.",
+        "Place **controls** that cut it."
+      ]
+    },
+    "analogy": {
+      "title": "Planning a heist movie",
+      "story": "The crew lists every way into the vault (tunnel, inside man, stolen keycard) and picks the easiest one.",
+      "mapping": [
+        [
+          "Vault",
+          "Root goal"
+        ],
+        [
+          "Ways in",
+          "OR branches"
+        ],
+        [
+          "Needs keycard and code",
+          "AND node"
+        ]
+      ],
+      "breaks": "Movie heists have one crew; real systems face many attackers trying all paths."
+    },
+    "mindmap": {
+      "center": "Attack Trees",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "Root goal",
+            "OR nodes",
+            "AND nodes",
+            "Leaves"
+          ]
+        },
+        {
+          "label": "Annotations",
+          "children": [
+            "Cost",
+            "Skill",
+            "Likelihood",
+            "Detectability"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Cheapest path",
+            "Control placement"
+          ]
+        },
+        {
+          "label": "Pairs with",
+          "children": [
+            "STRIDE",
+            "MITRE ATT&CK"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tree for 'read PII'",
+      "scenario": "Mermaid.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Phishing is cheapest, so MFA for admins becomes the top fix."
+        }
+      ],
+      "code": [
+        {
+          "lang": "mermaid",
+          "text": "flowchart TD\n  R[Read customer PII] --> A{OR}\n  A --> B[SQLi in search: $$$]\n  A --> C[Phish admin: $]\n  A --> D[Stolen DB backup: $$]\n  C --> E{AND}\n  E --> F[Send lure]\n  E --> G[No MFA on admin]"
+        }
+      ],
+      "outcome": "defences where attackers go."
+    },
+    "summary": {
+      "points": [
+        "Start from attacker goals.",
+        "OR/AND decomposition.",
+        "Cut the cheapest path."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an AND node mean for defenders?",
+        "a": "Blocking any one child blocks that whole branch."
+      }
+    ]
+  },
+  "prioritizing-threats-the-dread-model-and-risk-matrices": {
+    "core": "Threat lists need ranking, because time is limited. DREAD scores Damage, Reproducibility, Exploitability, Affected users and Discoverability (1–10 each), though it is subjective and largely retired at Microsoft. Simpler risk matrices of likelihood × impact (low/medium/high) are more common, and CVSS standardises severity for known vulns. Whatever the method, the goal is a consistent, defensible order with each risk mitigated, accepted with an owner, transferred or avoided.",
+    "first_principles": {
+      "problem": "Forty threats are found and the team argues for days about which to fix first.",
+      "truths": [
+        "Resources are limited.",
+        "Risk is likelihood times impact.",
+        "Consistency matters more than precision."
+      ],
+      "derivation": [
+        "Score **likelihood and impact**.",
+        "Use a shared **matrix**.",
+        "Decide: **mitigate, accept, transfer, avoid**.",
+        "Name an **owner** for accepted risk.",
+        "**Re-score** when things change."
+      ]
+    },
+    "analogy": {
+      "title": "Hospital triage",
+      "story": "Nurses don't treat in arrival order; they sort by severity and urgency so the worst cases go first.",
+      "mapping": [
+        [
+          "Triage category",
+          "Risk level"
+        ],
+        [
+          "Severity",
+          "Impact"
+        ],
+        [
+          "Urgency",
+          "Likelihood"
+        ]
+      ],
+      "breaks": "Triage is quick and clinical; risk scoring involves judgement and debate."
+    },
+    "mindmap": {
+      "center": "Prioritisation",
+      "branches": [
+        {
+          "label": "Models",
+          "children": [
+            "DREAD",
+            "Likelihood x Impact",
+            "CVSS"
+          ]
+        },
+        {
+          "label": "Responses",
+          "children": [
+            "Mitigate",
+            "Accept",
+            "Transfer",
+            "Avoid"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "False precision",
+            "Subjectivity"
+          ]
+        },
+        {
+          "label": "Governance",
+          "children": [
+            "Owners",
+            "Risk register",
+            "Review cadence"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Risk matrix",
+      "scenario": "Scoring three threats.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clear order and explicit decisions."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "| Threat                  | Likelihood | Impact | Risk | Decision          |\n|-------------------------|-----------|--------|------|-------------------|\n| Admin phished (no MFA)  | High      | High   | CRIT | Mitigate: FIDO2   |\n| Header spoof direct call| Medium    | High   | HIGH | Mitigate: NetPol  |\n| Verbose 500 errors      | Medium    | Low    | LOW  | Accept (owner: PM)|"
+        }
+      ],
+      "outcome": "defensible priorities."
+    },
+    "summary": {
+      "points": [
+        "Likelihood × impact.",
+        "Consistency over precision.",
+        "Every risk gets a decision."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why has DREAD fallen out of favour?",
+        "a": "Its scores are subjective and inconsistent between assessors, giving false precision."
+      }
+    ]
+  },
+  "the-human-element-red-teaming-and-blue-teaming": {
+    "core": "Threat models are hypotheses; red and blue teams test them. A red team emulates real adversaries end to end (phishing, lateral movement, exfiltration) to test whether defences and people detect and respond. The blue team defends: detection engineering, monitoring and incident response. Purple teaming puts them together, replaying techniques (mapped to MITRE ATT&CK) and tuning detections in real time. The value is discovering what the paper model missed and measuring detection.",
+    "first_principles": {
+      "problem": "A threat model says lateral movement is 'mitigated', but a red team moves from a laptop to production in two days undetected.",
+      "truths": [
+        "Models are assumptions.",
+        "Real attackers combine techniques.",
+        "Detection must be tested, not assumed."
+      ],
+      "derivation": [
+        "Run **red team** exercises against goals.",
+        "Map to **MITRE ATT&CK**.",
+        "Use **purple teaming** to tune detections.",
+        "Measure **time to detect/respond**.",
+        "Feed findings back into the **threat model**."
+      ]
+    },
+    "analogy": {
+      "title": "A fire drill with a hidden 'fire'",
+      "story": "You find out whether alarms work and people know the exits only by actually running the drill.",
+      "mapping": [
+        [
+          "Drill fire",
+          "Red team attack"
+        ],
+        [
+          "Fire wardens",
+          "Blue team"
+        ],
+        [
+          "Debrief",
+          "Purple team review"
+        ]
+      ],
+      "breaks": "Drills are announced; good red-team exercises are often unannounced to staff."
+    },
+    "mindmap": {
+      "center": "Red & Blue",
+      "branches": [
+        {
+          "label": "Red",
+          "children": [
+            "Adversary emulation",
+            "Objectives",
+            "Rules of engagement"
+          ]
+        },
+        {
+          "label": "Blue",
+          "children": [
+            "Detection",
+            "Response",
+            "Hunting"
+          ]
+        },
+        {
+          "label": "Purple",
+          "children": [
+            "Collaborative",
+            "Tuning"
+          ]
+        },
+        {
+          "label": "Frameworks",
+          "children": [
+            "MITRE ATT&CK",
+            "Atomic Red Team"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "MTTD",
+            "MTTR",
+            "Coverage"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Purple-team test",
+      "scenario": "Atomic Red Team.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Detection gaps are found and closed with evidence."
+        }
+      ],
+      "code": [
+        {
+          "lang": "powershell",
+          "text": "# emulate T1003.001 (LSASS credential dumping)\nInvoke-AtomicTest T1003.001 -TestNumbers 1\n# blue team checks: did the EDR/SIEM rule fire? how fast?\n# if not, write or fix the detection and re-run"
+        }
+      ],
+      "outcome": "tested defences."
+    },
+    "summary": {
+      "points": [
+        "Test the model.",
+        "ATT&CK as a shared map.",
+        "Measure detection."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is purple teaming?",
+        "a": "Red and blue teams working together to run attacks and immediately validate or improve detections."
+      }
+    ]
+  }
+}

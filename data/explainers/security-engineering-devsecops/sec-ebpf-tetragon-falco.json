@@ -1,0 +1,657 @@
+{
+  "introduction-javascript-for-the-linux-kernel": {
+    "core": "eBPF lets you run small, sandboxed programs inside the Linux kernel without writing kernel modules or rebooting, much as JavaScript lets you run code safely in a browser. Programs are loaded from user space, checked by the verifier for safety (bounded loops, valid memory access), JIT-compiled, and attached to hooks such as syscalls, kernel functions or network packets. They share data with user space through maps. This gives security tools deep, low-overhead visibility and control.",
+    "first_principles": {
+      "problem": "Security agents using kernel modules crash hosts and break on kernel upgrades, while user-space agents miss what happens in the kernel.",
+      "truths": [
+        "The kernel sees everything.",
+        "Kernel modules are risky.",
+        "Safe programmability needs verification."
+      ],
+      "derivation": [
+        "Write **eBPF programs**.",
+        "Pass the **verifier**.",
+        "**Attach** to hooks.",
+        "Share data via **maps / ring buffers**.",
+        "Use **CO-RE** for portability."
+      ]
+    },
+    "analogy": {
+      "title": "Browser JavaScript for the kernel",
+      "story": "A browser runs untrusted scripts safely in a sandbox; eBPF runs custom logic in the kernel safely after verification.",
+      "mapping": [
+        [
+          "Browser",
+          "Kernel"
+        ],
+        [
+          "JS sandbox",
+          "Verifier"
+        ],
+        [
+          "Event listeners",
+          "Hooks"
+        ]
+      ],
+      "breaks": "JS can run forever; eBPF programs must be provably bounded."
+    },
+    "mindmap": {
+      "center": "eBPF",
+      "branches": [
+        {
+          "label": "Pipeline",
+          "children": [
+            "Write (C/Rust)",
+            "Verify",
+            "JIT",
+            "Attach"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Maps",
+            "Ring buffer"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Security",
+            "Networking (Cilium)",
+            "Observability"
+          ]
+        },
+        {
+          "label": "Portability",
+          "children": [
+            "BTF",
+            "CO-RE"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "bpftrace",
+            "libbpf",
+            "BCC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One-liner with bpftrace",
+      "scenario": "Trace every exec.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Instant kernel-level visibility with no module."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "bpftrace -e 'tracepoint:syscalls:sys_enter_execve { printf(\"%s -> %s\\n\", comm, str(args->filename)); }'\n# bash -> /usr/bin/curl\n# python3 -> /bin/sh   ← suspicious"
+        }
+      ],
+      "outcome": "safe kernel programmability."
+    },
+    "summary": {
+      "points": [
+        "Sandboxed kernel programs.",
+        "Verifier ensures safety.",
+        "Hooks plus maps."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the eBPF verifier guarantee?",
+        "a": "That the program terminates, accesses memory safely and can't crash the kernel before it's allowed to load."
+      }
+    ]
+  },
+  "why-ebpf-the-end-of-toctou": {
+    "core": "Older syscall-monitoring tools (ptrace, some auditd and LD_PRELOAD approaches) inspect arguments from user space, which opens Time-Of-Check-To-Time-Of-Use (TOCTOU) races: an attacker changes the argument, such as a file path in user memory, between the security check and the kernel's actual use. eBPF can hook in-kernel functions (LSM hooks, kprobes) after arguments are copied into kernel memory, observing and enforcing on exactly what the kernel will act on, which closes that gap with low overhead.",
+    "first_principles": {
+      "problem": "Malware evades a ptrace-based sandbox by swapping a filename pointer in another thread after the check passes.",
+      "truths": [
+        "Checks must see what's actually used.",
+        "User memory can change concurrently.",
+        "Kernel-internal hooks see final values."
+      ],
+      "derivation": [
+        "Hook **after copy-in** (LSM, kprobes on kernel functions).",
+        "Avoid relying on **raw syscall args** in user memory.",
+        "Use **LSM BPF** for enforcement.",
+        "Enforce **in-kernel** (return error / kill).",
+        "Keep overhead **low**."
+      ]
+    },
+    "analogy": {
+      "title": "Checking a cheque at the moment the bank pays out, not when it's handed over the counter",
+      "story": "If you check early, someone can alter the cheque before it's cashed.",
+      "mapping": [
+        [
+          "Check at counter",
+          "User-space check"
+        ],
+        [
+          "Altering the cheque",
+          "Racing argument change"
+        ],
+        [
+          "Checking at payout",
+          "In-kernel hook"
+        ]
+      ],
+      "breaks": "Banks check once; kernels process millions of operations per second, so hooks must be efficient."
+    },
+    "mindmap": {
+      "center": "TOCTOU & eBPF",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Check then use",
+            "Racing threads",
+            "User memory"
+          ]
+        },
+        {
+          "label": "Old tools",
+          "children": [
+            "ptrace",
+            "LD_PRELOAD",
+            "Syscall-entry inspection"
+          ]
+        },
+        {
+          "label": "eBPF fix",
+          "children": [
+            "LSM hooks",
+            "Kernel functions",
+            "In-kernel enforcement"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Accurate",
+            "Fast",
+            "Hard to evade"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Where to hook",
+      "scenario": "Comparison.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Decisions are made on what the kernel really opens."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "sys_enter_openat(path_ptr)   ← path in user memory: raceable\nsecurity_file_open(file*)    ← LSM hook: kernel's resolved file object\n# Tetragon/LSM-BPF attach here and can return -EPERM"
+        }
+      ],
+      "outcome": "race-free enforcement."
+    },
+    "summary": {
+      "points": [
+        "TOCTOU races user-space checks.",
+        "Hook inside the kernel.",
+        "Enforce on final values."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is hooking security_file_open more reliable than sys_enter_openat?",
+        "a": "It sees the kernel's resolved file object after copy-in, which user space can no longer change."
+      }
+    ]
+  },
+  "ebpf-hook-types-where-you-can-attach": {
+    "core": "eBPF programs attach to different hook types depending on the goal. Tracepoints are stable, predefined kernel events (sched, syscalls). Kprobes and kretprobes attach to almost any kernel function, which is powerful but unstable across versions; fentry/fexit are faster equivalents. Uprobes attach to user-space functions (such as OpenSSL's SSL_write to see plaintext). LSM hooks allow security enforcement decisions. XDP and TC hooks process network packets at line rate.",
+    "first_principles": {
+      "problem": "A team wants to see decrypted TLS payloads, block file writes and drop DDoS packets, and doesn't know which hooks to use.",
+      "truths": [
+        "Different layers expose different events.",
+        "Stability varies by hook type.",
+        "Enforcement needs specific hooks."
+      ],
+      "derivation": [
+        "**Tracepoints** for stable events.",
+        "**kprobes/fentry** for deep kernel internals.",
+        "**uprobes** for user-space libraries.",
+        "**LSM** for allow/deny decisions.",
+        "**XDP/TC** for packets."
+      ]
+    },
+    "analogy": {
+      "title": "Placing sensors in a building",
+      "story": "Door sensors (tracepoints) are fixed, wiretaps on any cable (kprobes) are flexible but fragile, desk microphones are uprobes, guards at doors are LSM, and checkpoints at the loading dock are XDP.",
+      "mapping": [
+        [
+          "Door sensors",
+          "Tracepoints"
+        ],
+        [
+          "Wiretaps",
+          "kprobes"
+        ],
+        [
+          "Guards",
+          "LSM hooks"
+        ],
+        [
+          "Loading dock",
+          "XDP"
+        ]
+      ],
+      "breaks": "Building wiring rarely changes; kernel function names change between versions."
+    },
+    "mindmap": {
+      "center": "eBPF Hooks",
+      "branches": [
+        {
+          "label": "Tracing",
+          "children": [
+            "Tracepoints",
+            "kprobes/kretprobes",
+            "fentry/fexit",
+            "uprobes",
+            "USDT"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "LSM BPF",
+            "seccomp-bpf"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "XDP",
+            "TC",
+            "Socket filters",
+            "cgroup hooks"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Stability",
+            "Overhead",
+            "Capability"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three hooks",
+      "scenario": "bpftrace.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The right hook for each goal."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# stable syscall tracepoint\nbpftrace -e 'tracepoint:syscalls:sys_enter_connect { @[comm] = count(); }'\n# kernel function\nbpftrace -e 'kprobe:tcp_v4_connect { printf(\"%s\\n\", comm); }'\n# user-space TLS plaintext\nbpftrace -e 'uprobe:/usr/lib/x86_64-linux-gnu/libssl.so.3:SSL_write { printf(\"%d bytes\\n\", arg2); }'"
+        }
+      ],
+      "outcome": "targeted instrumentation."
+    },
+    "summary": {
+      "points": [
+        "Tracepoints are stable.",
+        "kprobes are flexible.",
+        "LSM enforces, XDP filters packets."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which hook type would you use to read TLS plaintext?",
+        "a": "A uprobe on the TLS library's read/write functions, such as SSL_read and SSL_write."
+      }
+    ]
+  },
+  "falco-the-security-camera": {
+    "core": "Falco, a CNCF project, is a runtime threat detection engine. It collects kernel events through an eBPF probe, enriches them with container and Kubernetes metadata, and evaluates them against YAML rules (shells in containers, reading /etc/shadow, unexpected outbound connections, privilege escalation). Matches produce alerts routed via Falcosidekick to Slack, SIEMs or response functions. Falco detects and alerts; it doesn't block by itself.",
+    "first_principles": {
+      "problem": "An attacker exploits a web app, spawns a shell and reads service-account tokens, and nobody notices.",
+      "truths": [
+        "Attacks have behavioural signatures.",
+        "Context (pod, image) makes alerts actionable.",
+        "Detection needs routing to responders."
+      ],
+      "derivation": [
+        "Deploy **Falco DaemonSet** with the eBPF driver.",
+        "Use **default rules**, then tune.",
+        "Write **custom rules** with macros/lists.",
+        "Route via **Falcosidekick**.",
+        "Automate **response** (isolate pod)."
+      ]
+    },
+    "analogy": {
+      "title": "CCTV with motion detection",
+      "story": "It records everything and alerts security when someone enters a restricted area, but it doesn't lock the door itself.",
+      "mapping": [
+        [
+          "Camera feed",
+          "Syscall events"
+        ],
+        [
+          "Motion zones",
+          "Rules"
+        ],
+        [
+          "Alarm to guard",
+          "Alert"
+        ]
+      ],
+      "breaks": "CCTV sees images; Falco sees syscalls enriched with container identity."
+    },
+    "mindmap": {
+      "center": "Falco",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "eBPF syscalls",
+            "K8s audit logs",
+            "Plugins (CloudTrail)"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Conditions",
+            "Macros",
+            "Lists",
+            "Priority"
+          ]
+        },
+        {
+          "label": "Outputs",
+          "children": [
+            "stdout",
+            "Falcosidekick",
+            "SIEM"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "Alert",
+            "Isolate",
+            "Kill (external)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Custom rule",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Token theft triggers a contextual critical alert."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- rule: Read SA token by non-app process\n  condition: >\n    open_read and container and\n    fd.name startswith /var/run/secrets/kubernetes.io/serviceaccount and\n    not proc.name in (node, java)\n  output: \"SA token read (proc=%proc.name pod=%k8s.pod.name image=%container.image.repository)\"\n  priority: CRITICAL"
+        }
+      ],
+      "outcome": "runtime visibility."
+    },
+    "summary": {
+      "points": [
+        "Detects behaviour.",
+        "Kubernetes context.",
+        "Alerts, doesn't block."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can Falco block a malicious process on its own?",
+        "a": "No. It detects and alerts; blocking needs Tetragon, LSM or an automated response hook."
+      }
+    ]
+  },
+  "tetragon-the-enforcer-prevention": {
+    "core": "Tetragon, from Cilium/Isovalent, is eBPF-based security observability and runtime enforcement. TracingPolicies define kernel hooks (kprobes, tracepoints, LSM) with in-kernel filters on arguments, process lineage and Kubernetes identity. When a match occurs, Tetragon can act synchronously in the kernel, sending SIGKILL or overriding the return value, so the malicious action is stopped before it completes rather than alerted on afterwards. Filtering in the kernel also keeps overhead low.",
+    "first_principles": {
+      "problem": "By the time a detection alert fires, a crypto-miner has already started and exfiltrated keys.",
+      "truths": [
+        "Async alerts are too late for some actions.",
+        "Kernel filtering reduces overhead.",
+        "Enforcement must be precise to avoid outages."
+      ],
+      "derivation": [
+        "Write **TracingPolicies**.",
+        "Filter **in-kernel** by args, binary and pod.",
+        "Choose **Post / Sigkill / Override**.",
+        "Start in **observe** mode.",
+        "Scope by **namespace/pod labels**."
+      ]
+    },
+    "analogy": {
+      "title": "A guard who tackles the intruder, versus a camera that only records them",
+      "story": "Prevention acts at the moment of the attempt, not after.",
+      "mapping": [
+        [
+          "Camera",
+          "Falco (detect)"
+        ],
+        [
+          "Guard",
+          "Tetragon (enforce)"
+        ],
+        [
+          "Rules of engagement",
+          "TracingPolicy"
+        ]
+      ],
+      "breaks": "Over-eager guards stop legitimate staff; policies must be tested to avoid killing real workloads."
+    },
+    "mindmap": {
+      "center": "Tetragon",
+      "branches": [
+        {
+          "label": "Policies",
+          "children": [
+            "TracingPolicy",
+            "Hooks",
+            "Selectors"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Post (observe)",
+            "Sigkill",
+            "Override return"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "Process tree",
+            "K8s identity",
+            "Capabilities"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Synchronous",
+            "Low overhead",
+            "Precise"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Block writes to /etc",
+      "scenario": "TracingPolicy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any write attempt to /etc kills the process in the kernel."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: cilium.io/v1alpha1\nkind: TracingPolicy\nmetadata: { name: protect-etc }\nspec:\n  kprobes:\n    - call: security_file_permission\n      syscall: false\n      args: [{ index: 0, type: file }, { index: 1, type: int }]\n      selectors:\n        - matchArgs:\n            - { index: 0, operator: Prefix, values: [\"/etc/\"] }\n            - { index: 1, operator: Equal, values: [\"2\"] }   # MAY_WRITE\n          matchActions: [{ action: Sigkill }]"
+        }
+      ],
+      "outcome": "prevention, not just detection."
+    },
+    "summary": {
+      "points": [
+        "Enforce in-kernel.",
+        "Synchronous actions.",
+        "Observe first, then enforce."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is in-kernel Sigkill better than killing from user space after an alert?",
+        "a": "It acts synchronously before the operation completes, avoiding the race where damage occurs first."
+      }
+    ]
+  },
+  "ebpf-security-in-kubernetes-the-full-picture": {
+    "core": "In Kubernetes, eBPF security spans layers. Cilium enforces identity-aware network policy (L3–L7) and transparent encryption. Tetragon observes and enforces process and file behaviour, and Falco detects threats across syscalls and the K8s audit log. All of them enrich kernel events with pod, namespace and label identity, because IPs and PIDs are ephemeral. Combined with admission policy (Gatekeeper) and image scanning, they cover the full lifecycle: build, deploy and run.",
+    "first_principles": {
+      "problem": "A cluster has image scanning and admission policy but no visibility into what pods actually do or connect to at runtime.",
+      "truths": [
+        "Pods are ephemeral; identity must be labels, not IPs.",
+        "Network and process layers both matter.",
+        "Prevention plus detection gives depth."
+      ],
+      "derivation": [
+        "**Cilium** for network policy and visibility (Hubble).",
+        "**Tetragon** for process/file enforcement.",
+        "**Falco** for broad detection rules.",
+        "Correlate in the **SIEM**.",
+        "Pair with **admission + scanning**."
+      ]
+    },
+    "analogy": {
+      "title": "A smart building's integrated security",
+      "story": "Door access control, corridor cameras and room motion sensors all know which employee badge triggered them.",
+      "mapping": [
+        [
+          "Door access",
+          "Cilium network policy"
+        ],
+        [
+          "Room sensors",
+          "Tetragon"
+        ],
+        [
+          "Cameras",
+          "Falco"
+        ],
+        [
+          "Badge identity",
+          "Pod labels"
+        ]
+      ],
+      "breaks": "Buildings have fixed rooms; pods appear and vanish every few minutes."
+    },
+    "mindmap": {
+      "center": "eBPF in K8s",
+      "branches": [
+        {
+          "label": "Network",
+          "children": [
+            "Cilium policy",
+            "Hubble flows",
+            "WireGuard encryption"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "Tetragon enforcement",
+            "Falco detection"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Pod labels",
+            "Namespaces",
+            "Service accounts"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Scan",
+            "Admit",
+            "Run"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "SIEM correlation",
+            "Response automation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Layered runtime defence",
+      "scenario": "Exploit attempt.",
+      "flow": [
+        "Exploit web pod",
+        "Tetragon: shell exec observed / killed",
+        "Cilium: egress to miner pool denied",
+        "Falco: alert with pod context",
+        "SIEM correlates"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each layer blocks or reveals part of the attack."
+        }
+      ],
+      "code": [],
+      "outcome": "full runtime picture."
+    },
+    "summary": {
+      "points": [
+        "Network + process layers.",
+        "Identity from labels.",
+        "Combine with build/deploy controls."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do eBPF tools enrich events with Kubernetes metadata?",
+        "a": "IPs and PIDs are short-lived; pod, namespace and label identity make events meaningful and policies stable."
+      }
+    ]
+  }
+}

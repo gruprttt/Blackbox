@@ -1,0 +1,640 @@
+{
+  "introduction-shifting-security-left": {
+    "core": "Shifting left means finding security issues as early as possible: in the IDE, on commit, and in CI, rather than in a pre-release pentest or in production. Bugs are cheaper to fix when the author still has context. Different scanners see different things. SAST reads source code, SCA checks dependencies, container scanning checks images, DAST attacks a running app, and runtime protection watches production. A layered pipeline uses each where it is strongest and tunes for low noise so developers keep trusting the results.",
+    "first_principles": {
+      "problem": "A critical vulnerability found two days before launch delays the release by a month.",
+      "truths": [
+        "Fix cost rises over time.",
+        "No single scanner sees everything.",
+        "Noisy tools get ignored."
+      ],
+      "derivation": [
+        "Scan in **IDE and PRs** (SAST, SCA, secrets).",
+        "Scan **images** in CI.",
+        "Run **DAST** in staging.",
+        "Watch **runtime** in prod.",
+        "**Tune** rules and set severity gates."
+      ]
+    },
+    "analogy": {
+      "title": "Checking ingredients before cooking instead of after serving",
+      "story": "Spotting a bad egg in the fridge is cheap; finding it after the dinner party isn't.",
+      "mapping": [
+        [
+          "Fridge check",
+          "SAST/SCA"
+        ],
+        [
+          "Tasting while cooking",
+          "DAST"
+        ],
+        [
+          "Watching guests",
+          "Runtime protection"
+        ]
+      ],
+      "breaks": "Shift left doesn't remove the need to watch production (shift right)."
+    },
+    "mindmap": {
+      "center": "Shift Left",
+      "branches": [
+        {
+          "label": "Code",
+          "children": [
+            "SAST",
+            "Secrets scanning"
+          ]
+        },
+        {
+          "label": "Dependencies",
+          "children": [
+            "SCA",
+            "SBOM"
+          ]
+        },
+        {
+          "label": "Artifacts",
+          "children": [
+            "Image scanning",
+            "IaC scanning"
+          ]
+        },
+        {
+          "label": "Running app",
+          "children": [
+            "DAST",
+            "Fuzzing"
+          ]
+        },
+        {
+          "label": "Production",
+          "children": [
+            "Runtime",
+            "eBPF"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A layered pipeline",
+      "scenario": "GitHub Actions.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Issues surface on the PR, while context is fresh."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "jobs:\n  security:\n    steps:\n      - run: semgrep ci                 # SAST\n      - run: gitleaks detect            # secrets\n      - run: osv-scanner -r .           # SCA\n      - run: trivy image --exit-code 1 --severity CRITICAL app:${{ github.sha }}"
+        }
+      ],
+      "outcome": "early, cheap fixes."
+    },
+    "summary": {
+      "points": [
+        "Earlier is cheaper.",
+        "Layer scanners.",
+        "Low noise keeps trust."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does noise matter so much in shift-left tooling?",
+        "a": "Developers ignore or bypass tools full of false positives, which defeats the purpose."
+      }
+    ]
+  },
+  "sast-the-code-spellchecker": {
+    "core": "Static Application Security Testing (SAST) analyses source code without running it, looking for dangerous patterns and data flows: user input (source) reaching a SQL query or shell call (sink) without sanitisation. Tools range from pattern matchers (Semgrep) to deep dataflow engines (CodeQL). SAST finds bugs early and points to exact lines, but it can't see runtime config and produces false positives, so it needs tuned rules and triage.",
+    "first_principles": {
+      "problem": "Code review misses a string-formatted SQL query buried in a helper three calls deep.",
+      "truths": [
+        "Code can be analysed before it runs.",
+        "Taint flows from source to sink.",
+        "Static analysis lacks runtime context."
+      ],
+      "derivation": [
+        "Run **SAST on PRs**.",
+        "Use **taint/dataflow** rules for injection.",
+        "Write **custom rules** for house patterns.",
+        "**Triage** and suppress with reasons.",
+        "Gate only on **high-confidence** findings."
+      ]
+    },
+    "analogy": {
+      "title": "A spellchecker and grammar checker",
+      "story": "It underlines suspicious words as you type, without needing anyone to read the document aloud.",
+      "mapping": [
+        [
+          "Red underline",
+          "SAST finding"
+        ],
+        [
+          "Grammar rules",
+          "Rule packs"
+        ],
+        [
+          "Writer's context",
+          "Runtime config SAST can't see"
+        ]
+      ],
+      "breaks": "A spellchecker flags valid jargon; SAST likewise flags safe code (false positives)."
+    },
+    "mindmap": {
+      "center": "SAST",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "Pattern matching",
+            "Taint analysis",
+            "Dataflow"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Semgrep",
+            "CodeQL",
+            "SonarQube"
+          ]
+        },
+        {
+          "label": "Finds",
+          "children": [
+            "Injection",
+            "Hard-coded secrets",
+            "Weak crypto"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "False positives",
+            "No runtime context"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A Semgrep rule",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Unsafe queries are flagged on the line where they're written."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "rules:\n  - id: sql-fstring\n    languages: [python]\n    severity: ERROR\n    message: SQL built with f-string; use parameters\n    pattern: $CUR.execute(f\"...\")"
+        }
+      ],
+      "outcome": "injection caught pre-merge."
+    },
+    "summary": {
+      "points": [
+        "Reads code, doesn't run it.",
+        "Source to sink.",
+        "Tune for precision."
+      ]
+    },
+    "check": [
+      {
+        "q": "What can't SAST detect well?",
+        "a": "Issues depending on runtime config or environment, like a misconfigured server or missing auth at the proxy."
+      }
+    ]
+  },
+  "dast-the-simulated-hacker": {
+    "core": "Dynamic Application Security Testing (DAST) attacks a running application from the outside, the way a black-box attacker would: crawling pages and APIs, then sending malicious payloads (XSS, SQLi, header tampering) and observing responses. It finds runtime and configuration issues SAST can't see, and is language-agnostic, but it is slower, needs a deployed environment and auth setup, and can't point to the exact code line.",
+    "first_principles": {
+      "problem": "SAST is clean, but a staging deploy exposes a reflected XSS through a reverse-proxy rewrite and missing security headers.",
+      "truths": [
+        "Runtime behaviour differs from code.",
+        "Attackers see only HTTP.",
+        "Coverage depends on crawling and auth."
+      ],
+      "derivation": [
+        "Run **DAST in staging** (never untested prod).",
+        "Feed it **OpenAPI specs** for API coverage.",
+        "Configure **authenticated scans**.",
+        "Run **baseline scans** per deploy, full scans nightly.",
+        "Correlate with **SAST** findings."
+      ]
+    },
+    "analogy": {
+      "title": "A hired burglar testing your house",
+      "story": "They don't read the blueprints; they rattle doors and windows and report which ones opened.",
+      "mapping": [
+        [
+          "Rattling doors",
+          "Sending payloads"
+        ],
+        [
+          "Blueprints",
+          "Source code (unused)"
+        ],
+        [
+          "Report of open windows",
+          "DAST findings"
+        ]
+      ],
+      "breaks": "A burglar explores every room; DAST only tests what it can crawl or is told about."
+    },
+    "mindmap": {
+      "center": "DAST",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "Crawl",
+            "Fuzz payloads",
+            "Observe responses"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "OWASP ZAP",
+            "Burp Suite",
+            "Nuclei"
+          ]
+        },
+        {
+          "label": "Finds",
+          "children": [
+            "XSS",
+            "Headers",
+            "Misconfig",
+            "Auth flaws"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Slow",
+            "Coverage",
+            "No line numbers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ZAP baseline in CI",
+      "scenario": "Docker.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Runtime issues are caught before production."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "docker run -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \\\n  -t https://staging.app.example.com -r zap.html\n# API scan from spec\ndocker run -t ghcr.io/zaproxy/zaproxy:stable zap-api-scan.py \\\n  -t https://staging.app.example.com/openapi.json -f openapi"
+        }
+      ],
+      "outcome": "outside-in coverage."
+    },
+    "summary": {
+      "points": [
+        "Tests the running app.",
+        "Finds config issues.",
+        "Coverage needs help."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why combine SAST and DAST?",
+        "a": "SAST sees code paths but not runtime; DAST sees runtime but not code. Together they cover each other's gaps."
+      }
+    ]
+  },
+  "sca-checking-your-supply-chain": {
+    "core": "Software Composition Analysis (SCA) inventories your open-source dependencies, including transitive ones, and matches them against vulnerability databases (CVE, GHSA, OSV) and licence policies. Most application code is third-party, so a single library (Log4j) can expose thousands of apps. Good SCA produces an SBOM, prioritises by reachability and exploitability (KEV, EPSS) rather than CVSS alone, and automates upgrades with tools like Dependabot or Renovate.",
+    "first_principles": {
+      "problem": "Log4Shell lands, and the team can't say which of 200 services include log4j-core, even transitively.",
+      "truths": [
+        "Most code is dependencies.",
+        "Transitive deps are invisible without tooling.",
+        "Not every CVE is reachable."
+      ],
+      "derivation": [
+        "Generate an **SBOM** per build.",
+        "Scan against **OSV/GHSA**.",
+        "Prioritise by **reachability, KEV, EPSS**.",
+        "Automate **upgrade PRs**.",
+        "Enforce **licence** policy."
+      ]
+    },
+    "analogy": {
+      "title": "A food recall check on your pantry",
+      "story": "When a supplier recalls a batch, you need to know which tins on your shelves came from it.",
+      "mapping": [
+        [
+          "Pantry list",
+          "SBOM"
+        ],
+        [
+          "Recall notice",
+          "CVE advisory"
+        ],
+        [
+          "Checking batch numbers",
+          "Version matching"
+        ]
+      ],
+      "breaks": "Tins don't contain other tins; dependencies nest many levels deep."
+    },
+    "mindmap": {
+      "center": "SCA",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Lockfiles",
+            "SBOM (CycloneDX, SPDX)"
+          ]
+        },
+        {
+          "label": "Databases",
+          "children": [
+            "NVD",
+            "GHSA",
+            "OSV"
+          ]
+        },
+        {
+          "label": "Prioritise",
+          "children": [
+            "Reachability",
+            "KEV",
+            "EPSS"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Dependabot",
+            "Renovate"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Licences"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SBOM and scan",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Affected services are found immediately."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "syft dir:. -o cyclonedx-json > sbom.json   # inventory\ngrype sbom:sbom.json --fail-on high        # match vulns\n# answer 'are we affected?' in seconds:\njq '.components[] | select(.name==\"log4j-core\") | .version' sbom.json"
+        }
+      ],
+      "outcome": "supply chain visibility."
+    },
+    "summary": {
+      "points": [
+        "Dependencies are most of your code.",
+        "SBOMs answer exposure fast.",
+        "Prioritise exploitable CVEs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prioritise by EPSS/KEV rather than CVSS alone?",
+        "a": "CVSS measures severity, not likelihood; KEV and EPSS indicate real-world exploitation."
+      }
+    ]
+  },
+  "container-scanning-trivy-and-grype": {
+    "core": "Container scanning inspects image layers for vulnerable OS packages and language libraries, embedded secrets, and misconfigurations (running as root, no USER). Trivy and Grype read package databases inside the image and match them against advisories. Scan at build in CI, again in the registry as new CVEs appear, and at admission in Kubernetes. Minimal base images (distroless, Alpine, Chainguard) remove most findings at the source.",
+    "first_principles": {
+      "problem": "An image built on a full Ubuntu base ships with 400 CVEs, mostly in packages the app never uses.",
+      "truths": [
+        "Images bundle an OS.",
+        "New CVEs appear after build.",
+        "Less software means fewer vulns."
+      ],
+      "derivation": [
+        "Use **minimal bases** (distroless).",
+        "Scan in **CI**, fail on critical with fixes.",
+        "**Rescan** registries continuously.",
+        "Check **config** (non-root, no secrets).",
+        "**Sign** and gate at admission."
+      ]
+    },
+    "analogy": {
+      "title": "X-raying luggage before it boards",
+      "story": "You check the bag at check-in, but also re-screen if a new threat is discovered on the flight list.",
+      "mapping": [
+        [
+          "Luggage",
+          "Image layers"
+        ],
+        [
+          "X-ray",
+          "Scanner"
+        ],
+        [
+          "Smaller bag",
+          "Minimal base image"
+        ]
+      ],
+      "breaks": "Luggage doesn't change after screening; image risk changes as new CVEs are published."
+    },
+    "mindmap": {
+      "center": "Container Scanning",
+      "branches": [
+        {
+          "label": "Finds",
+          "children": [
+            "OS package CVEs",
+            "Library CVEs",
+            "Secrets",
+            "Misconfig"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Trivy",
+            "Grype",
+            "Registry scanners"
+          ]
+        },
+        {
+          "label": "When",
+          "children": [
+            "CI build",
+            "Registry rescans",
+            "Admission"
+          ]
+        },
+        {
+          "label": "Reduce",
+          "children": [
+            "Distroless",
+            "Multi-stage builds"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Trivy in CI",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Builds fail only on fixable, serious issues."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "trivy image --ignore-unfixed --severity HIGH,CRITICAL \\\n  --exit-code 1 registry.example.com/app:1.4.2\ntrivy config Dockerfile      # e.g. flags missing USER\n# FROM gcr.io/distroless/static  → near-zero OS CVEs"
+        }
+      ],
+      "outcome": "clean, minimal images."
+    },
+    "summary": {
+      "points": [
+        "Images carry an OS.",
+        "Rescan continuously.",
+        "Minimal bases win."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use --ignore-unfixed in a CI gate?",
+        "a": "Failing builds on CVEs with no available fix blocks delivery without giving developers an action to take."
+      }
+    ]
+  },
+  "runtime-protection-the-security-camera": {
+    "core": "Runtime protection watches workloads while they run, because some attacks only show at runtime: zero-days, stolen credentials, or a compromised dependency doing something new. Tools such as Falco and Tetragon use eBPF to observe syscalls, process launches, file access and network connections, alerting on deviations (a shell spawned in a container, writes to /etc, outbound connections to mining pools) or blocking them. It complements shift-left scanning by covering what can't be known before deployment.",
+    "first_principles": {
+      "problem": "A clean, scanned image is exploited through a zero-day, and an attacker opens a reverse shell that nobody notices for weeks.",
+      "truths": [
+        "Not all threats are knowable before deploy.",
+        "Behaviour reveals compromise.",
+        "Kernel-level visibility is hard to evade."
+      ],
+      "derivation": [
+        "Deploy **eBPF sensors** (Falco, Tetragon).",
+        "Define **behaviour rules** (no shells, no unexpected egress).",
+        "Use **baselines** for normal behaviour.",
+        "Route alerts to the **SIEM**.",
+        "Enforce **blocking** where confident."
+      ]
+    },
+    "analogy": {
+      "title": "CCTV in a shop after the door locks are checked",
+      "story": "Locks keep most people out; cameras catch whoever gets in anyway.",
+      "mapping": [
+        [
+          "Locks",
+          "Shift-left scanning"
+        ],
+        [
+          "Cameras",
+          "Runtime sensors"
+        ],
+        [
+          "Guard reacting",
+          "Alert/block"
+        ]
+      ],
+      "breaks": "Cameras only record; runtime tools can also stop the action."
+    },
+    "mindmap": {
+      "center": "Runtime Protection",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "Syscalls",
+            "Process exec",
+            "File access",
+            "Network"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Falco",
+            "Tetragon",
+            "CNAPP agents"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Shell in container",
+            "Sensitive writes",
+            "Crypto-mining"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Alert",
+            "Kill",
+            "Block"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Falco rule",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The reverse shell triggers an alert within seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- rule: Shell in container\n  desc: interactive shell spawned in a container\n  condition: spawned_process and container and proc.name in (bash, sh, zsh)\n  output: \"shell in %container.name (user=%user.name cmd=%proc.cmdline)\"\n  priority: WARNING"
+        }
+      ],
+      "outcome": "runtime visibility."
+    },
+    "summary": {
+      "points": [
+        "Covers zero-days.",
+        "Behaviour over signatures.",
+        "eBPF sees everything."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is runtime protection needed if images are scanned?",
+        "a": "Scanning finds known flaws; runtime catches exploitation of unknown ones and malicious behaviour."
+      }
+    ]
+  }
+}

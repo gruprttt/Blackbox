@@ -1,0 +1,628 @@
+{
+  "introduction-the-problem-with-open-by-default": {
+    "core": "Kubernetes accepts almost any valid manifest by default: privileged containers, hostPath mounts, :latest images from any registry, no resource limits, no owner labels. RBAC controls who can create resources but not what those resources look like. Policy-as-code engines such as OPA Gatekeeper (or Kyverno) add guardrails that check every object against organisational rules at admission time, consistently and automatically, instead of relying on reviewers.",
+    "first_principles": {
+      "problem": "A developer deploys a privileged pod with hostPath: / to debug, opening a node-takeover path in production.",
+      "truths": [
+        "The API server accepts anything valid.",
+        "RBAC doesn't inspect content.",
+        "Manual review doesn't scale."
+      ],
+      "derivation": [
+        "Define rules as **code**.",
+        "Enforce at **admission**.",
+        "Start in **audit**, then **deny**.",
+        "Cover **security and hygiene** rules.",
+        "Version and **test** policies."
+      ]
+    },
+    "analogy": {
+      "title": "A building inspector at the site gate",
+      "story": "Builders can build anything, but nothing goes up without passing the code check.",
+      "mapping": [
+        [
+          "Building code",
+          "Policies"
+        ],
+        [
+          "Inspector",
+          "Admission controller"
+        ],
+        [
+          "Permit",
+          "Admitted object"
+        ]
+      ],
+      "breaks": "Inspectors visit occasionally; admission control checks every single object."
+    },
+    "mindmap": {
+      "center": "Open by Default",
+      "branches": [
+        {
+          "label": "Risks",
+          "children": [
+            "Privileged pods",
+            "hostPath",
+            "Untrusted registries",
+            "No limits"
+          ]
+        },
+        {
+          "label": "Gap",
+          "children": [
+            "RBAC = who, not what"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Policy as code",
+            "Admission control"
+          ]
+        },
+        {
+          "label": "Engines",
+          "children": [
+            "OPA Gatekeeper",
+            "Kyverno",
+            "Pod Security Admission"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What gets through today",
+      "scenario": "A risky manifest.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows why guardrails are needed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "spec:\n  containers:\n    - name: debug\n      image: randomhub/tools:latest\n      securityContext: { privileged: true }\n      volumeMounts: [{ name: root, mountPath: /host }]\n  volumes: [{ name: root, hostPath: { path: / } }]\n# accepted by default; a policy engine would reject it"
+        }
+      ],
+      "outcome": "need for policy clear."
+    },
+    "summary": {
+      "points": [
+        "Defaults are permissive.",
+        "RBAC isn't content policy.",
+        "Enforce at admission."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't RBAC block privileged pods?",
+        "a": "RBAC controls which verbs a user can perform on resource types, not the contents of the objects created."
+      }
+    ]
+  },
+  "architecture-the-webhook-interceptor": {
+    "core": "Kubernetes admission control runs after authentication and authorisation but before an object is persisted to etcd. Gatekeeper registers as a validating (and mutating) admission webhook: the API server sends an AdmissionReview for each matching request, Gatekeeper evaluates it with OPA against loaded constraints, and returns allow or deny with a message. It also caches cluster data for cross-object rules and runs periodic audits of existing resources. Webhook availability and failure policy matter.",
+    "first_principles": {
+      "problem": "A team wants to block bad manifests from kubectl, CI and GitOps alike, without changing every pipeline.",
+      "truths": [
+        "All writes go through the API server.",
+        "Webhooks can intercept them.",
+        "A webhook outage can block deploys."
+      ],
+      "derivation": [
+        "Register a **ValidatingWebhookConfiguration**.",
+        "Evaluate with **OPA**.",
+        "Return **allow/deny + reason**.",
+        "Run **HA replicas**; choose **failurePolicy**.",
+        "Exempt **system namespaces**."
+      ]
+    },
+    "analogy": {
+      "title": "A customs checkpoint every lorry must pass",
+      "story": "Whatever road it came from, every lorry reaches the same checkpoint before entering the country.",
+      "mapping": [
+        [
+          "Border",
+          "API server"
+        ],
+        [
+          "Customs officer",
+          "Gatekeeper webhook"
+        ],
+        [
+          "Manifest",
+          "AdmissionReview"
+        ]
+      ],
+      "breaks": "If customs closes, traffic stops; webhook failure modes must be designed."
+    },
+    "mindmap": {
+      "center": "Admission Webhooks",
+      "branches": [
+        {
+          "label": "Pipeline",
+          "children": [
+            "AuthN",
+            "AuthZ",
+            "Mutating",
+            "Schema validation",
+            "Validating",
+            "etcd"
+          ]
+        },
+        {
+          "label": "Gatekeeper",
+          "children": [
+            "Webhook",
+            "OPA engine",
+            "Data cache",
+            "Audit controller"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Replicas",
+            "failurePolicy",
+            "Timeouts",
+            "Namespace exemptions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The request path",
+      "scenario": "Flow.",
+      "flow": [
+        "kubectl apply",
+        "AuthN/AuthZ",
+        "Mutating webhooks",
+        "Validating webhook → Gatekeeper",
+        "OPA evaluates constraints",
+        "Allow → etcd / Deny → error"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One enforcement point for every client."
+        }
+      ],
+      "code": [],
+      "outcome": "universal guardrails."
+    },
+    "summary": {
+      "points": [
+        "Intercepts before etcd.",
+        "Applies to all clients.",
+        "Design for availability."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the risk of failurePolicy: Fail?",
+        "a": "If Gatekeeper is unavailable, matching requests are rejected and deployments block, so it needs HA."
+      }
+    ]
+  },
+  "the-language-rego": {
+    "core": "Rego is OPA's declarative policy language, inspired by Datalog. Instead of step-by-step code, you write rules that describe when something is true, such as when a `violation` exists, by querying structured input (the admission request JSON) and data. Rules with the same name are ORed, statements in a body are ANDed, and iteration is implicit through variables. It's built for querying nested JSON and is testable with `opa test`.",
+    "first_principles": {
+      "problem": "Policy logic written as imperative scripts is hard to read, audit and reuse across systems.",
+      "truths": [
+        "Policies are queries over data.",
+        "Declarative rules are easier to audit.",
+        "Policies need tests."
+      ],
+      "derivation": [
+        "Write **rules** that produce violations.",
+        "Query **input.review.object**.",
+        "Use **implicit iteration** (some/every).",
+        "Keep **parameters** separate.",
+        "Write **unit tests**."
+      ]
+    },
+    "analogy": {
+      "title": "Writing a filter in a spreadsheet instead of checking rows by hand",
+      "story": "You state the condition once ('show rows where X and Y') and the engine finds every match.",
+      "mapping": [
+        [
+          "Spreadsheet rows",
+          "JSON input"
+        ],
+        [
+          "Filter condition",
+          "Rule body"
+        ],
+        [
+          "Matching rows",
+          "Violations"
+        ]
+      ],
+      "breaks": "Spreadsheet filters are flat; Rego handles deeply nested documents."
+    },
+    "mindmap": {
+      "center": "Rego",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Rules",
+            "Input",
+            "Data",
+            "Implicit iteration"
+          ]
+        },
+        {
+          "label": "Logic",
+          "children": [
+            "Body = AND",
+            "Multiple rules = OR",
+            "not"
+          ]
+        },
+        {
+          "label": "Gatekeeper",
+          "children": [
+            "violation[{msg}]",
+            "input.parameters"
+          ]
+        },
+        {
+          "label": "Tooling",
+          "children": [
+            "opa eval",
+            "opa test",
+            "Playground"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Disallow privileged containers",
+      "scenario": "Rego.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any privileged container yields a violation message."
+        }
+      ],
+      "code": [
+        {
+          "lang": "rego",
+          "text": "package k8sdenyprivileged\n\nviolation[{\"msg\": msg}] {\n  c := input.review.object.spec.containers[_]   # iterate containers\n  c.securityContext.privileged == true\n  msg := sprintf(\"privileged container not allowed: %v\", [c.name])\n}"
+        }
+      ],
+      "outcome": "readable, testable policy."
+    },
+    "summary": {
+      "points": [
+        "Declarative rules.",
+        "Query JSON.",
+        "Test with opa test."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you express OR in Rego?",
+        "a": "Define multiple rules with the same name; the result is true if any of them matches."
+      }
+    ]
+  },
+  "the-core-model-templates-vs-constraints": {
+    "core": "Gatekeeper separates policy logic from policy use. A ConstraintTemplate contains the Rego and defines a new CRD kind with a parameter schema, written once by platform or security teams. A Constraint is an instance of that kind that sets parameters and scope (which kinds and namespaces). One template, such as 'required labels', can back many constraints with different parameters per team or environment, and libraries like the Gatekeeper policy library provide ready-made templates.",
+    "first_principles": {
+      "problem": "Each team copies and edits Rego to require different labels, creating dozens of divergent, untested policies.",
+      "truths": [
+        "Logic should be written once.",
+        "Parameters vary by context.",
+        "Reuse reduces bugs."
+      ],
+      "derivation": [
+        "Write a **ConstraintTemplate** (Rego + schema).",
+        "Instantiate **Constraints** with parameters.",
+        "Scope with **match** (kinds, namespaces).",
+        "Reuse the **policy library**.",
+        "Version templates in **Git**."
+      ]
+    },
+    "analogy": {
+      "title": "A form template and its filled-in copies",
+      "story": "The form defines the fields once; each department fills in its own values.",
+      "mapping": [
+        [
+          "Blank form",
+          "ConstraintTemplate"
+        ],
+        [
+          "Filled copy",
+          "Constraint"
+        ],
+        [
+          "Fields",
+          "Parameters schema"
+        ]
+      ],
+      "breaks": "Forms are passive; constraints actively enforce."
+    },
+    "mindmap": {
+      "center": "Templates vs Constraints",
+      "branches": [
+        {
+          "label": "Template",
+          "children": [
+            "Rego logic",
+            "CRD kind",
+            "Parameter schema"
+          ]
+        },
+        {
+          "label": "Constraint",
+          "children": [
+            "Parameters",
+            "match scope",
+            "enforcementAction"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Reuse",
+            "Separation of duties",
+            "Consistency"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "Gatekeeper library",
+            "In-house"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Required labels constraint",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Prod deployments without owner/cost-center are rejected."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: constraints.gatekeeper.sh/v1beta1\nkind: K8sRequiredLabels          # defined by the template\nmetadata: { name: must-have-owner }\nspec:\n  match:\n    kinds: [{ apiGroups: [\"apps\"], kinds: [\"Deployment\"] }]\n    namespaces: [\"prod-*\"]\n  parameters:\n    labels: [{ key: owner }, { key: cost-center }]"
+        }
+      ],
+      "outcome": "reusable policy."
+    },
+    "summary": {
+      "points": [
+        "Template = logic.",
+        "Constraint = use.",
+        "Parameters per scope."
+      ]
+    },
+    "check": [
+      {
+        "q": "Who typically writes ConstraintTemplates versus Constraints?",
+        "a": "Platform/security teams write templates; teams or environments configure constraints with parameters."
+      }
+    ]
+  },
+  "audit-vs-deny-dry-run-mode": {
+    "core": "Rolling out a new policy in deny mode on a live cluster can break deployments instantly. Gatekeeper's enforcementAction lets you stage it: `dryrun` records violations without blocking, `warn` returns warnings to users but admits the object, and `deny` blocks. The audit controller also periodically scans existing resources and records violations in the constraint status. The safe path is dryrun → review audit results and fix → warn → deny.",
+    "first_principles": {
+      "problem": "A new 'no :latest tags' policy in deny mode blocks a critical hotfix during an incident.",
+      "truths": [
+        "Existing resources may already violate.",
+        "Users need warning before enforcement.",
+        "Visibility comes before blocking."
+      ],
+      "derivation": [
+        "Start with **dryrun**.",
+        "Check **audit** violations.",
+        "Fix or **exempt** offenders.",
+        "Move to **warn**.",
+        "Then **deny**."
+      ]
+    },
+    "analogy": {
+      "title": "Warning tickets before fines for a new speed limit",
+      "story": "For a month the camera sends warnings, then it starts issuing fines.",
+      "mapping": [
+        [
+          "Warning letters",
+          "dryrun / warn"
+        ],
+        [
+          "Fines",
+          "deny"
+        ],
+        [
+          "Camera records",
+          "Audit results"
+        ]
+      ],
+      "breaks": "Drivers learn individually; clusters also contain existing offenders that must be found and fixed."
+    },
+    "mindmap": {
+      "center": "Enforcement Modes",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "dryrun",
+            "warn",
+            "deny"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "Periodic scan",
+            "status.violations",
+            "Metrics"
+          ]
+        },
+        {
+          "label": "Rollout",
+          "children": [
+            "Dryrun",
+            "Fix",
+            "Warn",
+            "Deny"
+          ]
+        },
+        {
+          "label": "Escape hatches",
+          "children": [
+            "Exempt namespaces",
+            "Break-glass"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Staged rollout",
+      "scenario": "YAML + kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Policies tighten without surprise outages."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "spec:\n  enforcementAction: dryrun\n# after a week:\n# kubectl get k8sdisallowlatest no-latest -o jsonpath='{.status.totalViolations}'\n# → 0 after fixes, then switch to warn, then deny"
+        }
+      ],
+      "outcome": "safe policy rollout."
+    },
+    "summary": {
+      "points": [
+        "Visibility before blocking.",
+        "Audit existing state.",
+        "Stage the rollout."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the warn mode do?",
+        "a": "It admits the object but returns a warning to the client, educating users before enforcement."
+      }
+    ]
+  },
+  "mutations-gatekeeper-beyond-validation": {
+    "core": "Validation rejects bad objects; mutation fixes them. Gatekeeper's mutation CRDs (Assign, AssignMetadata, ModifySet, AssignImage) declaratively change incoming objects: adding default labels, setting runAsNonRoot, injecting imagePullPolicy, or rewriting image registries. Mutations run in the mutating admission phase, before validation, so they can make objects compliant automatically. They should be idempotent and narrowly scoped, because silent changes can surprise users.",
+    "first_principles": {
+      "problem": "Hundreds of deployments lack securityContext defaults, and asking every team to update manifests would take months.",
+      "truths": [
+        "Defaults can be applied centrally.",
+        "Mutation runs before validation.",
+        "Hidden changes can confuse users."
+      ],
+      "derivation": [
+        "Use **Assign** for spec fields.",
+        "Use **AssignMetadata** for labels/annotations.",
+        "Scope with **match** and **location**.",
+        "Keep mutations **idempotent**.",
+        "Still **validate** afterwards."
+      ]
+    },
+    "analogy": {
+      "title": "A post office that adds the missing postcode instead of returning the letter",
+      "story": "It quietly fixes common mistakes so mail still arrives.",
+      "mapping": [
+        [
+          "Adding postcode",
+          "Assign mutation"
+        ],
+        [
+          "Returning letter",
+          "Validation deny"
+        ],
+        [
+          "Sorting rules",
+          "Mutation scope"
+        ]
+      ],
+      "breaks": "Senders may not know their letter was changed; document mutations clearly."
+    },
+    "mindmap": {
+      "center": "Mutation",
+      "branches": [
+        {
+          "label": "CRDs",
+          "children": [
+            "Assign",
+            "AssignMetadata",
+            "ModifySet",
+            "AssignImage"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Security defaults",
+            "Labels",
+            "Registry rewrite"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Idempotent",
+            "Scoped",
+            "Before validation"
+          ]
+        },
+        {
+          "label": "Cautions",
+          "children": [
+            "Surprise changes",
+            "GitOps drift"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Default runAsNonRoot",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Pods get runAsNonRoot unless they set it explicitly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: mutations.gatekeeper.sh/v1\nkind: Assign\nmetadata: { name: default-nonroot }\nspec:\n  applyTo: [{ groups: [\"\"], kinds: [\"Pod\"], versions: [\"v1\"] }]\n  location: \"spec.securityContext.runAsNonRoot\"\n  parameters:\n    assign: { value: true }\n    pathTests: [{ subPath: \"spec.securityContext.runAsNonRoot\", condition: MustNotExist }]"
+        }
+      ],
+      "outcome": "compliance by default."
+    },
+    "summary": {
+      "points": [
+        "Fix, don't just reject.",
+        "Runs before validation.",
+        "Scope carefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can mutation cause issues with GitOps tools?",
+        "a": "The live object differs from Git, which can show as drift unless the tool ignores those fields."
+      }
+    ]
+  }
+}

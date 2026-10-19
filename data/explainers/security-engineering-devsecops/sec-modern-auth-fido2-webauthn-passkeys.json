@@ -1,0 +1,432 @@
+{
+  "introduction-why-passwords-must-die": {
+    "core": "Passwords are reused, guessed, phished and leaked in breaches, and SMS and OTP codes can be phished in real time or SIM-swapped. Phishing-resistant authentication binds credentials to the legitimate site cryptographically, so a lookalike domain can't use them. FIDO2/WebAuthn and passkeys replace shared secrets with per-site public-key credentials stored in authenticators, removing both the password database and the phishing risk.",
+    "first_principles": {
+      "problem": "Employees with SMS MFA are phished through a real-time proxy site that relays their codes.",
+      "truths": [
+        "Shared secrets can be stolen and replayed.",
+        "Humans can't reliably spot phishing.",
+        "Origin binding defeats relays."
+      ],
+      "derivation": [
+        "Replace **shared secrets** with key pairs.",
+        "**Bind** credentials to origin.",
+        "Require **user presence/verification**.",
+        "Adopt **passkeys/security keys**.",
+        "Phase out **SMS/OTP** for high-risk access."
+      ]
+    },
+    "analogy": {
+      "title": "A key that only fits the real bank's door",
+      "story": "Even if a fake bank looks identical, your key physically won't turn in its lock.",
+      "mapping": [
+        [
+          "Key",
+          "Passkey"
+        ],
+        [
+          "Real bank door",
+          "Legitimate origin"
+        ],
+        [
+          "Fake bank",
+          "Phishing site"
+        ]
+      ],
+      "breaks": "Keys can be copied physically; private keys in authenticators are non-exportable (or synced encrypted)."
+    },
+    "mindmap": {
+      "center": "Beyond Passwords",
+      "branches": [
+        {
+          "label": "Password problems",
+          "children": [
+            "Reuse",
+            "Phishing",
+            "Breaches",
+            "Stuffing"
+          ]
+        },
+        {
+          "label": "Weak MFA",
+          "children": [
+            "SMS",
+            "TOTP",
+            "Push fatigue"
+          ]
+        },
+        {
+          "label": "Strong",
+          "children": [
+            "FIDO2",
+            "WebAuthn",
+            "Passkeys",
+            "Security keys"
+          ]
+        },
+        {
+          "label": "Key property",
+          "children": [
+            "Origin binding",
+            "No shared secret"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Phishing relay vs passkey",
+      "scenario": "Flow.",
+      "flow": [
+        "Attacker site login.acme-secure.co proxies to acme.com",
+        "OTP user types → relayed → account taken",
+        "Passkey: browser binds to origin acme-secure.co",
+        "No credential exists for that origin → attack fails"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Real-time phishing neutralised."
+        }
+      ],
+      "code": [],
+      "outcome": "case for phishing resistance."
+    },
+    "summary": {
+      "points": [
+        "Passwords and OTP phishable.",
+        "Origin binding fixes it.",
+        "Adopt passkeys."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are TOTP codes vulnerable to real-time phishing?",
+        "a": "A proxy site can relay the user's code to the real site within its validity window, because codes aren't bound to the site's origin."
+      }
+    ]
+  },
+  "fido2-and-webauthn-the-standard": {
+    "core": "FIDO2 combines W3C WebAuthn (the browser API) and CTAP (the protocol between browser and authenticator). At registration the authenticator creates a key pair scoped to the relying party ID (domain), returning the public key and attestation; the server stores it. At login the server sends a challenge, the authenticator signs it (after user presence or verification), and the browser includes origin data, so the server verifies the signature, challenge, origin and sign counter. No secret ever leaves the device.",
+    "first_principles": {
+      "problem": "A team wants hardware-backed MFA for admins that works across browsers and OSes.",
+      "truths": [
+        "Challenges prevent replay.",
+        "RP ID scopes credentials.",
+        "Authenticators protect private keys."
+      ],
+      "derivation": [
+        "**Register**: create key pair per RP ID.",
+        "**Authenticate**: sign server challenge.",
+        "**Verify**: signature, challenge, origin, rpIdHash, flags.",
+        "Require **userVerification** for strong auth.",
+        "Use **server libraries** (SimpleWebAuthn, py_webauthn)."
+      ]
+    },
+    "analogy": {
+      "title": "Signing a unique riddle with a stamp only you hold",
+      "story": "Each login the bank asks a fresh riddle; your stamp, which only works for that bank, answers it.",
+      "mapping": [
+        [
+          "Fresh riddle",
+          "Challenge"
+        ],
+        [
+          "Stamp",
+          "Private key"
+        ],
+        [
+          "Bank-specific",
+          "RP ID binding"
+        ]
+      ],
+      "breaks": "Stamps can be stolen; authenticators require presence or biometrics to sign."
+    },
+    "mindmap": {
+      "center": "WebAuthn",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "WebAuthn API",
+            "CTAP2",
+            "Authenticators"
+          ]
+        },
+        {
+          "label": "Ceremonies",
+          "children": [
+            "Registration",
+            "Authentication"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "Challenge",
+            "Origin",
+            "rpIdHash",
+            "UP/UV flags",
+            "Signature",
+            "Counter"
+          ]
+        },
+        {
+          "label": "Authenticators",
+          "children": [
+            "Platform (Touch ID, Windows Hello)",
+            "Roaming (YubiKey)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Browser call",
+      "scenario": "JavaScript.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Server verifies signed challenge bound to acme.com."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "const cred = await navigator.credentials.get({\n  publicKey: {\n    challenge: base64urlDecode(serverChallenge),   // random, single-use\n    rpId: 'acme.com',\n    userVerification: 'required',\n    allowCredentials: []                            // discoverable passkeys\n  }\n});\nawait fetch('/webauthn/verify', { method: 'POST', body: JSON.stringify(toJSON(cred)) });"
+        }
+      ],
+      "outcome": "standards-based strong auth."
+    },
+    "summary": {
+      "points": [
+        "Key pairs per site.",
+        "Signed challenges.",
+        "Origin verified."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the server verify during a WebAuthn authentication?",
+        "a": "The signature with the stored public key, that the challenge matches, the origin and RP ID hash are correct, and user presence/verification flags."
+      }
+    ]
+  },
+  "passkeys-fido2-for-the-masses": {
+    "core": "Passkeys are FIDO2 discoverable credentials made consumer-friendly. They sync across a user's devices via platform credential managers (iCloud Keychain, Google Password Manager, 1Password) with end-to-end encryption, unlock with biometrics or a PIN, and work cross-device via QR and Bluetooth (hybrid transport). They're usernameless and phishing-resistant, but synced passkeys trade some hardware isolation for recoverability; high-security roles may still require device-bound security keys.",
+    "first_principles": {
+      "problem": "Consumers abandon sign-up when forced to buy hardware keys, and password resets flood support.",
+      "truths": [
+        "Usability drives adoption.",
+        "Sync solves device loss.",
+        "Different risk tiers need different assurance."
+      ],
+      "derivation": [
+        "Offer **passkey sign-in** with conditional UI.",
+        "Allow **synced passkeys** for consumers.",
+        "Require **device-bound keys** for admins.",
+        "Keep **account recovery** strong.",
+        "Phase out **passwords** gradually."
+      ]
+    },
+    "analogy": {
+      "title": "A house key automatically copied to your other keyrings, securely",
+      "story": "Lose your phone and your laptop still has the key, protected by your fingerprint.",
+      "mapping": [
+        [
+          "Keyrings",
+          "Devices"
+        ],
+        [
+          "Secure copying",
+          "E2E-encrypted sync"
+        ],
+        [
+          "Fingerprint",
+          "User verification"
+        ]
+      ],
+      "breaks": "Copied keys are a theft risk physically; synced passkeys rely on the sync provider's security."
+    },
+    "mindmap": {
+      "center": "Passkeys",
+      "branches": [
+        {
+          "label": "Properties",
+          "children": [
+            "Discoverable",
+            "Synced",
+            "Phishing-resistant",
+            "Usernameless"
+          ]
+        },
+        {
+          "label": "Providers",
+          "children": [
+            "iCloud Keychain",
+            "Google PM",
+            "Windows Hello",
+            "1Password"
+          ]
+        },
+        {
+          "label": "Cross-device",
+          "children": [
+            "QR + BLE hybrid"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Synced vs device-bound",
+            "Recovery"
+          ]
+        },
+        {
+          "label": "UX",
+          "children": [
+            "Conditional mediation autofill"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Conditional UI",
+      "scenario": "HTML + JS.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Passkeys offered in the autofill dropdown."
+        }
+      ],
+      "code": [
+        {
+          "lang": "html",
+          "text": "<input type=\"text\" name=\"username\" autocomplete=\"username webauthn\">\n<script>\nnavigator.credentials.get({ mediation: 'conditional',\n  publicKey: { challenge, rpId: 'shop.example', userVerification: 'preferred' } })\n  .then(cred => verifyOnServer(cred));\n</script>"
+        }
+      ],
+      "outcome": "mass-market phishing resistance."
+    },
+    "summary": {
+      "points": [
+        "Synced FIDO credentials.",
+        "Biometric unlock.",
+        "Tier by risk."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main trade-off between synced passkeys and device-bound security keys?",
+        "a": "Synced passkeys are recoverable and convenient but depend on the sync provider; device-bound keys offer stronger isolation but are lost with the device."
+      }
+    ]
+  },
+  "device-posture-contextual-access": {
+    "core": "Strong authentication proves the user, but not that the device is safe. Device posture checks (managed or enrolled status, OS version and patch level, disk encryption, firewall and EDR running, screen lock, jailbreak detection) feed access decisions alongside identity, location and risk signals. Zero-trust access proxies and IdPs (Okta Device Trust, Entra Conditional Access, BeyondCorp) allow, step up or deny per request, with device certificates or attestation proving device identity.",
+    "first_principles": {
+      "problem": "An employee logs in with a passkey from a malware-infected personal laptop and downloads customer data.",
+      "truths": [
+        "Valid users can use compromised devices.",
+        "Device health is measurable.",
+        "Access can adapt to risk."
+      ],
+      "derivation": [
+        "**Enrol** devices (MDM) with certificates.",
+        "Collect **posture signals** (EDR, encryption, patch).",
+        "Write **conditional access** policies.",
+        "**Step up** or **deny** on risk.",
+        "Re-evaluate **continuously**."
+      ]
+    },
+    "analogy": {
+      "title": "A visitor badge plus a health screening",
+      "story": "Your ID gets you to reception, but you only enter the lab if your safety equipment checks out.",
+      "mapping": [
+        [
+          "ID",
+          "User authentication"
+        ],
+        [
+          "Safety check",
+          "Device posture"
+        ],
+        [
+          "Lab access",
+          "Sensitive app access"
+        ]
+      ],
+      "breaks": "Health screenings are one-off; posture should be re-checked continuously."
+    },
+    "mindmap": {
+      "center": "Device Posture",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "Managed/enrolled",
+            "OS/patch",
+            "Disk encryption",
+            "EDR",
+            "Jailbreak"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Device certificates",
+            "TPM attestation"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Allow",
+            "Step-up",
+            "Limit",
+            "Deny"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Entra Conditional Access",
+            "Okta Device Trust",
+            "Kolide",
+            "BeyondCorp"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Conditional policy",
+      "scenario": "Pseudo-config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Valid user on unhealthy device is blocked."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "policy: finance-apps\nwhen:\n  user.groups: [finance]\nrequire:\n  authentication: phishing_resistant\n  device:\n    managed: true\n    disk_encrypted: true\n    edr_running: true\n    os_patch_age_days: \"<= 30\"\nelse: deny"
+        }
+      ],
+      "outcome": "context-aware access."
+    },
+    "summary": {
+      "points": [
+        "Authenticate device too.",
+        "Posture signals.",
+        "Adaptive policy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why isn't strong user authentication sufficient for zero-trust access?",
+        "a": "A legitimate user may be on a compromised or non-compliant device, so device health must also be evaluated."
+      }
+    ]
+  }
+}

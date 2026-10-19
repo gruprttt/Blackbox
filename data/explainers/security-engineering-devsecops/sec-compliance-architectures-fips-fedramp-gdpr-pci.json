@@ -1,0 +1,675 @@
+{
+  "introduction-why-engineers-should-care-about-compliance": {
+    "core": "Compliance frameworks turn legal, contractual and market requirements into technical controls: which crypto modules you use (FIPS), where data may live (GDPR), how card data is isolated (PCI DSS), and how government cloud is operated (FedRAMP). They decide which markets and customers a product can sell to. If engineers ignore them, the result is expensive retrofits. If engineers design for them, compliance becomes mostly architecture plus automated evidence.",
+    "first_principles": {
+      "problem": "A startup lands a large bank deal that requires PCI DSS and data residency, and its architecture needs a six-month rebuild.",
+      "truths": [
+        "Regulations constrain architecture.",
+        "Retrofitting is costly.",
+        "Controls can be automated."
+      ],
+      "derivation": [
+        "Know which **frameworks** apply.",
+        "Translate them to **technical controls**.",
+        "**Design** scope and boundaries early.",
+        "**Automate** evidence.",
+        "Treat controls as **requirements**."
+      ]
+    },
+    "analogy": {
+      "title": "Building regulations for a restaurant kitchen",
+      "story": "Fire suppression, drainage and ventilation are cheap to plan into the design and painful to add after opening.",
+      "mapping": [
+        [
+          "Health code",
+          "Compliance framework"
+        ],
+        [
+          "Kitchen layout",
+          "Architecture"
+        ],
+        [
+          "Inspection",
+          "Audit"
+        ]
+      ],
+      "breaks": "Kitchens are inspected yearly; cloud systems change daily and need continuous checks."
+    },
+    "mindmap": {
+      "center": "Why Compliance",
+      "branches": [
+        {
+          "label": "Business",
+          "children": [
+            "Market access",
+            "Contracts",
+            "Fines"
+          ]
+        },
+        {
+          "label": "Frameworks",
+          "children": [
+            "FIPS",
+            "FedRAMP",
+            "GDPR",
+            "PCI DSS",
+            "SOC 2",
+            "HIPAA"
+          ]
+        },
+        {
+          "label": "Engineering impact",
+          "children": [
+            "Crypto",
+            "Data location",
+            "Segmentation",
+            "Logging"
+          ]
+        },
+        {
+          "label": "Approach",
+          "children": [
+            "Design early",
+            "Automate evidence"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Control to code",
+      "scenario": "One requirement.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The control exists as reviewable, auditable code."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "# Requirement: encrypt data at rest with customer-managed keys (PCI 3.5, SOC 2 CC6.1)\nresource \"aws_s3_bucket_server_side_encryption_configuration\" \"data\" {\n  bucket = aws_s3_bucket.data.id\n  rule { apply_server_side_encryption_by_default {\n    sse_algorithm = \"aws:kms\", kms_master_key_id = aws_kms_key.data.arn } }\n}"
+        }
+      ],
+      "outcome": "compliance designed in."
+    },
+    "summary": {
+      "points": [
+        "Regulation shapes architecture.",
+        "Design early.",
+        "Automate evidence."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is designing for compliance early cheaper?",
+        "a": "Constraints like data location and segmentation are architectural; changing them later means rebuilding."
+      }
+    ]
+  },
+  "fips-140-2-the-foundation-of-cryptography": {
+    "core": "FIPS 140-2 (now being superseded by 140-3) is the US government standard for validating cryptographic modules. A module is tested by an accredited lab and receives a certificate covering approved algorithms (AES, SHA-2, RSA, ECDSA), key management and security levels 1–4 (Level 3+ adds tamper resistance). US federal systems must use validated modules in an approved mode. Engineers must build with FIPS-validated libraries (such as the OpenSSL FIPS provider or BoringCrypto) and use FIPS endpoints.",
+    "first_principles": {
+      "problem": "A product sold to a US agency uses a crypto library that isn't FIPS-validated and fails the security review.",
+      "truths": [
+        "Algorithms alone aren't enough; the module is validated.",
+        "Validation is specific to a version and mode.",
+        "Government buyers require it."
+      ],
+      "derivation": [
+        "Use **validated modules** (check CMVP certs).",
+        "Enable **FIPS mode**.",
+        "Restrict to **approved algorithms**.",
+        "Use **FIPS endpoints** in cloud.",
+        "Pin **validated versions**."
+      ]
+    },
+    "analogy": {
+      "title": "An approved safety-certified helmet",
+      "story": "Any helmet looks protective, but only certified models, worn correctly, meet the regulation.",
+      "mapping": [
+        [
+          "Certification sticker",
+          "CMVP certificate"
+        ],
+        [
+          "Approved model",
+          "Validated module version"
+        ],
+        [
+          "Wearing it properly",
+          "FIPS mode"
+        ]
+      ],
+      "breaks": "Helmets don't need updating; modules need re-validation as code changes."
+    },
+    "mindmap": {
+      "center": "FIPS 140",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Validates crypto modules",
+            "CMVP"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "1: software",
+            "2: tamper evidence",
+            "3: tamper resistance",
+            "4: environmental"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "AES",
+            "SHA-2",
+            "RSA/ECDSA",
+            "No MD5"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "FIPS mode",
+            "Validated libs",
+            "FIPS endpoints"
+          ]
+        },
+        {
+          "label": "Versions",
+          "children": [
+            "140-2",
+            "140-3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enabling FIPS",
+      "scenario": "Linux + Go + AWS.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only validated crypto is used end to end."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "fips-mode-setup --enable && reboot          # RHEL system-wide\nopenssl list -providers | grep -i fips\nGOEXPERIMENT=boringcrypto go build ./...    # FIPS-validated crypto in Go\naws s3 ls --endpoint-url https://s3-fips.us-east-1.amazonaws.com"
+        }
+      ],
+      "outcome": "FIPS-compliant stack."
+    },
+    "summary": {
+      "points": [
+        "Validates modules, not just algorithms.",
+        "Use FIPS mode.",
+        "Required for US government."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is using AES-256 enough to be FIPS compliant?",
+        "a": "No. The implementation must be in a validated module running in FIPS-approved mode."
+      }
+    ]
+  },
+  "fedramp-selling-cloud-services-to-the-us-government": {
+    "core": "FedRAMP is the US government's standardised authorisation programme for cloud services, based on NIST SP 800-53 controls at Low, Moderate or High impact baselines (roughly 150 to 400+ controls). Achieving an Authority to Operate (ATO) requires a System Security Plan, assessment by a third-party assessor (3PAO), FIPS-validated crypto, US-based operations for higher levels, and continuous monitoring with monthly vulnerability scans and POA&Ms. It's expensive, so architectures usually isolate a dedicated 'gov' environment.",
+    "first_principles": {
+      "problem": "A SaaS wants federal customers, but its shared multi-tenant platform can't meet FedRAMP boundary and personnel requirements.",
+      "truths": [
+        "Government requires standard controls.",
+        "The authorisation boundary defines scope.",
+        "Monitoring is continuous, not one-off."
+      ],
+      "derivation": [
+        "Pick an **impact level**.",
+        "Define a tight **authorisation boundary** (often a separate GovCloud env).",
+        "Implement **800-53 controls**.",
+        "Get **3PAO** assessment and ATO.",
+        "Run **ConMon**: monthly scans, POA&Ms."
+      ]
+    },
+    "analogy": {
+      "title": "Getting a licence to supply a military base",
+      "story": "You build a separate, inspected facility to their specifications and submit reports every month to keep the licence.",
+      "mapping": [
+        [
+          "Separate facility",
+          "Authorisation boundary"
+        ],
+        [
+          "Inspection",
+          "3PAO assessment"
+        ],
+        [
+          "Licence",
+          "ATO"
+        ],
+        [
+          "Monthly reports",
+          "Continuous monitoring"
+        ]
+      ],
+      "breaks": "A facility is physical; cloud boundaries are defined by accounts, networks and people."
+    },
+    "mindmap": {
+      "center": "FedRAMP",
+      "branches": [
+        {
+          "label": "Levels",
+          "children": [
+            "Low",
+            "Moderate",
+            "High"
+          ]
+        },
+        {
+          "label": "Basis",
+          "children": [
+            "NIST 800-53"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "SSP",
+            "3PAO",
+            "ATO",
+            "ConMon"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "FIPS crypto",
+            "US persons",
+            "Boundary"
+          ]
+        },
+        {
+          "label": "Architecture",
+          "children": [
+            "GovCloud",
+            "Dedicated env"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Boundary design",
+      "scenario": "Separate environment.",
+      "flow": [
+        "Commercial SaaS (us-east-1)",
+        "Separate FedRAMP env (GovCloud)",
+        "FIPS endpoints only",
+        "US-person ops team",
+        "Monthly scans → POA&M"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Compliance scope is contained and auditable."
+        }
+      ],
+      "code": [],
+      "outcome": "government-ready offering."
+    },
+    "summary": {
+      "points": [
+        "800-53 baselines.",
+        "Tight boundary.",
+        "Continuous monitoring."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do companies often build a separate environment for FedRAMP?",
+        "a": "To keep the authorisation boundary small and avoid applying strict controls to the whole commercial platform."
+      }
+    ]
+  },
+  "gdpr-and-data-residency-geography-as-a-technical-constraint": {
+    "core": "GDPR protects EU residents' personal data: lawful basis, purpose limitation, minimisation, data subject rights (access, erasure, portability), breach notification within 72 hours, and restrictions on transfers outside the EU (Schrems II, adequacy decisions, SCCs). Combined with national data-residency laws, this makes geography an architectural constraint: data must be stored and processed in specific regions, cross-region replication and support access need controls, and key management can provide additional sovereignty.",
+    "first_principles": {
+      "problem": "A global analytics pipeline copies EU customer data into a US warehouse, violating transfer rules.",
+      "truths": [
+        "Personal data has legal location constraints.",
+        "Data flows are often invisible.",
+        "Rights requests need findable data."
+      ],
+      "derivation": [
+        "**Map** personal data flows.",
+        "Deploy **regional cells** (EU data in EU).",
+        "Control **replication and support access**.",
+        "Use **EU-held keys** for sovereignty.",
+        "Automate **DSAR/erasure** workflows."
+      ]
+    },
+    "analogy": {
+      "title": "Goods that can't legally leave a country without a licence",
+      "story": "Your warehouse layout and shipping routes must respect where each item is allowed to go.",
+      "mapping": [
+        [
+          "Export licence",
+          "Transfer mechanism (SCCs)"
+        ],
+        [
+          "Regional warehouse",
+          "Regional data cell"
+        ],
+        [
+          "Customs checks",
+          "Data-flow controls"
+        ]
+      ],
+      "breaks": "Goods are physical; data copies itself through logs, backups and caches."
+    },
+    "mindmap": {
+      "center": "GDPR & Residency",
+      "branches": [
+        {
+          "label": "Principles",
+          "children": [
+            "Lawful basis",
+            "Minimisation",
+            "Purpose limitation"
+          ]
+        },
+        {
+          "label": "Rights",
+          "children": [
+            "Access",
+            "Erasure",
+            "Portability"
+          ]
+        },
+        {
+          "label": "Transfers",
+          "children": [
+            "Adequacy",
+            "SCCs",
+            "Schrems II"
+          ]
+        },
+        {
+          "label": "Architecture",
+          "children": [
+            "Regional cells",
+            "Geo-routing",
+            "EU keys"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "72h breach notice",
+            "DPIAs",
+            "Records"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Region pinning",
+      "scenario": "Org policy (AWS SCP).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "EU accounts can't create resources outside the EU."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Deny\",\n  \"Action\": \"*\",\n  \"Resource\": \"*\",\n  \"Condition\": {\"StringNotEquals\": {\"aws:RequestedRegion\": [\"eu-west-1\", \"eu-central-1\"]}}\n}"
+        }
+      ],
+      "outcome": "residency enforced by policy."
+    },
+    "summary": {
+      "points": [
+        "Geography is a constraint.",
+        "Regional cells.",
+        "Automate rights handling."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are logs and backups a common GDPR residency failure?",
+        "a": "They often replicate to central or foreign regions automatically and contain personal data."
+      }
+    ]
+  },
+  "pci-dss-protecting-credit-card-data": {
+    "core": "PCI DSS (now v4.0) is the card industry's standard for any system that stores, processes or transmits cardholder data. Every system in or connected to the Cardholder Data Environment (CDE) is in scope for 12 requirement areas: segmentation, encryption, access control, logging, vulnerability management, testing and more. The best engineering strategy is scope reduction: tokenise cards through a PCI-certified provider (Stripe, Adyen) or an isolated vault, so most systems never touch a card number.",
+    "first_principles": {
+      "problem": "Card numbers logged by one debug statement pull the whole logging platform, and every service writing to it, into PCI scope.",
+      "truths": [
+        "Scope spreads through contact with card data.",
+        "Every in-scope system needs controls.",
+        "Tokens aren't card data."
+      ],
+      "derivation": [
+        "**Minimise scope**: hosted fields / tokenisation.",
+        "**Segment** the CDE network.",
+        "**Encrypt** PAN; never store CVV.",
+        "**Mask** in logs and UIs.",
+        "Run **ASV scans, pentests, log review**."
+      ]
+    },
+    "analogy": {
+      "title": "A hospital's isolation ward",
+      "story": "Only a few staff enter in protective gear; everyone else works outside, so the whole hospital doesn't need ward-level procedures.",
+      "mapping": [
+        [
+          "Isolation ward",
+          "CDE"
+        ],
+        [
+          "Protective gear",
+          "PCI controls"
+        ],
+        [
+          "Staying outside",
+          "Using tokens"
+        ]
+      ],
+      "breaks": "Contamination is visible; a stray card number in a log is not, unless you scan for it."
+    },
+    "mindmap": {
+      "center": "PCI DSS",
+      "branches": [
+        {
+          "label": "Scope",
+          "children": [
+            "CDE",
+            "Connected systems",
+            "Segmentation"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "PAN encrypt",
+            "No CVV storage",
+            "Masking"
+          ]
+        },
+        {
+          "label": "Reduce",
+          "children": [
+            "Tokenisation",
+            "Hosted fields",
+            "P2PE"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "ASV scans",
+            "Pentests",
+            "Log review",
+            "Access reviews"
+          ]
+        },
+        {
+          "label": "Version",
+          "children": [
+            "v4.0"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hosted fields",
+      "scenario": "Card never touches your servers.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Your infrastructure largely leaves PCI scope."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "// card entered in provider's iframe; your backend only sees a token\nconst { paymentMethod } = await stripe.createPaymentMethod({ type: \"card\", card: cardElement });\nawait fetch(\"/api/pay\", { method: \"POST\", body: JSON.stringify({ pm: paymentMethod.id }) });\n// your systems: SAQ A scope instead of full SAQ D"
+        }
+      ],
+      "outcome": "minimal PCI burden."
+    },
+    "summary": {
+      "points": [
+        "Scope is everything.",
+        "Tokenise to shrink it.",
+        "Segment and monitor the CDE."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is scope reduction the most effective PCI strategy?",
+        "a": "Every system touching card data needs all the controls; keeping card data out of systems removes them from scope."
+      }
+    ]
+  },
+  "compliance-as-continuous-engineering-not-a-one-time-audit": {
+    "core": "Point-in-time audits prove a system was compliant on one day, while systems change hourly. Continuous compliance expresses controls as code (IaC guardrails, OPA policies, SCPs), checks them continuously (CSPM, config rules), collects evidence automatically (logs, scan results, change records) into a GRC platform mapped to multiple frameworks, and treats control failures as alerts with owners. One control often satisfies many frameworks ('test once, comply many'), so audits become a report export.",
+    "first_principles": {
+      "problem": "A company passes its audit in March, but by June half the controls have drifted, and nobody knows until the next audit.",
+      "truths": [
+        "Systems drift between audits.",
+        "Controls overlap across frameworks.",
+        "Evidence can be automated."
+      ],
+      "derivation": [
+        "Express controls as **code**.",
+        "**Monitor continuously**.",
+        "**Automate evidence** collection.",
+        "**Map once** to many frameworks.",
+        "Alert on **control failures** with owners."
+      ]
+    },
+    "analogy": {
+      "title": "A fitness tracker versus an annual check-up",
+      "story": "You see your health every day and react early, instead of hoping you're well on check-up day.",
+      "mapping": [
+        [
+          "Daily tracking",
+          "Continuous monitoring"
+        ],
+        [
+          "Check-up",
+          "Audit"
+        ],
+        [
+          "Health record",
+          "Evidence repository"
+        ]
+      ],
+      "breaks": "Fitness metrics are personal; compliance controls involve many teams and owners."
+    },
+    "mindmap": {
+      "center": "Continuous Compliance",
+      "branches": [
+        {
+          "label": "Controls as code",
+          "children": [
+            "IaC",
+            "OPA",
+            "SCPs"
+          ]
+        },
+        {
+          "label": "Monitoring",
+          "children": [
+            "CSPM",
+            "Config rules",
+            "Drift"
+          ]
+        },
+        {
+          "label": "Evidence",
+          "children": [
+            "Automated collection",
+            "GRC platform"
+          ]
+        },
+        {
+          "label": "Mapping",
+          "children": [
+            "Common controls",
+            "Many frameworks"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Owners",
+            "Alerts",
+            "Exceptions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Common control mapping",
+      "scenario": "One control, many frameworks.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One check produces evidence for four frameworks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "control: ENC-01 Encrypt data at rest with managed keys\nimplemented_by: [terraform/modules/s3-secure, scp/deny-unencrypted]\nmonitored_by: aws-config:s3-default-encryption-kms\nmaps_to:\n  soc2: CC6.1\n  pci_dss_v4: 3.5.1\n  iso27001: A.8.24\n  hipaa: 164.312(a)(2)(iv)\nowner: platform-security"
+        }
+      ],
+      "outcome": "always audit-ready."
+    },
+    "summary": {
+      "points": [
+        "Audits are snapshots.",
+        "Controls as code, monitored.",
+        "Test once, comply many."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'test once, comply many' mean?",
+        "a": "Implementing and evidencing one common control that satisfies equivalent requirements in several frameworks."
+      }
+    ]
+  }
+}

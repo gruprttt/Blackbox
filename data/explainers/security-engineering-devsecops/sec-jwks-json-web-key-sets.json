@@ -1,0 +1,529 @@
+{
+  "introduction-the-shared-secret-problem": {
+    "core": "Services verifying JWTs signed with a shared HMAC secret (HS256) must all hold the same secret, which can also mint tokens, so any compromised service can forge tokens for all, and rotation means updating every service at once. Asymmetric signing (RS256, ES256, EdDSA) fixes that: only the issuer holds the private key, and verifiers fetch public keys. A JWKS is the standard JSON document publishing those public keys.",
+    "first_principles": {
+      "problem": "A compromised low-value microservice uses the shared HS256 secret to mint admin tokens for every API.",
+      "truths": [
+        "Shared secrets grant signing power.",
+        "Verification needs only public keys.",
+        "Keys must be discoverable and rotatable."
+      ],
+      "derivation": [
+        "Use **asymmetric signing** (ES256/RS256/EdDSA).",
+        "Keep **private key** only at issuer (KMS/HSM).",
+        "Publish **public keys** via JWKS.",
+        "Identify keys with **kid**.",
+        "**Rotate** without coordination."
+      ]
+    },
+    "analogy": {
+      "title": "A wax seal vs a shared stamp",
+      "story": "With one shared stamp, anyone holding it can forge decrees; with a seal only the king holds, everyone can check against a public specimen.",
+      "mapping": [
+        [
+          "Shared stamp",
+          "HS256 secret"
+        ],
+        [
+          "King's seal",
+          "Private key"
+        ],
+        [
+          "Public specimen",
+          "JWKS"
+        ]
+      ],
+      "breaks": "Specimens are posted once; JWKS rotates keys regularly."
+    },
+    "mindmap": {
+      "center": "Shared Secret Problem",
+      "branches": [
+        {
+          "label": "HS256",
+          "children": [
+            "Shared secret",
+            "Verify = sign",
+            "Hard rotation"
+          ]
+        },
+        {
+          "label": "Asymmetric",
+          "children": [
+            "RS256",
+            "ES256",
+            "EdDSA"
+          ]
+        },
+        {
+          "label": "Distribution",
+          "children": [
+            "JWKS",
+            "kid",
+            "Discovery"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Verifiers can't forge"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Blast radius",
+      "scenario": "Comparison.",
+      "flow": [
+        "HS256: 40 services hold secret → any can forge",
+        "ES256: issuer holds private key in KMS",
+        "40 services fetch JWKS public keys",
+        "Compromised service can verify, not forge"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Forgery limited to issuer compromise."
+        }
+      ],
+      "code": [],
+      "outcome": "why JWKS exists."
+    },
+    "summary": {
+      "points": [
+        "Shared secrets forge.",
+        "Asymmetric separates roles.",
+        "Publish public keys."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is HS256 risky in a microservices architecture?",
+        "a": "Every verifying service holds the secret that can also sign tokens, so compromising any one allows forging tokens for all."
+      }
+    ]
+  },
+  "what-is-a-jwks": {
+    "core": "A JSON Web Key Set (RFC 7517) is a JSON object with a keys array. Each JWK has kty (RSA or EC or OKP), kid (key ID), use (sig) or key_ops, alg (RS256, ES256), and the public parameters (n and e for RSA; crv, x and y for EC). Identity providers publish it at a jwks_uri advertised in OIDC discovery (/.well-known/openid-configuration). Verifiers read a JWT's header kid, select the matching key and verify the signature.",
+    "first_principles": {
+      "problem": "Engineers hardcode a PEM public key in every service and break everything when the IdP rotates keys.",
+      "truths": [
+        "Keys need IDs.",
+        "Discovery avoids hardcoding.",
+        "Multiple keys enable rotation."
+      ],
+      "derivation": [
+        "Publish **JWKS at jwks_uri**.",
+        "Include **kid, kty, alg, use**.",
+        "Advertise via **OIDC discovery**.",
+        "Select key by **header kid**.",
+        "Allow **multiple active keys**."
+      ]
+    },
+    "analogy": {
+      "title": "A public directory of seal specimens",
+      "story": "Each specimen has a number; a document says which seal number was used, so you look up that one.",
+      "mapping": [
+        [
+          "Directory",
+          "JWKS"
+        ],
+        [
+          "Specimen number",
+          "kid"
+        ],
+        [
+          "Document's seal note",
+          "JWT header kid"
+        ]
+      ],
+      "breaks": "Directories change rarely; JWKS rotates on schedule."
+    },
+    "mindmap": {
+      "center": "JWKS",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "kty",
+            "kid",
+            "use",
+            "alg",
+            "n/e",
+            "crv/x/y"
+          ]
+        },
+        {
+          "label": "Location",
+          "children": [
+            "jwks_uri",
+            ".well-known/openid-configuration"
+          ]
+        },
+        {
+          "label": "Verification",
+          "children": [
+            "Header kid → key",
+            "Check alg",
+            "Verify signature"
+          ]
+        },
+        {
+          "label": "Multiple keys",
+          "children": [
+            "Rotation overlap"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "JWKS document",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Verifiers pick key by kid automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"keys\": [\n    { \"kty\": \"EC\", \"crv\": \"P-256\", \"kid\": \"2026-10-a\", \"use\": \"sig\", \"alg\": \"ES256\",\n      \"x\": \"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU\", \"y\": \"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0\" },\n    { \"kty\": \"EC\", \"crv\": \"P-256\", \"kid\": \"2026-07-b\", \"use\": \"sig\", \"alg\": \"ES256\", \"x\": \"...\", \"y\": \"...\" }\n  ]\n}"
+        }
+      ],
+      "outcome": "JWKS structure clear."
+    },
+    "summary": {
+      "points": [
+        "Set of public keys.",
+        "kid selects key.",
+        "Discovered, not hardcoded."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a verifier know which JWKS key to use for a JWT?",
+        "a": "It reads the kid in the JWT header and selects the key with the matching kid from the JWKS."
+      }
+    ]
+  },
+  "key-rotation-zero-downtime-security": {
+    "core": "Rotate signing keys without breaking verification. (1) Generate the new key and publish its public half in the JWKS alongside the old one; wait at least the verifiers' cache TTL. (2) Switch signing to the new key, so new tokens carry the new kid. (3) Keep the old public key until all tokens it signed have expired (the maximum token lifetime). (4) Remove the old key. Emergency rotation after compromise removes the old key immediately and accepts forced re-login.",
+    "first_principles": {
+      "problem": "An IdP switches signing keys and removes the old one at the same moment, invalidating every active session.",
+      "truths": [
+        "Verifiers cache JWKS.",
+        "Tokens outlive the switch.",
+        "Overlap prevents breakage."
+      ],
+      "derivation": [
+        "**Pre-publish** new key.",
+        "Wait **cache TTL**.",
+        "**Switch** signing key.",
+        "Keep old until **max token lifetime**.",
+        "**Remove** old; emergency = immediate removal."
+      ]
+    },
+    "analogy": {
+      "title": "Changing the locks with a grace period",
+      "story": "Hand out new keys first, switch the lock to accept both, and only later stop accepting the old key.",
+      "mapping": [
+        [
+          "New keys handed out",
+          "Publish new JWKS key"
+        ],
+        [
+          "Accept both",
+          "Overlap"
+        ],
+        [
+          "Stop old key",
+          "Remove after expiry"
+        ]
+      ],
+      "breaks": "Locks don't cache; verifiers do, so timing matters."
+    },
+    "mindmap": {
+      "center": "Key Rotation",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Publish new",
+            "Wait cache TTL",
+            "Sign with new",
+            "Wait max token TTL",
+            "Remove old"
+          ]
+        },
+        {
+          "label": "Emergency",
+          "children": [
+            "Remove compromised immediately",
+            "Revoke sessions"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "KMS key versions",
+            "Scheduled rotation"
+          ]
+        },
+        {
+          "label": "Monitoring",
+          "children": [
+            "Unknown kid errors"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rotation timeline",
+      "scenario": "Schedule.",
+      "flow": [
+        "Day 0: add kid 2026-10-a to JWKS (old 2026-07-b still signs)",
+        "Day 1 (> cache TTL 1h): sign with 2026-10-a",
+        "Day 1 + 24h (max refresh/token life): remove 2026-07-b",
+        "Repeat every 90 days"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Zero-downtime rotation."
+        }
+      ],
+      "code": [],
+      "outcome": "safe key rotation."
+    },
+    "summary": {
+      "points": [
+        "Publish before use.",
+        "Overlap old and new.",
+        "Remove after expiry."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must a new signing key be published in the JWKS before it's used to sign tokens?",
+        "a": "Verifiers cache the JWKS; publishing first ensures they've fetched the new key before tokens signed with it arrive."
+      }
+    ]
+  },
+  "caching-strategies-dont-dos-your-own-auth-server": {
+    "core": "Fetching the JWKS on every request adds latency and can overwhelm the IdP. Cache it in memory, respecting Cache-Control or a sensible TTL (minutes to hours). On an unknown kid, refetch once, rate-limited, to pick up newly rotated keys, then reject if still unknown. Serve stale keys if the IdP is briefly unavailable, and share caches across workers. Mature libraries (jose, jwks-rsa, go-oidc) implement this correctly.",
+    "first_principles": {
+      "problem": "Each API pod fetches the JWKS on every request, and a traffic spike takes down the auth server.",
+      "truths": [
+        "Keys change rarely.",
+        "Unknown kids signal rotation.",
+        "Dependency failures shouldn't break verification."
+      ],
+      "derivation": [
+        "**Cache** JWKS in memory with TTL.",
+        "**Refetch on unknown kid** (rate-limited).",
+        "**Serve stale** on fetch failure.",
+        "Use **well-tested libraries**.",
+        "**Monitor** fetch rate and failures."
+      ]
+    },
+    "analogy": {
+      "title": "Keeping a copy of the directory at reception",
+      "story": "You check your copy, and only call head office for an update when you see a seal number you don't recognise.",
+      "mapping": [
+        [
+          "Directory copy",
+          "Cached JWKS"
+        ],
+        [
+          "Unknown seal",
+          "Unknown kid"
+        ],
+        [
+          "Calling head office",
+          "Refetch"
+        ]
+      ],
+      "breaks": "Receptions don't get spammed; unrate-limited refetches can DoS the IdP."
+    },
+    "mindmap": {
+      "center": "JWKS Caching",
+      "branches": [
+        {
+          "label": "Cache",
+          "children": [
+            "In-memory",
+            "TTL/Cache-Control"
+          ]
+        },
+        {
+          "label": "Refresh",
+          "children": [
+            "On unknown kid",
+            "Rate limited",
+            "Background refresh"
+          ]
+        },
+        {
+          "label": "Resilience",
+          "children": [
+            "Serve stale",
+            "Timeouts"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "jose (JS)",
+            "jwks-rsa",
+            "go-oidc",
+            "PyJWT PyJWKClient"
+          ]
+        },
+        {
+          "label": "Abuse",
+          "children": [
+            "Random kid DoS → rate limit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Library-based cache",
+      "scenario": "Node.js jose.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One fetch per 10 min per pod; rotation handled."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "import { createRemoteJWKSet, jwtVerify } from 'jose';\nconst JWKS = createRemoteJWKSet(new URL('https://login.acme.com/.well-known/jwks.json'), {\n  cacheMaxAge: 10 * 60 * 1000,   // 10 min\n  cooldownDuration: 30 * 1000     // min time between refetches on unknown kid\n});\nconst { payload } = await jwtVerify(token, JWKS, {\n  issuer: 'https://login.acme.com', audience: 'https://api.acme.com', algorithms: ['ES256']\n});"
+        }
+      ],
+      "outcome": "efficient, resilient verification."
+    },
+    "summary": {
+      "points": [
+        "Cache keys.",
+        "Refetch on unknown kid.",
+        "Rate-limit refetches."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why rate-limit JWKS refetches triggered by unknown kids?",
+        "a": "Attackers could send tokens with random kids to force constant refetches, overloading the auth server."
+      }
+    ]
+  },
+  "security-considerations-and-attack-vectors": {
+    "core": "Common JWT and JWKS attacks: alg: none acceptance; algorithm confusion (an RS256 public key used as an HS256 secret); jku or x5u header injection (pointing verifiers at an attacker's key set); kid injection (path traversal or SQL in kid lookups); missing iss, aud or exp checks; overly long lifetimes; and tokens in URLs or logs. Defences: pin allowed algorithms, fetch JWKS only from a configured URL, validate all claims, keep tokens short-lived and use proven libraries.",
+    "first_principles": {
+      "problem": "An API accepts a token whose header sets jku to an attacker-hosted JWKS, so attacker-signed tokens validate.",
+      "truths": [
+        "Headers are attacker-controlled.",
+        "Libraries may honour dangerous options.",
+        "Claims must be checked."
+      ],
+      "derivation": [
+        "**Pin algorithms** (e.g. ES256 only).",
+        "**Ignore jku/x5u**; use configured JWKS URL.",
+        "**Validate iss, aud, exp, nbf**.",
+        "**Sanitise kid** usage.",
+        "Use **short TTLs** and keep tokens out of logs."
+      ]
+    },
+    "analogy": {
+      "title": "A forged letter that tells you where to verify its seal",
+      "story": "A forger includes a note saying 'check my seal against this specimen', and the specimen is also forged.",
+      "mapping": [
+        [
+          "Note with specimen location",
+          "jku header"
+        ],
+        [
+          "Forged specimen",
+          "Attacker JWKS"
+        ],
+        [
+          "Trusted directory",
+          "Configured JWKS URL"
+        ]
+      ],
+      "breaks": "Clerks might notice odd notes; code follows headers unless told not to."
+    },
+    "mindmap": {
+      "center": "JWT Attacks",
+      "branches": [
+        {
+          "label": "Header abuse",
+          "children": [
+            "alg:none",
+            "Algorithm confusion",
+            "jku/x5u injection",
+            "kid injection"
+          ]
+        },
+        {
+          "label": "Claim gaps",
+          "children": [
+            "No aud check",
+            "No iss check",
+            "Long exp"
+          ]
+        },
+        {
+          "label": "Leakage",
+          "children": [
+            "Tokens in URLs/logs"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Pinned algs",
+            "Fixed JWKS URL",
+            "Full claim validation",
+            "Short TTL",
+            "Proven libraries"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Strict verification",
+      "scenario": "Python PyJWT.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Header-based attacks rejected."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import jwt\njwks = jwt.PyJWKClient(\"https://login.acme.com/.well-known/jwks.json\")   # fixed URL\nkey = jwks.get_signing_key_from_jwt(token).key\nclaims = jwt.decode(token, key,\n    algorithms=[\"ES256\"],                        # never derived from header\n    audience=\"https://api.acme.com\",\n    issuer=\"https://login.acme.com\",\n    options={\"require\": [\"exp\", \"iat\", \"sub\"]})"
+        }
+      ],
+      "outcome": "hardened token verification."
+    },
+    "summary": {
+      "points": [
+        "Never trust headers.",
+        "Pin algorithms.",
+        "Validate all claims."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the JWT algorithm confusion attack?",
+        "a": "Tricking a verifier into treating an RSA public key as an HMAC secret (switching alg to HS256), letting attackers forge tokens using the public key."
+      }
+    ]
+  }
+}

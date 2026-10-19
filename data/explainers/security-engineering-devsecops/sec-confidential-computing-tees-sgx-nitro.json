@@ -1,0 +1,772 @@
+{
+  "introduction-the-third-state-of-data": {
+    "core": "Data has three states: at rest (encrypted on disk), in transit (TLS), and in use (decrypted in memory while being processed). The third is the gap: anyone with control of the host, such as a cloud admin, a hypervisor exploit or a memory dump, can read plaintext in RAM. Confidential computing closes it by processing data inside hardware-isolated, memory-encrypted Trusted Execution Environments that even the host OS and hypervisor can't inspect, and that can prove what code they run.",
+    "first_principles": {
+      "problem": "Two hospitals want to train a model on combined patient data, but neither will let the other, or the cloud provider, see plaintext records.",
+      "truths": [
+        "Computation needs plaintext.",
+        "Hosts can read guest memory.",
+        "Hardware can isolate and encrypt memory."
+      ],
+      "derivation": [
+        "Identify **data in use** risks.",
+        "Run sensitive code in a **TEE**.",
+        "**Encrypt memory** in hardware.",
+        "**Attest** before sending data.",
+        "Minimise the **trusted computing base**."
+      ]
+    },
+    "analogy": {
+      "title": "A sealed glovebox in a lab",
+      "story": "You can manipulate the samples through gloves, but the air inside never mixes with the room, and outsiders can't reach in.",
+      "mapping": [
+        [
+          "Glovebox",
+          "TEE"
+        ],
+        [
+          "Lab room",
+          "Host OS / hypervisor"
+        ],
+        [
+          "Inspection certificate",
+          "Attestation"
+        ]
+      ],
+      "breaks": "Gloveboxes are visible; TEEs must prove their sealing cryptographically."
+    },
+    "mindmap": {
+      "center": "Data States",
+      "branches": [
+        {
+          "label": "At rest",
+          "children": [
+            "Disk encryption",
+            "KMS"
+          ]
+        },
+        {
+          "label": "In transit",
+          "children": [
+            "TLS",
+            "mTLS"
+          ]
+        },
+        {
+          "label": "In use",
+          "children": [
+            "TEEs",
+            "Memory encryption"
+          ]
+        },
+        {
+          "label": "Threats",
+          "children": [
+            "Malicious admin",
+            "Hypervisor exploit",
+            "Memory dump"
+          ]
+        },
+        {
+          "label": "Guarantees",
+          "children": [
+            "Isolation",
+            "Attestation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The gap",
+      "scenario": "Where plaintext lives.",
+      "flow": [
+        "Encrypted on disk",
+        "Encrypted over TLS",
+        "Decrypted in RAM ← exposed",
+        "TEE: decrypted only inside encrypted enclave memory"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows why at-rest and in-transit aren't enough."
+        }
+      ],
+      "code": [],
+      "outcome": "in-use protection understood."
+    },
+    "summary": {
+      "points": [
+        "Three states of data.",
+        "In use is the gap.",
+        "TEEs close it."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't disk encryption protect against a malicious hypervisor?",
+        "a": "The data is decrypted in guest memory while in use, and the hypervisor can read that memory."
+      }
+    ]
+  },
+  "what-is-a-tee-trusted-execution-environment": {
+    "core": "A Trusted Execution Environment is a hardware-enforced isolated region where code and data are protected in confidentiality and integrity from everything outside, including the OS, hypervisor and firmware. CPUs encrypt its memory with keys that never leave the chip, block outside access, and can produce attestation reports measuring the loaded code. TEEs come as process-level enclaves (SGX), whole confidential VMs (AMD SEV-SNP, Intel TDX), or isolated sibling VMs (Nitro Enclaves).",
+    "first_principles": {
+      "problem": "A team wants to know which parts of the stack it must trust when processing secrets in the cloud.",
+      "truths": [
+        "Hardware can enforce isolation.",
+        "Memory encryption keys can stay in the CPU.",
+        "Smaller TCB means less to trust."
+      ],
+      "derivation": [
+        "Pick **granularity** (enclave vs VM).",
+        "Understand the **TCB**.",
+        "Use **attestation** to verify code.",
+        "Watch **side channels**.",
+        "Plan **performance** costs."
+      ]
+    },
+    "analogy": {
+      "title": "A bank's private counting room inside a public building",
+      "story": "The building's staff run the lifts and lights but have no key to the room, and the room's seal shows if it was opened.",
+      "mapping": [
+        [
+          "Counting room",
+          "Enclave/confidential VM"
+        ],
+        [
+          "Building staff",
+          "OS/hypervisor"
+        ],
+        [
+          "Seal and log",
+          "Attestation"
+        ]
+      ],
+      "breaks": "Clever observers can still infer things from outside (side channels such as timing)."
+    },
+    "mindmap": {
+      "center": "TEE",
+      "branches": [
+        {
+          "label": "Guarantees",
+          "children": [
+            "Confidentiality",
+            "Integrity",
+            "Attestation"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Enclaves (SGX)",
+            "Confidential VMs (SEV-SNP, TDX)",
+            "Isolated VMs (Nitro)",
+            "Arm CCA/TrustZone"
+          ]
+        },
+        {
+          "label": "TCB",
+          "children": [
+            "CPU",
+            "Firmware",
+            "Your code"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Side channels",
+            "Bugs in enclave code"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "TCB comparison",
+      "scenario": "What you trust.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows how TEEs shrink what you must trust."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "| Setup          | Must trust                                |\n|----------------|-------------------------------------------|\n| Normal VM      | CPU, firmware, hypervisor, host OS, admins|\n| SEV-SNP VM     | CPU (AMD-SP), guest OS, your app           |\n| SGX enclave    | CPU, your enclave code only                |"
+        }
+      ],
+      "outcome": "clear trust boundaries."
+    },
+    "summary": {
+      "points": [
+        "Hardware isolation + encryption.",
+        "Attestable.",
+        "Different granularities."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the TCB?",
+        "a": "The trusted computing base: all hardware and software whose correctness the security guarantee depends on."
+      }
+    ]
+  },
+  "implementation-1-intel-sgx-software-guard-extensions": {
+    "core": "Intel SGX creates enclaves: protected regions inside a process's address space, encrypted by the CPU's Memory Encryption Engine. Only code inside the enclave can access its memory, and even the OS kernel and hypervisor are excluded. Applications are split into untrusted and trusted parts that communicate through defined calls (ECALLs/OCALLs). SGX has a tiny TCB but historically limited enclave memory, demands app partitioning (or library OSes like Gramine), and has had notable side-channel attacks. It's now mostly server-only.",
+    "first_principles": {
+      "problem": "A key-handling routine must be protected even if the server OS is fully compromised.",
+      "truths": [
+        "Minimal TCB is ideal.",
+        "Partitioning code is hard.",
+        "Shared CPU resources leak via side channels."
+      ],
+      "derivation": [
+        "Put **secrets logic** in the enclave.",
+        "Define narrow **ECALL/OCALL** interfaces.",
+        "Or use **Gramine/Occlum** to run apps unmodified.",
+        "**Seal** data to enclave identity.",
+        "Apply **side-channel** mitigations."
+      ]
+    },
+    "analogy": {
+      "title": "A safe built inside one desk drawer",
+      "story": "Only that drawer is protected; the rest of the office is assumed hostile.",
+      "mapping": [
+        [
+          "Drawer safe",
+          "Enclave"
+        ],
+        [
+          "Slot to pass papers",
+          "ECALL/OCALL"
+        ],
+        [
+          "Rest of office",
+          "Untrusted app + OS"
+        ]
+      ],
+      "breaks": "Someone listening to the drawer's sounds can guess what you do (side channels)."
+    },
+    "mindmap": {
+      "center": "Intel SGX",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Process enclaves",
+            "ECALL/OCALL",
+            "EPC memory"
+          ]
+        },
+        {
+          "label": "Strengths",
+          "children": [
+            "Tiny TCB",
+            "OS excluded"
+          ]
+        },
+        {
+          "label": "Weaknesses",
+          "children": [
+            "Partitioning effort",
+            "Side channels",
+            "Memory limits"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "SGX SDK",
+            "Gramine",
+            "Occlum"
+          ]
+        },
+        {
+          "label": "Attestation",
+          "children": [
+            "DCAP",
+            "MRENCLAVE/MRSIGNER"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Gramine manifest",
+      "scenario": "Run an app in SGX.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The app runs inside an enclave with attestation, unmodified."
+        }
+      ],
+      "code": [
+        {
+          "lang": "toml",
+          "text": "libos.entrypoint = \"/usr/bin/python3\"\nsgx.enclave_size = \"2G\"\nsgx.trusted_files = [\"file:/usr/bin/python3\", \"file:/app/\"]\nsgx.remote_attestation = \"dcap\"\n# gramine-sgx python3 /app/score.py"
+        }
+      ],
+      "outcome": "process-level confidentiality."
+    },
+    "summary": {
+      "points": [
+        "Enclaves in a process.",
+        "Tiny TCB.",
+        "Watch side channels."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do MRENCLAVE and MRSIGNER identify?",
+        "a": "MRENCLAVE is the hash of the enclave's code and data; MRSIGNER identifies the key that signed it."
+      }
+    ]
+  },
+  "implementation-2-amd-sev-secure-encrypted-virtualization": {
+    "core": "AMD SEV encrypts an entire VM's memory with a per-VM key managed by the AMD Secure Processor, so the hypervisor sees only ciphertext. SEV-ES adds encrypted register state, and SEV-SNP adds memory integrity (preventing replay and remapping attacks by a malicious hypervisor) plus attestation reports. Because protection is VM-wide, existing applications run unchanged ('lift and shift'), but the guest OS joins the TCB. Intel TDX offers a similar confidential-VM model.",
+    "first_principles": {
+      "problem": "A team wants confidentiality from the cloud operator without rewriting its applications into enclaves.",
+      "truths": [
+        "Rewriting apps is costly.",
+        "VM-level isolation is familiar.",
+        "Integrity matters as much as encryption."
+      ],
+      "derivation": [
+        "Use **SEV-SNP or TDX** confidential VMs.",
+        "**Attest** the launch measurement.",
+        "Harden the **guest OS**.",
+        "Use **encrypted disks** with keys released on attestation.",
+        "Accept a **larger TCB** for compatibility."
+      ]
+    },
+    "analogy": {
+      "title": "Renting a whole sealed apartment instead of a safe in a shared office",
+      "story": "Everything you own works as normal inside, and the landlord can't see in.",
+      "mapping": [
+        [
+          "Sealed apartment",
+          "Confidential VM"
+        ],
+        [
+          "Landlord",
+          "Hypervisor/cloud operator"
+        ],
+        [
+          "Your furniture",
+          "Unmodified apps + guest OS"
+        ]
+      ],
+      "breaks": "You must trust everyone you let into the apartment (the guest OS is in the TCB)."
+    },
+    "mindmap": {
+      "center": "AMD SEV",
+      "branches": [
+        {
+          "label": "Generations",
+          "children": [
+            "SEV",
+            "SEV-ES",
+            "SEV-SNP"
+          ]
+        },
+        {
+          "label": "Protects",
+          "children": [
+            "Memory confidentiality",
+            "Register state",
+            "Integrity (SNP)"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "No code changes",
+            "Familiar ops"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Guest OS in TCB",
+            "Some overhead"
+          ]
+        },
+        {
+          "label": "Clouds",
+          "children": [
+            "Azure",
+            "GCP",
+            "AWS"
+          ]
+        },
+        {
+          "label": "Peer",
+          "children": [
+            "Intel TDX"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Launching a confidential VM",
+      "scenario": "GCP CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "An unmodified workload runs with encrypted, integrity-protected memory."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "gcloud compute instances create cvm-1 \\\n  --machine-type=n2d-standard-4 \\\n  --confidential-compute-type=SEV_SNP \\\n  --maintenance-policy=TERMINATE --image-family=ubuntu-2204-lts\n# inside guest: dmesg | grep -i sev   → SEV-SNP active"
+        }
+      ],
+      "outcome": "lift-and-shift confidentiality."
+    },
+    "summary": {
+      "points": [
+        "Whole-VM encryption.",
+        "SNP adds integrity.",
+        "No app rewrite."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does SEV-SNP add over SEV?",
+        "a": "Memory integrity protection against a malicious hypervisor (replay, remapping) and stronger attestation."
+      }
+    ]
+  },
+  "implementation-3-aws-nitro-enclaves": {
+    "core": "AWS Nitro Enclaves carve CPU and memory from a parent EC2 instance into an isolated VM with no persistent storage, no network access and no interactive login, even for root on the parent. The only channel is a local vsock. The Nitro Hypervisor enforces the isolation, and the enclave produces signed attestation documents with PCR-style measurements of its image. KMS can require those measurements in key policies, so only a specific, verified enclave image can decrypt a secret.",
+    "first_principles": {
+      "problem": "A payments service must decrypt card numbers so that even engineers with root on the instance can't see them.",
+      "truths": [
+        "Root on the host is powerful.",
+        "Fewer channels mean less attack surface.",
+        "KMS can check attestation."
+      ],
+      "derivation": [
+        "Build an **enclave image** (EIF).",
+        "Communicate over **vsock** only.",
+        "Record **PCR0–8** measurements.",
+        "Write **KMS policy** requiring PCRs.",
+        "Keep enclave code **minimal**."
+      ]
+    },
+    "analogy": {
+      "title": "A soundproof, windowless back room with only a letterbox",
+      "story": "Notes go in and out through the slot; nobody, not even the owner, can walk in or look inside.",
+      "mapping": [
+        [
+          "Letterbox",
+          "vsock"
+        ],
+        [
+          "Windowless room",
+          "Enclave (no network/storage)"
+        ],
+        [
+          "Room's ID card",
+          "Attestation document"
+        ]
+      ],
+      "breaks": "It's isolated from the parent, but it relies on AWS's Nitro hardware and hypervisor as the root of trust."
+    },
+    "mindmap": {
+      "center": "Nitro Enclaves",
+      "branches": [
+        {
+          "label": "Isolation",
+          "children": [
+            "No network",
+            "No storage",
+            "No SSH",
+            "vsock only"
+          ]
+        },
+        {
+          "label": "Attestation",
+          "children": [
+            "PCRs",
+            "Signed by Nitro",
+            "KMS conditions"
+          ]
+        },
+        {
+          "label": "Build",
+          "children": [
+            "Docker → EIF",
+            "nitro-cli"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Card data",
+            "Key handling",
+            "Private ML inference"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "KMS policy bound to the enclave",
+      "scenario": "JSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only the verified enclave image can decrypt; the parent can't."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Allow\",\n  \"Principal\": {\"AWS\": \"arn:aws:iam::111122223333:role/parent\"},\n  \"Action\": \"kms:Decrypt\",\n  \"Resource\": \"*\",\n  \"Condition\": {\"StringEqualsIgnoreCase\": {\n    \"kms:RecipientAttestation:PCR0\": \"<enclave-image-hash>\"}}\n}"
+        }
+      ],
+      "outcome": "root-proof secret handling."
+    },
+    "summary": {
+      "points": [
+        "Isolated sibling VM.",
+        "vsock only.",
+        "KMS checks attestation."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does the KMS condition use RecipientAttestation rather than just the IAM role?",
+        "a": "The role belongs to the parent; requiring the enclave's PCR ensures only the enclave code can receive the plaintext."
+      }
+    ]
+  },
+  "remote-attestation-the-cryptographic-id-card": {
+    "core": "A TEE's isolation is worthless unless the data owner can verify they're talking to genuine hardware running the expected code. Attestation provides this: the TEE produces a report containing measurements (hash of code and config), platform security version and caller data (such as a public key), signed by a hardware-rooted key chaining to the vendor (Intel, AMD, AWS). A relying party verifies the signature chain and measurements, then sends secrets encrypted to the key bound in the report.",
+    "first_principles": {
+      "problem": "A data owner needs assurance that the 'enclave' isn't just a normal VM pretending, running modified code that exfiltrates data.",
+      "truths": [
+        "Anyone can claim to be an enclave.",
+        "Hardware keys chain to vendors.",
+        "Secrets must be bound to the attested instance."
+      ],
+      "derivation": [
+        "TEE generates a **key pair**.",
+        "Embeds public key in **report data**.",
+        "Hardware **signs** the report.",
+        "Verifier checks **chain + measurements + TCB version**.",
+        "Release secrets **encrypted to that key**."
+      ]
+    },
+    "analogy": {
+      "title": "A passport with a chip signed by the issuing government",
+      "story": "Border control checks the government's signature, the photo matches you, and it hasn't expired.",
+      "mapping": [
+        [
+          "Government signature",
+          "Vendor root key"
+        ],
+        [
+          "Photo",
+          "Code measurement"
+        ],
+        [
+          "Expiry/version",
+          "TCB version"
+        ],
+        [
+          "Your face",
+          "Bound public key"
+        ]
+      ],
+      "breaks": "Passports are checked once; attestation should be repeated or bound to each session."
+    },
+    "mindmap": {
+      "center": "TEE Attestation",
+      "branches": [
+        {
+          "label": "Report",
+          "children": [
+            "Measurements",
+            "TCB version",
+            "Report data"
+          ]
+        },
+        {
+          "label": "Roots",
+          "children": [
+            "Intel DCAP",
+            "AMD VCEK/ARK",
+            "AWS Nitro PKI"
+          ]
+        },
+        {
+          "label": "Verifier",
+          "children": [
+            "Chain check",
+            "Policy",
+            "Freshness"
+          ]
+        },
+        {
+          "label": "Services",
+          "children": [
+            "Azure Attestation",
+            "Intel Trust Authority",
+            "KMS conditions"
+          ]
+        },
+        {
+          "label": "Binding",
+          "children": [
+            "Public key in report",
+            "Secure channel"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Attested key release",
+      "scenario": "Flow.",
+      "flow": [
+        "Enclave makes keypair",
+        "Report(hash, pubkey) signed by CPU",
+        "Verifier checks chain + hash",
+        "KMS encrypts data key to pubkey",
+        "Only enclave decrypts"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Secrets reach only genuine, expected code."
+        }
+      ],
+      "code": [],
+      "outcome": "verifiable trust."
+    },
+    "summary": {
+      "points": [
+        "Prove hardware and code.",
+        "Bind a key.",
+        "Then release secrets."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why include a public key in the attestation report data?",
+        "a": "It binds the secure channel to that specific attested instance, preventing relay to another machine."
+      }
+    ]
+  },
+  "confidential-computing-in-practice-use-cases-and-trade-offs": {
+    "core": "Confidential computing is used where data owners don't trust the operator or each other: multi-party analytics and ML (data clean rooms), key management and signing, private AI inference with confidential GPUs, blockchain, and regulated workloads in public cloud. Trade-offs include performance overhead (memory encryption, I/O bounce buffers), debugging limits, side-channel risk, dependence on the hardware vendor's trust root and TCB updates, and attestation infrastructure complexity.",
+    "first_principles": {
+      "problem": "A team adopts confidential VMs everywhere and is surprised by I/O overhead, broken debugging and attestation it never actually checks.",
+      "truths": [
+        "Protection has costs.",
+        "Unverified attestation adds nothing.",
+        "Hardware vendors become trust anchors."
+      ],
+      "derivation": [
+        "Use it where **operator trust** is the issue.",
+        "**Benchmark** overhead (I/O heavy hurts most).",
+        "Actually **enforce attestation** in key release.",
+        "Track **TCB/firmware updates**.",
+        "Plan **debug/observability** without plaintext."
+      ]
+    },
+    "analogy": {
+      "title": "Armoured transport",
+      "story": "Worth it for gold bars, overkill for groceries, and pointless if nobody checks the seal on arrival.",
+      "mapping": [
+        [
+          "Gold bars",
+          "Highly sensitive data"
+        ],
+        [
+          "Armour cost",
+          "Performance overhead"
+        ],
+        [
+          "Checking seals",
+          "Verifying attestation"
+        ]
+      ],
+      "breaks": "Armour is visible; skipped attestation checks are silent failures."
+    },
+    "mindmap": {
+      "center": "Confidential Computing in Practice",
+      "branches": [
+        {
+          "label": "Use cases",
+          "children": [
+            "Data clean rooms",
+            "Key mgmt",
+            "Private AI",
+            "Regulated cloud"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Performance",
+            "Debugging",
+            "Complexity"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Side channels",
+            "Vendor trust",
+            "Stale TCB"
+          ]
+        },
+        {
+          "label": "Must-dos",
+          "children": [
+            "Verify attestation",
+            "Bind key release"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Data clean room",
+      "scenario": "Two banks detecting shared fraud.",
+      "flow": [
+        "Each bank encrypts data",
+        "Verify enclave attestation",
+        "Release keys to enclave",
+        "Join + model inside",
+        "Only aggregate results leave"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Neither bank nor the cloud sees the other's raw data."
+        }
+      ],
+      "code": [],
+      "outcome": "collaboration without exposure."
+    },
+    "summary": {
+      "points": [
+        "Use where operators aren't trusted.",
+        "Measure costs.",
+        "Always verify attestation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the most common way confidential computing deployments fail to deliver security?",
+        "a": "Not enforcing attestation before releasing secrets, so any VM can receive the data."
+      }
+    ]
+  }
+}

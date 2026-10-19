@@ -1,0 +1,642 @@
+{
+  "introduction-can-you-trust-your-own-os": {
+    "core": "Software can't fully vouch for itself: a rootkit in the bootloader or kernel can make every security tool report 'all clear'. Trust must start from something immutable, a hardware root of trust, and extend step by step: each boot stage verifies or measures the next before running it. Attestation then lets the machine prove to a remote party, cryptographically, exactly what booted, so secrets are released only to healthy systems.",
+    "first_principles": {
+      "problem": "A bootkit loads before the OS, hides from antivirus, and persists through reinstalls.",
+      "truths": [
+        "Compromised software can lie.",
+        "Trust needs an immutable start.",
+        "Each stage must check the next."
+      ],
+      "derivation": [
+        "Anchor in **hardware** (ROM, TPM).",
+        "**Verify** each stage (Secure Boot).",
+        "**Measure** each stage (Measured Boot).",
+        "**Attest** measurements remotely.",
+        "**Gate secrets** on attestation."
+      ]
+    },
+    "analogy": {
+      "title": "Checking a witness's credibility through who vouches for them",
+      "story": "You trust A because B vouches, B because C does, and so on, back to someone whose integrity is beyond question.",
+      "mapping": [
+        [
+          "Unimpeachable first witness",
+          "Hardware root of trust"
+        ],
+        [
+          "Chain of vouching",
+          "Chain of trust"
+        ],
+        [
+          "Cross-examination",
+          "Attestation"
+        ]
+      ],
+      "breaks": "Witnesses can be bribed later; measurements are recorded at load time and can't be undone."
+    },
+    "mindmap": {
+      "center": "Platform Trust",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Rootkits",
+            "Bootkits",
+            "Self-reporting"
+          ]
+        },
+        {
+          "label": "Root",
+          "children": [
+            "Boot ROM",
+            "TPM"
+          ]
+        },
+        {
+          "label": "Chain",
+          "children": [
+            "Firmware",
+            "Bootloader",
+            "Kernel",
+            "Userspace"
+          ]
+        },
+        {
+          "label": "Proof",
+          "children": [
+            "Measurements",
+            "Quotes",
+            "Attestation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Why self-checks fail",
+      "scenario": "Thought experiment.",
+      "flow": [
+        "Bootkit loads first",
+        "Hooks kernel",
+        "AV asks kernel 'any malware?'",
+        "Kernel lies 'no'",
+        "Need: measurement taken before bootkit could act"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows why trust must come from below the OS."
+        }
+      ],
+      "code": [],
+      "outcome": "hardware-anchored trust."
+    },
+    "summary": {
+      "points": [
+        "Software can't self-attest.",
+        "Start in hardware.",
+        "Chain each stage."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't antivirus reliably detect a bootkit?",
+        "a": "It runs on an OS the bootkit already controls, so the OS can hide the bootkit from it."
+      }
+    ]
+  },
+  "the-chain-of-trust-secure-boot-vs-measured-boot": {
+    "core": "Secure Boot and Measured Boot are complementary. Secure Boot enforces: UEFI firmware checks each bootloader and kernel signature against trusted keys (db/dbx) and refuses to run unsigned code. Measured Boot records: each stage hashes the next and extends the hash into TPM PCRs before running it, creating a tamper-evident log of what actually booted, even if it was allowed. Secure Boot blocks known-bad code; Measured Boot lets a remote verifier decide.",
+    "first_principles": {
+      "problem": "Secure Boot is on, but a signed yet vulnerable bootloader (BootHole) is loaded and exploited, and nothing records it.",
+      "truths": [
+        "Signatures can't capture 'signed but vulnerable'.",
+        "Recording enables later judgement.",
+        "Both need a hardware anchor."
+      ],
+      "derivation": [
+        "Enable **Secure Boot** with tight db/dbx.",
+        "Update **dbx** revocations.",
+        "Enable **Measured Boot** into the TPM.",
+        "Keep the **event log**.",
+        "**Attest** PCRs remotely."
+      ]
+    },
+    "analogy": {
+      "title": "A bouncer versus a guest book",
+      "story": "The bouncer refuses anyone not on the list; the guest book records everyone who came in, so you can review it later.",
+      "mapping": [
+        [
+          "Bouncer",
+          "Secure Boot"
+        ],
+        [
+          "Guest list",
+          "Signature db"
+        ],
+        [
+          "Guest book",
+          "TPM PCR log"
+        ]
+      ],
+      "breaks": "A guest book can be forged; PCRs can only be extended, never rewritten."
+    },
+    "mindmap": {
+      "center": "Boot Chain",
+      "branches": [
+        {
+          "label": "Secure Boot",
+          "children": [
+            "Signature checks",
+            "db/dbx",
+            "shim/MOK"
+          ]
+        },
+        {
+          "label": "Measured Boot",
+          "children": [
+            "Hash next stage",
+            "Extend PCR",
+            "Event log"
+          ]
+        },
+        {
+          "label": "Stages",
+          "children": [
+            "Firmware",
+            "Bootloader",
+            "Kernel",
+            "initrd"
+          ]
+        },
+        {
+          "label": "Gaps",
+          "children": [
+            "Signed-but-vulnerable",
+            "Runtime changes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspecting both",
+      "scenario": "Linux CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "You can see what was enforced and what was measured."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mokutil --sb-state                 # SecureBoot enabled\ntpm2_pcrread sha256:0,4,7          # firmware, bootloader, SB policy\ntpm2_eventlog /sys/kernel/security/tpm0/binary_bios_measurements | head"
+        }
+      ],
+      "outcome": "enforce plus evidence."
+    },
+    "summary": {
+      "points": [
+        "Secure Boot enforces.",
+        "Measured Boot records.",
+        "Use both."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is Measured Boot useful even with Secure Boot enabled?",
+        "a": "It records exactly what ran, including signed-but-vulnerable code, so a verifier can reject it."
+      }
+    ]
+  },
+  "the-hardware-ledger-trusted-platform-module-tpm": {
+    "core": "A TPM is a small secure cryptoprocessor (a discrete chip, firmware, or virtual vTPM) holding keys that never leave it and Platform Configuration Registers (PCRs). PCRs can only be extended (new = hash(old || measurement)), never set, so their final value summarises everything measured since reset. The TPM can sign PCR values with an attestation key (a quote), seal data to PCR states, and store keys bound to the device via its unique Endorsement Key.",
+    "first_principles": {
+      "problem": "A server needs to prove its boot state and store a disk key that only works if boot hasn't changed.",
+      "truths": [
+        "Hash chains are append-only.",
+        "Keys in hardware can't be copied.",
+        "Device identity needs a unique key."
+      ],
+      "derivation": [
+        "**Extend PCRs** at each boot stage.",
+        "Use the **EK** for device identity.",
+        "Create an **AK** to sign quotes.",
+        "**Seal** secrets to PCR policies.",
+        "Use **vTPM** for VMs."
+      ]
+    },
+    "analogy": {
+      "title": "A ledger written in permanent ink where each line includes a summary of all lines before",
+      "story": "You can add lines but never erase, and the last line proves the whole history.",
+      "mapping": [
+        [
+          "Permanent ink",
+          "Extend-only PCRs"
+        ],
+        [
+          "Running summary",
+          "Hash chain"
+        ],
+        [
+          "Notary stamp",
+          "TPM quote signature"
+        ]
+      ],
+      "breaks": "A ledger is readable; TPM keys inside are not."
+    },
+    "mindmap": {
+      "center": "TPM",
+      "branches": [
+        {
+          "label": "Registers",
+          "children": [
+            "PCRs",
+            "Extend-only",
+            "Banks (SHA-1/256)"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "EK (identity)",
+            "AK (attestation)",
+            "SRK (storage)"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Quote",
+            "Seal/unseal",
+            "Random"
+          ]
+        },
+        {
+          "label": "Forms",
+          "children": [
+            "Discrete",
+            "fTPM",
+            "vTPM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "How extend works",
+      "scenario": "Python sketch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One value captures the whole boot sequence."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import hashlib\npcr = bytes(32)                               # reset value\nfor stage in [b\"firmware\", b\"grub\", b\"vmlinuz\"]:\n    m = hashlib.sha256(stage).digest()\n    pcr = hashlib.sha256(pcr + m).digest()   # extend\nprint(pcr.hex())   # changes if any stage or the order changes"
+        }
+      ],
+      "outcome": "tamper-evident boot record."
+    },
+    "summary": {
+      "points": [
+        "Extend-only PCRs.",
+        "Keys never leave.",
+        "Quote, seal, identify."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't malware just set a PCR to the expected value?",
+        "a": "PCRs can only be extended by hashing; reaching a specific value would require breaking SHA-256."
+      }
+    ]
+  },
+  "releasing-secrets-sealing-and-unsealing": {
+    "core": "Sealing encrypts data with a TPM key under a policy, typically that specific PCRs hold expected values. Unseal succeeds only when the machine is in that measured state. BitLocker and systemd-cryptenroll use this to unlock disks automatically on a trusted boot: if someone boots a different OS, changes the bootloader or moves the disk to another machine, the TPM refuses and recovery is required. Policies can add PINs and must handle legitimate updates.",
+    "first_principles": {
+      "problem": "A stolen laptop's disk is booted from USB to read files, or the disk is moved to another machine.",
+      "truths": [
+        "Keys should depend on platform state.",
+        "The TPM enforces policy in hardware.",
+        "Updates change measurements."
+      ],
+      "derivation": [
+        "**Seal** disk key to PCRs (such as 7, 11).",
+        "Add a **PIN** for stronger protection.",
+        "Store a **recovery key** safely.",
+        "Use **signed PCR policies** to survive updates.",
+        "Test **reseal** in upgrade pipelines."
+      ]
+    },
+    "analogy": {
+      "title": "A safe that only opens in your own house, with the lights arranged a certain way",
+      "story": "Move it, or change the room, and it stays shut.",
+      "mapping": [
+        [
+          "Room arrangement",
+          "PCR values"
+        ],
+        [
+          "Safe",
+          "TPM-sealed key"
+        ],
+        [
+          "Spare combination",
+          "Recovery key"
+        ]
+      ],
+      "breaks": "Rearranging furniture yourself (OS updates) also locks it, unless the policy anticipates it."
+    },
+    "mindmap": {
+      "center": "Sealing",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "TPM key",
+            "PCR policy",
+            "Unseal on match"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "BitLocker",
+            "LUKS + systemd-cryptenroll",
+            "Clevis"
+          ]
+        },
+        {
+          "label": "Hardening",
+          "children": [
+            "PIN",
+            "Signed policies"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Recovery keys",
+            "Updates reseal"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "LUKS with TPM",
+      "scenario": "systemd.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The disk only unlocks on its own trusted boot."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7+11 /dev/nvme0n1p3\n# /etc/crypttab: root /dev/nvme0n1p3 - tpm2-device=auto\n# boot from USB → PCR 7/11 differ → TPM refuses → recovery key needed"
+        }
+      ],
+      "outcome": "state-bound secrets."
+    },
+    "summary": {
+      "points": [
+        "Seal to state.",
+        "Unseal only on match.",
+        "Plan for updates."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do firmware updates often trigger BitLocker recovery?",
+        "a": "Measurements change, so the PCR policy no longer matches unless it's resealed or uses signed policies."
+      }
+    ]
+  },
+  "remote-attestation-proving-health-to-the-cloud": {
+    "core": "Remote attestation lets a verifier check a device's state over the network. The verifier sends a fresh nonce, and the device's TPM returns a quote: selected PCR values plus the nonce, signed by an attestation key certified as belonging to a genuine TPM (via the EK certificate). The verifier replays the event log to confirm it matches the PCRs and compares against known-good values, then issues credentials or access. The nonce prevents replaying an old healthy quote.",
+    "first_principles": {
+      "problem": "A zero-trust network wants to grant production access only to laptops and servers with a verified, unmodified boot chain.",
+      "truths": [
+        "The verifier must trust the signer is a real TPM.",
+        "Freshness prevents replay.",
+        "Logs explain PCR values."
+      ],
+      "derivation": [
+        "Verifier sends **nonce**.",
+        "Device returns **quote + event log**.",
+        "Verify **AK→EK cert chain**.",
+        "**Replay log** and compare to policy.",
+        "Issue **short-lived credentials** on success."
+      ]
+    },
+    "analogy": {
+      "title": "A health certificate signed by a trusted doctor, dated today",
+      "story": "The border agent checks the doctor's licence, today's date and the results before letting you through.",
+      "mapping": [
+        [
+          "Doctor's signature",
+          "AK-signed quote"
+        ],
+        [
+          "Medical licence",
+          "EK certificate"
+        ],
+        [
+          "Today's date",
+          "Nonce"
+        ],
+        [
+          "Test results",
+          "PCRs + log"
+        ]
+      ],
+      "breaks": "Doctors examine you live; attestation proves boot-time state, not current runtime state."
+    },
+    "mindmap": {
+      "center": "Remote Attestation",
+      "branches": [
+        {
+          "label": "Device",
+          "children": [
+            "TPM quote",
+            "Event log",
+            "AK"
+          ]
+        },
+        {
+          "label": "Verifier",
+          "children": [
+            "Nonce",
+            "EK cert chain",
+            "Golden values"
+          ]
+        },
+        {
+          "label": "Outcomes",
+          "children": [
+            "Issue creds",
+            "Deny",
+            "Quarantine"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Keylime",
+            "Azure Attestation",
+            "Intune/Conditional access"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Quote exchange",
+      "scenario": "tpm2-tools.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Access depends on proven boot integrity."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# verifier: NONCE=$(openssl rand -hex 16)\ntpm2_quote -c ak.ctx -l sha256:0,4,7 -q $NONCE -m quote.msg -s quote.sig -o pcrs.bin\n# verifier:\ntpm2_checkquote -u ak.pub -m quote.msg -s quote.sig -f pcrs.bin -q $NONCE"
+        }
+      ],
+      "outcome": "health-gated access."
+    },
+    "summary": {
+      "points": [
+        "Nonce for freshness.",
+        "Signed by a genuine TPM.",
+        "Compare to golden values."
+      ]
+    },
+    "check": [
+      {
+        "q": "What attack does the nonce prevent?",
+        "a": "Replay: re-sending an old quote captured when the device was still healthy."
+      }
+    ]
+  },
+  "the-ima-subsystem-extending-attestation-into-runtime": {
+    "core": "Boot measurements stop at the kernel. Linux IMA (Integrity Measurement Architecture) extends measurement into runtime: it hashes executables, libraries and config files when they're opened or run, logs them, and extends PCR 10. Remote verifiers (such as Keylime) can check the IMA log against an allow-list to detect unexpected binaries. In appraisal mode, IMA/EVM enforce that files carry valid signatures and refuse to execute modified ones.",
+    "first_principles": {
+      "problem": "A server boots cleanly, but an attacker later drops a modified sshd binary that boot attestation never sees.",
+      "truths": [
+        "Compromise can happen after boot.",
+        "Files can be measured at use.",
+        "Logs must be bounded by policy."
+      ],
+      "derivation": [
+        "Enable **IMA measurement** with a policy.",
+        "Extend into **PCR 10**.",
+        "**Verify the log** remotely against allow-lists.",
+        "Use **appraisal** with signatures to enforce.",
+        "Tune the **policy** to control log volume."
+      ]
+    },
+    "analogy": {
+      "title": "A building that logs every badge swipe after opening, not just the morning lock-up check",
+      "story": "You know who entered which room all day, not only that the doors were locked at dawn.",
+      "mapping": [
+        [
+          "Badge swipes",
+          "File measurements"
+        ],
+        [
+          "Access log",
+          "IMA log"
+        ],
+        [
+          "Locked-out badge",
+          "Appraisal denial"
+        ]
+      ],
+      "breaks": "Logging everything is noisy; IMA policies must choose what to measure."
+    },
+    "mindmap": {
+      "center": "IMA",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "Measure",
+            "Appraise",
+            "Audit"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "Executables",
+            "Libraries",
+            "Kernel modules",
+            "Configs"
+          ]
+        },
+        {
+          "label": "Anchors",
+          "children": [
+            "PCR 10",
+            "Event log"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Keylime",
+            "EVM",
+            "Signed files"
+          ]
+        },
+        {
+          "label": "Challenges",
+          "children": [
+            "Log size",
+            "Updates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enabling IMA",
+      "scenario": "Kernel cmdline + log.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The tampered sshd is detected at runtime."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# kernel cmdline: ima_policy=tcb ima_hash=sha256\nhead -3 /sys/kernel/security/ima/ascii_runtime_measurements\n# 10 <hash> ima-ng sha256:<filehash> /usr/sbin/sshd\n# Keylime verifier alerts if sshd's hash isn't on the allow-list"
+        }
+      ],
+      "outcome": "attestation beyond boot."
+    },
+    "summary": {
+      "points": [
+        "Measure at runtime.",
+        "PCR 10 anchors the log.",
+        "Appraisal enforces."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does IMA appraisal add over measurement?",
+        "a": "Enforcement: files without valid hashes or signatures are blocked, not just logged."
+      }
+    ]
+  }
+}

@@ -1,0 +1,643 @@
+{
+  "introduction-the-new-perimeter": {
+    "core": "APIs are now the main attack surface: mobile apps, SPAs and partners all talk directly to backend endpoints, so business logic is exposed as raw JSON calls. Attackers skip the UI and call APIs directly, enumerating IDs, inflating payloads and scripting at volume. The OWASP API Security Top 10 captures the API-specific risks (BOLA, broken auth, excessive data exposure, resource exhaustion). Securing APIs means inventory, strong auth, per-object authorization, schema validation and rate limiting.",
+    "first_principles": {
+      "problem": "A company secures its web UI, but its mobile API exposes unauthenticated endpoints nobody knew existed.",
+      "truths": [
+        "The UI is not the security boundary.",
+        "APIs are machine-callable at scale.",
+        "Unknown APIs can't be protected."
+      ],
+      "derivation": [
+        "Maintain an **API inventory** (OpenAPI).",
+        "**Authenticate** every endpoint.",
+        "**Authorize** per object.",
+        "**Validate schemas** in and out.",
+        "**Rate-limit** and monitor."
+      ]
+    },
+    "analogy": {
+      "title": "A shop's back door for deliveries",
+      "story": "The front is guarded, but the loading dock opens straight into the stockroom, and anyone who finds it can walk in.",
+      "mapping": [
+        [
+          "Front door",
+          "Web UI"
+        ],
+        [
+          "Loading dock",
+          "API"
+        ],
+        [
+          "Dock guard",
+          "API gateway"
+        ]
+      ],
+      "breaks": "Docks are few; organisations often have hundreds of undocumented ('shadow') APIs."
+    },
+    "mindmap": {
+      "center": "API Security",
+      "branches": [
+        {
+          "label": "Surface",
+          "children": [
+            "Mobile",
+            "SPA",
+            "Partner",
+            "Shadow APIs"
+          ]
+        },
+        {
+          "label": "Top risks",
+          "children": [
+            "BOLA",
+            "Broken auth",
+            "Data exposure",
+            "Resource abuse"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Gateway",
+            "Schema validation",
+            "Rate limits"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Inventory",
+            "Testing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Calling the API directly",
+      "scenario": "curl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows why API controls, not UI ones, matter."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# the UI only shows your orders, but the API is one curl away\ncurl -H \"Authorization: Bearer $T\" https://api.shop.com/v1/orders/1002\ncurl https://api.shop.com/v1/internal/debug   # forgotten endpoint"
+        }
+      ],
+      "outcome": "API-first security mindset."
+    },
+    "summary": {
+      "points": [
+        "APIs are the perimeter.",
+        "Inventory first.",
+        "Server-side controls only."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a shadow API?",
+        "a": "An undocumented or forgotten endpoint that's live but not inventoried, tested or protected."
+      }
+    ]
+  },
+  "the-1-vulnerability-bola-broken-object-level-authorization": {
+    "core": "BOLA (Broken Object Level Authorization) is the API form of IDOR and the top API risk: an endpoint takes an object ID from the request and returns or modifies that object without checking that the caller may access it. Because APIs expose IDs everywhere (paths, bodies, queries), every handler needs an ownership or policy check. Scoping queries by the authenticated principal (WHERE owner_id = :me) makes the safe path the default.",
+    "first_principles": {
+      "problem": "Changing `user_id` in a JSON body of PUT /v1/profile updates another user's email, enabling account takeover.",
+      "truths": [
+        "IDs in requests are attacker-controlled.",
+        "Authentication says who, not what.",
+        "Checks must be in each handler or a shared layer."
+      ],
+      "derivation": [
+        "**Scope queries** by caller identity.",
+        "Take identity from the **token**, not the body.",
+        "Use a **policy layer** (OPA, Cedar).",
+        "Use **UUIDs** as defence in depth.",
+        "Write **two-user tests**."
+      ]
+    },
+    "analogy": {
+      "title": "A cloakroom that hands over any coat for any ticket number you say aloud",
+      "story": "You should have to show the ticket that matches the coat, not just name a number.",
+      "mapping": [
+        [
+          "Ticket number",
+          "Object ID"
+        ],
+        [
+          "Showing your ticket",
+          "Ownership check"
+        ],
+        [
+          "Saying any number",
+          "Enumerating IDs"
+        ]
+      ],
+      "breaks": "Cloakroom staff see faces; APIs only see tokens and IDs."
+    },
+    "mindmap": {
+      "center": "BOLA",
+      "branches": [
+        {
+          "label": "Where IDs hide",
+          "children": [
+            "Path",
+            "Query",
+            "Body",
+            "Headers"
+          ]
+        },
+        {
+          "label": "Impact",
+          "children": [
+            "Data leak",
+            "Account takeover"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Scoped queries",
+            "Identity from token",
+            "Policy engine"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "Two-user matrix",
+            "Fuzz IDs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scoped query",
+      "scenario": "SQL in the handler.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Other users' IDs simply match nothing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "def get_order(order_id, principal):\n    row = db.one(\n        \"SELECT * FROM orders WHERE id = %s AND customer_id = %s\",\n        (order_id, principal.sub))     # identity from JWT, not request\n    if not row: raise NotFound()\n    return row"
+        }
+      ],
+      "outcome": "BOLA closed by construction."
+    },
+    "summary": {
+      "points": [
+        "Top API risk.",
+        "Scope by identity.",
+        "Never trust body IDs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do random UUIDs fix BOLA?",
+        "a": "No. They make guessing harder, but leaked IDs still work without an authorization check."
+      }
+    ]
+  },
+  "authentication-patterns-for-apis-tokens-and-keys": {
+    "core": "APIs authenticate callers with credentials suited to who they are. Users authenticate via OAuth 2.0/OIDC, getting short-lived JWT access tokens with scopes. Services use mTLS or client-credentials tokens. Static API keys identify a partner or app but are bearer secrets: hard to rotate and often leaked. Good practice: short token lifetimes, validated signatures and audiences, scoped permissions, keys stored hashed and rotatable, and never credentials in URLs.",
+    "first_principles": {
+      "problem": "A long-lived API key embedded in a mobile app is extracted and used to scrape the full catalogue.",
+      "truths": [
+        "Bearer tokens work for whoever holds them.",
+        "Long-lived secrets leak eventually.",
+        "Validation must check sig, exp, aud, iss."
+      ],
+      "derivation": [
+        "Users: **OAuth/OIDC + PKCE**.",
+        "Services: **mTLS** or client credentials.",
+        "**Short-lived** tokens with refresh.",
+        "Validate **sig, exp, aud, iss**.",
+        "Keep keys **hashed, scoped, rotatable**."
+      ]
+    },
+    "analogy": {
+      "title": "Day passes versus master keys",
+      "story": "A visitor badge that expires tonight is safer to lose than a permanent master key.",
+      "mapping": [
+        [
+          "Day pass",
+          "Short-lived JWT"
+        ],
+        [
+          "Master key",
+          "Static API key"
+        ],
+        [
+          "Badge check",
+          "Token validation"
+        ]
+      ],
+      "breaks": "A badge has a photo; bearer tokens don't prove who holds them, unless bound with mTLS or DPoP."
+    },
+    "mindmap": {
+      "center": "API AuthN",
+      "branches": [
+        {
+          "label": "Users",
+          "children": [
+            "OAuth 2.0",
+            "OIDC",
+            "PKCE"
+          ]
+        },
+        {
+          "label": "Services",
+          "children": [
+            "mTLS",
+            "Client credentials"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "Partner ID",
+            "Hash at rest",
+            "Rotate"
+          ]
+        },
+        {
+          "label": "Validation",
+          "children": [
+            "Signature",
+            "exp",
+            "aud",
+            "iss",
+            "scope"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Validating a JWT",
+      "scenario": "Python (PyJWT).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only fresh, correctly issued, scoped tokens pass."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "claims = jwt.decode(\n    token, key=jwks_client.get_signing_key_from_jwt(token).key,\n    algorithms=[\"RS256\"],          # pin; never accept 'none'\n    audience=\"api://orders\",\n    issuer=\"https://idp.example.com/\")\nif \"orders:read\" not in claims[\"scope\"].split(): raise Forbidden()"
+        }
+      ],
+      "outcome": "robust API auth."
+    },
+    "summary": {
+      "points": [
+        "Match credential to caller.",
+        "Short-lived beats static.",
+        "Validate every claim."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why pin the accepted JWT algorithms?",
+        "a": "To prevent alg-confusion attacks such as 'none' or HS256 signed with the public key."
+      }
+    ]
+  },
+  "excessive-data-exposure-the-lazy-backend": {
+    "core": "Excessive data exposure happens when an API returns full database objects and relies on the client to hide fields. Attackers read the raw JSON and see password hashes, emails, internal flags or other users' PII. Its twin is mass assignment, where the API binds every incoming field (such as is_admin) onto the model. The fix is explicit response and request schemas (DTOs) that list exactly which fields go out and which may come in.",
+    "first_principles": {
+      "problem": "A /users/me endpoint serialises the ORM model, including `password_hash` and `is_admin`, and accepts `is_admin: true` on update.",
+      "truths": [
+        "Clients can read the whole response.",
+        "ORMs serialise everything by default.",
+        "Binding all fields lets clients set anything."
+      ],
+      "derivation": [
+        "Define **response schemas** (allow-list fields).",
+        "Define **request schemas** (writable fields only).",
+        "Avoid **to_dict()** on models.",
+        "Validate in **contract tests**.",
+        "Scan responses for **PII**."
+      ]
+    },
+    "analogy": {
+      "title": "Handing someone the whole file and asking them not to read page 3",
+      "story": "If you only want them to see the address, photocopy just the address.",
+      "mapping": [
+        [
+          "Whole file",
+          "Full DB object"
+        ],
+        [
+          "Photocopied address",
+          "DTO"
+        ],
+        [
+          "Trusting them not to read",
+          "Client-side filtering"
+        ]
+      ],
+      "breaks": "People may honour the request; attackers never do."
+    },
+    "mindmap": {
+      "center": "Data Exposure",
+      "branches": [
+        {
+          "label": "Outbound",
+          "children": [
+            "Full objects",
+            "Hidden fields",
+            "PII leaks"
+          ]
+        },
+        {
+          "label": "Inbound",
+          "children": [
+            "Mass assignment",
+            "Role fields"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Response DTOs",
+            "Request DTOs",
+            "Field allow-lists"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "Contract tests",
+            "PII scanning"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Explicit schemas",
+      "scenario": "Python (Pydantic).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only intended fields leave or enter."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class UserOut(BaseModel):\n    id: int\n    display_name: str            # no email, hash or flags\n\nclass UserUpdate(BaseModel):\n    display_name: str            # is_admin can't be set\n    model_config = {\"extra\": \"forbid\"}"
+        }
+      ],
+      "outcome": "minimal API surface."
+    },
+    "summary": {
+      "points": [
+        "Never rely on client filtering.",
+        "Allow-list fields both ways.",
+        "Beware mass assignment."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is mass assignment?",
+        "a": "Automatically binding all request fields to a model, letting clients set fields like is_admin they shouldn't."
+      }
+    ]
+  },
+  "injection-attacks-via-apis-sql-and-beyond": {
+    "core": "APIs carry injection risks beyond classic SQL because they accept rich, structured input. NoSQL operator injection (`{\"$ne\": null}` in a MongoDB filter), GraphQL abuse (deep or batched queries, introspection), XML external entities, server-side template injection and command injection all arise when structured input reaches an interpreter unchecked. The defence is strict schema validation with type checks, parameterised queries for every engine, disabling dangerous parser features, and query depth or cost limits.",
+    "first_principles": {
+      "problem": "A login API accepts `{\"user\":\"admin\",\"pass\":{\"$ne\":null}}`, and MongoDB matches any password.",
+      "truths": [
+        "JSON can carry operators, not just strings.",
+        "Each interpreter has its own injection syntax.",
+        "Types must be enforced."
+      ],
+      "derivation": [
+        "**Validate types** strictly (string, not object).",
+        "Parameterise **every query language**.",
+        "Disable **XXE** and dangerous parsers.",
+        "Limit **GraphQL depth and cost**.",
+        "Avoid **eval** and template rendering of input."
+      ]
+    },
+    "analogy": {
+      "title": "A vending machine that accepts tokens shaped like a master key",
+      "story": "If you don't check the coin is a coin, a cleverly shaped object can open the machine.",
+      "mapping": [
+        [
+          "Coin slot check",
+          "Type validation"
+        ],
+        [
+          "Shaped token",
+          "Operator object"
+        ],
+        [
+          "Machine internals",
+          "Query engine"
+        ]
+      ],
+      "breaks": "Coins are physical; JSON shapes are unlimited unless a schema constrains them."
+    },
+    "mindmap": {
+      "center": "API Injection",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "SQL",
+            "NoSQL operators",
+            "GraphQL abuse",
+            "XXE",
+            "SSTI",
+            "Command"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "Untyped input",
+            "Dynamic queries"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Schema validation",
+            "Parameterisation",
+            "Parser hardening"
+          ]
+        },
+        {
+          "label": "GraphQL",
+          "children": [
+            "Depth limits",
+            "Cost analysis",
+            "Disable introspection in prod"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rejecting operator injection",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Operator objects are rejected before reaching MongoDB."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "class Login(BaseModel):\n    user: constr(max_length=64)\n    password: constr(max_length=128)   # a dict fails validation\n\nbody = Login.model_validate_json(req.body)\nusers.find_one({\"user\": body.user})     # then verify hash in code"
+        }
+      ],
+      "outcome": "structured injection blocked."
+    },
+    "summary": {
+      "points": [
+        "JSON carries operators.",
+        "Strict types.",
+        "Limit query complexity."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can GraphQL be abused for DoS?",
+        "a": "Deeply nested or batched queries can make the server do exponential work; depth and cost limits prevent this."
+      }
+    ]
+  },
+  "rate-limiting-preventing-abuse-at-scale": {
+    "core": "Rate limiting caps how many requests a client can make in a time window, protecting against credential stuffing, scraping, enumeration and resource exhaustion. Common algorithms are token bucket (smooths bursts), fixed and sliding windows. Limits should key on the right identity (API key, user, IP or device), be enforced at the gateway with a shared store like Redis, return 429 with Retry-After, and be tighter on expensive or sensitive endpoints such as login and password reset.",
+    "first_principles": {
+      "problem": "An attacker tries 10 million leaked credentials against /login from a botnet, and some accounts are taken over.",
+      "truths": [
+        "Attacks scale through automation.",
+        "Resources are finite.",
+        "Different endpoints have different costs."
+      ],
+      "derivation": [
+        "Use **token bucket** or sliding window.",
+        "Key by **user/key/IP**.",
+        "Enforce at the **gateway** with a shared store.",
+        "Return **429 + Retry-After**.",
+        "Add **per-endpoint** limits and bot detection."
+      ]
+    },
+    "analogy": {
+      "title": "A nightclub bouncer letting in a few people per minute",
+      "story": "The queue moves, but nobody can rush the door with a hundred friends at once.",
+      "mapping": [
+        [
+          "Bouncer",
+          "Rate limiter"
+        ],
+        [
+          "People per minute",
+          "Refill rate"
+        ],
+        [
+          "Small groups allowed",
+          "Burst capacity"
+        ]
+      ],
+      "breaks": "A bouncer recognises faces; botnets rotate IPs, so IP-only limits are weak."
+    },
+    "mindmap": {
+      "center": "Rate Limiting",
+      "branches": [
+        {
+          "label": "Algorithms",
+          "children": [
+            "Token bucket",
+            "Fixed window",
+            "Sliding window"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "API key",
+            "User",
+            "IP",
+            "Device"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "Gateway",
+            "Service",
+            "WAF"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "429",
+            "Retry-After",
+            "Backoff"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "Login",
+            "Reset",
+            "Search",
+            "Exports"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Token bucket in Redis",
+      "scenario": "Lua script idea, nginx config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Login attempts per source are capped at 5/minute."
+        }
+      ],
+      "code": [
+        {
+          "lang": "nginx",
+          "text": "limit_req_zone $binary_remote_addr zone=login:10m rate=5r/m;\nserver {\n  location /login {\n    limit_req zone=login burst=3 nodelay;\n    limit_req_status 429;\n  }\n}"
+        }
+      ],
+      "outcome": "abuse throttled."
+    },
+    "summary": {
+      "points": [
+        "Cap requests per identity.",
+        "Shared store at the gateway.",
+        "Stricter on sensitive paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is IP-only rate limiting weak against credential stuffing?",
+        "a": "Botnets spread attempts over many IPs; also key by account and use bot detection."
+      }
+    ]
+  }
+}

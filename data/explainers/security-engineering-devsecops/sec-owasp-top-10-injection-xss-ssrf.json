@@ -1,0 +1,635 @@
+{
+  "introduction-the-ten-most-wanted": {
+    "core": "The OWASP Top 10 ranks the most common and damaging web application risk categories, based on data from real breaches and scans. It is an awareness baseline and not a complete standard (that is ASVS). Most entries share one root cause: the application trusts input or assumes identity and authorization it never checked. Learning the categories gives teams a shared vocabulary for code review, testing and threat modeling.",
+    "first_principles": {
+      "problem": "A team passes a pentest checklist yet ships an IDOR bug, because nobody had framed access control as a vulnerability class.",
+      "truths": [
+        "Attackers reuse the same few techniques.",
+        "Input crosses trust boundaries.",
+        "Shared vocabulary speeds review."
+      ],
+      "derivation": [
+        "Learn the **categories**.",
+        "Map each to **controls** (validation, authz, encoding).",
+        "Add **tests** per category.",
+        "Use **ASVS** for depth.",
+        "Re-check on each **release**."
+      ]
+    },
+    "analogy": {
+      "title": "A police most-wanted poster",
+      "story": "You don't memorise every criminal, only the ten who cause most of the damage.",
+      "mapping": [
+        [
+          "Wanted poster",
+          "Top 10 list"
+        ],
+        [
+          "Criminal's MO",
+          "Attack technique"
+        ],
+        [
+          "Patrol focus",
+          "Review checklist"
+        ]
+      ],
+      "breaks": "The list isn't exhaustive; criminals off the poster still exist."
+    },
+    "mindmap": {
+      "center": "OWASP Top 10",
+      "branches": [
+        {
+          "label": "Access",
+          "children": [
+            "A01 Broken access control",
+            "A07 Auth failures"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "A02 Crypto failures",
+            "A08 Integrity"
+          ]
+        },
+        {
+          "label": "Input",
+          "children": [
+            "A03 Injection",
+            "A10 SSRF"
+          ]
+        },
+        {
+          "label": "Platform",
+          "children": [
+            "A05 Misconfig",
+            "A06 Vulnerable components"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "A04 Insecure design",
+            "A09 Logging gaps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mapping categories to checks",
+      "scenario": "A PR template.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each PR is reviewed against the riskiest classes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "## Security review\n- [ ] A01: every endpoint checks object ownership\n- [ ] A03: queries parameterised, output encoded\n- [ ] A05: no debug flags / default creds\n- [ ] A06: deps scanned (SCA green)\n- [ ] A10: outbound URLs allow-listed"
+        }
+      ],
+      "outcome": "shared risk vocabulary."
+    },
+    "summary": {
+      "points": [
+        "Data-driven ranking.",
+        "Awareness, not a full standard.",
+        "Most bugs are trust mistakes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is passing the OWASP Top 10 enough for a secure app?",
+        "a": "No. It's an awareness baseline; ASVS and threat modeling cover far more."
+      }
+    ]
+  },
+  "a01-broken-access-control-idor-and-beyond": {
+    "core": "Broken access control means a user can act outside their intended permissions. The classic case is IDOR (Insecure Direct Object Reference): changing /invoices/1001 to /invoices/1002 returns someone else's invoice because the server checked authentication but not ownership. Other forms are missing function-level checks (calling admin APIs), privilege escalation, and path traversal. The fix is to deny by default and enforce authorization on the server for every object and every action.",
+    "first_principles": {
+      "problem": "A logged-in user edits the account ID in a URL and downloads other customers' statements.",
+      "truths": [
+        "Clients control every request field.",
+        "Authentication isn't authorization.",
+        "Checks must be server-side and per object."
+      ],
+      "derivation": [
+        "**Deny by default**.",
+        "Check **ownership** on each object fetch.",
+        "Centralise **policy** (middleware, OPA).",
+        "Use **unguessable IDs** as defence in depth.",
+        "**Test** horizontal and vertical escalation."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel key card",
+      "story": "The card proves you're a guest, but it should only open your room, not every door on the floor.",
+      "mapping": [
+        [
+          "Guest card",
+          "Session"
+        ],
+        [
+          "Your room only",
+          "Object-level authz"
+        ],
+        [
+          "Staff-only door",
+          "Function-level authz"
+        ]
+      ],
+      "breaks": "Hotel doors enforce it physically; in software you must remember to check every endpoint."
+    },
+    "mindmap": {
+      "center": "Broken Access Control",
+      "branches": [
+        {
+          "label": "Forms",
+          "children": [
+            "IDOR",
+            "Missing function checks",
+            "Privilege escalation",
+            "Path traversal"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Trusting client IDs",
+            "UI-only hiding"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Deny by default",
+            "Ownership checks",
+            "Central policy"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "Two-user tests",
+            "Role matrix"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ownership check",
+      "scenario": "Python/Flask.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Changing the ID returns 404 for other users' objects."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "@app.get(\"/invoices/<int:inv_id>\")\n@login_required\ndef get_invoice(inv_id):\n    inv = Invoice.query.get_or_404(inv_id)\n    if inv.owner_id != current_user.id:    # the missing line in IDOR bugs\n        abort(404)                          # don't reveal existence\n    return inv.to_json()"
+        }
+      ],
+      "outcome": "IDOR closed."
+    },
+    "summary": {
+      "points": [
+        "#1 risk category.",
+        "Check every object.",
+        "Deny by default."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why return 404 rather than 403 for another user's object?",
+        "a": "It avoids confirming that the object exists, which limits enumeration."
+      }
+    ]
+  },
+  "a02-a05-cryptographic-failures-and-security-misconfiguration": {
+    "core": "Cryptographic failures expose sensitive data through missing or weak crypto: plaintext HTTP, MD5 password hashes, hard-coded keys, or old TLS. Security misconfiguration is the gap between secure defaults and what was deployed: default credentials, verbose errors, open S3 buckets, directory listings and unnecessary features left on. Both are fixed less by clever code than by hardened baselines, automated config scanning, and strong defaults (TLS everywhere, Argon2/bcrypt for passwords, keys in a KMS).",
+    "first_principles": {
+      "problem": "A staging bucket left public and a debug page showing stack traces leak customer data and internal hostnames.",
+      "truths": [
+        "Defaults are often insecure.",
+        "Weak algorithms break over time.",
+        "Drift happens without automation."
+      ],
+      "derivation": [
+        "Encrypt in **transit** (TLS 1.2+) and **at rest**.",
+        "Hash passwords with **Argon2id/bcrypt**.",
+        "Keep keys in **KMS**.",
+        "Harden **baselines** (CIS).",
+        "Scan configs **continuously** (CSPM, IaC scan)."
+      ]
+    },
+    "analogy": {
+      "title": "A new house with the builder's padlock still on",
+      "story": "The house may be well built, but the default lock everyone knows the code to, and windows left open, let anyone in.",
+      "mapping": [
+        [
+          "Builder's padlock",
+          "Default credentials"
+        ],
+        [
+          "Open windows",
+          "Public buckets"
+        ],
+        [
+          "Cheap lock",
+          "Weak crypto"
+        ]
+      ],
+      "breaks": "A house inspection is one-off; cloud configs change daily and need continuous checking."
+    },
+    "mindmap": {
+      "center": "Crypto & Misconfig",
+      "branches": [
+        {
+          "label": "Crypto failures",
+          "children": [
+            "Plaintext transport",
+            "MD5/SHA1 passwords",
+            "Hard-coded keys"
+          ]
+        },
+        {
+          "label": "Misconfig",
+          "children": [
+            "Default creds",
+            "Verbose errors",
+            "Public storage",
+            "Unused features"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "TLS everywhere",
+            "Argon2id",
+            "KMS",
+            "CIS baselines"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "IaC scanning",
+            "CSPM"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Password hashing",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stolen hash dumps resist offline cracking."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from argon2 import PasswordHasher\nph = PasswordHasher()               # memory-hard, salted\nh = ph.hash(\"correct horse\")\nph.verify(h, \"correct horse\")       # True; raises on mismatch\n# never: hashlib.md5(pw).hexdigest()"
+        }
+      ],
+      "outcome": "hardened crypto and config."
+    },
+    "summary": {
+      "points": [
+        "Use modern algorithms.",
+        "Defaults aren't safe.",
+        "Automate config checks."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a fast hash like SHA-256 a poor password hash?",
+        "a": "Attackers can try billions of guesses per second; memory-hard slow hashes like Argon2 make that expensive."
+      }
+    ]
+  },
+  "a03-injection-the-sql-nightmare": {
+    "core": "Injection happens when untrusted input is concatenated into an interpreter's command (SQL, shell, LDAP or NoSQL) so that data becomes code. `' OR 1=1 --` in a login field rewrites the query's logic. The fix is structural: keep code and data separate with parameterised queries and prepared statements, use safe APIs instead of shell strings, validate input against an allow-list, and run with least-privilege database accounts to limit the damage.",
+    "first_principles": {
+      "problem": "A search box builds SQL with string formatting, and an attacker dumps the users table with a UNION query.",
+      "truths": [
+        "Interpreters can't tell data from code in a string.",
+        "Escaping is error-prone.",
+        "Parameters keep them separate."
+      ],
+      "derivation": [
+        "Use **parameterised queries**.",
+        "Use **ORMs** carefully (no raw string concat).",
+        "Avoid **shell=True**.",
+        "**Allow-list** inputs like sort columns.",
+        "Least-privilege **DB users**."
+      ]
+    },
+    "analogy": {
+      "title": "A form where someone writes extra instructions in the name field",
+      "story": "A clerk who reads the whole box aloud as commands will follow 'Bob; also give him the vault key'.",
+      "mapping": [
+        [
+          "Form field",
+          "User input"
+        ],
+        [
+          "Clerk reading aloud",
+          "SQL parser"
+        ],
+        [
+          "Separate boxes for data",
+          "Bind parameters"
+        ]
+      ],
+      "breaks": "A human clerk might notice; a parser never does."
+    },
+    "mindmap": {
+      "center": "Injection",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "SQL",
+            "OS command",
+            "NoSQL",
+            "LDAP",
+            "Template"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "String concatenation",
+            "Data treated as code"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Prepared statements",
+            "Safe APIs",
+            "Allow-lists"
+          ]
+        },
+        {
+          "label": "Limit damage",
+          "children": [
+            "Least-privilege DB",
+            "WAF as backup"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Vulnerable vs safe",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Input is always treated as a value, never as SQL."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "# vulnerable\ncur.execute(f\"SELECT * FROM users WHERE name = '{name}'\")\n# name = \"x' OR '1'='1\" → returns every row\n\n# safe: the driver sends data separately from SQL\ncur.execute(\"SELECT * FROM users WHERE name = %s\", (name,))"
+        }
+      ],
+      "outcome": "SQLi eliminated."
+    },
+    "summary": {
+      "points": [
+        "Data must not become code.",
+        "Parameterise always.",
+        "Least privilege limits blast radius."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you parameterise an ORDER BY column name?",
+        "a": "Identifiers aren't values; validate them against an allow-list of known columns instead."
+      }
+    ]
+  },
+  "a03-cross-site-scripting-xss": {
+    "core": "Cross-site scripting (XSS) is injection into the browser: attacker-controlled input is rendered as HTML or JavaScript in another user's page, where it runs with that user's session. Reflected XSS bounces off a request, stored XSS is saved (such as a comment) and served to everyone, and DOM XSS happens entirely in client-side JS. Defences are context-aware output encoding (frameworks auto-escape), avoiding innerHTML-style sinks, sanitising rich HTML, HttpOnly cookies, and a strict Content Security Policy.",
+    "first_principles": {
+      "problem": "A comment containing `<script>` steals session cookies from every visitor who views the post.",
+      "truths": [
+        "Browsers execute whatever HTML they receive.",
+        "Scripts run with the victim's privileges.",
+        "Encoding must match the context."
+      ],
+      "derivation": [
+        "Rely on **auto-escaping** templates.",
+        "Avoid **innerHTML / dangerouslySetInnerHTML**.",
+        "**Sanitise** rich text (DOMPurify).",
+        "Set **HttpOnly** cookies.",
+        "Deploy a strict **CSP**."
+      ]
+    },
+    "analogy": {
+      "title": "A notice board that reads posts aloud as announcements",
+      "story": "If anyone can pin a note saying 'everyone hand your wallet to me', and the board announces it with authority, people comply.",
+      "mapping": [
+        [
+          "Pinned note",
+          "Stored payload"
+        ],
+        [
+          "Board's authority",
+          "Site's origin"
+        ],
+        [
+          "Reading only as text",
+          "Output encoding"
+        ]
+      ],
+      "breaks": "People might doubt a suspicious notice; browsers trust the origin completely."
+    },
+    "mindmap": {
+      "center": "XSS",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Reflected",
+            "Stored",
+            "DOM-based"
+          ]
+        },
+        {
+          "label": "Impact",
+          "children": [
+            "Session theft",
+            "Keylogging",
+            "Actions as victim"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Output encoding",
+            "Safe sinks",
+            "Sanitisation"
+          ]
+        },
+        {
+          "label": "Defence in depth",
+          "children": [
+            "CSP",
+            "HttpOnly",
+            "Trusted Types"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe rendering and CSP",
+      "scenario": "JS and header.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Payloads display as text, and inline scripts are blocked."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "// unsafe\nel.innerHTML = comment;\n// safe: rendered as text\nel.textContent = comment;\n// rich HTML: sanitise first\nel.innerHTML = DOMPurify.sanitize(comment);\n\n// header\n// Content-Security-Policy: script-src 'self' 'nonce-r4nd0m'; object-src 'none'"
+        }
+      ],
+      "outcome": "XSS mitigated."
+    },
+    "summary": {
+      "points": [
+        "Injection in the browser.",
+        "Encode by context.",
+        "CSP as a safety net."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't HttpOnly fully stop XSS damage?",
+        "a": "The script can still make requests as the user from the page, even without reading the cookie."
+      }
+    ]
+  },
+  "a10-server-side-request-forgery-ssrf": {
+    "core": "SSRF tricks a server into making requests on the attacker's behalf, usually through a feature that fetches a user-supplied URL (webhooks, image previews, PDF renderers). Because the server sits inside the network, it can reach internal admin panels and cloud metadata endpoints such as 169.254.169.254, which hand out IAM credentials. Defences are allow-lists of destinations, resolving and validating the IP (blocking private ranges and DNS rebinding), egress firewalls, and IMDSv2 on AWS.",
+    "first_principles": {
+      "problem": "An image-preview feature fetches `http://169.254.169.254/latest/meta-data/iam/...` and leaks the instance's AWS keys (as in the Capital One breach).",
+      "truths": [
+        "Servers have network access users don't.",
+        "URLs can point anywhere, including internal IPs.",
+        "Metadata endpoints trust local callers."
+      ],
+      "derivation": [
+        "**Allow-list** domains or schemes.",
+        "**Resolve DNS** and block private/link-local IPs.",
+        "Disable **redirects** or re-validate them.",
+        "Enforce **IMDSv2**.",
+        "Restrict **egress** at the network layer."
+      ]
+    },
+    "analogy": {
+      "title": "Asking the receptionist to fetch a parcel from 'room 1, back office'",
+      "story": "An outsider can't enter the back office, but the trusted receptionist can, and will bring back whatever's there.",
+      "mapping": [
+        [
+          "Receptionist",
+          "Server"
+        ],
+        [
+          "Back office",
+          "Internal network"
+        ],
+        [
+          "'Only fetch from the post room' rule",
+          "Destination allow-list"
+        ]
+      ],
+      "breaks": "A receptionist might question an odd request; a server follows the URL blindly."
+    },
+    "mindmap": {
+      "center": "SSRF",
+      "branches": [
+        {
+          "label": "Entry points",
+          "children": [
+            "Webhooks",
+            "URL previews",
+            "PDF/image renderers",
+            "XML (XXE)"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "Cloud metadata",
+            "Internal admin",
+            "Localhost services"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Allow-lists",
+            "IP validation",
+            "No redirects"
+          ]
+        },
+        {
+          "label": "Infra",
+          "children": [
+            "IMDSv2",
+            "Egress firewall"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Validating a URL",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Internal and metadata addresses are refused."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import ipaddress, socket\nfrom urllib.parse import urlparse\ndef safe(url):\n    u = urlparse(url)\n    if u.scheme not in (\"https\",): return False\n    ip = ipaddress.ip_address(socket.gethostbyname(u.hostname))\n    return not (ip.is_private or ip.is_loopback or ip.is_link_local)\n# then connect to that resolved IP (pin it) to beat DNS rebinding"
+        }
+      ],
+      "outcome": "SSRF blocked."
+    },
+    "summary": {
+      "points": [
+        "Server fetches on your behalf.",
+        "Metadata creds are the prize.",
+        "Validate resolved IPs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does IMDSv2 add against SSRF?",
+        "a": "It requires a PUT to get a session token with a hop limit, which simple GET-based SSRF can't do."
+      }
+    ]
+  }
+}

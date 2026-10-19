@@ -1,0 +1,995 @@
+{
+  "introduction-keeping-secrets-in-a-digital-world": {
+    "core": "Cryptography provides four guarantees. Confidentiality: only intended parties can read (encryption). Integrity: tampering is detectable (hashes, MACs). Authenticity: you know who sent it (signatures, MACs). Non-repudiation: the sender can't deny it (signatures). Modern systems combine primitives (symmetric ciphers for bulk data, asymmetric keys for exchange and identity, hashes for fingerprints) and the hard part is usually key management, not the maths.",
+    "first_principles": {
+      "problem": "A team 'encrypts' API tokens with base64 and believes they're secure.",
+      "truths": [
+        "Data crosses untrusted networks and storage.",
+        "Secrecy needs keys.",
+        "Encoding isn't encryption."
+      ],
+      "derivation": [
+        "Identify needed **property** (confidentiality, integrity, authenticity).",
+        "Choose **primitive** (AES, signatures, hashes).",
+        "Use **vetted libraries** (libsodium, Tink).",
+        "Manage **keys** carefully.",
+        "Never **roll your own** crypto."
+      ]
+    },
+    "analogy": {
+      "title": "Sealed envelopes, wax seals and fingerprints",
+      "story": "Envelopes hide contents, seals prove sender, and fingerprints detect tampering.",
+      "mapping": [
+        [
+          "Envelope",
+          "Encryption"
+        ],
+        [
+          "Wax seal",
+          "Signature"
+        ],
+        [
+          "Fingerprint",
+          "Hash"
+        ]
+      ],
+      "breaks": "Physical seals can be forged with skill; good crypto is computationally infeasible to forge."
+    },
+    "mindmap": {
+      "center": "Cryptography",
+      "branches": [
+        {
+          "label": "Goals",
+          "children": [
+            "Confidentiality",
+            "Integrity",
+            "Authenticity",
+            "Non-repudiation"
+          ]
+        },
+        {
+          "label": "Primitives",
+          "children": [
+            "Symmetric",
+            "Asymmetric",
+            "Hashes",
+            "MACs",
+            "KDFs"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Vetted libraries",
+            "Key management",
+            "No DIY"
+          ]
+        },
+        {
+          "label": "Threats",
+          "children": [
+            "Weak keys",
+            "Misuse",
+            "Quantum"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Encoding vs encryption",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Real confidentiality and integrity."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import base64\nbase64.b64encode(b\"token123\")          # b'dG9rZW4xMjM=' → anyone can decode\nfrom cryptography.fernet import Fernet\nk = Fernet.generate_key(); f = Fernet(k)\nct = f.encrypt(b\"token123\")            # unreadable without k, and tamper-evident"
+        }
+      ],
+      "outcome": "crypto goals clear."
+    },
+    "summary": {
+      "points": [
+        "Four properties.",
+        "Combine primitives.",
+        "Keys are the hard part."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why isn't base64 encoding a form of encryption?",
+        "a": "It's a reversible encoding with no key; anyone can decode it, so it provides no confidentiality."
+      }
+    ]
+  },
+  "symmetric-encryption-the-shared-secret": {
+    "core": "Symmetric encryption uses one secret key for both encryption and decryption. AES (128 or 256-bit) and ChaCha20 are the standards: fast, hardware-accelerated (AES-NI), and used for bulk data such as disks, TLS records and databases. Always use authenticated modes (AES-GCM, ChaCha20-Poly1305) that provide confidentiality and integrity together, with unique nonces per message. The challenge is securely sharing and rotating the key.",
+    "first_principles": {
+      "problem": "An app encrypts data with AES-ECB, and patterns in the plaintext remain visible in the ciphertext.",
+      "truths": [
+        "One key, both directions.",
+        "Modes determine security.",
+        "Nonce reuse can be catastrophic."
+      ],
+      "derivation": [
+        "Use **AES-GCM / ChaCha20-Poly1305**.",
+        "Never reuse **nonce + key**.",
+        "Avoid **ECB** and unauthenticated CBC.",
+        "Store keys in **KMS/HSM**.",
+        "**Rotate** keys (envelope encryption)."
+      ]
+    },
+    "analogy": {
+      "title": "A lockbox with one key copied to both parties",
+      "story": "Fast and simple, but you must get the copy to the other person safely.",
+      "mapping": [
+        [
+          "Lockbox key",
+          "Symmetric key"
+        ],
+        [
+          "Copying the key safely",
+          "Key distribution"
+        ],
+        [
+          "Tamper seal",
+          "Authentication tag"
+        ]
+      ],
+      "breaks": "Physical keys can be seen; leaked digital keys silently decrypt everything."
+    },
+    "mindmap": {
+      "center": "Symmetric Crypto",
+      "branches": [
+        {
+          "label": "Algorithms",
+          "children": [
+            "AES-128/256",
+            "ChaCha20"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "GCM (AEAD)",
+            "ChaCha20-Poly1305",
+            "Avoid ECB"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Unique nonces",
+            "AEAD",
+            "Key rotation"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "TLS records",
+            "Disk encryption",
+            "DB fields"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "KMS",
+            "Envelope encryption"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AEAD",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confidential, tamper-evident data."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import os\nfrom cryptography.hazmat.primitives.ciphers.aead import AESGCM\nkey = AESGCM.generate_key(bit_length=256)\naes = AESGCM(key)\nnonce = os.urandom(12)                      # unique per message\nct = aes.encrypt(nonce, b\"card=4111...\", b\"order-42\")   # AAD binds context\npt = aes.decrypt(nonce, ct, b\"order-42\")    # raises if tampered"
+        }
+      ],
+      "outcome": "correct symmetric encryption."
+    },
+    "summary": {
+      "points": [
+        "One shared key.",
+        "Use AEAD modes.",
+        "Unique nonces."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is AES-ECB mode insecure?",
+        "a": "Identical plaintext blocks produce identical ciphertext blocks, leaking patterns in the data."
+      }
+    ]
+  },
+  "asymmetric-encryption-public-and-private-keys": {
+    "core": "Asymmetric cryptography uses a key pair: a public key shared freely and a private key kept secret. Data encrypted with the public key can only be decrypted with the private key, and the private key can create signatures anyone verifies with the public key. It's slow, so in practice it's used to exchange or wrap symmetric keys (ECDH key agreement in TLS, RSA-OAEP key wrapping) and for identity. Common choices are RSA (2048–4096), ECDSA/ECDH (P-256) and Ed25519/X25519.",
+    "first_principles": {
+      "problem": "Two services need to establish encryption without having pre-shared any secret.",
+      "truths": [
+        "Public keys can be distributed openly.",
+        "Private keys never leave their owner.",
+        "Asymmetric ops are slow."
+      ],
+      "derivation": [
+        "Generate **key pairs**.",
+        "Use **ECDH/X25519** for key agreement.",
+        "Derive **symmetric session keys**.",
+        "Use **RSA-OAEP** only for key wrapping.",
+        "Protect **private keys** (HSM, KMS)."
+      ]
+    },
+    "analogy": {
+      "title": "A public mailbox with a private key",
+      "story": "Anyone can drop letters through the slot, but only the owner can open the box.",
+      "mapping": [
+        [
+          "Mail slot",
+          "Public key"
+        ],
+        [
+          "Box key",
+          "Private key"
+        ],
+        [
+          "Letter",
+          "Encrypted data"
+        ]
+      ],
+      "breaks": "Mailboxes can be pried open; strong keys can't be broken by brute force today."
+    },
+    "mindmap": {
+      "center": "Asymmetric Crypto",
+      "branches": [
+        {
+          "label": "Algorithms",
+          "children": [
+            "RSA",
+            "ECDSA/ECDH P-256",
+            "Ed25519/X25519"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Key exchange",
+            "Key wrapping",
+            "Signatures",
+            "Identity"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "Asymmetric for keys",
+            "Symmetric for data"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "HSM",
+            "KMS",
+            "Hardware tokens"
+          ]
+        },
+        {
+          "label": "Threat",
+          "children": [
+            "Quantum (Shor)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Key agreement",
+      "scenario": "Python X25519.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shared secret without pre-shared keys."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey\nfrom cryptography.hazmat.primitives.kdf.hkdf import HKDF\nfrom cryptography.hazmat.primitives import hashes\na, b = X25519PrivateKey.generate(), X25519PrivateKey.generate()\nshared = a.exchange(b.public_key())          # same as b.exchange(a.public_key())\nkey = HKDF(hashes.SHA256(), 32, None, b\"session\").derive(shared)   # AES-256 key"
+        }
+      ],
+      "outcome": "asymmetric crypto used properly."
+    },
+    "summary": {
+      "points": [
+        "Public + private.",
+        "Exchange keys, not data.",
+        "Protect private keys."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is asymmetric encryption rarely used to encrypt bulk data directly?",
+        "a": "It's much slower than symmetric encryption; it's used to agree on or wrap a symmetric key that encrypts the data."
+      }
+    ]
+  },
+  "encryption-vs-hashing-the-crucial-difference": {
+    "core": "Encryption is reversible with a key: you encrypt to hide data you'll later need back. Hashing is one-way: a fixed-size digest is computed from any input, and you can't recover the input, only recompute and compare. Use encryption for data you must read later (credit cards, PII), hashing for integrity checks and fingerprints (file checksums, deduplication), and slow salted password hashing for passwords. Mixing them up leads to stored-password breaches or unrecoverable data.",
+    "first_principles": {
+      "problem": "A company 'encrypts' passwords with AES, so a stolen key exposes every password.",
+      "truths": [
+        "Some data must be recoverable.",
+        "Some data only needs verification.",
+        "One-way functions can't be reversed."
+      ],
+      "derivation": [
+        "**Encrypt** data you must read back.",
+        "**Hash** for integrity/fingerprints.",
+        "**Password-hash** (Argon2/bcrypt) for credentials.",
+        "Use **HMAC** for keyed integrity.",
+        "Never **encrypt passwords**."
+      ]
+    },
+    "analogy": {
+      "title": "A locked safe vs a fingerprint",
+      "story": "You can open the safe with the key to get the document back; a fingerprint identifies a person but can't recreate them.",
+      "mapping": [
+        [
+          "Safe",
+          "Encryption"
+        ],
+        [
+          "Key",
+          "Encryption key"
+        ],
+        [
+          "Fingerprint",
+          "Hash"
+        ]
+      ],
+      "breaks": "Fingerprints can be faked physically; good hashes resist finding collisions."
+    },
+    "mindmap": {
+      "center": "Encryption vs Hashing",
+      "branches": [
+        {
+          "label": "Encryption",
+          "children": [
+            "Reversible",
+            "Needs key",
+            "Confidentiality"
+          ]
+        },
+        {
+          "label": "Hashing",
+          "children": [
+            "One-way",
+            "Fixed output",
+            "Integrity"
+          ]
+        },
+        {
+          "label": "Keyed hash",
+          "children": [
+            "HMAC"
+          ]
+        },
+        {
+          "label": "Passwords",
+          "children": [
+            "Argon2id",
+            "bcrypt",
+            "scrypt"
+          ]
+        },
+        {
+          "label": "Mistakes",
+          "children": [
+            "Encrypting passwords",
+            "Hashing data you need"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Right tool per job",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each data type protected appropriately."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import hashlib, hmac\nhashlib.sha256(open(\"release.tar.gz\", \"rb\").read()).hexdigest()   # file integrity\nhmac.new(b\"server-secret\", b\"user=42\", hashlib.sha256).hexdigest()  # tamper-proof cookie\nfrom argon2 import PasswordHasher\nPasswordHasher().hash(\"hunter2\")                                  # password storage"
+        }
+      ],
+      "outcome": "the distinction internalised."
+    },
+    "summary": {
+      "points": [
+        "Encrypt to recover.",
+        "Hash to verify.",
+        "Special hashes for passwords."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should passwords be hashed rather than encrypted?",
+        "a": "You only need to verify passwords, not recover them; encryption means anyone with the key can recover all passwords."
+      }
+    ]
+  },
+  "hashing-deep-dive-the-digital-fingerprint": {
+    "core": "A cryptographic hash (SHA-256, SHA-3, BLAKE2 or BLAKE3) maps any input to a fixed-size digest with three properties: preimage resistance (you can't find an input from the hash), second-preimage resistance (you can't find another input with the same hash) and collision resistance (you can't find any two inputs that collide). Tiny input changes flip about half the output bits (the avalanche effect). MD5 and SHA-1 are broken for collisions and must not be used for security.",
+    "first_principles": {
+      "problem": "A system verifies downloads with MD5, and an attacker crafts a malicious file with a colliding hash.",
+      "truths": [
+        "Fingerprints must be unique in practice.",
+        "Old algorithms were broken.",
+        "Hashes underpin signatures and Merkle trees."
+      ],
+      "derivation": [
+        "Use **SHA-256/SHA-3/BLAKE2/BLAKE3**.",
+        "Retire **MD5/SHA-1**.",
+        "Use **HMAC** for authentication (not plain hash).",
+        "Verify **artifacts** by digest.",
+        "Remember hashes don't hide **low-entropy** data."
+      ]
+    },
+    "analogy": {
+      "title": "A unique fingerprint for any document",
+      "story": "Change a single comma and the fingerprint is completely different, and nobody can craft two documents with the same print.",
+      "mapping": [
+        [
+          "Fingerprint",
+          "Digest"
+        ],
+        [
+          "Changed comma",
+          "Avalanche effect"
+        ],
+        [
+          "Forged twin",
+          "Collision"
+        ]
+      ],
+      "breaks": "Human fingerprints are fixed; hash strength erodes as attacks improve."
+    },
+    "mindmap": {
+      "center": "Hash Functions",
+      "branches": [
+        {
+          "label": "Properties",
+          "children": [
+            "Preimage",
+            "Second preimage",
+            "Collision resistance",
+            "Avalanche"
+          ]
+        },
+        {
+          "label": "Good",
+          "children": [
+            "SHA-256/512",
+            "SHA-3",
+            "BLAKE2/3"
+          ]
+        },
+        {
+          "label": "Broken",
+          "children": [
+            "MD5",
+            "SHA-1"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Integrity",
+            "Signatures",
+            "Merkle trees",
+            "Content addressing"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "Low-entropy inputs guessable",
+            "Length extension (use HMAC)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Avalanche + verification",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Integrity verified with a modern hash."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "echo -n 'transfer $100' | sha256sum\necho -n 'transfer $900' | sha256sum   # completely different digest\nsha256sum -c app-1.4.2.tar.gz.sha256\n# container images are addressed by sha256 digests: app@sha256:3f1c..."
+        }
+      ],
+      "outcome": "hash properties understood."
+    },
+    "summary": {
+      "points": [
+        "One-way fingerprints.",
+        "Collision resistance.",
+        "Retire MD5/SHA-1."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are MD5 and SHA-1 unsuitable for security today?",
+        "a": "Practical collision attacks exist, so attackers can create different inputs with the same hash."
+      }
+    ]
+  },
+  "password-hashing-salt-and-pepper": {
+    "core": "Passwords are low-entropy, so fast hashes like SHA-256 let attackers test billions of guesses per second on GPUs. Password hashing uses slow, memory-hard functions (Argon2id preferred, then scrypt or bcrypt) with a unique random salt per password, defeating precomputed rainbow tables and making identical passwords hash differently, plus optionally a pepper (a secret key held outside the database, for example in an HSM or KMS). Tune cost parameters to roughly 100–500 ms per hash.",
+    "first_principles": {
+      "problem": "A breached database of SHA-256 password hashes is cracked within hours.",
+      "truths": [
+        "Passwords are guessable.",
+        "Fast hashes enable brute force.",
+        "Identical passwords should hash differently."
+      ],
+      "derivation": [
+        "Use **Argon2id** (or bcrypt/scrypt).",
+        "Add **unique salt** per password.",
+        "Add **pepper** stored separately.",
+        "Tune **cost** to hardware.",
+        "**Rehash** on login when parameters improve."
+      ]
+    },
+    "analogy": {
+      "title": "A slow, unique lock per house",
+      "story": "Even if burglars know your street, each door has a different lock that takes an hour to pick.",
+      "mapping": [
+        [
+          "Unique lock",
+          "Salt"
+        ],
+        [
+          "Slow to pick",
+          "Cost factor"
+        ],
+        [
+          "Master code kept elsewhere",
+          "Pepper"
+        ]
+      ],
+      "breaks": "Locks can be bypassed by force; good parameters make brute force economically infeasible."
+    },
+    "mindmap": {
+      "center": "Password Hashing",
+      "branches": [
+        {
+          "label": "Algorithms",
+          "children": [
+            "Argon2id",
+            "scrypt",
+            "bcrypt",
+            "PBKDF2 (legacy)"
+          ]
+        },
+        {
+          "label": "Salt",
+          "children": [
+            "Unique",
+            "Random",
+            "Stored with hash"
+          ]
+        },
+        {
+          "label": "Pepper",
+          "children": [
+            "Secret key",
+            "HSM/KMS",
+            "Separate from DB"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Memory",
+            "Iterations",
+            "Parallelism",
+            "~250 ms"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Rehash on login"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Argon2id",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each guess costs attackers ~100 ms and 64 MiB."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from argon2 import PasswordHasher\nph = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=2)   # 64 MiB\nh = ph.hash(\"correct horse battery staple\")\n# $argon2id$v=19$m=65536,t=3,p=2$<salt>$<hash>\nph.verify(h, \"correct horse battery staple\")\nif ph.check_needs_rehash(h): h = ph.hash(password)"
+        }
+      ],
+      "outcome": "breach-resistant password storage."
+    },
+    "summary": {
+      "points": [
+        "Slow, memory-hard.",
+        "Unique salts.",
+        "Optional pepper."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a per-password salt prevent?",
+        "a": "Precomputed rainbow-table attacks and identical passwords producing identical hashes."
+      }
+    ]
+  },
+  "digital-signatures-authentication-and-non-repudiation": {
+    "core": "A digital signature is computed over a message's hash with a private key; anyone with the public key can verify that the message is unchanged and came from the key holder. Signatures underpin TLS certificates, code signing (Sigstore, Authenticode), JWTs (RS256, ES256, EdDSA), package and container image verification, and Git commit signing. Unlike HMACs (shared secrets), signatures give non-repudiation: only the private key holder could have signed.",
+    "first_principles": {
+      "problem": "Attackers replace a release binary on a mirror, and users can't detect it.",
+      "truths": [
+        "Hashes detect change only if trusted.",
+        "Private keys prove origin.",
+        "Public verification scales."
+      ],
+      "derivation": [
+        "**Sign** artifacts with private key.",
+        "**Verify** with trusted public key.",
+        "Use **Ed25519/ECDSA P-256**.",
+        "Protect keys (**HSM**, keyless Sigstore).",
+        "Publish signatures with **transparency logs**."
+      ]
+    },
+    "analogy": {
+      "title": "A notarised signature with a public specimen",
+      "story": "Anyone can compare the signature against the registered specimen; only the signer could produce it.",
+      "mapping": [
+        [
+          "Signature",
+          "Digital signature"
+        ],
+        [
+          "Public specimen",
+          "Public key"
+        ],
+        [
+          "Notary register",
+          "Transparency log"
+        ]
+      ],
+      "breaks": "Handwritten signatures can be forged; digital ones can't without the private key."
+    },
+    "mindmap": {
+      "center": "Signatures",
+      "branches": [
+        {
+          "label": "Algorithms",
+          "children": [
+            "Ed25519",
+            "ECDSA",
+            "RSA-PSS"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "TLS certs",
+            "Code signing",
+            "JWT",
+            "Containers",
+            "Git"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Integrity",
+            "Authenticity",
+            "Non-repudiation"
+          ]
+        },
+        {
+          "label": "Tooling",
+          "children": [
+            "Sigstore cosign",
+            "GPG",
+            "minisign"
+          ]
+        },
+        {
+          "label": "vs HMAC",
+          "children": [
+            "Public verify vs shared secret"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sign and verify an image",
+      "scenario": "cosign.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only CI-built, signed images verify."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cosign sign --yes ghcr.io/acme/api@sha256:3f1c...        # keyless via OIDC + Rekor log\ncosign verify ghcr.io/acme/api@sha256:3f1c... \\\n  --certificate-identity 'https://github.com/acme/api/.github/workflows/release.yml@refs/heads/main' \\\n  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+        }
+      ],
+      "outcome": "verifiable origin and integrity."
+    },
+    "summary": {
+      "points": [
+        "Sign with private key.",
+        "Verify with public.",
+        "Non-repudiation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a digital signature provide that an HMAC doesn't?",
+        "a": "Public verifiability and non-repudiation: anyone can verify it with the public key, and only the private key holder could have created it."
+      }
+    ]
+  },
+  "the-quantum-threat-to-cryptography": {
+    "core": "A large fault-tolerant quantum computer running Shor's algorithm would break RSA, Diffie-Hellman and elliptic-curve cryptography (key exchange and signatures) entirely. Grover's algorithm only halves symmetric and hash security, so AES-256 and SHA-384+ remain safe. The urgent risk is 'harvest now, decrypt later': adversaries recording encrypted traffic today to decrypt in the future, which matters for data with long secrecy lifetimes.",
+    "first_principles": {
+      "problem": "Health records encrypted today with ECDH-based TLS must stay confidential for 30 years.",
+      "truths": [
+        "Shor breaks public-key maths.",
+        "Grover weakens symmetric only moderately.",
+        "Recorded traffic can be decrypted later."
+      ],
+      "derivation": [
+        "**Inventory** asymmetric crypto usage.",
+        "Assess **data secrecy lifetime**.",
+        "Use **AES-256, SHA-384+**.",
+        "Plan **PQC migration** (hybrid).",
+        "Build **crypto agility**."
+      ]
+    },
+    "analogy": {
+      "title": "A future master key for today's locks",
+      "story": "Someone could photograph your locked boxes now and open them all once the master key is invented.",
+      "mapping": [
+        [
+          "Photographing boxes",
+          "Harvesting traffic"
+        ],
+        [
+          "Master key",
+          "Quantum computer"
+        ],
+        [
+          "New locks",
+          "PQC"
+        ]
+      ],
+      "breaks": "Master keys are physical; quantum timelines are uncertain but the risk to long-lived data is real now."
+    },
+    "mindmap": {
+      "center": "Quantum Threat",
+      "branches": [
+        {
+          "label": "Shor",
+          "children": [
+            "Breaks RSA",
+            "Breaks ECC",
+            "Breaks DH"
+          ]
+        },
+        {
+          "label": "Grover",
+          "children": [
+            "Halves symmetric strength",
+            "AES-256 OK"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "Harvest now, decrypt later",
+            "Signature forgery later"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "Inventory",
+            "Hybrid PQC",
+            "Crypto agility",
+            "Mosca's theorem"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mosca's inequality",
+      "scenario": "Decision.",
+      "flow": [
+        "x = years data must stay secret (30)",
+        "y = years to migrate systems (5)",
+        "z = years until quantum threat (unknown, maybe 10–15)",
+        "If x + y > z → act now"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Prioritises long-lived data for PQC."
+        }
+      ],
+      "code": [],
+      "outcome": "quantum risk framed."
+    },
+    "summary": {
+      "points": [
+        "Public-key crypto at risk.",
+        "Symmetric mostly fine.",
+        "Harvest-now risk is current."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is 'harvest now, decrypt later' a present-day concern?",
+        "a": "Adversaries can record encrypted traffic today and decrypt it once a capable quantum computer exists, exposing long-lived secrets."
+      }
+    ]
+  },
+  "post-quantum-cryptography-pqc": {
+    "core": "NIST standardised post-quantum algorithms in 2024: ML-KEM (Kyber, FIPS 203) for key encapsulation, ML-DSA (Dilithium, FIPS 204) and SLH-DSA (SPHINCS+, FIPS 205) for signatures, with FN-DSA (Falcon) to follow. Deployment uses hybrid modes (classical X25519 plus ML-KEM-768) so security holds if either survives. Browsers and Cloudflare already use hybrid key exchange in TLS 1.3. PQC keys and signatures are larger, which affects handshakes and certificates.",
+    "first_principles": {
+      "problem": "A bank must start migrating to quantum-safe TLS without risking new, less-tested algorithms alone.",
+      "truths": [
+        "New algorithms resist known quantum attacks.",
+        "New algorithms are less battle-tested.",
+        "Hybrid combines strengths."
+      ],
+      "derivation": [
+        "Use **hybrid KEMs** (X25519MLKEM768).",
+        "Adopt **ML-DSA** for signatures where supported.",
+        "Test **handshake sizes/latency**.",
+        "Upgrade **libraries** (OpenSSL 3.5+, BoringSSL).",
+        "Maintain **crypto inventory** and agility."
+      ]
+    },
+    "analogy": {
+      "title": "Two different locks on the same door",
+      "story": "A thief must defeat both the familiar lock and the new quantum-proof one.",
+      "mapping": [
+        [
+          "Familiar lock",
+          "X25519"
+        ],
+        [
+          "New lock",
+          "ML-KEM"
+        ],
+        [
+          "Both required",
+          "Hybrid"
+        ]
+      ],
+      "breaks": "Two locks double physical effort; hybrid PQC also increases handshake bytes."
+    },
+    "mindmap": {
+      "center": "PQC",
+      "branches": [
+        {
+          "label": "KEM",
+          "children": [
+            "ML-KEM (Kyber)"
+          ]
+        },
+        {
+          "label": "Signatures",
+          "children": [
+            "ML-DSA (Dilithium)",
+            "SLH-DSA (SPHINCS+)",
+            "FN-DSA (Falcon)"
+          ]
+        },
+        {
+          "label": "Deployment",
+          "children": [
+            "Hybrid X25519+ML-KEM",
+            "TLS 1.3"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Larger keys/signatures",
+            "Handshake size"
+          ]
+        },
+        {
+          "label": "Support",
+          "children": [
+            "Chrome",
+            "Cloudflare",
+            "OpenSSL 3.5",
+            "AWS KMS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hybrid TLS",
+      "scenario": "OpenSSL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Quantum-resistant key exchange with classical fallback."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "openssl s_client -connect pq.cloudflareresearch.com:443 -groups X25519MLKEM768 </dev/null 2>/dev/null | grep -i 'Negotiated TLS1.3 group'\n# Negotiated TLS1.3 group: X25519MLKEM768\n# nginx (OpenSSL 3.5+): ssl_ecdh_curve X25519MLKEM768:X25519;"
+        }
+      ],
+      "outcome": "PQC migration started safely."
+    },
+    "summary": {
+      "points": [
+        "NIST standards 2024.",
+        "Hybrid deployment.",
+        "Mind sizes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why deploy post-quantum key exchange in hybrid mode with a classical algorithm?",
+        "a": "Security holds if either algorithm remains unbroken, protecting against flaws in new PQC algorithms and against quantum attacks on classical ones."
+      }
+    ]
+  }
+}

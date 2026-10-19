@@ -1,0 +1,555 @@
+{
+  "introduction-the-log-everything-problem": {
+    "core": "Security teams want every log, because investigations need context and you can't search data you didn't collect. But volumes are enormous (terabytes per day), traditional SIEMs price by ingest, and most data is rarely queried. The modern answer splits the problem: route high-value, real-time data to the SIEM for detection, and land everything in cheap object storage (a security data lake) in open formats for hunting, investigation and long retention, with a pipeline that filters, normalises and routes in between.",
+    "first_principles": {
+      "problem": "A SIEM bill passes $2M a year, so the team drops DNS and VPC flow logs, exactly the data needed in the next incident.",
+      "truths": [
+        "Unknown questions need broad data.",
+        "Ingest-priced SIEMs punish volume.",
+        "Most logs are cold."
+      ],
+      "derivation": [
+        "**Tier** data: hot (SIEM) vs cold (lake).",
+        "Use a **pipeline** (Cribl, Vector) to filter and route.",
+        "**Normalise** to a schema (OCSF, ECS).",
+        "Store in **open formats** (Parquet).",
+        "Set **retention** by value and regulation."
+      ]
+    },
+    "analogy": {
+      "title": "A library with a reading room and an archive",
+      "story": "Popular books sit on open shelves; everything else is kept in a cheap warehouse but can still be fetched when needed.",
+      "mapping": [
+        [
+          "Reading room",
+          "SIEM (hot)"
+        ],
+        [
+          "Archive",
+          "Data lake (cold)"
+        ],
+        [
+          "Librarian sorting books",
+          "Pipeline routing"
+        ]
+      ],
+      "breaks": "Archive retrieval takes days; lake queries take seconds to minutes."
+    },
+    "mindmap": {
+      "center": "Log Everything",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Volume",
+            "Cost",
+            "Rare queries"
+          ]
+        },
+        {
+          "label": "Tiers",
+          "children": [
+            "Hot SIEM",
+            "Warm search",
+            "Cold lake"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Filter",
+            "Enrich",
+            "Route",
+            "Normalise"
+          ]
+        },
+        {
+          "label": "Formats",
+          "children": [
+            "OCSF",
+            "ECS",
+            "Parquet"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Routing in a pipeline",
+      "scenario": "Vector config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "High-value events go to the SIEM, and everything goes to the lake."
+        }
+      ],
+      "code": [
+        {
+          "lang": "toml",
+          "text": "[transforms.route]\ntype = \"route\"\ninputs = [\"all_logs\"]\nroute.siem = '.class == \"auth\" || .severity >= 4'\n\n[sinks.siem]\ninputs = [\"route.siem\"]\ntype = \"splunk_hec_logs\"\n\n[sinks.lake]\ninputs = [\"all_logs\"]          # everything to S3 as Parquet\ntype = \"aws_s3\"\nencoding.codec = \"parquet\""
+        }
+      ],
+      "outcome": "full visibility at sane cost."
+    },
+    "summary": {
+      "points": [
+        "Keep everything somewhere.",
+        "Tier by value.",
+        "Pipelines route."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why normalise to a schema like OCSF?",
+        "a": "So detections and queries work across sources without per-vendor field mapping."
+      }
+    ]
+  },
+  "the-telemetry-triad-what-are-we-collecting": {
+    "core": "Security telemetry falls into three complementary sources. Endpoint data (EDR, process trees, file and registry changes, eBPF events) shows what ran. Network data (flow logs, DNS, proxy, IDS) shows who talked to whom. Identity and cloud control-plane logs (SSO sign-ins, IAM changes, CloudTrail, Kubernetes audit) show who did what with which permission. Attacks cross all three, so correlation across them, with consistent identities and timestamps, is what turns events into a story.",
+    "first_principles": {
+      "problem": "An alert shows a suspicious process, but without DNS and sign-in logs the team can't tell how the attacker got in or what they reached.",
+      "truths": [
+        "Each source sees part of an attack.",
+        "Correlation needs common keys.",
+        "Time must be synchronised."
+      ],
+      "derivation": [
+        "Collect **endpoint** (EDR/eBPF).",
+        "Collect **network** (flow, DNS, proxy).",
+        "Collect **identity/cloud** (IdP, CloudTrail, K8s audit).",
+        "Normalise **user, host, IP** fields.",
+        "Sync **time** (NTP, UTC)."
+      ]
+    },
+    "analogy": {
+      "title": "A detective using witness statements, CCTV and phone records together",
+      "story": "Each alone is partial; together they reconstruct who did what, where and when.",
+      "mapping": [
+        [
+          "CCTV",
+          "Endpoint telemetry"
+        ],
+        [
+          "Phone records",
+          "Network logs"
+        ],
+        [
+          "Witness IDs",
+          "Identity logs"
+        ]
+      ],
+      "breaks": "Witnesses can lie; logs can be tampered with too, so protect their integrity."
+    },
+    "mindmap": {
+      "center": "Telemetry Triad",
+      "branches": [
+        {
+          "label": "Endpoint",
+          "children": [
+            "EDR",
+            "Process trees",
+            "eBPF",
+            "File changes"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "VPC flow",
+            "DNS",
+            "Proxy",
+            "IDS"
+          ]
+        },
+        {
+          "label": "Identity/Cloud",
+          "children": [
+            "IdP sign-ins",
+            "CloudTrail",
+            "K8s audit",
+            "SaaS logs"
+          ]
+        },
+        {
+          "label": "Glue",
+          "children": [
+            "Common fields",
+            "UTC time",
+            "Asset inventory"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Correlating three sources",
+      "scenario": "SQL over the lake.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One query links login → process → C2 domain."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT s.user, s.src_ip, p.process, d.query\nFROM signins s\nJOIN edr_process p ON p.host = s.device AND p.ts BETWEEN s.ts AND s.ts + INTERVAL '1' HOUR\nJOIN dns d ON d.host = p.host AND d.ts BETWEEN p.ts AND p.ts + INTERVAL '5' MINUTE\nWHERE s.risk = 'high' AND d.query LIKE '%.top'"
+        }
+      ],
+      "outcome": "complete attack narrative."
+    },
+    "summary": {
+      "points": [
+        "Endpoint, network, identity.",
+        "Correlate on common keys.",
+        "Synchronise time."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which telemetry source would show an attacker creating new IAM access keys?",
+        "a": "Cloud control-plane logs such as AWS CloudTrail."
+      }
+    ]
+  },
+  "data-lake-architecture-patterns-and-operational-considerations": {
+    "core": "A security data lake stores normalised telemetry in object storage (S3, GCS, ADLS) in columnar formats (Parquet) with table formats (Iceberg, Delta) for schema evolution and efficient queries. Query engines (Athena, Trino, Snowflake, Databricks) search it, and Amazon Security Lake standardises on OCSF. Operational keys are partitioning by time and source, compaction of small files, schema governance, tiered retention, access control (logs contain sensitive data) and immutability for evidence.",
+    "first_principles": {
+      "problem": "A lake of raw JSON in millions of tiny files makes a 30-day hunt query take an hour and cost hundreds of dollars.",
+      "truths": [
+        "Columnar formats scan less.",
+        "Partitions prune data.",
+        "Small files kill performance."
+      ],
+      "derivation": [
+        "Store as **Parquet + Iceberg**.",
+        "**Partition** by date/source.",
+        "**Compact** small files.",
+        "Govern **schemas** (OCSF).",
+        "Apply **retention, access control, object lock**."
+      ]
+    },
+    "analogy": {
+      "title": "A well-organised warehouse with labelled aisles",
+      "story": "Find 'March, firewall logs' by walking to one aisle, not opening every box.",
+      "mapping": [
+        [
+          "Aisles",
+          "Partitions"
+        ],
+        [
+          "Labelled boxes",
+          "Columnar files"
+        ],
+        [
+          "Inventory system",
+          "Table format catalogue"
+        ]
+      ],
+      "breaks": "Warehouses hold fixed goods; logs evolve schemas, which table formats must handle."
+    },
+    "mindmap": {
+      "center": "Security Data Lake",
+      "branches": [
+        {
+          "label": "Storage",
+          "children": [
+            "S3/GCS/ADLS",
+            "Parquet",
+            "Iceberg/Delta"
+          ]
+        },
+        {
+          "label": "Query",
+          "children": [
+            "Athena",
+            "Trino",
+            "Snowflake",
+            "Databricks"
+          ]
+        },
+        {
+          "label": "Schema",
+          "children": [
+            "OCSF",
+            "Evolution"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Partitioning",
+            "Compaction",
+            "Retention",
+            "Object lock"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Access control",
+            "PII handling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Iceberg table",
+      "scenario": "Athena DDL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hunt queries scan gigabytes, not terabytes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "CREATE TABLE sec.dns (\n  ts timestamp, host string, src_ip string, query string, rcode string)\nPARTITIONED BY (day(ts))\nLOCATION 's3://sec-lake/dns/'\nTBLPROPERTIES ('table_type'='ICEBERG', 'format'='parquet');\n-- WHERE ts > now() - interval '30' day → scans only 30 partitions"
+        }
+      ],
+      "outcome": "fast, cheap lake queries."
+    },
+    "summary": {
+      "points": [
+        "Columnar + table format.",
+        "Partition and compact.",
+        "Govern and protect."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why enable S3 Object Lock on security logs?",
+        "a": "To make evidence immutable so an attacker or insider can't delete or alter it."
+      }
+    ]
+  },
+  "siem-engineering-detection-as-code": {
+    "core": "Detection-as-code treats detection rules like software: written in a portable format (Sigma, or the SIEM's own query language), stored in Git, peer-reviewed, unit-tested against sample logs, mapped to MITRE ATT&CK, deployed through CI/CD, and measured for precision. This replaces clicking rules into a SIEM UI with versioned, reviewable, testable logic, and makes tuning and coverage tracking systematic. Each rule should come with a triage runbook.",
+    "first_principles": {
+      "problem": "SIEM rules edited in the UI break silently, nobody knows who changed what, and false positives bury real alerts.",
+      "truths": [
+        "Untested rules drift and break.",
+        "Reviews improve quality.",
+        "Coverage must be measurable."
+      ],
+      "derivation": [
+        "Write rules in **Sigma** / YAML.",
+        "Store in **Git** with PR review.",
+        "**Unit-test** with true and false samples.",
+        "Tag **ATT&CK** techniques.",
+        "**Deploy via CI**; track **precision** metrics."
+      ]
+    },
+    "analogy": {
+      "title": "Treating smoke-detector settings like building code that's tested",
+      "story": "Each detector is installed to spec, tested with real smoke, and logged, instead of being set by guesswork.",
+      "mapping": [
+        [
+          "Detector spec",
+          "Rule"
+        ],
+        [
+          "Smoke test",
+          "Unit test"
+        ],
+        [
+          "Install log",
+          "Git history"
+        ]
+      ],
+      "breaks": "Smoke is the same everywhere; each environment's 'normal' differs, so rules need tuning."
+    },
+    "mindmap": {
+      "center": "Detection as Code",
+      "branches": [
+        {
+          "label": "Format",
+          "children": [
+            "Sigma",
+            "KQL",
+            "SPL",
+            "YARA-L"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Git",
+            "PR review",
+            "CI deploy"
+          ]
+        },
+        {
+          "label": "Quality",
+          "children": [
+            "Unit tests",
+            "Precision",
+            "Alert volume"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "ATT&CK mapping",
+            "Runbooks"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "sigma-cli",
+            "Panther",
+            "Chronicle"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sigma rule",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reviewed, tested, portable detection deployed automatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "title: AWS root account console login\nid: 8f7a1c2e-0000-4000-8000-000000000001\nlogsource: { product: aws, service: cloudtrail }\ndetection:\n  sel:\n    eventName: ConsoleLogin\n    userIdentity.type: Root\n  condition: sel\nlevel: high\ntags: [attack.t1078.004]\n# CI: sigma convert -t splunk rule.yml + run against test fixtures"
+        }
+      ],
+      "outcome": "reliable detections."
+    },
+    "summary": {
+      "points": [
+        "Rules are code.",
+        "Test with samples.",
+        "Map to ATT&CK."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the benefit of Sigma over native SIEM queries?",
+        "a": "Portability: one rule can be converted to many SIEM query languages."
+      }
+    ]
+  },
+  "advanced-threat-hunting-finding-the-needle": {
+    "core": "Threat hunting is the proactive, hypothesis-driven search for attackers who evaded existing detections. A hunter forms a hypothesis from threat intel or ATT&CK ('an attacker uses living-off-the-land binaries for persistence'), queries broad telemetry in the lake, uses statistics such as stack counting and rare-value analysis to find anomalies, investigates the outliers, and turns confirmed patterns into new automated detections. Hunting assumes breach and feeds the detection pipeline.",
+    "first_principles": {
+      "problem": "No alerts have fired in months, but an APT has been beaconing to a C2 domain every 60 seconds the whole time.",
+      "truths": [
+        "Detections miss novel techniques.",
+        "Attackers are statistically rare.",
+        "Hunts should produce detections."
+      ],
+      "derivation": [
+        "Form a **hypothesis** (intel, ATT&CK).",
+        "Query **broad telemetry**.",
+        "Use **stacking / rarity / beaconing** analysis.",
+        "**Investigate** outliers.",
+        "Convert findings into **detections**."
+      ]
+    },
+    "analogy": {
+      "title": "A naturalist searching for a rare species",
+      "story": "You don't wait for it to walk past the camera; you study habitats, look for signs, and follow the rare tracks.",
+      "mapping": [
+        [
+          "Habitat",
+          "Telemetry source"
+        ],
+        [
+          "Tracks",
+          "Anomalies"
+        ],
+        [
+          "Field guide",
+          "ATT&CK / intel"
+        ]
+      ],
+      "breaks": "Species don't hide on purpose; attackers actively blend in."
+    },
+    "mindmap": {
+      "center": "Threat Hunting",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Threat intel",
+            "ATT&CK",
+            "Incidents"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Stack counting",
+            "Rarity",
+            "Beaconing",
+            "Baselines"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Data lake",
+            "EDR",
+            "DNS"
+          ]
+        },
+        {
+          "label": "Outputs",
+          "children": [
+            "Findings",
+            "New detections",
+            "Visibility gaps"
+          ]
+        },
+        {
+          "label": "Models",
+          "children": [
+            "PEAK",
+            "TaHiTI"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Beaconing hunt",
+      "scenario": "SQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "The 60-second beacon stands out; a detection is then written."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "-- hosts contacting a domain at very regular intervals\nWITH c AS (\n  SELECT host, query, ts - lag(ts) OVER (PARTITION BY host, query ORDER BY ts) AS gap\n  FROM sec.dns WHERE ts > now() - interval '7' day)\nSELECT host, query, count(*) n, stddev(to_milliseconds(gap)) jitter\nFROM c GROUP BY host, query\nHAVING count(*) > 500 AND stddev(to_milliseconds(gap)) < 2000\nORDER BY jitter;"
+        }
+      ],
+      "outcome": "hidden attacker found."
+    },
+    "summary": {
+      "points": [
+        "Hypothesis-driven.",
+        "Statistics find rarity.",
+        "Hunts become detections."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should a successful hunt produce besides a finding?",
+        "a": "A new or improved automated detection, so the same pattern doesn't need hunting again."
+      }
+    ]
+  }
+}

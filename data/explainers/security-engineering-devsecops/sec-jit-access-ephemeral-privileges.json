@@ -1,0 +1,565 @@
+{
+  "introduction-the-liability-of-standing-access": {
+    "core": "Standing privileges (permanent admin roles, long-lived keys, always-on production access) are a constant liability. A phished admin, leaked key or insider can act at any time, and most of that access is unused most of the time. Just-in-time (JIT) access grants elevated permissions only when needed, for a limited duration, with approval and logging, then revokes them automatically, moving towards zero standing privilege.",
+    "first_principles": {
+      "problem": "A breached engineer laptop holds AWS keys with permanent AdministratorAccess, used by attackers months later.",
+      "truths": [
+        "Permanent access is always exploitable.",
+        "Most privileges sit idle.",
+        "Time-bound grants shrink exposure."
+      ],
+      "derivation": [
+        "**Inventory** standing privileges.",
+        "Default to **least privilege**.",
+        "Grant elevation **on request**.",
+        "**Expire** automatically.",
+        "**Log and review** every grant."
+      ]
+    },
+    "analogy": {
+      "title": "Borrowing the master key from security for one job",
+      "story": "You sign it out for an hour with a reason, and it's returned automatically, instead of carrying it permanently.",
+      "mapping": [
+        [
+          "Master key",
+          "Admin role"
+        ],
+        [
+          "Sign-out sheet",
+          "Request + approval"
+        ],
+        [
+          "Auto-return",
+          "Expiry"
+        ]
+      ],
+      "breaks": "Keys must be physically returned; JIT revocation is automatic."
+    },
+    "mindmap": {
+      "center": "Standing Access Risk",
+      "branches": [
+        {
+          "label": "Risks",
+          "children": [
+            "Phished admins",
+            "Leaked keys",
+            "Insiders",
+            "Privilege creep"
+          ]
+        },
+        {
+          "label": "JIT",
+          "children": [
+            "On-demand",
+            "Time-bound",
+            "Approved",
+            "Logged"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Zero standing privilege"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Cloud",
+            "K8s",
+            "Databases",
+            "SSH"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Exposure math",
+      "scenario": "Comparison.",
+      "flow": [
+        "Standing admin: exploitable 8,760 h/year",
+        "JIT: ~20 grants × 1 h = 20 h/year",
+        "Exposure window cut ~99.8%",
+        "Every use has a ticket and audit trail"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dramatically smaller attack window."
+        }
+      ],
+      "code": [],
+      "outcome": "case for JIT."
+    },
+    "summary": {
+      "points": [
+        "Standing access is risk.",
+        "Grant when needed.",
+        "Expire automatically."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are standing privileges a liability even if never misused by their owner?",
+        "a": "They can be exploited at any time by attackers who compromise the account or credentials, and most of the time they aren't needed."
+      }
+    ]
+  },
+  "how-jit-works-the-four-step-flow": {
+    "core": "A JIT flow has four steps. (1) Request: the user asks for a specific role or resource, a duration and a justification (ticket ID). (2) Approve: by policy, auto-approve low-risk, require a peer or manager or on-call for high-risk, maybe with MFA step-up. (3) Grant: the system creates a temporary binding or credentials (an IAM role session, group membership, a K8s RoleBinding, a DB user) for the window. (4) Revoke and audit: automatic removal at expiry, with logs of who, what, why and actions taken.",
+    "first_principles": {
+      "problem": "Engineers wait hours for production access during incidents because approvals are manual tickets.",
+      "truths": [
+        "Access needs context and approval.",
+        "Speed matters during incidents.",
+        "Revocation must be automatic."
+      ],
+      "derivation": [
+        "**Request** with scope, duration, reason.",
+        "**Approve** by policy (auto, peer, on-call).",
+        "**Grant** temporary credentials/bindings.",
+        "**Revoke** at expiry automatically.",
+        "**Audit** actions during session."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel room key for your stay",
+      "story": "You request a room, reception approves, you get a key that stops working at checkout, and the stay is recorded.",
+      "mapping": [
+        [
+          "Request room",
+          "Request"
+        ],
+        [
+          "Reception",
+          "Approval"
+        ],
+        [
+          "Key card",
+          "Temporary grant"
+        ],
+        [
+          "Checkout",
+          "Revocation"
+        ]
+      ],
+      "breaks": "Hotel keys rarely expire mid-stay; JIT grants can be shortened or revoked anytime."
+    },
+    "mindmap": {
+      "center": "JIT Flow",
+      "branches": [
+        {
+          "label": "Request",
+          "children": [
+            "Scope",
+            "Duration",
+            "Justification"
+          ]
+        },
+        {
+          "label": "Approve",
+          "children": [
+            "Auto",
+            "Peer",
+            "Manager",
+            "On-call",
+            "MFA step-up"
+          ]
+        },
+        {
+          "label": "Grant",
+          "children": [
+            "Temp role",
+            "Group add",
+            "Short-lived creds"
+          ]
+        },
+        {
+          "label": "Revoke",
+          "children": [
+            "Auto expiry",
+            "Manual early"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "Who/what/why",
+            "Session logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Policy tiers",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fast for low risk, controlled for high risk."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "access_policies:\n  - resource: aws:prod:ReadOnly\n    max_duration: 8h\n    approval: auto\n  - resource: aws:prod:Admin\n    max_duration: 1h\n    approval: [on-call-lead]\n    require: [mfa, ticket]\n  - resource: k8s:prod:cluster-admin\n    max_duration: 30m\n    approval: [two-person]"
+        }
+      ],
+      "outcome": "practical JIT workflow."
+    },
+    "summary": {
+      "points": [
+        "Request, approve, grant, revoke.",
+        "Risk-tiered approval.",
+        "Audit everything."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should a JIT access request always include?",
+        "a": "The specific scope (role/resource), a bounded duration and a justification such as a ticket or incident ID."
+      }
+    ]
+  },
+  "jit-for-cloud-infrastructure-aws-gcp-and-azure-patterns": {
+    "core": "Each cloud has JIT primitives. AWS uses IAM Identity Center permission sets with temporary sessions (TEAM, the open-source temporary elevated access tool, or third-party brokers) and STS AssumeRole with short DurationSeconds and session tags. GCP uses Privileged Access Manager or IAM Conditions with expiring bindings (request.time < timestamp). Azure uses Entra Privileged Identity Management (PIM) with eligible versus active role assignments, activation, approval and MFA. All produce audit trails in CloudTrail, Cloud Audit Logs or Entra logs.",
+    "first_principles": {
+      "problem": "A multi-cloud org has permanent Owner/Admin assignments in AWS, GCP and Azure for 40 engineers.",
+      "truths": [
+        "Clouds support temporary credentials.",
+        "Native tools integrate with audit logs.",
+        "Eligibility can replace assignment."
+      ],
+      "derivation": [
+        "AWS: **Identity Center + TEAM/STS**.",
+        "GCP: **PAM / conditional expiring bindings**.",
+        "Azure: **PIM eligible roles**.",
+        "Require **MFA on activation**.",
+        "Alert on **standing admin** drift."
+      ]
+    },
+    "analogy": {
+      "title": "Different hotel chains, same check-in model",
+      "story": "Each chain's front desk works slightly differently, but all issue time-limited room keys.",
+      "mapping": [
+        [
+          "Hotel chains",
+          "Clouds"
+        ],
+        [
+          "Front desk",
+          "PIM/PAM/TEAM"
+        ],
+        [
+          "Room keys",
+          "Temporary roles"
+        ]
+      ],
+      "breaks": "Hotel systems don't share guests; multi-cloud JIT may need a broker for consistency."
+    },
+    "mindmap": {
+      "center": "Cloud JIT",
+      "branches": [
+        {
+          "label": "AWS",
+          "children": [
+            "Identity Center",
+            "TEAM",
+            "STS AssumeRole",
+            "Session tags"
+          ]
+        },
+        {
+          "label": "GCP",
+          "children": [
+            "Privileged Access Manager",
+            "IAM Conditions expiry"
+          ]
+        },
+        {
+          "label": "Azure",
+          "children": [
+            "Entra PIM",
+            "Eligible vs active"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "CloudTrail",
+            "Cloud Audit Logs",
+            "Entra audit"
+          ]
+        },
+        {
+          "label": "Brokers",
+          "children": [
+            "Sym",
+            "Indent",
+            "ConductorOne",
+            "Opal"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "GCP expiring binding",
+      "scenario": "gcloud.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Admin access expires automatically at noon."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "gcloud projects add-iam-policy-binding prod-123 \\\n  --member='user:alice@acme.com' --role='roles/compute.admin' \\\n  --condition='expression=request.time < timestamp(\"2026-10-19T12:00:00Z\"),title=jit-INC-4821'\n# Azure: az rest ... roleEligibilityScheduleRequests (PIM) ; AWS: TEAM request in Identity Center"
+        }
+      ],
+      "outcome": "native JIT across clouds."
+    },
+    "summary": {
+      "points": [
+        "Each cloud has tools.",
+        "Eligible not active.",
+        "Audit natively."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Azure PIM mean by an 'eligible' role assignment?",
+        "a": "The user can activate the role on demand (with MFA/approval) for a limited time, but doesn't hold it permanently."
+      }
+    ]
+  },
+  "automated-workflows-sym-indent-and-native-cloud-tools": {
+    "core": "JIT succeeds when requesting is as easy as asking a colleague. Tools like Sym, Indent, ConductorOne and Opal integrate requests into Slack or CLI, apply approval policies as code, call cloud, IdP, Kubernetes and database APIs to grant and revoke, and log to SIEM. Integrate with on-call (PagerDuty) for auto-approval during incidents, and with ticketing for justification, so engineers don't route around controls.",
+    "first_principles": {
+      "problem": "JIT exists, but engineers keep a shared break-glass account because the request process takes 20 minutes.",
+      "truths": [
+        "Friction drives workarounds.",
+        "Chat is where engineers work.",
+        "Policies can be codified."
+      ],
+      "derivation": [
+        "Request via **Slack/CLI**.",
+        "Write **approval policies as code**.",
+        "**Auto-approve** on-call during incidents.",
+        "Integrate **ticket** references.",
+        "Stream **audit events** to SIEM."
+      ]
+    },
+    "analogy": {
+      "title": "Ordering coffee with an app vs filling a form",
+      "story": "If it's one tap, nobody sneaks behind the counter to make their own.",
+      "mapping": [
+        [
+          "One-tap app",
+          "Slack JIT bot"
+        ],
+        [
+          "Sneaking behind counter",
+          "Shared admin accounts"
+        ],
+        [
+          "Order history",
+          "Audit log"
+        ]
+      ],
+      "breaks": "Coffee apps don't need approvals; JIT still needs policy for high-risk roles."
+    },
+    "mindmap": {
+      "center": "JIT Automation",
+      "branches": [
+        {
+          "label": "Interfaces",
+          "children": [
+            "Slack",
+            "CLI",
+            "Web"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Sym",
+            "Indent",
+            "ConductorOne",
+            "Opal",
+            "TEAM",
+            "PIM"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "IdP groups",
+            "Cloud IAM",
+            "K8s",
+            "Databases",
+            "PagerDuty",
+            "Jira"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "As code",
+            "Risk tiers"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "SIEM streaming"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Slack request",
+      "scenario": "Interaction.",
+      "flow": [
+        "/access request aws-prod-admin 1h INC-4821",
+        "Policy: on-call engineer → auto-approve, MFA prompt",
+        "Bot adds user to IdP group; AWS session issued",
+        "After 1h: group removed; summary posted to #access-audit"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Secure access in under a minute."
+        }
+      ],
+      "code": [],
+      "outcome": "frictionless, auditable JIT."
+    },
+    "summary": {
+      "points": [
+        "Make requesting easy.",
+        "Policy as code.",
+        "Integrate on-call."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is low friction critical for JIT adoption?",
+        "a": "If requesting access is slow or painful, engineers create workarounds like shared or standing admin accounts, defeating the control."
+      }
+    ]
+  },
+  "break-glass-procedures-when-jit-itself-fails": {
+    "core": "If the IdP, JIT broker or SSO is down during an outage, you still need access. Break-glass accounts are emergency, highly privileged credentials (cloud root or emergency IAM users, local DB superusers) stored offline or in a sealed vault with split knowledge (two people), protected with hardware MFA, monitored with alerts on any use, and rotated after every use. Test them regularly so they work when needed, and keep them out of daily workflows.",
+    "first_principles": {
+      "problem": "An IdP outage locks every engineer out of AWS during a major incident because all access depended on SSO.",
+      "truths": [
+        "Access systems can fail.",
+        "Emergency access must still be controlled.",
+        "Untested procedures fail."
+      ],
+      "derivation": [
+        "Create **dedicated break-glass accounts**.",
+        "Store credentials **sealed/split** (two-person).",
+        "Protect with **hardware MFA**.",
+        "**Alert** on any use.",
+        "**Rotate** after use; **test** quarterly."
+      ]
+    },
+    "analogy": {
+      "title": "A fire axe behind glass",
+      "story": "It's there for emergencies, breaking the glass sets off an alarm, and it's replaced and inspected after use.",
+      "mapping": [
+        [
+          "Fire axe",
+          "Break-glass account"
+        ],
+        [
+          "Glass alarm",
+          "Usage alert"
+        ],
+        [
+          "Inspection",
+          "Rotation + review"
+        ]
+      ],
+      "breaks": "Axes don't need MFA; break-glass accounts should."
+    },
+    "mindmap": {
+      "center": "Break-Glass",
+      "branches": [
+        {
+          "label": "Accounts",
+          "children": [
+            "Cloud root",
+            "Emergency IAM user",
+            "Local DB/OS admin"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Offline safe",
+            "Sealed vault",
+            "Split knowledge"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "Hardware MFA",
+            "Restricted network"
+          ]
+        },
+        {
+          "label": "Detection",
+          "children": [
+            "Alerts on login",
+            "SIEM rules"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "Rotate after use",
+            "Quarterly tests",
+            "Postmortem"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detect use",
+      "scenario": "AWS EventBridge rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any break-glass use triggers immediate review."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"source\": [\"aws.signin\"],\n  \"detail-type\": [\"AWS Console Sign In via CloudTrail\"],\n  \"detail\": { \"userIdentity\": { \"type\": [\"Root\"] } }\n}\n// → SNS → page security on-call + post in #security-alerts"
+        }
+      ],
+      "outcome": "safe emergency access."
+    },
+    "summary": {
+      "points": [
+        "Plan for JIT failure.",
+        "Seal and monitor.",
+        "Rotate and test."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should happen immediately after a break-glass account is used?",
+        "a": "Security is alerted, the use is reviewed, and the credentials are rotated and resealed."
+      }
+    ]
+  }
+}

@@ -1,0 +1,536 @@
+{
+  "introduction-misconfiguration-is-the-real-exploit": {
+    "core": "Most cloud breaches don't need zero-days: they exploit misconfigurations such as public storage buckets, overly permissive IAM roles, open security groups, unencrypted snapshots and exposed management ports. The cloud's API-driven, self-service nature makes such mistakes easy and fast to create at scale. Cloud Security Posture Management (CSPM) continuously inventories cloud resources through provider APIs and checks them against best practices and compliance benchmarks such as CIS.",
+    "first_principles": {
+      "problem": "An S3 bucket with customer exports is made public 'temporarily' for a partner and indexed by scanners within hours.",
+      "truths": [
+        "Cloud resources change constantly.",
+        "Misconfigs are the common breach path.",
+        "APIs expose full configuration."
+      ],
+      "derivation": [
+        "**Inventory** all accounts/projects via APIs.",
+        "Check against **CIS / best practices**.",
+        "**Prioritise** exposed + sensitive.",
+        "**Alert or auto-remediate**.",
+        "Shift left with **IaC scanning**."
+      ]
+    },
+    "analogy": {
+      "title": "A night-time security patrol checking doors and windows",
+      "story": "Most burglaries come from unlocked doors, not picked locks, so someone walks the building checking every one.",
+      "mapping": [
+        [
+          "Unlocked door",
+          "Public bucket / open SG"
+        ],
+        [
+          "Patrol",
+          "CSPM scan"
+        ],
+        [
+          "Building map",
+          "Cloud inventory"
+        ]
+      ],
+      "breaks": "Buildings don't add new doors hourly; cloud accounts do."
+    },
+    "mindmap": {
+      "center": "Cloud Misconfig",
+      "branches": [
+        {
+          "label": "Common",
+          "children": [
+            "Public storage",
+            "Wildcard IAM",
+            "Open SGs",
+            "Unencrypted data",
+            "No logging"
+          ]
+        },
+        {
+          "label": "CSPM",
+          "children": [
+            "API inventory",
+            "Benchmarks",
+            "Drift"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "Alert",
+            "Auto-remediate"
+          ]
+        },
+        {
+          "label": "Prevention",
+          "children": [
+            "IaC scanning",
+            "SCPs/guardrails"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Quick check",
+      "scenario": "AWS CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exposed resources are found before attackers find them."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws s3api get-public-access-block --bucket exports || echo \"no block configured\"\naws ec2 describe-security-groups \\\n  --query \"SecurityGroups[?IpPermissions[?IpRanges[?CidrIp=='0.0.0.0/0'] && FromPort==\\`22\\`]].GroupId\"\n# CSPM runs thousands of such checks continuously"
+        }
+      ],
+      "outcome": "posture visibility."
+    },
+    "summary": {
+      "points": [
+        "Misconfig over zero-days.",
+        "Continuous inventory.",
+        "Benchmarks + prioritisation."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is misconfiguration so common in cloud?",
+        "a": "Self-service APIs let anyone create and change resources quickly and at scale, often without review."
+      }
+    ]
+  },
+  "the-old-way-agents-vs-the-new-way-agentless": {
+    "core": "Traditional workload security installs agents on every VM and container to collect vulnerability, configuration and runtime data. Agents give deep, real-time visibility and can block, but they need deployment, upgrades and resources, and coverage gaps appear wherever they're missing. Agentless platforms (Wiz, Orca, cloud-native scanners) read configuration via cloud APIs and inspect workloads via snapshots, achieving full coverage within minutes of connecting an account, at the cost of real-time detection and blocking.",
+    "first_principles": {
+      "problem": "After two years, agents are installed on only 60% of VMs, and the unprotected 40% are exactly the forgotten ones attackers find.",
+      "truths": [
+        "Coverage gaps are where risk hides.",
+        "Agents have operational cost.",
+        "APIs and snapshots don't need guest access."
+      ],
+      "derivation": [
+        "Use **agentless** for broad coverage and posture.",
+        "Use **agents/eBPF** for runtime detection and blocking.",
+        "Measure **coverage**.",
+        "Combine signals in one **risk view**.",
+        "Choose per **workload criticality**."
+      ]
+    },
+    "analogy": {
+      "title": "A building survey by aerial drone versus guards stationed in each room",
+      "story": "The drone covers everything quickly but only periodically; guards see live activity but only where posted.",
+      "mapping": [
+        [
+          "Drone survey",
+          "Agentless scan"
+        ],
+        [
+          "Room guard",
+          "Agent"
+        ],
+        [
+          "Unguarded rooms",
+          "Coverage gaps"
+        ]
+      ],
+      "breaks": "Drones can't stop an intruder; agentless can't block in real time."
+    },
+    "mindmap": {
+      "center": "Agents vs Agentless",
+      "branches": [
+        {
+          "label": "Agents",
+          "children": [
+            "Real-time",
+            "Can block",
+            "Deploy/upgrade cost",
+            "Gaps"
+          ]
+        },
+        {
+          "label": "Agentless",
+          "children": [
+            "Full coverage fast",
+            "No guest access",
+            "Periodic",
+            "No blocking"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "Agentless posture",
+            "eBPF runtime"
+          ]
+        },
+        {
+          "label": "Vendors",
+          "children": [
+            "Wiz",
+            "Orca",
+            "Prisma",
+            "Defender"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Comparison",
+      "scenario": "Table.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clarifies where each fits."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "| Aspect           | Agent-based     | Agentless          |\n|------------------|-----------------|--------------------|\n| Time to coverage | Months          | Minutes            |\n| Coverage         | Where installed | All via API        |\n| Real-time        | Yes             | No (periodic)      |\n| Block attacks    | Yes             | No                 |\n| Perf impact      | On workload     | None on workload   |"
+        }
+      ],
+      "outcome": "hybrid strategy."
+    },
+    "summary": {
+      "points": [
+        "Agents: depth, blocking.",
+        "Agentless: breadth, speed.",
+        "Use both."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main limitation of agentless scanning?",
+        "a": "It's periodic and out-of-band, so it can't detect or block live attacks in real time."
+      }
+    ]
+  },
+  "how-agentless-works-sidescanning": {
+    "core": "Sidescanning (snapshot scanning) inspects workloads without touching them. The platform uses read-only cloud permissions to snapshot a VM's disks, share or copy the snapshot into a scanner account, mount it on an ephemeral scanner instance, and read the filesystem offline: installed packages for CVEs, secrets in files, malware, and configuration. The snapshot is then deleted. Combined with API metadata, this gives a deep picture of every workload with zero performance impact.",
+    "first_principles": {
+      "problem": "Security wants a vulnerability inventory of 5,000 VMs, but the ops team refuses to install anything on production hosts.",
+      "truths": [
+        "Disk contents reveal software state.",
+        "Snapshots don't affect running workloads.",
+        "Read-only access minimises risk."
+      ],
+      "derivation": [
+        "Grant **read-only + snapshot** permissions.",
+        "**Snapshot** disks.",
+        "**Mount** in an isolated scanner account.",
+        "**Analyse** packages, secrets, malware.",
+        "**Delete** snapshots; respect encryption keys."
+      ]
+    },
+    "analogy": {
+      "title": "Photocopying a book to check it, rather than reading over someone's shoulder",
+      "story": "You get the full contents to study without disturbing the reader.",
+      "mapping": [
+        [
+          "Photocopy",
+          "Disk snapshot"
+        ],
+        [
+          "Reading the copy",
+          "Offline analysis"
+        ],
+        [
+          "Shredding afterwards",
+          "Snapshot deletion"
+        ]
+      ],
+      "breaks": "A photocopy shows the page, not what the reader is doing now (no runtime state)."
+    },
+    "mindmap": {
+      "center": "Sidescanning",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Snapshot",
+            "Share/copy",
+            "Mount",
+            "Analyse",
+            "Delete"
+          ]
+        },
+        {
+          "label": "Finds",
+          "children": [
+            "Package CVEs",
+            "Secrets",
+            "Malware",
+            "Config"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Read-only IAM",
+            "KMS access for encrypted disks"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "No memory",
+            "Periodic",
+            "Data residency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What a scanner does",
+      "scenario": "AWS flow.",
+      "flow": [
+        "Describe instances (API)",
+        "CreateSnapshot of EBS",
+        "Share snapshot to scanner account",
+        "Create volume + attach to scanner",
+        "Read /var/lib/dpkg, /etc, files",
+        "Delete volume + snapshot"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Full workload inventory with nothing installed."
+        }
+      ],
+      "code": [],
+      "outcome": "zero-touch deep scanning."
+    },
+    "summary": {
+      "points": [
+        "Snapshot, mount, analyse.",
+        "No workload impact.",
+        "No runtime view."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might agentless scanning need KMS permissions?",
+        "a": "Encrypted EBS snapshots can only be shared and mounted if the scanner can use the KMS key."
+      }
+    ]
+  },
+  "graph-based-context-connecting-the-dots": {
+    "core": "Thousands of isolated findings ('VM has CVE', 'role is admin', 'port is open') overwhelm teams. Modern CNAPPs build a security graph connecting resources, identities, network paths, vulnerabilities, secrets and data. They then query for toxic combinations: an internet-exposed VM with a critical exploitable CVE, whose role can read a bucket holding PII. That attack path is the real risk, and fixing one link (removing the exposure or the role permission) breaks it.",
+    "first_principles": {
+      "problem": "A team has 40,000 critical findings and no idea which ten actually create a path to customer data.",
+      "truths": [
+        "Risk comes from combinations.",
+        "Attackers chain weaknesses.",
+        "Relationships form a graph."
+      ],
+      "derivation": [
+        "Model resources and relations as a **graph**.",
+        "Correlate **exposure + vuln + identity + data**.",
+        "Query for **attack paths**.",
+        "Prioritise **toxic combinations**.",
+        "Fix the **cheapest link**."
+      ]
+    },
+    "analogy": {
+      "title": "A detective's corkboard with strings between clues",
+      "story": "Individually the clues mean little; connected, they reveal the route to the crime.",
+      "mapping": [
+        [
+          "Clues",
+          "Findings"
+        ],
+        [
+          "Strings",
+          "Relationships"
+        ],
+        [
+          "Route",
+          "Attack path"
+        ]
+      ],
+      "breaks": "Detectives connect clues by hand; graphs compute millions of paths."
+    },
+    "mindmap": {
+      "center": "Security Graph",
+      "branches": [
+        {
+          "label": "Nodes",
+          "children": [
+            "VMs",
+            "Roles",
+            "Buckets",
+            "Secrets",
+            "CVEs"
+          ]
+        },
+        {
+          "label": "Edges",
+          "children": [
+            "Can assume",
+            "Exposed to",
+            "Can read",
+            "Runs on"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "Internet → vuln → admin",
+            "Path to PII"
+          ]
+        },
+        {
+          "label": "Outcome",
+          "children": [
+            "Toxic combinations",
+            "Prioritised fixes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Attack path query",
+      "scenario": "Pseudo-Cypher.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Focus moves to the few paths that matter."
+        }
+      ],
+      "code": [
+        {
+          "lang": "cypher",
+          "text": "MATCH (i:Internet)-[:EXPOSES]->(vm:VM)-[:HAS]->(c:CVE {exploitable:true}),\n      (vm)-[:ASSUMES]->(r:Role)-[:CAN_READ]->(b:Bucket {data:'PII'})\nRETURN vm, c, r, b\n// 40,000 findings → 7 attack paths"
+        }
+      ],
+      "outcome": "risk-based prioritisation."
+    },
+    "summary": {
+      "points": [
+        "Combinations are the risk.",
+        "Graph queries find paths.",
+        "Break the cheapest link."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a 'toxic combination'?",
+        "a": "Several individually moderate issues, such as exposure, a vulnerability and excessive permissions, that together create a critical attack path."
+      }
+    ]
+  },
+  "compliance-reporting-automation": {
+    "core": "Because CSPM continuously maps every resource to controls, it can automate compliance evidence: mapping checks to frameworks (CIS, SOC 2, PCI DSS, ISO 27001, HIPAA, NIST), producing per-framework scores, tracking drift over time, and exporting reports for auditors. That replaces screenshot-gathering before audits with always-on evidence. Combined with policy-as-code and auto-remediation, compliance becomes a continuous engineering property rather than an annual scramble.",
+    "first_principles": {
+      "problem": "Each SOC 2 audit costs weeks of engineers gathering screenshots of encryption settings and IAM configs.",
+      "truths": [
+        "Controls map to technical checks.",
+        "Point-in-time evidence goes stale.",
+        "Automation reduces audit cost."
+      ],
+      "derivation": [
+        "Map **checks to frameworks**.",
+        "Track **scores and drift**.",
+        "Export **evidence reports**.",
+        "**Auto-remediate** simple failures.",
+        "Document **exceptions** with owners."
+      ]
+    },
+    "analogy": {
+      "title": "A car's dashboard instead of an annual MOT",
+      "story": "You see warning lights the moment something fails, not once a year at inspection.",
+      "mapping": [
+        [
+          "Dashboard lights",
+          "Continuous checks"
+        ],
+        [
+          "MOT certificate",
+          "Audit report"
+        ],
+        [
+          "Service log",
+          "Evidence history"
+        ]
+      ],
+      "breaks": "MOTs inspect physically; some controls (policies, training) still need human evidence."
+    },
+    "mindmap": {
+      "center": "Compliance Automation",
+      "branches": [
+        {
+          "label": "Frameworks",
+          "children": [
+            "CIS",
+            "SOC 2",
+            "PCI DSS",
+            "ISO 27001",
+            "HIPAA",
+            "NIST"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Control mapping",
+            "Scores",
+            "Drift",
+            "Reports"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Auto-remediate",
+            "Exceptions"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Process controls",
+            "Human evidence"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Auto-remediation",
+      "scenario": "AWS Config rule + SSM.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Public buckets are fixed automatically and the evidence is recorded."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws configservice put-remediation-configurations --remediation-configurations '[{\n  \"ConfigRuleName\": \"s3-bucket-public-read-prohibited\",\n  \"TargetType\": \"SSM_DOCUMENT\",\n  \"TargetId\": \"AWS-DisableS3BucketPublicReadWrite\",\n  \"Automatic\": true, \"MaximumAutomaticAttempts\": 3, \"RetryAttemptSeconds\": 60,\n  \"Parameters\": {\"S3BucketName\": {\"ResourceValue\": {\"Value\": \"RESOURCE_ID\"}}}}]'"
+        }
+      ],
+      "outcome": "continuous compliance."
+    },
+    "summary": {
+      "points": [
+        "Map checks to controls.",
+        "Always-on evidence.",
+        "Remediate automatically."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which controls can CSPM not fully evidence?",
+        "a": "Process and people controls such as training, background checks and incident response procedures."
+      }
+    ]
+  }
+}

@@ -1,0 +1,434 @@
+{
+  "introduction-the-spectrum-of-trust": {
+    "core": "Key management models sit on a spectrum of how much you trust your cloud provider. Provider-managed keys are easiest but the provider fully controls them. Customer-managed keys (CMK) in the provider's KMS give you policy control. BYOK lets you generate key material yourself and import it. HYOK/XKS keeps keys outside the cloud entirely, so the provider must call you to decrypt. MPC splits keys so that no single party ever holds them. Each step up adds control and operational burden.",
+    "first_principles": {
+      "problem": "A regulator asks whether the cloud provider could be compelled to decrypt your data, and nobody can answer.",
+      "truths": [
+        "Whoever holds the key controls the data.",
+        "Control costs operations and availability.",
+        "Regulation sometimes requires separation."
+      ],
+      "derivation": [
+        "Classify data by **sensitivity and regulation**.",
+        "Pick a **point on the spectrum** per class.",
+        "Weigh **availability** risk of external keys.",
+        "Document **who can decrypt**.",
+        "Test **revocation** and recovery."
+      ]
+    },
+    "analogy": {
+      "title": "Where you keep your house keys",
+      "story": "With the landlord (managed), in a lockbox the landlord installed (CMK), a lock you bought (BYOK), or keys only in your pocket (HYOK).",
+      "mapping": [
+        [
+          "Landlord holds key",
+          "Provider-managed"
+        ],
+        [
+          "Your own lock",
+          "BYOK"
+        ],
+        [
+          "Keys only in your pocket",
+          "HYOK"
+        ]
+      ],
+      "breaks": "With keys only in your pocket, losing them locks you out too."
+    },
+    "mindmap": {
+      "center": "Key Trust Spectrum",
+      "branches": [
+        {
+          "label": "Managed",
+          "children": [
+            "Provider keys"
+          ]
+        },
+        {
+          "label": "CMK",
+          "children": [
+            "Your policy",
+            "Provider HSM"
+          ]
+        },
+        {
+          "label": "BYOK",
+          "children": [
+            "Your material",
+            "Imported"
+          ]
+        },
+        {
+          "label": "HYOK/XKS",
+          "children": [
+            "Keys outside cloud"
+          ]
+        },
+        {
+          "label": "MPC",
+          "children": [
+            "Split keys",
+            "No single holder"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Control",
+            "Ops",
+            "Availability",
+            "Latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision table",
+      "scenario": "Per data class.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each class gets a justified level of control."
+        }
+      ],
+      "code": [
+        {
+          "lang": "markdown",
+          "text": "| Data class            | Model       | Why                         |\n|-----------------------|-------------|-----------------------------|\n| Public assets         | AWS-managed | No need for control         |\n| Customer PII          | CMK         | Policy + audit, low ops     |\n| Regulated EU banking  | XKS (HYOK)  | Key sovereignty required    |\n| Crypto custody wallet | MPC         | No single point of theft    |"
+        }
+      ],
+      "outcome": "trust is chosen deliberately."
+    },
+    "summary": {
+      "points": [
+        "Spectrum of control.",
+        "Control costs ops.",
+        "Match to data class."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main risk of moving to HYOK?",
+        "a": "Availability: if your external key store is down, the cloud can't decrypt your data."
+      }
+    ]
+  },
+  "byok-bring-your-own-key": {
+    "core": "Bring Your Own Key means generating key material in your own HSM and importing it into the cloud KMS, wrapped with a provider-supplied public key. You control origin, can set expiry, and can delete the material to make data instantly unreadable (crypto-shredding) while keeping your own copy for re-import. But once imported, the key operates inside the provider's HSMs, so BYOK proves where a key came from, not that the provider can't use it.",
+    "first_principles": {
+      "problem": "Compliance requires proof that key material was generated under the company's control, with the ability to revoke it immediately.",
+      "truths": [
+        "Key provenance can be required.",
+        "Imported keys run in the provider's HSM.",
+        "Deleting key material renders data unreadable."
+      ],
+      "derivation": [
+        "Generate in **your HSM**.",
+        "**Wrap** with the provider's import key.",
+        "**Import** with expiry.",
+        "Keep an **escrow copy**.",
+        "Use **delete** for crypto-shredding."
+      ]
+    },
+    "analogy": {
+      "title": "Cutting your own key and handing a copy to the building manager",
+      "story": "You know it's a quality key you made, but the manager can still open the door with it.",
+      "mapping": [
+        [
+          "Your locksmith",
+          "Your HSM"
+        ],
+        [
+          "Copy to manager",
+          "Import to KMS"
+        ],
+        [
+          "Asking for it back",
+          "Delete key material"
+        ]
+      ],
+      "breaks": "You can't be sure the manager didn't use it before you took it back."
+    },
+    "mindmap": {
+      "center": "BYOK",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Generate",
+            "Wrap",
+            "Import",
+            "Expire"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Provenance",
+            "Revocation",
+            "Crypto-shredding"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Provider still operates key",
+            "Backup responsibility"
+          ]
+        },
+        {
+          "label": "Clouds",
+          "children": [
+            "AWS KMS import",
+            "Azure Key Vault BYOK",
+            "GCP Cloud KMS import"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AWS KMS import",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Key originates with you and expires unless renewed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws kms create-key --origin EXTERNAL\naws kms get-parameters-for-import --key-id $K \\\n  --wrapping-algorithm RSAES_OAEP_SHA_256 --wrapping-key-spec RSA_4096\n# wrap your HSM-generated key with the returned public key, then:\naws kms import-key-material --key-id $K --encrypted-key-material fileb://wrapped.bin \\\n  --import-token fileb://token.bin --expiration-model KEY_MATERIAL_EXPIRES --valid-to 2027-01-01"
+        }
+      ],
+      "outcome": "provenance and kill switch."
+    },
+    "summary": {
+      "points": [
+        "You create the key.",
+        "Provider still runs it.",
+        "Crypto-shred by deleting."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does BYOK not protect against?",
+        "a": "The provider using the key while it is imported; for that you need HYOK/XKS."
+      }
+    ]
+  },
+  "hyok-hold-your-own-key-external-key-store-xks": {
+    "core": "Hold Your Own Key keeps the key outside the cloud provider entirely. With AWS KMS External Key Store (XKS), KMS forwards every encrypt/decrypt request through an XKS proxy to your own HSM, on-prem or in another provider. The cloud never holds the key, so you can cut access by disabling the proxy. The costs are added latency, a hard availability dependency on your infrastructure, and full operational responsibility. It's for strict sovereignty requirements.",
+    "first_principles": {
+      "problem": "EU regulation requires that a US provider be technically unable to decrypt data without the bank's live participation.",
+      "truths": [
+        "Holding the key outside means the provider must ask.",
+        "External calls add latency.",
+        "Your outage becomes the cloud's outage."
+      ],
+      "derivation": [
+        "Deploy **HSM + XKS proxy**.",
+        "Make it **highly available** across sites.",
+        "Use **envelope encryption** to limit calls.",
+        "Monitor **latency and errors**.",
+        "Document **revocation** procedures."
+      ]
+    },
+    "analogy": {
+      "title": "A safe in your bank where the combination is only in your head",
+      "story": "The bank can't open it without phoning you each time, and if you don't answer, nobody gets in.",
+      "mapping": [
+        [
+          "Phone call",
+          "XKS proxy request"
+        ],
+        [
+          "Your memory",
+          "External HSM"
+        ],
+        [
+          "Not answering",
+          "Revocation"
+        ]
+      ],
+      "breaks": "If you're ill (your HSM is down), your own business is locked out too."
+    },
+    "mindmap": {
+      "center": "HYOK / XKS",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Cloud service",
+            "KMS",
+            "XKS proxy",
+            "Your HSM"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Sovereignty",
+            "Instant cut-off"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Latency",
+            "Availability",
+            "Ops"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "Envelope encryption",
+            "HA proxies",
+            "Caching data keys"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "XKS flow",
+      "scenario": "Decrypt request path.",
+      "flow": [
+        "S3 GetObject",
+        "KMS Decrypt (data key)",
+        "XKS proxy (mTLS/SigV4)",
+        "On-prem HSM",
+        "Plaintext data key",
+        "S3 decrypts object"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every data-key unwrap requires your HSM's participation."
+        }
+      ],
+      "code": [],
+      "outcome": "provider cannot decrypt alone."
+    },
+    "summary": {
+      "points": [
+        "Key never in the cloud.",
+        "Provider must call you.",
+        "Availability is yours."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does envelope encryption matter for XKS?",
+        "a": "Only small data keys go to the external HSM, reducing calls and latency compared with sending bulk data."
+      }
+    ]
+  },
+  "multi-party-computation-mpc-the-keyless-key": {
+    "core": "Multi-Party Computation lets several parties jointly compute a function, such as producing a signature, without any of them revealing their secret input. In threshold signing (TSS), a private key is generated as shares across parties or devices and never exists whole anywhere, even during signing. Any t of n shares cooperate to sign. This removes the single key that can be stolen, and is widely used in crypto custody, with emerging use in cloud key management.",
+    "first_principles": {
+      "problem": "A crypto exchange's hot-wallet private key on one server is stolen, and all funds are drained.",
+      "truths": [
+        "A whole key is a single point of theft.",
+        "Maths can split computation.",
+        "Thresholds allow fault tolerance."
+      ],
+      "derivation": [
+        "**Distributed key generation** (DKG).",
+        "Store **shares** on separate systems.",
+        "Sign with **t-of-n** parties.",
+        "**Refresh shares** periodically.",
+        "Combine with **policy** approvals."
+      ]
+    },
+    "analogy": {
+      "title": "A treasure map torn into pieces held by different people",
+      "story": "Any three of five can lay their pieces together to find the treasure, but no single piece reveals it. In MPC the full map is never even assembled.",
+      "mapping": [
+        [
+          "Map pieces",
+          "Key shares"
+        ],
+        [
+          "Any three of five",
+          "Threshold"
+        ],
+        [
+          "Never assembling the map",
+          "No key reconstruction"
+        ]
+      ],
+      "breaks": "Torn maps are physically joined; MPC computes the signature without ever joining shares."
+    },
+    "mindmap": {
+      "center": "MPC",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Secret shares",
+            "Threshold t-of-n",
+            "DKG"
+          ]
+        },
+        {
+          "label": "vs Shamir",
+          "children": [
+            "Shamir reconstructs",
+            "MPC never does"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Crypto custody",
+            "Wallets",
+            "Cloud KMS"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Share refresh",
+            "Policy engine",
+            "Latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Threshold signing",
+      "scenario": "Conceptual.",
+      "flow": [
+        "DKG: 3 parties create shares",
+        "Tx request",
+        "Policy approves",
+        "2 of 3 run signing protocol",
+        "Valid ECDSA signature"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stealing one server yields a useless share."
+        }
+      ],
+      "code": [],
+      "outcome": "no single key to steal."
+    },
+    "summary": {
+      "points": [
+        "Key never whole.",
+        "Threshold signing.",
+        "Refresh shares."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does MPC differ from Shamir's Secret Sharing in Vault unsealing?",
+        "a": "Shamir reconstructs the full key in one place; MPC computes with shares and never reconstructs it."
+      }
+    ]
+  }
+}
