@@ -1,0 +1,642 @@
+{
+  "introduction-from-dead-metal-to-live-system": {
+    "core": "Booting is a relay. Firmware (BIOS or UEFI) initialises hardware and finds a bootloader; the bootloader (GRUB) loads the kernel and initramfs; the kernel initialises memory, CPUs and drivers; the initramfs finds and mounts the real root filesystem; and PID 1 (systemd) starts services to reach the target. Knowing each handoff tells you where a boot failure is and what tool can fix it.",
+    "first_principles": {
+      "problem": "A server doesn't come back after a reboot, and the team doesn't know whether to look at BIOS, GRUB, the kernel or systemd.",
+      "truths": [
+        "Boot is staged.",
+        "Each stage hands off to the next.",
+        "Failure messages identify the stage."
+      ],
+      "derivation": [
+        "**Firmware**: POST, find bootloader.",
+        "**Bootloader**: load kernel + initramfs.",
+        "**Kernel**: init hardware.",
+        "**initramfs**: mount real root.",
+        "**PID 1**: start services."
+      ]
+    },
+    "analogy": {
+      "title": "A relay race",
+      "story": "Each runner passes the baton; if it's dropped, you know which handoff failed.",
+      "mapping": [
+        [
+          "Runners",
+          "Boot stages"
+        ],
+        [
+          "Baton",
+          "Control + parameters"
+        ],
+        [
+          "Dropped baton",
+          "Boot failure"
+        ]
+      ],
+      "breaks": "Relay runners are visible; boot stages are only visible on console."
+    },
+    "mindmap": {
+      "center": "Boot Process",
+      "branches": [
+        {
+          "label": "Stages",
+          "children": [
+            "Firmware",
+            "Bootloader",
+            "Kernel",
+            "initramfs",
+            "systemd"
+          ]
+        },
+        {
+          "label": "Clues",
+          "children": [
+            "Console messages",
+            "Emergency shell",
+            "journalctl -b"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Serial console",
+            "Rescue media",
+            "systemd-analyze"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Locate failure",
+      "scenario": "Symptoms.",
+      "flow": [
+        "No video/POST beep → firmware/hardware",
+        "'grub rescue>' → bootloader",
+        "Kernel panic → kernel/drivers",
+        "'dracut emergency shell' → initramfs/root",
+        "Services failing → systemd"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Map symptom to stage."
+        }
+      ],
+      "code": [],
+      "outcome": "boot as a staged relay."
+    },
+    "summary": {
+      "points": [
+        "Five stages.",
+        "Handoffs.",
+        "Symptoms locate failures."
+      ]
+    },
+    "check": [
+      {
+        "q": "If boot drops to a dracut emergency shell, which stage failed?",
+        "a": "The initramfs stage, typically failing to find or mount the real root filesystem."
+      }
+    ]
+  },
+  "stage-1-the-hardware-handshake-bios-vs-uefi": {
+    "core": "Legacy BIOS runs POST, then reads the first 512-byte sector (MBR) of the boot disk and executes it, which has tiny space, limited partition tables and 2 TB disks. UEFI is modern firmware that understands GPT partitions and FAT filesystems: it loads .efi bootloaders from the EFI System Partition, stores boot entries in NVRAM (efibootmgr), supports Secure Boot signature verification, and offers network and HTTP boot. Cloud VMs and modern servers use UEFI.",
+    "first_principles": {
+      "problem": "A cloned disk won't boot on a new server because it was set up for legacy BIOS and the server is UEFI-only.",
+      "truths": [
+        "Firmware must find a bootloader.",
+        "MBR is tiny and limited.",
+        "UEFI reads filesystems and verifies signatures."
+      ],
+      "derivation": [
+        "**BIOS**: MBR boot sector.",
+        "**UEFI**: ESP with .efi files.",
+        "Use **GPT** with UEFI.",
+        "Manage entries with **efibootmgr**.",
+        "Enable **Secure Boot** with signed loaders (shim)."
+      ]
+    },
+    "analogy": {
+      "title": "A guard reading the first page vs a librarian with a catalogue",
+      "story": "The old guard only reads the first page of the first book; the librarian finds the right book by title and checks its seal.",
+      "mapping": [
+        [
+          "First page",
+          "MBR"
+        ],
+        [
+          "Catalogue",
+          "EFI System Partition"
+        ],
+        [
+          "Seal check",
+          "Secure Boot"
+        ]
+      ],
+      "breaks": "Librarians can be persuaded; Secure Boot strictly checks signatures."
+    },
+    "mindmap": {
+      "center": "BIOS vs UEFI",
+      "branches": [
+        {
+          "label": "BIOS",
+          "children": [
+            "POST",
+            "MBR 512 B",
+            "2 TB limit",
+            "Legacy"
+          ]
+        },
+        {
+          "label": "UEFI",
+          "children": [
+            "GPT",
+            "ESP (FAT32)",
+            "NVRAM entries",
+            "Secure Boot",
+            "HTTP boot"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "efibootmgr",
+            "mokutil",
+            "bootctl"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "/sys/firmware/efi exists"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect UEFI",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms boot mode and entries."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "[ -d /sys/firmware/efi ] && echo UEFI || echo BIOS\nefibootmgr -v | head\n# Boot0001* ubuntu  HD(1,GPT,...)/File(\\EFI\\ubuntu\\shimx64.efi)\nmokutil --sb-state      # SecureBoot enabled"
+        }
+      ],
+      "outcome": "firmware handshake understood."
+    },
+    "summary": {
+      "points": [
+        "BIOS reads MBR.",
+        "UEFI reads ESP.",
+        "Secure Boot verifies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where does UEFI look for bootloaders?",
+        "a": "In .efi files on the EFI System Partition (a FAT-formatted GPT partition), referenced by NVRAM boot entries."
+      }
+    ]
+  },
+  "stage-2-the-bootloader-grub": {
+    "core": "GRUB 2 presents a menu, reads its config (grub.cfg, generated from /etc/default/grub and /etc/grub.d by update-grub or grub2-mkconfig), loads the chosen kernel image (vmlinuz) and initramfs into memory, and passes the kernel command line: root=UUID=..., console=ttyS0, quiet, plus tuning parameters. You can edit entries at boot (e) to fix problems, for example adding systemd.unit=rescue.target or init=/bin/bash.",
+    "first_principles": {
+      "problem": "A wrong root= UUID after a disk change leaves the system unable to find its root filesystem.",
+      "truths": [
+        "Bootloaders load kernel and initramfs.",
+        "The command line configures the kernel.",
+        "Config is generated, not hand-edited."
+      ],
+      "derivation": [
+        "Edit **/etc/default/grub**, not grub.cfg.",
+        "Regenerate with **update-grub/grub2-mkconfig**.",
+        "Use **UUIDs** for root.",
+        "Edit entries at boot with **e** for rescue.",
+        "Add **console=ttyS0** for serial logs."
+      ]
+    },
+    "analogy": {
+      "title": "A stage manager handing the lead actor the script",
+      "story": "GRUB chooses which actor (kernel) goes on, gives them their opening lines (command line) and their props (initramfs).",
+      "mapping": [
+        [
+          "Actor",
+          "Kernel"
+        ],
+        [
+          "Opening lines",
+          "Command line"
+        ],
+        [
+          "Props",
+          "initramfs"
+        ]
+      ],
+      "breaks": "Actors improvise; kernels follow the command line literally."
+    },
+    "mindmap": {
+      "center": "GRUB",
+      "branches": [
+        {
+          "label": "Files",
+          "children": [
+            "/etc/default/grub",
+            "/etc/grub.d/",
+            "/boot/grub/grub.cfg"
+          ]
+        },
+        {
+          "label": "Loads",
+          "children": [
+            "vmlinuz",
+            "initramfs"
+          ]
+        },
+        {
+          "label": "Cmdline",
+          "children": [
+            "root=UUID",
+            "console=",
+            "quiet",
+            "tuning params"
+          ]
+        },
+        {
+          "label": "Rescue",
+          "children": [
+            "e to edit",
+            "rescue.target",
+            "init=/bin/bash"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "update-grub",
+            "grub2-mkconfig",
+            "grubby"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Change kernel params",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Parameters persist across kernel updates."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sed -i 's/^GRUB_CMDLINE_LINUX=\"/&console=ttyS0,115200 transparent_hugepage=madvise /' /etc/default/grub\nupdate-grub           # Debian/Ubuntu\n# grub2-mkconfig -o /boot/grub2/grub.cfg   # RHEL\ncat /proc/cmdline     # after reboot"
+        }
+      ],
+      "outcome": "bootloader under control."
+    },
+    "summary": {
+      "points": [
+        "Loads kernel + initramfs.",
+        "Passes command line.",
+        "Edit defaults, regenerate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shouldn't you edit grub.cfg directly?",
+        "a": "It's regenerated from /etc/default/grub and /etc/grub.d by update-grub/grub2-mkconfig, overwriting manual edits."
+      }
+    ]
+  },
+  "stage-3-the-kernel-initializes": {
+    "core": "The kernel decompresses itself, sets up memory management and page tables, brings up CPUs (SMP), initialises the scheduler, timers and interrupts, probes built-in drivers, parses the command line, then mounts the initramfs as a temporary root and executes /init. dmesg records every step. Kernel panics here usually mean missing storage drivers, bad parameters, hardware faults or incompatible kernel builds.",
+    "first_principles": {
+      "problem": "After a kernel upgrade the server panics with 'VFS: Unable to mount root fs on unknown-block(0,0)'.",
+      "truths": [
+        "The kernel must initialise hardware first.",
+        "Drivers may be built-in or modules.",
+        "Root needs storage drivers."
+      ],
+      "derivation": [
+        "Read **dmesg/serial console**.",
+        "Check **command line** (root=, params).",
+        "Ensure **storage drivers** in initramfs.",
+        "Keep a **previous kernel** to boot.",
+        "Capture panics with **kdump**."
+      ]
+    },
+    "analogy": {
+      "title": "A new building manager's first morning",
+      "story": "Turn on power, check the lifts, wake the security systems and confirm the floors exist before letting anyone in.",
+      "mapping": [
+        [
+          "Power/lifts",
+          "Memory/CPU init"
+        ],
+        [
+          "Security systems",
+          "Drivers"
+        ],
+        [
+          "Letting people in",
+          "Running /init"
+        ]
+      ],
+      "breaks": "Managers can call for help; a panicked kernel just stops."
+    },
+    "mindmap": {
+      "center": "Kernel Init",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Decompress",
+            "Memory setup",
+            "SMP bring-up",
+            "Drivers",
+            "Mount initramfs",
+            "Run /init"
+          ]
+        },
+        {
+          "label": "Logs",
+          "children": [
+            "dmesg",
+            "Serial console",
+            "journalctl -k -b"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "VFS root panic",
+            "Missing drivers",
+            "Bad params"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Fallback kernel",
+            "kdump"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnose panic",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Missing NVMe driver added; boots again."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# boot previous kernel from GRUB menu, then:\njournalctl -k -b -1 | tail -40       # previous boot's kernel log\nlsinitrd /boot/initramfs-$(uname -r).img | grep -E 'nvme|virtio'\ndracut -f --kver 6.8.0-45-generic    # rebuild initramfs with drivers"
+        }
+      ],
+      "outcome": "kernel init failures fixed."
+    },
+    "summary": {
+      "points": [
+        "Hardware init first.",
+        "Drivers for root.",
+        "Keep fallback kernels."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'VFS: Unable to mount root fs on unknown-block(0,0)' usually mean?",
+        "a": "The kernel can't find the root device, often because the initramfs is missing or lacks the storage driver, or root= is wrong."
+      }
+    ]
+  },
+  "stage-4-the-initramfs-trick": {
+    "core": "The real root filesystem may sit on NVMe, LVM, RAID, LUKS encryption, iSCSI or the network, which needs drivers and userspace tools the kernel doesn't have built in. The initramfs is a small compressed cpio archive loaded into RAM as a temporary root. Its /init (dracut, initramfs-tools or systemd in the initrd) loads modules, assembles RAID or LVM, unlocks LUKS, mounts the real root, then switch_roots into it. When it fails you get an emergency shell.",
+    "first_principles": {
+      "problem": "A server with LUKS-encrypted root drops to an emergency shell after the disk controller changes.",
+      "truths": [
+        "The kernel can't include every driver.",
+        "Root may need complex setup.",
+        "A temporary RAM root bridges the gap."
+      ],
+      "derivation": [
+        "Pack **needed modules/tools** in initramfs.",
+        "Run **/init** to assemble storage.",
+        "Unlock **LUKS**, activate **LVM/RAID**.",
+        "**switch_root** to real root.",
+        "Rebuild with **dracut/update-initramfs** after changes."
+      ]
+    },
+    "analogy": {
+      "title": "A scaffold used to reach the real building's entrance",
+      "story": "A temporary structure lets you get in; once inside, it's taken down.",
+      "mapping": [
+        [
+          "Scaffold",
+          "initramfs"
+        ],
+        [
+          "Real entrance",
+          "Real root fs"
+        ],
+        [
+          "Taking it down",
+          "switch_root"
+        ]
+      ],
+      "breaks": "Scaffolds are built on-site; initramfs must be prebuilt with the right tools."
+    },
+    "mindmap": {
+      "center": "initramfs",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "Kernel modules",
+            "udev",
+            "LVM/mdadm/cryptsetup",
+            "/init"
+          ]
+        },
+        {
+          "label": "Generators",
+          "children": [
+            "dracut",
+            "initramfs-tools",
+            "mkinitcpio"
+          ]
+        },
+        {
+          "label": "Tasks",
+          "children": [
+            "Load drivers",
+            "Assemble RAID/LVM",
+            "Unlock LUKS",
+            "Mount root",
+            "switch_root"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "rd.break",
+            "rd.debug",
+            "emergency shell"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Debug and rebuild",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New controller driver included; boots."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# at boot: add rd.break to kernel cmdline to stop before switch_root\nlsinitrd | grep -E 'cryptsetup|megaraid'\ndracut --add-drivers megaraid_sas -f\n# Debian: echo megaraid_sas >> /etc/initramfs-tools/modules && update-initramfs -u"
+        }
+      ],
+      "outcome": "flexible root mounting."
+    },
+    "summary": {
+      "points": [
+        "Temporary RAM root.",
+        "Assembles real root.",
+        "Rebuild after changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is an initramfs needed for systems with LUKS or LVM root filesystems?",
+        "a": "Unlocking and assembling them needs userspace tools and drivers that must run before the real root can be mounted."
+      }
+    ]
+  },
+  "stage-5-pid-1-and-systemd": {
+    "core": "After switch_root, the kernel runs /sbin/init, which is systemd on most distros, as PID 1. systemd reads unit files, builds a dependency graph toward the default target (multi-user.target or graphical.target), starts units in parallel respecting dependencies, mounts filesystems from fstab, starts journald and udev, and reaps orphans. If PID 1 dies, the kernel panics. systemd-analyze shows where boot time goes.",
+    "first_principles": {
+      "problem": "Boot takes 90 seconds, and the team doesn't know which service is slow.",
+      "truths": [
+        "PID 1 is special.",
+        "Units have dependencies.",
+        "Parallel start speeds boot."
+      ],
+      "derivation": [
+        "Set **default target**.",
+        "Use **systemd-analyze blame/critical-chain**.",
+        "Fix **slow or failing** units.",
+        "Use **rescue/emergency** targets for repair.",
+        "Check **failed units** after boot."
+      ]
+    },
+    "analogy": {
+      "title": "An orchestra conductor",
+      "story": "They start each section when its cues are met, many playing at once, until the full piece is running.",
+      "mapping": [
+        [
+          "Conductor",
+          "systemd"
+        ],
+        [
+          "Sections",
+          "Units"
+        ],
+        [
+          "Cues",
+          "Dependencies"
+        ]
+      ],
+      "breaks": "Conductors can improvise; systemd follows unit definitions strictly."
+    },
+    "mindmap": {
+      "center": "PID 1 & systemd",
+      "branches": [
+        {
+          "label": "Role",
+          "children": [
+            "PID 1",
+            "Reap orphans",
+            "Start units"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "multi-user",
+            "graphical",
+            "rescue",
+            "emergency"
+          ]
+        },
+        {
+          "label": "Analysis",
+          "children": [
+            "systemd-analyze",
+            "blame",
+            "critical-chain",
+            "plot"
+          ]
+        },
+        {
+          "label": "Health",
+          "children": [
+            "systemctl --failed",
+            "journalctl -b"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find slow boot",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Slow wait-online service found."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemd-analyze\n# Startup finished in 3.1s (kernel) + 4.2s (initrd) + 82.4s (userspace)\nsystemd-analyze critical-chain | head\n# network-online.target @80.1s\n#  └─NetworkManager-wait-online.service +78.9s\nsystemctl --failed"
+        }
+      ],
+      "outcome": "fast, healthy userspace boot."
+    },
+    "summary": {
+      "points": [
+        "systemd is PID 1.",
+        "Dependency graph.",
+        "Analyze boot time."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if PID 1 exits?",
+        "a": "The kernel panics, since PID 1 is required to run the system and reap orphaned processes."
+      }
+    ]
+  }
+}

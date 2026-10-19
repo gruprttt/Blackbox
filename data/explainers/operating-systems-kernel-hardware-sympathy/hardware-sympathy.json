@@ -1,0 +1,965 @@
+{
+  "introduction-thinking-like-a-mechanic": {
+    "core": "Mechanical sympathy means writing software that works with the hardware rather than against it. CPUs are fast only when data is in cache and branches are predictable; memory is slow and organised in cache lines and NUMA nodes; cores share caches and contend for cache lines. Code that ignores this can be 10–100× slower than code doing the same work with hardware-friendly layouts and access patterns.",
+    "first_principles": {
+      "problem": "Two algorithms with the same Big-O complexity differ 20× in speed on real hardware.",
+      "truths": [
+        "Big-O ignores constant factors.",
+        "Memory access dominates modern CPUs.",
+        "Hardware rewards predictability."
+      ],
+      "derivation": [
+        "Know the **latency hierarchy**.",
+        "Optimise **memory access patterns**.",
+        "Avoid **false sharing**.",
+        "Respect **NUMA**.",
+        "Make branches **predictable**."
+      ]
+    },
+    "analogy": {
+      "title": "A racing driver who understands the engine",
+      "story": "Knowing how the car works lets the driver shift at the right moment instead of fighting the machine.",
+      "mapping": [
+        [
+          "Engine",
+          "CPU/memory"
+        ],
+        [
+          "Gear shifts",
+          "Access patterns"
+        ],
+        [
+          "Driver",
+          "Programmer"
+        ]
+      ],
+      "breaks": "Cars are similar across models; CPUs differ in cache sizes and microarchitecture."
+    },
+    "mindmap": {
+      "center": "Hardware Sympathy",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Latency hierarchy",
+            "Cache lines",
+            "False sharing",
+            "NUMA",
+            "Branch prediction"
+          ]
+        },
+        {
+          "label": "Impact",
+          "children": [
+            "10–100× differences"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "perf",
+            "lscpu",
+            "cachegrind"
+          ]
+        },
+        {
+          "label": "Mindset",
+          "children": [
+            "Measure",
+            "Data layout first"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same work, different speed",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Identical Big-O, wildly different speed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "// row-major traversal (cache-friendly)\nfor (i = 0; i < N; i++) for (j = 0; j < N; j++) sum += a[i][j];\n// column-major traversal of row-major array (cache-hostile): ~10× slower for large N\nfor (j = 0; j < N; j++) for (i = 0; i < N; i++) sum += a[i][j];"
+        }
+      ],
+      "outcome": "hardware-aware mindset."
+    },
+    "summary": {
+      "points": [
+        "Hardware has preferences.",
+        "Memory dominates.",
+        "Measure, then lay out data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can two O(n²) loops over the same array differ 10× in speed?",
+        "a": "Different access orders hit cache lines efficiently or not, so memory latency dominates the slower version."
+      }
+    ]
+  },
+  "the-great-lie-memory-is-fast": {
+    "core": "Programming models present memory as a flat, uniformly fast array. In reality a modern CPU can execute hundreds of instructions in the time one DRAM access takes (~100 ns, roughly 300+ cycles). Caches hide that latency only when access patterns are predictable and data fits. 'Memory-bound' code spends most cycles stalled waiting for data, not computing, so reducing memory traffic often matters more than reducing arithmetic.",
+    "first_principles": {
+      "problem": "A team optimises arithmetic in a hot loop, but profiling shows the CPU stalls on memory 70% of the time.",
+      "truths": [
+        "DRAM is ~100× slower than L1.",
+        "CPUs stall waiting for data.",
+        "Caches depend on locality."
+      ],
+      "derivation": [
+        "Measure **stalls** (perf: cycles vs instructions, IPC).",
+        "Reduce **memory traffic**.",
+        "Improve **locality**.",
+        "Use **compact data** (smaller types, SoA).",
+        "**Prefetch**-friendly sequential access."
+      ]
+    },
+    "analogy": {
+      "title": "A chef whose pantry is down the street",
+      "story": "Chopping speed doesn't matter if every ingredient requires a walk to the pantry.",
+      "mapping": [
+        [
+          "Chopping",
+          "Computation"
+        ],
+        [
+          "Walking to pantry",
+          "DRAM access"
+        ],
+        [
+          "Countertop",
+          "Cache"
+        ]
+      ],
+      "breaks": "Chefs can carry several items; CPUs fetch fixed 64-byte lines."
+    },
+    "mindmap": {
+      "center": "Memory Isn't Fast",
+      "branches": [
+        {
+          "label": "Numbers",
+          "children": [
+            "L1 ~1 ns",
+            "DRAM ~100 ns",
+            "300+ cycles"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Low IPC",
+            "Cache misses",
+            "Stalled cycles"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Locality",
+            "Compact data",
+            "Sequential access",
+            "Fewer pointers"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "perf stat",
+            "perf c2c",
+            "VTune"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure IPC",
+      "scenario": "perf.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms memory, not math, is the bottleneck."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "perf stat -e cycles,instructions,cache-misses,LLC-load-misses ./app\n#  instructions per cycle: 0.45   ← memory-bound (good code often > 2)\n#  LLC-load-misses: 1.2e9"
+        }
+      ],
+      "outcome": "memory reality acknowledged."
+    },
+    "summary": {
+      "points": [
+        "DRAM is slow.",
+        "CPUs stall.",
+        "Optimise data movement."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a low instructions-per-cycle (IPC) value suggest?",
+        "a": "The CPU is often stalled, typically waiting on memory, so the code is memory-bound."
+      }
+    ]
+  },
+  "the-latency-hierarchy-the-desk-analogy": {
+    "core": "Approximate latencies: register ~0.3 ns, L1 cache ~1 ns (32–48 KB per core), L2 ~4 ns (around 1–2 MB), L3 ~10–20 ns (tens of MB, shared), DRAM ~80–120 ns, NVMe SSD ~20–100 µs, network within a data centre ~0.5 ms, cross-continent ~80 ms. Each level is roughly 3–10× slower and bigger. Performance comes from keeping the working set in the fastest level that fits.",
+    "first_principles": {
+      "problem": "Engineers can't reason about why a lookup table that fits in L2 beats a 'smarter' algorithm hitting DRAM.",
+      "truths": [
+        "Each level is bigger and slower.",
+        "Working set size decides the level.",
+        "Orders of magnitude separate levels."
+      ],
+      "derivation": [
+        "Memorise **rough latencies**.",
+        "Estimate **working set size**.",
+        "Fit hot data in **cache**.",
+        "Batch **I/O and network** calls.",
+        "Measure with **perf/benchmarks**."
+      ]
+    },
+    "analogy": {
+      "title": "A desk, drawer, filing cabinet, warehouse",
+      "story": "Papers on your desk take a second, the drawer a few seconds, the cabinet across the room a minute, and the warehouse across town an hour.",
+      "mapping": [
+        [
+          "Desk",
+          "L1"
+        ],
+        [
+          "Drawer",
+          "L2"
+        ],
+        [
+          "Cabinet",
+          "L3/DRAM"
+        ],
+        [
+          "Warehouse",
+          "Disk/network"
+        ]
+      ],
+      "breaks": "Desks are manually organised; caches are managed automatically by hardware."
+    },
+    "mindmap": {
+      "center": "Latency Hierarchy",
+      "branches": [
+        {
+          "label": "On-chip",
+          "children": [
+            "Register 0.3 ns",
+            "L1 1 ns",
+            "L2 4 ns",
+            "L3 15 ns"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "DRAM 100 ns",
+            "Remote NUMA +50%"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "NVMe 20–100 µs",
+            "HDD 5–10 ms"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "DC 0.5 ms",
+            "Cross-region 80 ms"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Fit working set in fastest level"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Human-scale",
+      "scenario": "Scaling 1 ns → 1 s.",
+      "flow": [
+        "L1 hit: 1 second",
+        "DRAM: ~2 minutes",
+        "NVMe read: ~1 day",
+        "Cross-continent round trip: ~2.5 years"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Makes the gaps intuitive."
+        }
+      ],
+      "code": [],
+      "outcome": "latency intuition."
+    },
+    "summary": {
+      "points": [
+        "Orders of magnitude.",
+        "Working set matters.",
+        "Avoid slow levels."
+      ]
+    },
+    "check": [
+      {
+        "q": "Roughly how much slower is a DRAM access than an L1 cache hit?",
+        "a": "About 100× (≈1 ns vs ≈100 ns)."
+      }
+    ]
+  },
+  "cache-lines-and-spatial-locality": {
+    "core": "Caches move data in fixed 64-byte cache lines. Touching one byte loads its whole line, so neighbouring data comes for free (spatial locality), and hardware prefetchers detect sequential or strided access and fetch ahead. Arrays of contiguous structs or primitive arrays (structure of arrays) exploit this; linked lists and pointer-chasing trees scatter accesses across lines and defeat prefetching.",
+    "first_principles": {
+      "problem": "Iterating a linked list of 10 million nodes is 20× slower than iterating an array of the same values.",
+      "truths": [
+        "Memory moves in 64-byte lines.",
+        "Sequential access is prefetched.",
+        "Pointer chasing is unpredictable."
+      ],
+      "derivation": [
+        "Prefer **contiguous arrays**.",
+        "Use **struct-of-arrays** for hot fields.",
+        "Keep **hot fields together**.",
+        "Avoid **pointer chasing** in hot loops.",
+        "**Align/pack** data structures."
+      ]
+    },
+    "analogy": {
+      "title": "Buying eggs by the carton",
+      "story": "You can't buy one egg; you get a carton, so recipes using neighbouring eggs are cheap.",
+      "mapping": [
+        [
+          "Carton",
+          "Cache line"
+        ],
+        [
+          "Neighbouring eggs",
+          "Adjacent data"
+        ],
+        [
+          "Scattered shops",
+          "Linked list nodes"
+        ]
+      ],
+      "breaks": "Cartons are always 12; lines are 64 bytes (128 on some CPUs)."
+    },
+    "mindmap": {
+      "center": "Cache Lines",
+      "branches": [
+        {
+          "label": "Size",
+          "children": [
+            "64 bytes (typical)"
+          ]
+        },
+        {
+          "label": "Locality",
+          "children": [
+            "Spatial",
+            "Temporal"
+          ]
+        },
+        {
+          "label": "Friendly",
+          "children": [
+            "Arrays",
+            "SoA",
+            "Sequential scans"
+          ]
+        },
+        {
+          "label": "Hostile",
+          "children": [
+            "Linked lists",
+            "Random access",
+            "Wide structs"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "Prefetchers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AoS vs SoA",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "SoA scan several times faster."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "// Array of structs: scanning 'price' loads unused fields too\nstruct Item { char name[48]; double price; int qty; } items[N];\nfor (i = 0; i < N; i++) total += items[i].price;   // 1 useful double per ~64 B line\n// Struct of arrays: 8 prices per cache line\ndouble price[N];\nfor (i = 0; i < N; i++) total += price[i];"
+        }
+      ],
+      "outcome": "cache-line-aware layouts."
+    },
+    "summary": {
+      "points": [
+        "64-byte lines.",
+        "Contiguous wins.",
+        "Pack hot fields."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are linked lists slow to traverse compared with arrays?",
+        "a": "Nodes are scattered in memory, so each step likely misses cache and defeats hardware prefetching."
+      }
+    ]
+  },
+  "false-sharing-the-noisy-neighbor-problem": {
+    "core": "Cache coherence works per cache line. If two threads on different cores write to different variables that share the same 64-byte line, each write invalidates the other core's copy, and the line ping-pongs between cores, even though the threads never touch the same data. Per-thread counters packed in an array are the classic case. The fix is padding or aligning hot per-thread data to separate cache lines.",
+    "first_principles": {
+      "problem": "A multi-threaded counter gets slower as more threads are added, despite each thread using its own counter.",
+      "truths": [
+        "Coherence tracks whole lines.",
+        "Writes invalidate other copies.",
+        "Unrelated data can share lines."
+      ],
+      "derivation": [
+        "Identify **per-thread hot writes**.",
+        "**Pad/align** to 64 (or 128) bytes.",
+        "Use **thread-local** accumulation.",
+        "Detect with **perf c2c**.",
+        "Use language helpers (**@Contended**, alignas)."
+      ]
+    },
+    "analogy": {
+      "title": "Two people sharing one notebook page",
+      "story": "Each writes in their own corner, but they must keep passing the notebook back and forth.",
+      "mapping": [
+        [
+          "Notebook page",
+          "Cache line"
+        ],
+        [
+          "Passing back and forth",
+          "Line ping-pong"
+        ],
+        [
+          "Separate pages",
+          "Padding"
+        ]
+      ],
+      "breaks": "People could tear the page; hardware can't split a line."
+    },
+    "mindmap": {
+      "center": "False Sharing",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "Different vars, same line",
+            "Concurrent writes"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Scaling collapse",
+            "High HITM"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Padding",
+            "alignas(64)",
+            "Thread-local",
+            "@Contended"
+          ]
+        },
+        {
+          "label": "Detection",
+          "children": [
+            "perf c2c",
+            "VTune"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pad counters",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Throughput scales linearly with threads."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "// bad: counters share cache lines\nlong counters[NTHREADS];\n// good: each counter on its own line\nstruct alignas(64) padded { long v; };\nstruct padded counters2[NTHREADS];\n// detect: perf c2c record ./app && perf c2c report"
+        }
+      ],
+      "outcome": "contention-free per-thread data."
+    },
+    "summary": {
+      "points": [
+        "Coherence per line.",
+        "Unrelated writes collide.",
+        "Pad hot data."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can two threads that never share variables still slow each other down?",
+        "a": "If their variables share a cache line, each write invalidates the other's cached copy (false sharing)."
+      }
+    ]
+  },
+  "numa-non-uniform-memory-access": {
+    "core": "Multi-socket servers attach memory to each socket. A core reading its local node's memory is fast; reading a remote node's memory crosses the interconnect, roughly 1.5–2× the latency with less bandwidth. Linux allocates on first touch, on the node of the thread that first writes the page. Threads migrating across sockets, or initialisation by one thread, cause remote access. Pin threads and memory together, or interleave memory for shared data.",
+    "first_principles": {
+      "problem": "A database on a 2-socket server performs worse than on a 1-socket machine because half its memory accesses are remote.",
+      "truths": [
+        "Memory is attached to sockets.",
+        "Remote access is slower.",
+        "First touch decides placement."
+      ],
+      "derivation": [
+        "Inspect with **numactl --hardware**.",
+        "**Pin** processes to a node.",
+        "Initialise memory **from the using thread**.",
+        "**Interleave** shared structures.",
+        "Monitor **numastat** (other_node)."
+      ]
+    },
+    "analogy": {
+      "title": "Two kitchens in one restaurant",
+      "story": "A chef using the other kitchen's fridge walks further each time.",
+      "mapping": [
+        [
+          "Kitchens",
+          "NUMA nodes"
+        ],
+        [
+          "Fridge",
+          "Local memory"
+        ],
+        [
+          "Walking over",
+          "Remote access"
+        ]
+      ],
+      "breaks": "Chefs see the walk; NUMA penalties hide in latency."
+    },
+    "mindmap": {
+      "center": "NUMA",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Memory per socket",
+            "Interconnect"
+          ]
+        },
+        {
+          "label": "Penalty",
+          "children": [
+            "1.5–2× latency",
+            "Lower bandwidth"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "First touch",
+            "Interleave",
+            "Bind"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "numactl",
+            "numastat",
+            "lscpu",
+            "lstopo"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Pin threads + memory",
+            "One instance per node"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bind and check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Remote accesses eliminated."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "numactl --hardware            # node distances: 10 local, 21 remote\nnumactl --cpunodebind=0 --membind=0 ./redis-server\nnumastat -p $(pgrep redis)    # 'other_node' should be near 0\n# shared data: numactl --interleave=all ./app"
+        }
+      ],
+      "outcome": "NUMA-aware deployment."
+    },
+    "summary": {
+      "points": [
+        "Local is fast.",
+        "First touch.",
+        "Pin or interleave."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is Linux's default NUMA memory allocation policy?",
+        "a": "First touch: a page is allocated on the node of the CPU that first writes to it."
+      }
+    ]
+  },
+  "branch-prediction-and-speculation": {
+    "core": "Modern CPUs pipeline 15–20 stages and execute out of order, so they guess which way branches go and speculatively execute ahead. A correct prediction is nearly free; a misprediction flushes the pipeline, costing around 15–20 cycles. Predictable branches (sorted data, loop conditions) are cheap and random ones are expensive. Branchless code (conditional moves, arithmetic tricks), sorting data or restructuring loops can remove mispredictions.",
+    "first_principles": {
+      "problem": "Processing a sorted array is 5× faster than the same unsorted array with an if inside the loop.",
+      "truths": [
+        "Pipelines need instructions ahead of time.",
+        "Predictors learn patterns.",
+        "Mispredictions flush work."
+      ],
+      "derivation": [
+        "Measure **branch-misses**.",
+        "Make data **predictable** (sort, partition).",
+        "Use **branchless** forms in hot loops.",
+        "Hint with **likely/unlikely** sparingly.",
+        "Let compilers **vectorise**."
+      ]
+    },
+    "analogy": {
+      "title": "A waiter who guesses your order",
+      "story": "Regulars' orders are prepared early and arrive instantly; a wrong guess means throwing food away and starting again.",
+      "mapping": [
+        [
+          "Guessing order",
+          "Branch prediction"
+        ],
+        [
+          "Wrong guess",
+          "Misprediction flush"
+        ],
+        [
+          "Regulars",
+          "Predictable branches"
+        ]
+      ],
+      "breaks": "Waiters ask; CPUs must guess every few nanoseconds."
+    },
+    "mindmap": {
+      "center": "Branch Prediction",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Pipelining",
+            "Predictors",
+            "Speculation"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "~15–20 cycles per miss"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Sorting",
+            "Branchless code",
+            "Lookup tables",
+            "Vectorisation"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "perf stat branch-misses"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Branchless",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Branch misses drop from 25% to ~0%."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "// branchy: unpredictable for random data\nif (x[i] >= 128) sum += x[i];\n// branchless\nint mask = -(x[i] >= 128);   // all 1s or 0\nsum += x[i] & mask;\n// perf stat -e branches,branch-misses ./bench"
+        }
+      ],
+      "outcome": "pipeline-friendly code."
+    },
+    "summary": {
+      "points": [
+        "CPUs guess branches.",
+        "Misses flush pipelines.",
+        "Predictable or branchless."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does sorting data sometimes speed up a loop with an if statement?",
+        "a": "The branch becomes predictable (long runs of true then false), so the CPU rarely mispredicts."
+      }
+    ]
+  },
+  "spectre-and-meltdown-when-speculation-becomes-a-security-hole": {
+    "core": "Speculative execution leaves traces in caches even when the speculated work is discarded. Meltdown let user code speculatively read kernel memory and leak it through cache-timing side channels; it was fixed by kernel page-table isolation (KPTI). Spectre tricks speculation into accessing out-of-bounds or victim data; it's mitigated by fences, retpolines, IBRS and bounds masking. Those mitigations cost performance, especially for syscall-heavy workloads.",
+    "first_principles": {
+      "problem": "After a kernel update, a syscall-heavy service loses 15% throughput and nobody knows why.",
+      "truths": [
+        "Speculation affects caches.",
+        "Cache timing is measurable.",
+        "Mitigations add overhead."
+      ],
+      "derivation": [
+        "Understand **side-channel leakage**.",
+        "Apply **KPTI/retpoline/IBRS** mitigations.",
+        "Check status in **/sys/devices/system/cpu/vulnerabilities**.",
+        "Measure **mitigation cost**.",
+        "Isolate **untrusted workloads** (separate hosts/cores)."
+      ]
+    },
+    "analogy": {
+      "title": "A clerk who glances at a confidential file before checking permission",
+      "story": "They put it back, but you can tell which drawer they opened by how warm the handle is.",
+      "mapping": [
+        [
+          "Glancing at file",
+          "Speculative access"
+        ],
+        [
+          "Warm handle",
+          "Cache state"
+        ],
+        [
+          "Checking permission late",
+          "Delayed security check"
+        ]
+      ],
+      "breaks": "Warm handles cool quickly; cache timing is precise and repeatable."
+    },
+    "mindmap": {
+      "center": "Spectre & Meltdown",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "Speculation side effects",
+            "Cache timing"
+          ]
+        },
+        {
+          "label": "Meltdown",
+          "children": [
+            "Kernel memory read",
+            "KPTI fix"
+          ]
+        },
+        {
+          "label": "Spectre",
+          "children": [
+            "Bounds bypass",
+            "Branch target injection"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "KPTI",
+            "Retpoline",
+            "IBRS/eIBRS",
+            "Fences"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Syscall overhead",
+            "Context switches"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check mitigations",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains post-update slowdown."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "grep . /sys/devices/system/cpu/vulnerabilities/*\n# meltdown: Mitigation: PTI\n# spectre_v2: Mitigation: Enhanced / Automatic IBRS; IBPB: conditional; RSB filling\nperf stat -e syscalls:sys_enter_* -a sleep 5   # syscall rate drives KPTI cost"
+        }
+      ],
+      "outcome": "security-performance trade-off understood."
+    },
+    "summary": {
+      "points": [
+        "Speculation leaks via cache.",
+        "Kernel/CPU mitigations.",
+        "Measurable cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why did Meltdown mitigations (KPTI) slow syscall-heavy workloads?",
+        "a": "KPTI separates kernel and user page tables, adding overhead (TLB flushes, CR3 switches) on every user-kernel transition."
+      }
+    ]
+  },
+  "putting-it-all-together-hardware-sympathy-in-practice": {
+    "core": "Apply hardware sympathy methodically. Profile first (perf for IPC, cache misses, branch misses), find the hot path, then fix data layout (contiguous, struct-of-arrays, compact types), access patterns (sequential, batched), sharing (pad per-thread data, avoid contended locks), placement (NUMA pinning), and branches (predictable or branchless). Re-measure every change, since intuition about hardware is often wrong.",
+    "first_principles": {
+      "problem": "A team rewrites code 'for performance' based on guesses and gains nothing.",
+      "truths": [
+        "Measurement beats intuition.",
+        "Hot paths are small.",
+        "Layout changes give big wins."
+      ],
+      "derivation": [
+        "**Profile** (perf stat/record).",
+        "Find **hot loops**.",
+        "Fix **layout and access**.",
+        "Remove **sharing/contention**.",
+        "**Pin** NUMA; **re-measure**."
+      ]
+    },
+    "analogy": {
+      "title": "A pit crew with telemetry",
+      "story": "They change tyres, wings or fuel strategy based on lap data, not hunches.",
+      "mapping": [
+        [
+          "Lap telemetry",
+          "Profiles"
+        ],
+        [
+          "Tyre change",
+          "Layout fix"
+        ],
+        [
+          "Lap time",
+          "Benchmark"
+        ]
+      ],
+      "breaks": "Race conditions are visible on track; CPU effects need counters."
+    },
+    "mindmap": {
+      "center": "In Practice",
+      "branches": [
+        {
+          "label": "Measure",
+          "children": [
+            "perf stat",
+            "perf record",
+            "perf c2c",
+            "flamegraphs"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Layout",
+            "Access patterns",
+            "False sharing",
+            "NUMA",
+            "Branches"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Benchmarks",
+            "Counters"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Premature micro-opt",
+            "Guesswork"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Optimisation loop",
+      "scenario": "Flow.",
+      "flow": [
+        "perf: IPC 0.4, LLC misses high in order matching",
+        "Switch map-of-pointers to sorted arrays",
+        "Pad per-thread stats",
+        "IPC 1.9, throughput 4×"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Data-driven big win."
+        }
+      ],
+      "code": [],
+      "outcome": "practical hardware sympathy."
+    },
+    "summary": {
+      "points": [
+        "Profile first.",
+        "Fix data before code.",
+        "Re-measure."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the first step before applying hardware-sympathy optimisations?",
+        "a": "Profile with hardware counters to find the actual hot path and its bottleneck (cache misses, branch misses, contention)."
+      }
+    ]
+  }
+}

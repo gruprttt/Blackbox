@@ -1,0 +1,441 @@
+{
+  "introduction-beyond-top-and-htop": {
+    "core": "top and htop show per-process CPU and memory, but not why: which cores and caches a process shares, where kernel memory went, or which mappings make up a process's RSS. Deeper tools answer these: lscpu and lstopo for hardware topology, slabtop for kernel object caches, /proc/<pid>/smaps for detailed memory mappings, plus perf, vmstat and pidstat for rates. Choosing the right lens turns guesses into facts.",
+    "first_principles": {
+      "problem": "free shows 30 GB used, but top's processes only add up to 10 GB.",
+      "truths": [
+        "Top-level views aggregate.",
+        "Kernel memory isn't per process.",
+        "Topology affects performance."
+      ],
+      "derivation": [
+        "Use **lscpu/lstopo** for topology.",
+        "Use **slabtop** for kernel caches.",
+        "Use **smaps/smaps_rollup** for process memory.",
+        "Use **vmstat/pidstat** for rates.",
+        "Correlate **multiple views**."
+      ]
+    },
+    "analogy": {
+      "title": "A building's lobby directory vs floor plans",
+      "story": "The directory says who's in the building; floor plans and utility meters show where space and power really go.",
+      "mapping": [
+        [
+          "Directory",
+          "top/htop"
+        ],
+        [
+          "Floor plans",
+          "lstopo"
+        ],
+        [
+          "Utility meters",
+          "slabtop/smaps"
+        ]
+      ],
+      "breaks": "Floor plans don't change; memory use does every second."
+    },
+    "mindmap": {
+      "center": "Inspection Tools",
+      "branches": [
+        {
+          "label": "Topology",
+          "children": [
+            "lscpu",
+            "lstopo",
+            "numactl -H"
+          ]
+        },
+        {
+          "label": "Kernel memory",
+          "children": [
+            "slabtop",
+            "/proc/meminfo",
+            "/proc/slabinfo"
+          ]
+        },
+        {
+          "label": "Process memory",
+          "children": [
+            "/proc/pid/smaps",
+            "smaps_rollup",
+            "pmap"
+          ]
+        },
+        {
+          "label": "Rates",
+          "children": [
+            "vmstat",
+            "pidstat",
+            "iostat"
+          ]
+        },
+        {
+          "label": "Deep",
+          "children": [
+            "perf",
+            "bpftrace"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Missing 20 GB",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Memory found in kernel slab caches."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "free -g\ngrep -E 'Slab|SReclaimable|SUnreclaim|PageTables|Shmem' /proc/meminfo\nslabtop -o -s c | head -8\n# dentry 14 GB  ← kernel dentry cache from millions of files"
+        }
+      ],
+      "outcome": "right tool for each question."
+    },
+    "summary": {
+      "points": [
+        "top is a summary.",
+        "Kernel memory is separate.",
+        "Use deeper lenses."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might system memory usage exceed the sum of process RSS values?",
+        "a": "Kernel memory (slab caches, page tables, buffers) and shared memory aren't attributed to individual processes' RSS."
+      }
+    ]
+  },
+  "cpu-topology-lscpu-and-lstopo": {
+    "core": "lscpu summarises CPU architecture: sockets, cores per socket, threads per core (SMT/hyper-threading), NUMA nodes and which CPUs belong to each, cache sizes per level and flags (avx512, pdpe1gb). lstopo (from hwloc) draws the full tree of packages, NUMA nodes, L3/L2/L1 caches, cores, hardware threads and attached PCI devices. Use them to pin threads, avoid sharing L2 with noisy siblings, and place workloads near their devices.",
+    "first_principles": {
+      "problem": "A latency-sensitive service pinned to CPUs 0 and 1 runs slowly because they're two hyper-threads of the same physical core.",
+      "truths": [
+        "Logical CPUs aren't all independent.",
+        "Caches are shared at different levels.",
+        "Devices attach to specific nodes."
+      ],
+      "derivation": [
+        "Read **sockets/cores/threads** in lscpu.",
+        "Map **CPU IDs to cores** (lscpu -e).",
+        "See **cache sharing** in lstopo.",
+        "Pin to **separate physical cores**.",
+        "Place near **NUMA-local devices**."
+      ]
+    },
+    "analogy": {
+      "title": "An office floor plan",
+      "story": "Desks (threads) at the same table (core) share a lamp (L1/L2); tables in one wing (socket) share a printer (L3).",
+      "mapping": [
+        [
+          "Desks",
+          "Hardware threads"
+        ],
+        [
+          "Table",
+          "Core"
+        ],
+        [
+          "Wing",
+          "Socket/NUMA node"
+        ]
+      ],
+      "breaks": "Office plans rarely change; cloud instance topology varies by type."
+    },
+    "mindmap": {
+      "center": "CPU Topology",
+      "branches": [
+        {
+          "label": "Levels",
+          "children": [
+            "Socket",
+            "NUMA node",
+            "L3",
+            "Core",
+            "SMT thread"
+          ]
+        },
+        {
+          "label": "lscpu",
+          "children": [
+            "-e table",
+            "Caches",
+            "Flags",
+            "NUMA map"
+          ]
+        },
+        {
+          "label": "lstopo",
+          "children": [
+            "Tree view",
+            "PCI devices",
+            "--of png"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Pinning",
+            "SMT avoidance",
+            "Device locality"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Map CPUs",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Pin to CPUs 0 and 2 (different cores) instead of 0 and 32."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "lscpu | grep -E 'Socket|Core|Thread|NUMA node[0-9]'\nlscpu -e=CPU,CORE,SOCKET,NODE | head\n# CPU 0 → CORE 0, CPU 32 → CORE 0 (sibling)\nlstopo --no-io --of console | head -30"
+        }
+      ],
+      "outcome": "topology-aware placement."
+    },
+    "summary": {
+      "points": [
+        "Know sockets, cores, threads.",
+        "Cache sharing matters.",
+        "Pin wisely."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can you tell which logical CPUs are hyper-thread siblings?",
+        "a": "lscpu -e shows the CORE column; CPUs sharing the same core ID are SMT siblings."
+      }
+    ]
+  },
+  "kernel-memory-slabtop": {
+    "core": "The kernel allocates many small, fixed-size objects (inodes, dentries, socket buffers, task structs) from slab caches managed by the SLUB allocator. slabtop shows live caches sorted by size or object count, and /proc/meminfo splits Slab into SReclaimable (dentry and inode caches the kernel can drop under pressure) and SUnreclaim (in-use objects). Rapidly growing unreclaimable slab can indicate a kernel or driver leak.",
+    "first_principles": {
+      "problem": "A node's free memory steadily declines with no process growing, until the OOM killer fires.",
+      "truths": [
+        "Kernel objects consume RAM.",
+        "Some caches are reclaimable.",
+        "Leaks show as monotonic growth."
+      ],
+      "derivation": [
+        "Check **Slab, SReclaimable, SUnreclaim**.",
+        "Sort **slabtop by cache size**.",
+        "Identify the **growing cache**.",
+        "Correlate with **workload/driver**.",
+        "Test **drop_caches** to confirm reclaimable."
+      ]
+    },
+    "analogy": {
+      "title": "A building's maintenance storage rooms",
+      "story": "Some hold spare chairs that can be cleared (reclaimable); others hold items in use that can't.",
+      "mapping": [
+        [
+          "Spare chairs",
+          "SReclaimable caches"
+        ],
+        [
+          "Items in use",
+          "SUnreclaim"
+        ],
+        [
+          "Storage rooms",
+          "Slab caches"
+        ]
+      ],
+      "breaks": "Storage rooms are visible; slab growth needs tools."
+    },
+    "mindmap": {
+      "center": "Kernel Slab",
+      "branches": [
+        {
+          "label": "Allocator",
+          "children": [
+            "SLUB"
+          ]
+        },
+        {
+          "label": "Caches",
+          "children": [
+            "dentry",
+            "inode",
+            "kmalloc-*",
+            "skbuff",
+            "task_struct"
+          ]
+        },
+        {
+          "label": "Meminfo",
+          "children": [
+            "Slab",
+            "SReclaimable",
+            "SUnreclaim"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "slabtop",
+            "/proc/slabinfo",
+            "/sys/kernel/slab"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Monotonic SUnreclaim growth = leak"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find the growing cache",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Leak traced to a kernel allocation cache."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "slabtop -o -s c | head -10\n#  OBJS   ACTIVE  ... CACHE SIZE NAME\n#  42M    42M         11.2G     kmalloc-256\nwatch -n 60 \"grep SUnreclaim /proc/meminfo\"\n# grows 200 MB/h → kernel leak; check recent driver/kernel update"
+        }
+      ],
+      "outcome": "kernel memory visibility."
+    },
+    "summary": {
+      "points": [
+        "Kernel uses slabs.",
+        "Reclaimable vs not.",
+        "Watch for leaks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between SReclaimable and SUnreclaim?",
+        "a": "SReclaimable slab (e.g. dentry/inode caches) can be freed under memory pressure; SUnreclaim is in-use kernel memory that can't."
+      }
+    ]
+  },
+  "process-memory-analysis-procpidsmaps": {
+    "core": "/proc/<pid>/smaps breaks a process's memory down per mapping (heap, stacks, shared libraries, mmapped files, anonymous regions), with Size (virtual), Rss (resident), Pss (proportional share of shared pages), Shared and Private clean or dirty pages, Swap and AnonHugePages. smaps_rollup gives totals. PSS is the fairest per-process measure when many processes share libraries; private dirty pages are what you'd free by killing the process.",
+    "first_principles": {
+      "problem": "Twenty worker processes each show 1 GB RSS, but the machine only has 8 GB and isn't swapping.",
+      "truths": [
+        "Shared pages are counted in every RSS.",
+        "PSS divides shared pages fairly.",
+        "Private dirty is truly owned."
+      ],
+      "derivation": [
+        "Read **smaps_rollup** for totals.",
+        "Use **Pss** for fair accounting.",
+        "Use **Private_Dirty** for 'freed if killed'.",
+        "Inspect **per-mapping** in smaps.",
+        "Watch **AnonHugePages/Swap**."
+      ]
+    },
+    "analogy": {
+      "title": "Splitting a shared flat's rent",
+      "story": "Each tenant 'uses' the whole kitchen (RSS), but their fair share is the rent divided among them (PSS).",
+      "mapping": [
+        [
+          "Whole kitchen",
+          "Shared pages in RSS"
+        ],
+        [
+          "Fair share",
+          "PSS"
+        ],
+        [
+          "Own bedroom",
+          "Private dirty"
+        ]
+      ],
+      "breaks": "Rent splits are fixed; PSS changes as processes start and exit."
+    },
+    "mindmap": {
+      "center": "smaps",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "Size",
+            "Rss",
+            "Pss",
+            "Shared_*",
+            "Private_*",
+            "Swap",
+            "AnonHugePages"
+          ]
+        },
+        {
+          "label": "Files",
+          "children": [
+            "smaps",
+            "smaps_rollup",
+            "status"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Fair accounting",
+            "Leak hunting",
+            "Shared lib cost"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "pmap -x",
+            "smem"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fair memory",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Real usage ~6 GB, not 20 GB."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat /proc/$(pgrep -o gunicorn)/smaps_rollup | grep -E '^(Rss|Pss|Private_Dirty|Shared_Clean)'\n# Rss: 1048576 kB  Pss: 312000 kB  Private_Dirty: 180000 kB\nsmem -t -k -P gunicorn   # totals by PSS"
+        }
+      ],
+      "outcome": "accurate process memory."
+    },
+    "summary": {
+      "points": [
+        "RSS double-counts shared.",
+        "PSS is fair.",
+        "Private dirty is owned."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can the sum of RSS across processes exceed physical RAM?",
+        "a": "Shared pages (libraries, shared memory, copy-on-write after fork) are counted fully in each process's RSS."
+      }
+    ]
+  }
+}

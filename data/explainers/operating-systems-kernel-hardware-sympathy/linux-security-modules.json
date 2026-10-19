@@ -1,0 +1,758 @@
+{
+  "introduction-the-linux-security-module-framework": {
+    "core": "The LSM framework places hooks throughout the kernel (file open, exec, socket connect, capability use, mount and more) where security modules can make extra allow or deny decisions after normal permission checks pass. SELinux, AppArmor, Smack, TOMOYO, Landlock, Yama, Lockdown and BPF-LSM plug in this way. Stacking allows several (for example Yama plus AppArmor). That is how Linux implements mandatory access control on top of discretionary permissions.",
+    "first_principles": {
+      "problem": "A compromised web server running as www-data can still read any world-readable file on the system.",
+      "truths": [
+        "DAC is controlled by owners.",
+        "Policy can be enforced centrally.",
+        "Hooks cover sensitive operations."
+      ],
+      "derivation": [
+        "Add **MAC** via LSMs.",
+        "Choose **SELinux or AppArmor** (distro-driven).",
+        "Use **Landlock** for app self-sandboxing.",
+        "Use **Yama/Lockdown** for hardening.",
+        "Check active LSMs in **/sys/kernel/security/lsm**."
+      ]
+    },
+    "analogy": {
+      "title": "Building security on top of door locks",
+      "story": "Even if you have a key to a door, a guard may stop you based on central rules about who goes where.",
+      "mapping": [
+        [
+          "Door key",
+          "DAC permission"
+        ],
+        [
+          "Guard",
+          "LSM hook"
+        ],
+        [
+          "Central rules",
+          "MAC policy"
+        ]
+      ],
+      "breaks": "Guards use judgement; LSMs follow policy literally."
+    },
+    "mindmap": {
+      "center": "LSM Framework",
+      "branches": [
+        {
+          "label": "Hooks",
+          "children": [
+            "File",
+            "Exec",
+            "Socket",
+            "Capability",
+            "Mount",
+            "IPC"
+          ]
+        },
+        {
+          "label": "Modules",
+          "children": [
+            "SELinux",
+            "AppArmor",
+            "Smack",
+            "Landlock",
+            "Yama",
+            "Lockdown",
+            "BPF-LSM"
+          ]
+        },
+        {
+          "label": "Stacking",
+          "children": [
+            "Minor + major modules"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "/sys/kernel/security/lsm"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Which LSMs?",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Know what MAC is active."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat /sys/kernel/security/lsm\n# lockdown,capability,landlock,yama,apparmor,bpf\ngetenforce 2>/dev/null || aa-status | head -3"
+        }
+      ],
+      "outcome": "LSM landscape understood."
+    },
+    "summary": {
+      "points": [
+        "Kernel hooks.",
+        "MAC on top of DAC.",
+        "Several modules."
+      ]
+    },
+    "check": [
+      {
+        "q": "When does an LSM hook get to make its decision relative to normal Unix permissions?",
+        "a": "After standard DAC checks pass; the LSM can further deny the operation."
+      }
+    ]
+  },
+  "dac-vs-mac-the-problem-lsm-solves": {
+    "core": "Discretionary access control (DAC) lets owners decide permissions, and root bypasses them, so any compromised process can do whatever its user can, and a root compromise is total. Mandatory access control (MAC) enforces a system-wide policy that users and root processes can't override: nginx may read /srv/www and bind port 443 but never read /etc/shadow, even as root. MAC contains the blast radius of compromised services.",
+    "first_principles": {
+      "problem": "An exploited service running as root reads secrets and installs a backdoor, since DAC can't stop root.",
+      "truths": [
+        "Owners and root control DAC.",
+        "Compromised processes inherit their user's power.",
+        "Central policy can restrict even root."
+      ],
+      "derivation": [
+        "Recognise **DAC limits**.",
+        "Define **per-service MAC policy**.",
+        "Enforce **least privilege** per program.",
+        "Deny by **default**.",
+        "Audit **denials**."
+      ]
+    },
+    "analogy": {
+      "title": "House keys vs a bank's vault policy",
+      "story": "A homeowner lends keys freely (DAC); the bank's policy says no employee, even the manager, opens the vault alone (MAC).",
+      "mapping": [
+        [
+          "House keys",
+          "DAC"
+        ],
+        [
+          "Vault policy",
+          "MAC"
+        ],
+        [
+          "Manager",
+          "root"
+        ]
+      ],
+      "breaks": "Bank policies are human-enforced; MAC is kernel-enforced on every access."
+    },
+    "mindmap": {
+      "center": "DAC vs MAC",
+      "branches": [
+        {
+          "label": "DAC",
+          "children": [
+            "Owner decides",
+            "root bypass",
+            "Per-user power"
+          ]
+        },
+        {
+          "label": "MAC",
+          "children": [
+            "Central policy",
+            "Binds root too",
+            "Per-program confinement"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Blast radius containment",
+            "Least privilege"
+          ]
+        },
+        {
+          "label": "Implementations",
+          "children": [
+            "SELinux",
+            "AppArmor"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Containment",
+      "scenario": "Scenario.",
+      "flow": [
+        "nginx exploited, running as root",
+        "DAC: can read /etc/shadow",
+        "MAC: httpd_t denied shadow_t read",
+        "Attack contained; AVC denial logged"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Compromise limited to web content."
+        }
+      ],
+      "code": [],
+      "outcome": "why MAC matters."
+    },
+    "summary": {
+      "points": [
+        "DAC trusts owners.",
+        "MAC enforces policy.",
+        "Contains compromises."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't DAC alone stop a compromised root process?",
+        "a": "Root bypasses discretionary permission checks; only mandatory policy enforced by the kernel can restrict it."
+      }
+    ]
+  },
+  "selinux-labels-and-contexts": {
+    "core": "SELinux labels every process and object with a context, user:role:type:level (e.g. system_u:object_r:httpd_sys_content_t:s0). Policy is mainly type enforcement, with rules like 'allow httpd_t httpd_sys_content_t:file { read open getattr }'. Processes get domains (httpd_t) via transitions when executing labelled binaries, and files get types from the policy's file contexts. Labels, not paths, decide access, so moving files can keep wrong labels.",
+    "first_principles": {
+      "problem": "Web content copied into /var/www/html with mv keeps its home-directory label, and Apache gets permission denied.",
+      "truths": [
+        "Every object has a label.",
+        "Policy compares domain and type.",
+        "mv preserves labels; cp creates new ones."
+      ],
+      "derivation": [
+        "View with **ls -Z / ps -Z**.",
+        "Policy: **allow domain type:class perms**.",
+        "File labels from **file contexts** (semanage fcontext).",
+        "Domains via **transitions**.",
+        "Restore labels with **restorecon**."
+      ]
+    },
+    "analogy": {
+      "title": "Colour-coded badges and colour-coded rooms",
+      "story": "A blue-badge worker may enter blue rooms only; carrying a red file into a blue room doesn't make it blue.",
+      "mapping": [
+        [
+          "Badge colour",
+          "Process domain"
+        ],
+        [
+          "Room colour",
+          "File type"
+        ],
+        [
+          "Rulebook",
+          "Policy"
+        ]
+      ],
+      "breaks": "Badges are visible; labels need -Z to see."
+    },
+    "mindmap": {
+      "center": "SELinux Contexts",
+      "branches": [
+        {
+          "label": "Format",
+          "children": [
+            "user:role:type:level"
+          ]
+        },
+        {
+          "label": "Type enforcement",
+          "children": [
+            "allow domain type:class perms"
+          ]
+        },
+        {
+          "label": "Labels",
+          "children": [
+            "ls -Z",
+            "ps -Z",
+            "id -Z"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "File contexts",
+            "Transitions",
+            "Booleans"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "mv keeps label",
+            "cp gets new label"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Wrong label",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Apache can serve the file."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ls -Z /var/www/html/index.html\n# unconfined_u:object_r:user_home_t:s0 index.html   ← moved from home\nps -eZ | grep httpd     # system_u:system_r:httpd_t:s0\nrestorecon -v /var/www/html/index.html\n# → httpd_sys_content_t"
+        }
+      ],
+      "outcome": "SELinux labels understood."
+    },
+    "summary": {
+      "points": [
+        "Everything labelled.",
+        "Type enforcement.",
+        "Restore labels."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does moving a file with mv often cause SELinux denials?",
+        "a": "mv preserves the original SELinux label, so the file keeps a type the target service isn't allowed to access."
+      }
+    ]
+  },
+  "selinux-modes-enforcing-permissive-and-disabled": {
+    "core": "Enforcing mode denies policy violations and logs AVC denials. Permissive mode allows everything but logs what would have been denied, which is useful for developing policy or diagnosing. Disabled turns SELinux off completely, losing labels (re-enabling needs a full relabel). Switch at runtime with setenforce 0 or 1 (not to or from disabled), persist in /etc/selinux/config, and set per-domain permissive with semanage permissive -a httpd_t. Disabling SELinux 'to make it work' throws away the protection.",
+    "first_principles": {
+      "problem": "A team disables SELinux whenever something breaks and never re-enables it.",
+      "truths": [
+        "Logging without denying helps debugging.",
+        "Disabling loses labels.",
+        "Per-domain permissive narrows the scope."
+      ],
+      "derivation": [
+        "Run **enforcing** in production.",
+        "Use **permissive** briefly to collect denials.",
+        "Prefer **per-domain permissive**.",
+        "Avoid **disabled**.",
+        "Check with **getenforce/sestatus**."
+      ]
+    },
+    "analogy": {
+      "title": "A security guard who either stops people, only takes notes, or goes home",
+      "story": "Taking notes for a week reveals what rules are missing without blocking work; going home leaves the building open.",
+      "mapping": [
+        [
+          "Stopping people",
+          "Enforcing"
+        ],
+        [
+          "Taking notes",
+          "Permissive"
+        ],
+        [
+          "Going home",
+          "Disabled"
+        ]
+      ],
+      "breaks": "Guards return easily; re-enabling from disabled requires a relabel."
+    },
+    "mindmap": {
+      "center": "SELinux Modes",
+      "branches": [
+        {
+          "label": "Enforcing",
+          "children": [
+            "Deny + log"
+          ]
+        },
+        {
+          "label": "Permissive",
+          "children": [
+            "Allow + log"
+          ]
+        },
+        {
+          "label": "Disabled",
+          "children": [
+            "Off",
+            "Labels lost"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "setenforce",
+            "/etc/selinux/config",
+            "semanage permissive"
+          ]
+        },
+        {
+          "label": "Status",
+          "children": [
+            "getenforce",
+            "sestatus"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Targeted permissive",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Debug one domain; rest stays protected."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "getenforce                         # Enforcing\nsemanage permissive -a httpd_t     # only httpd permissive\n# reproduce issue, collect denials\nausearch -m AVC -ts recent -c httpd\nsemanage permissive -d httpd_t     # back to enforcing for httpd"
+        }
+      ],
+      "outcome": "modes used responsibly."
+    },
+    "summary": {
+      "points": [
+        "Enforcing in prod.",
+        "Permissive to learn.",
+        "Never disable casually."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is disabling SELinux worse than setting it to permissive?",
+        "a": "Disabled stops labelling files, so re-enabling requires a full relabel, and you lose all logging of would-be denials."
+      }
+    ]
+  },
+  "audit-logs-reading-avc-denials": {
+    "core": "SELinux denials are logged as AVC messages in /var/log/audit/audit.log (and the journal). Each records the action (denied { read }), the process (comm, pid, scontext), the target (path or name, tcontext), the object class (tclass=file) and the permissive flag. ausearch -m AVC filters them, and audit2why explains the cause: a missing label, a boolean or a needed policy. sealert (setroubleshoot) gives human-readable suggestions.",
+    "first_principles": {
+      "problem": "An app fails with 'permission denied' but file permissions look correct.",
+      "truths": [
+        "MAC denials are logged.",
+        "Messages identify source, target and action.",
+        "Tools translate them."
+      ],
+      "derivation": [
+        "Search **ausearch -m AVC -ts recent**.",
+        "Read **scontext, tcontext, tclass, perms**.",
+        "Explain with **audit2why**.",
+        "Get suggestions with **sealert -a**.",
+        "Fix **labels/booleans** first."
+      ]
+    },
+    "analogy": {
+      "title": "A security incident report",
+      "story": "It says who tried what, on which door, and which rule stopped them.",
+      "mapping": [
+        [
+          "Who",
+          "scontext/comm"
+        ],
+        [
+          "Which door",
+          "tcontext/path"
+        ],
+        [
+          "What",
+          "Permission/class"
+        ]
+      ],
+      "breaks": "Incident reports are written by people; AVCs are terse and need decoding."
+    },
+    "mindmap": {
+      "center": "AVC Denials",
+      "branches": [
+        {
+          "label": "Location",
+          "children": [
+            "/var/log/audit/audit.log",
+            "journal"
+          ]
+        },
+        {
+          "label": "Fields",
+          "children": [
+            "denied { perm }",
+            "comm/pid",
+            "scontext",
+            "tcontext",
+            "tclass",
+            "permissive"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ausearch",
+            "audit2why",
+            "sealert",
+            "journalctl -t setroubleshoot"
+          ]
+        },
+        {
+          "label": "Typical causes",
+          "children": [
+            "Wrong label",
+            "Boolean off",
+            "Non-standard port",
+            "Missing policy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decode a denial",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Web app connects to Postgres; SELinux stays enforcing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ausearch -m AVC -ts recent | tail -3\n# avc: denied { name_connect } for comm=\"php-fpm\" dest=5432 scontext=system_u:system_r:httpd_t:s0\n#   tcontext=system_u:object_r:postgresql_port_t:s0 tclass=tcp_socket permissive=0\nausearch -m AVC -ts recent | audit2why\n# Boolean httpd_can_network_connect_db was set incorrectly.\nsetsebool -P httpd_can_network_connect_db on"
+        }
+      ],
+      "outcome": "denials decoded and fixed properly."
+    },
+    "summary": {
+      "points": [
+        "Logged as AVCs.",
+        "Read contexts.",
+        "audit2why explains."
+      ]
+    },
+    "check": [
+      {
+        "q": "What tool explains why an SELinux AVC denial occurred?",
+        "a": "audit2why (and sealert from setroubleshoot), reading AVC records from the audit log."
+      }
+    ]
+  },
+  "fixing-selinux-restorecon-semanage-and-audit2allow": {
+    "core": "Fix SELinux issues in order of preference. First restorecon to reset labels to policy defaults. Then semanage fcontext to define correct labels for custom paths (then restorecon). Then setsebool -P for intended features such as network connections or home directories. Then semanage port for non-standard ports. Only as a last resort, audit2allow -M to generate a small custom module, reviewed carefully so you don't blindly allow everything that was denied.",
+    "first_principles": {
+      "problem": "An engineer pipes all denials into audit2allow and loads a module that lets the web server read anything.",
+      "truths": [
+        "Most denials are labelling issues.",
+        "Booleans encode common intents.",
+        "Custom policy should be minimal."
+      ],
+      "derivation": [
+        "**restorecon -Rv** path.",
+        "**semanage fcontext -a -t type 'path(/.*)?'**.",
+        "**setsebool -P** boolean on.",
+        "**semanage port -a -t type -p tcp N**.",
+        "**audit2allow -M** last, review rules."
+      ]
+    },
+    "analogy": {
+      "title": "Fixing a filing error before rewriting company policy",
+      "story": "First check the document is in the right folder, then whether a standard exception applies, and only then draft a new rule.",
+      "mapping": [
+        [
+          "Wrong folder",
+          "Mislabel"
+        ],
+        [
+          "Standard exception",
+          "Boolean"
+        ],
+        [
+          "New rule",
+          "Custom module"
+        ]
+      ],
+      "breaks": "Company policies get reviewed; audit2allow output often doesn't."
+    },
+    "mindmap": {
+      "center": "Fixing SELinux",
+      "branches": [
+        {
+          "label": "1 Labels",
+          "children": [
+            "restorecon",
+            "semanage fcontext"
+          ]
+        },
+        {
+          "label": "2 Booleans",
+          "children": [
+            "getsebool -a",
+            "setsebool -P"
+          ]
+        },
+        {
+          "label": "3 Ports",
+          "children": [
+            "semanage port"
+          ]
+        },
+        {
+          "label": "4 Custom",
+          "children": [
+            "audit2allow -M",
+            "Review .te",
+            "semodule -i"
+          ]
+        },
+        {
+          "label": "Never",
+          "children": [
+            "Blanket allow",
+            "Disable SELinux"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Custom web root",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Minimal, correct fixes; enforcing preserved."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "semanage fcontext -a -t httpd_sys_content_t '/srv/site(/.*)?'\nrestorecon -Rv /srv/site\nsemanage port -a -t http_port_t -p tcp 8081\n# last resort, reviewed:\nausearch -m AVC -c myapp -ts today | audit2allow -M myapp_local\ncat myapp_local.te && semodule -i myapp_local.pp"
+        }
+      ],
+      "outcome": "SELinux fixed properly."
+    },
+    "summary": {
+      "points": [
+        "Labels first.",
+        "Booleans and ports.",
+        "Review custom modules."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should audit2allow be a last resort?",
+        "a": "It blindly converts denials into allow rules, potentially granting broad unintended access; labels, booleans and ports usually fix the real cause."
+      }
+    ]
+  },
+  "apparmor-the-path-based-alternative": {
+    "core": "AppArmor (the Ubuntu, Debian and SUSE default) confines programs with profiles keyed to executable paths. Rules list allowed file paths with permissions (/srv/www/** r,), capabilities, network access and child execution modes. Profiles run in enforce or complain (log-only) mode, are managed with aa-status, aa-enforce, aa-complain and aa-genprof/aa-logprof, and log denials to the kernel log. It's simpler to write than SELinux but path-based, so hard links and renames can matter.",
+    "first_principles": {
+      "problem": "A custom service on Ubuntu needs confinement, and the team finds SELinux policy too complex.",
+      "truths": [
+        "Path-based rules are intuitive.",
+        "Profiles attach to executables.",
+        "Complain mode helps build profiles."
+      ],
+      "derivation": [
+        "Generate with **aa-genprof**.",
+        "Run in **complain** to learn.",
+        "Refine with **aa-logprof**.",
+        "Switch to **enforce**.",
+        "Check with **aa-status**, denials in dmesg."
+      ]
+    },
+    "analogy": {
+      "title": "A visitor pass listing allowed rooms by name",
+      "story": "The pass says 'Room 101, 102, the cafeteria'; anywhere else, security stops you.",
+      "mapping": [
+        [
+          "Pass",
+          "Profile"
+        ],
+        [
+          "Room names",
+          "Paths"
+        ],
+        [
+          "Security",
+          "Kernel enforcement"
+        ]
+      ],
+      "breaks": "Rooms keep names; files can be reached via other paths (links), a known weakness."
+    },
+    "mindmap": {
+      "center": "AppArmor",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Path-based profiles"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "enforce",
+            "complain",
+            "unconfined"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Paths + perms",
+            "capability",
+            "network",
+            "ix/px/cx exec"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "aa-status",
+            "aa-genprof",
+            "aa-logprof",
+            "aa-enforce",
+            "aa-complain"
+          ]
+        },
+        {
+          "label": "Containers",
+          "children": [
+            "docker-default",
+            "K8s annotations"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Profile snippet",
+      "scenario": "AppArmor.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "reportd confined to its paths."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "#include <tunables/global>\n/usr/local/bin/reportd {\n  #include <abstractions/base>\n  capability net_bind_service,\n  network inet stream,\n  /etc/reportd/** r,\n  /var/lib/reportd/** rw,\n  /usr/local/bin/reportd mr,\n  deny /etc/shadow r,\n}\n# apparmor_parser -r /etc/apparmor.d/usr.local.bin.reportd && aa-enforce reportd"
+        }
+      ],
+      "outcome": "practical MAC confinement."
+    },
+    "summary": {
+      "points": [
+        "Path-based.",
+        "Complain then enforce.",
+        "Simpler than SELinux."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a key conceptual difference between AppArmor and SELinux?",
+        "a": "AppArmor rules are based on file paths; SELinux uses labels (types) on objects regardless of path."
+      }
+    ]
+  }
+}

@@ -1,0 +1,516 @@
+{
+  "the-single-core-bottleneck": {
+    "core": "By default a NIC might deliver all packets through one queue, one interrupt and one CPU core. That core does interrupt handling, softirq protocol processing (IP, TCP) and possibly the application, so throughput caps at what one core can handle (often a few Gbps or around 1 Mpps) while other cores idle. Network scaling techniques spread receive and transmit work across cores while keeping each flow's packets in order on one core.",
+    "first_principles": {
+      "problem": "A 25 Gbps server tops out at 6 Gbps with CPU 0 at 100% softirq.",
+      "truths": [
+        "One core has finite capacity.",
+        "Packet processing is per-packet work.",
+        "Flow order must be preserved."
+      ],
+      "derivation": [
+        "Check **per-CPU softirq** load.",
+        "Use **RSS** (hardware queues).",
+        "Use **RPS** (software steering) if no RSS.",
+        "Use **RFS** for app locality.",
+        "Use **XPS** for transmit."
+      ]
+    },
+    "analogy": {
+      "title": "One toll booth on a motorway",
+      "story": "However wide the road, one booth limits traffic; open more booths and assign each car a lane by plate number.",
+      "mapping": [
+        [
+          "Toll booth",
+          "CPU core"
+        ],
+        [
+          "More booths",
+          "Multiple queues"
+        ],
+        [
+          "Plate number",
+          "Flow hash"
+        ]
+      ],
+      "breaks": "Booths are physical; queue counts are configurable."
+    },
+    "mindmap": {
+      "center": "Single-Core Bottleneck",
+      "branches": [
+        {
+          "label": "Symptoms",
+          "children": [
+            "One CPU 100% si",
+            "Throughput cap",
+            "Drops"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Single queue",
+            "IRQ affinity",
+            "No RSS"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "RSS",
+            "RPS",
+            "RFS",
+            "XPS"
+          ]
+        },
+        {
+          "label": "Constraint",
+          "children": [
+            "Per-flow ordering"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnose",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One queue in use; 16 available."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mpstat -P ALL 1 1 | sort -k8 -n | tail -3    # %soft per CPU\nethtool -l eth0          # Combined: 1 (max 16)\ngrep eth0 /proc/interrupts | wc -l"
+        }
+      ],
+      "outcome": "bottleneck identified."
+    },
+    "summary": {
+      "points": [
+        "One core caps throughput.",
+        "Spread per flow.",
+        "Several techniques."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't packets simply be sprayed randomly across all cores?",
+        "a": "Packets of the same flow must be processed in order; random distribution would cause reordering, hurting TCP performance."
+      }
+    ]
+  },
+  "hardware-scaling-rss-receive-side-scaling": {
+    "core": "RSS is a NIC feature. Multiple receive queues, each with its own interrupt, and a hash (usually Toeplitz over source and destination IP and ports) choose the queue per packet via an indirection table. Bind each queue's IRQ to a different core and packet processing spreads across them while flows stay on one core. Configure the queue count (ethtool -L), hash fields (ethtool -N rx-flow-hash) and indirection weights (ethtool -X).",
+    "first_principles": {
+      "problem": "A NIC supports 16 queues but the driver defaulted to 4, limiting throughput.",
+      "truths": [
+        "Hardware can hash flows.",
+        "Queues map to interrupts.",
+        "Interrupts map to cores."
+      ],
+      "derivation": [
+        "Enable **max useful queues**.",
+        "Pin **queue IRQs** to local cores.",
+        "Set **hash fields** (include ports).",
+        "Tune **indirection table**.",
+        "Verify **per-queue counters**."
+      ]
+    },
+    "analogy": {
+      "title": "A sorting machine at the post office entrance",
+      "story": "It reads postcodes and sends letters to different sorting desks, always the same desk for the same postcode.",
+      "mapping": [
+        [
+          "Sorting machine",
+          "NIC hash"
+        ],
+        [
+          "Desks",
+          "Queues/cores"
+        ],
+        [
+          "Postcode",
+          "Flow tuple"
+        ]
+      ],
+      "breaks": "Sorting machines are fixed; RSS hash keys and tables are tunable."
+    },
+    "mindmap": {
+      "center": "RSS",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "RX queues",
+            "Toeplitz hash",
+            "Indirection table",
+            "MSI-X IRQs"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "ethtool -L",
+            "ethtool -N rx-flow-hash",
+            "ethtool -X"
+          ]
+        },
+        {
+          "label": "Placement",
+          "children": [
+            "IRQ affinity",
+            "NUMA-local cores"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "ethtool -S per-queue",
+            "/proc/interrupts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Configure",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Traffic spread across 16 queues."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ethtool -L eth0 combined 16\nethtool -N eth0 rx-flow-hash udp4 sdfn     # hash UDP on IPs + ports\nethtool -x eth0 | head\nethtool -S eth0 | grep -E 'rx_queue_[0-9]+_packets' | head"
+        }
+      ],
+      "outcome": "hardware-spread receive."
+    },
+    "summary": {
+      "points": [
+        "NIC hashes flows.",
+        "Queue per core.",
+        "Tune hash and table."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why include UDP ports in the RSS hash?",
+        "a": "Without ports, all traffic between the same two IPs lands on one queue, so ports add spread for many UDP flows."
+      }
+    ]
+  },
+  "software-scaling-rps-receive-packet-steering": {
+    "core": "RPS is RSS in software. After the driver receives a packet on one CPU, the kernel computes a flow hash and enqueues the packet to another CPU's backlog (per /sys/class/net/<dev>/queues/rx-N/rps_cpus), where the protocol processing runs. It's useful for NICs with few or no hardware queues, virtual NICs, or to spread processing beyond the queue count, at the cost of an inter-processor interrupt and some cache movement.",
+    "first_principles": {
+      "problem": "A VM's virtio NIC has a single queue, so all network processing lands on one vCPU.",
+      "truths": [
+        "Some NICs lack queues.",
+        "The kernel can hash and redistribute.",
+        "Redistribution has overhead."
+      ],
+      "derivation": [
+        "Set **rps_cpus** mask per RX queue.",
+        "Use **local NUMA** CPUs.",
+        "Combine with **RFS** for locality.",
+        "Measure **CPU/softirq** before and after.",
+        "Prefer **RSS** when hardware supports it."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist redistributing letters",
+      "story": "One person receives all mail at the door, then hands each batch to a different desk by postcode.",
+      "mapping": [
+        [
+          "Receptionist",
+          "Receiving CPU"
+        ],
+        [
+          "Desks",
+          "Target CPUs"
+        ],
+        [
+          "Hand-off",
+          "IPI + backlog"
+        ]
+      ],
+      "breaks": "Receptionists don't interrupt colleagues; RPS sends IPIs."
+    },
+    "mindmap": {
+      "center": "RPS",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Software hash",
+            "Per-CPU backlog",
+            "IPI"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "rps_cpus bitmask",
+            "rps_flow_cnt (RFS)"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Single-queue NICs",
+            "VMs",
+            "Beyond HW queues"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "IPIs",
+            "Cache transfer"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Softirq load spread across 8 vCPUs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "echo ff > /sys/class/net/eth0/queues/rx-0/rps_cpus      # CPUs 0-7\ncat /sys/class/net/eth0/queues/rx-0/rps_cpus\nmpstat -P ALL 1 1 | awk '{print $3, $8}' | head   # %soft spreads"
+        }
+      ],
+      "outcome": "software receive spreading."
+    },
+    "summary": {
+      "points": [
+        "Hash in software.",
+        "Redistribute to CPUs.",
+        "For limited NICs."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is RPS most useful?",
+        "a": "When the NIC has fewer hardware queues than cores (or only one, like many virtual NICs), so the kernel spreads processing in software."
+      }
+    ]
+  },
+  "locality-scaling-rfs-receive-flow-steering": {
+    "core": "RSS and RPS spread flows across CPUs by hash, but the application thread consuming a flow may run on a different CPU, so packet data must move across caches. RFS records which CPU last called recv() for each flow (in a global flow table sized by rps_sock_flow_entries) and steers that flow's packets to that CPU. Accelerated RFS (aRFS) programs the NIC to do it in hardware. Better cache locality lowers latency.",
+    "first_principles": {
+      "problem": "Network latency is higher than expected because packets are processed on one core and consumed by a thread on another.",
+      "truths": [
+        "Data processed far from its consumer causes cache misses.",
+        "The kernel can learn where consumers run.",
+        "NICs can steer in hardware."
+      ],
+      "derivation": [
+        "Set **rps_sock_flow_entries** (e.g. 32768).",
+        "Set per-queue **rps_flow_cnt**.",
+        "Enable **aRFS** if NIC supports (ntuple).",
+        "Keep **app threads stable** (affinity).",
+        "Measure **latency/cache misses**."
+      ]
+    },
+    "analogy": {
+      "title": "Delivering parcels to the desk where the recipient actually sits",
+      "story": "Instead of a fixed mailbox by surname, the post finds where the person is working today.",
+      "mapping": [
+        [
+          "Recipient's desk",
+          "Consumer CPU"
+        ],
+        [
+          "Fixed mailbox",
+          "RSS hash CPU"
+        ],
+        [
+          "Finding the desk",
+          "Flow table lookup"
+        ]
+      ],
+      "breaks": "People move between desks; threads that migrate a lot reduce RFS benefit."
+    },
+    "mindmap": {
+      "center": "RFS",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Flow table",
+            "Last recv CPU",
+            "Steer packets"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "net.core.rps_sock_flow_entries",
+            "rx-N/rps_flow_cnt"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "aRFS",
+            "ethtool -K ntuple on"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Cache locality",
+            "Lower latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable RFS",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Packets processed where the app consumes them."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl -w net.core.rps_sock_flow_entries=32768\nfor q in /sys/class/net/eth0/queues/rx-*; do echo 2048 > $q/rps_flow_cnt; done\nethtool -K eth0 ntuple on      # aRFS if supported"
+        }
+      ],
+      "outcome": "locality-aware steering."
+    },
+    "summary": {
+      "points": [
+        "Steer to consumer CPU.",
+        "Flow table.",
+        "aRFS in hardware."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does RFS solve that RSS doesn't?",
+        "a": "RSS picks a CPU by hash; RFS steers packets to the CPU where the consuming application thread runs, improving cache locality."
+      }
+    ]
+  },
+  "transmit-side-scaling-xps-transmit-packet-steering": {
+    "core": "On transmit, multi-queue NICs have several TX queues. XPS maps CPUs (or RX queues) to TX queues so each CPU transmits on its own queue, avoiding lock contention on a shared queue and keeping completion processing local. Configure it via /sys/class/net/<dev>/queues/tx-N/xps_cpus (or xps_rxqs). Without it, many cores contend on the same TX queue lock, limiting throughput.",
+    "first_principles": {
+      "problem": "A multi-core sender shows high spinlock contention in the network transmit path.",
+      "truths": [
+        "Shared queues need locks.",
+        "Per-CPU queues avoid contention.",
+        "Completions benefit from locality."
+      ],
+      "derivation": [
+        "Map **CPU → TX queue** via xps_cpus.",
+        "Or map **RX → TX** via xps_rxqs.",
+        "Use **one queue per core**.",
+        "Check **qdisc per queue** (mq).",
+        "Profile **lock contention** with perf."
+      ]
+    },
+    "analogy": {
+      "title": "Separate checkout lanes per cashier for departures",
+      "story": "Instead of every departing shopper squeezing through one exit gate, each cashier has their own.",
+      "mapping": [
+        [
+          "Exit gate",
+          "TX queue"
+        ],
+        [
+          "Cashiers",
+          "CPUs"
+        ],
+        [
+          "Squeezing",
+          "Lock contention"
+        ]
+      ],
+      "breaks": "Exits are physical; XPS mappings are bitmasks."
+    },
+    "mindmap": {
+      "center": "XPS",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "CPU→TX queue map",
+            "RXQ→TX queue map"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "tx-N/xps_cpus",
+            "tx-N/xps_rxqs"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No TX lock contention",
+            "Local completions"
+          ]
+        },
+        {
+          "label": "Related",
+          "children": [
+            "mq qdisc",
+            "fq per queue"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Map TX queues",
+      "scenario": "Script.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each CPU transmits on its own queue."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "n=$(ls -d /sys/class/net/eth0/queues/tx-* | wc -l)\nfor i in $(seq 0 $((n-1))); do\n  printf '%x' $((1 << i)) > /sys/class/net/eth0/queues/tx-$i/xps_cpus\ndone\ntc qdisc show dev eth0 | head -3     # mq root with per-queue children"
+        }
+      ],
+      "outcome": "contention-free transmit."
+    },
+    "summary": {
+      "points": [
+        "Per-CPU TX queues.",
+        "Avoid lock contention.",
+        "Configure masks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does XPS configure?",
+        "a": "Which CPUs (or RX queues) use which transmit queues, so each CPU sends on its own TX queue without contention."
+      }
+    ]
+  }
+}

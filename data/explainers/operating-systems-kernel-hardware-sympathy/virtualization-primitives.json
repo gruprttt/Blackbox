@@ -1,0 +1,545 @@
+{
+  "introduction-the-hypervisor": {
+    "core": "A hypervisor runs multiple virtual machines on one physical host, each with virtual CPUs, memory, disks and NICs. Type 1 hypervisors (KVM, Xen, ESXi, Hyper-V and AWS Nitro) run on or in the kernel close to hardware; type 2 (VirtualBox) run as apps on a host OS. Hardware support (Intel VT-x and AMD-V for CPU, EPT and NPT for memory, IOMMU for devices) makes it efficient. Contention, overcommit and emulation explain most VM performance mysteries.",
+    "first_principles": {
+      "problem": "A VM's performance varies wildly at different times of day with no change to the workload.",
+      "truths": [
+        "VMs share physical hardware.",
+        "Hardware assists virtualisation.",
+        "Contention on the host affects guests."
+      ],
+      "derivation": [
+        "Know **type 1 vs type 2**.",
+        "Use **hardware virtualisation** (VT-x/EPT).",
+        "Watch **steal time**.",
+        "Use **paravirtual devices** (virtio).",
+        "Understand **overcommit** (CPU, memory, storage)."
+      ]
+    },
+    "analogy": {
+      "title": "Apartments in one building",
+      "story": "Each tenant has their own flat, but they share the plumbing, lifts and electricity.",
+      "mapping": [
+        [
+          "Flats",
+          "VMs"
+        ],
+        [
+          "Building systems",
+          "Physical hardware"
+        ],
+        [
+          "Landlord",
+          "Hypervisor"
+        ]
+      ],
+      "breaks": "Flats have fixed size; VM resources can be overcommitted."
+    },
+    "mindmap": {
+      "center": "Hypervisors",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Type 1 (KVM, Xen, ESXi, Nitro)",
+            "Type 2 (VirtualBox)"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "VT-x/AMD-V",
+            "EPT/NPT",
+            "IOMMU"
+          ]
+        },
+        {
+          "label": "Concerns",
+          "children": [
+            "Steal time",
+            "Ballooning",
+            "virtio",
+            "Thin provisioning"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "virsh",
+            "virt-what",
+            "lscpu Hypervisor"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Am I virtualised?",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms environment and capabilities."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemd-detect-virt          # kvm / amazon / microsoft\nlscpu | grep -E 'Hypervisor|Virtualization'\ngrep -E 'vmx|svm' /proc/cpuinfo | head -1   # host supports HW virt"
+        }
+      ],
+      "outcome": "virtualisation basics."
+    },
+    "summary": {
+      "points": [
+        "Shared hardware.",
+        "HW assistance.",
+        "Contention matters."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between type 1 and type 2 hypervisors?",
+        "a": "Type 1 runs directly on hardware (or as part of the host kernel, like KVM); type 2 runs as an application on a host OS."
+      }
+    ]
+  },
+  "cpu-steal-time-st": {
+    "core": "Steal time (st in top, vmstat and mpstat) is the percentage of time a guest's vCPU wanted to run but the hypervisor was running something else, such as other VMs or host work. It reveals host CPU contention invisible inside the guest. Sustained steal above a few percent means noisy neighbours or overcommitted hosts, or credit exhaustion on burstable cloud instances (T-series). Fixes include bigger or dedicated instances, moving hosts, or reducing vCPU overcommit.",
+    "first_principles": {
+      "problem": "A batch job takes twice as long on some days, while in-guest CPU shows 'idle' time that isn't really idle.",
+      "truths": [
+        "Guests share physical CPUs.",
+        "Hypervisors can delay vCPUs.",
+        "Guests can measure lost time."
+      ],
+      "derivation": [
+        "Watch **st** column.",
+        "Alert on **sustained steal > 5–10%**.",
+        "Check **burstable credits**.",
+        "Use **dedicated/larger** instances.",
+        "Spread **noisy workloads**."
+      ]
+    },
+    "analogy": {
+      "title": "A shared taxi that keeps picking up others",
+      "story": "You're ready to go, but the driver serves other passengers first; that waiting is steal time.",
+      "mapping": [
+        [
+          "Taxi",
+          "Physical CPU"
+        ],
+        [
+          "Other passengers",
+          "Other VMs"
+        ],
+        [
+          "Your waiting",
+          "Steal"
+        ]
+      ],
+      "breaks": "Passengers see the detours; guests only see a percentage."
+    },
+    "mindmap": {
+      "center": "Steal Time",
+      "branches": [
+        {
+          "label": "Meaning",
+          "children": [
+            "vCPU ready but not scheduled"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Noisy neighbours",
+            "Host overcommit",
+            "Burst credits"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "top st",
+            "vmstat st",
+            "mpstat %steal",
+            "node_cpu_seconds_total{mode=steal}"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Bigger/dedicated instance",
+            "Move host",
+            "Unlimited mode"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains slowdowns; move to non-burstable instance."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mpstat 1 5 | tail -1\n#  %usr %sys %steal %idle\n#  55.0  5.0   28.0  12.0   ← heavy steal\naws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUCreditBalance ... # burstable?"
+        }
+      ],
+      "outcome": "host contention visible."
+    },
+    "summary": {
+      "points": [
+        "Lost CPU time.",
+        "Noisy neighbours/credits.",
+        "Resize or move."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does high CPU steal time indicate in a VM?",
+        "a": "The hypervisor is not scheduling the VM's vCPUs when they're ready, due to host contention or CPU credit limits."
+      }
+    ]
+  },
+  "memory-virtualization-and-ballooning": {
+    "core": "Guests see 'physical' memory that the hypervisor maps to host RAM via second-level page tables (EPT and NPT), adding cost on TLB misses (two-dimensional page walks, where huge pages help). Hosts can overcommit memory using ballooning (a guest driver inflates to hand pages back to the host), page sharing (KSM merges identical pages), compression and host swapping. Ballooned or host-swapped guests suffer unexplained latency and apparent memory loss.",
+    "first_principles": {
+      "problem": "A VM's available memory suddenly drops by 8 GB and latency spikes, though no process grew.",
+      "truths": [
+        "Guest RAM is virtual from the host's view.",
+        "Hosts can reclaim guest memory.",
+        "Reclaim methods affect performance."
+      ],
+      "derivation": [
+        "Check **balloon driver** stats.",
+        "Use **huge pages** for guest memory.",
+        "Avoid **host memory overcommit** for latency-sensitive VMs.",
+        "Monitor **host swap**.",
+        "Reserve memory (**reservations/limits**)."
+      ]
+    },
+    "analogy": {
+      "title": "A landlord reclaiming unused rooms",
+      "story": "A balloon in your flat slowly expands, pushing your belongings out so the landlord can rent the space to someone else.",
+      "mapping": [
+        [
+          "Balloon",
+          "Balloon driver"
+        ],
+        [
+          "Belongings pushed out",
+          "Guest reclaim/swap"
+        ],
+        [
+          "Re-renting",
+          "Host overcommit"
+        ]
+      ],
+      "breaks": "Balloons are visible; guest memory loss is not unless monitored."
+    },
+    "mindmap": {
+      "center": "Memory Virtualisation",
+      "branches": [
+        {
+          "label": "Translation",
+          "children": [
+            "EPT/NPT",
+            "2D page walks",
+            "Huge pages help"
+          ]
+        },
+        {
+          "label": "Overcommit",
+          "children": [
+            "Ballooning",
+            "KSM page sharing",
+            "Compression",
+            "Host swap"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Lost guest RAM",
+            "Latency spikes"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Reservations",
+            "Disable balloon",
+            "Dedicated hosts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check balloon",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Memory loss traced to host balloon."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# KVM host\nvirsh dommemstat web01      # actual vs available, swap_in\n# VMware guest\nvmware-toolbox-cmd stat balloon     # 8192 MB\n# guest view\ngrep MemTotal /proc/meminfo"
+        }
+      ],
+      "outcome": "memory overcommit understood."
+    },
+    "summary": {
+      "points": [
+        "Two-level translation.",
+        "Ballooning reclaims.",
+        "Reserve for critical VMs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a balloon driver do in a virtual machine?",
+        "a": "Allocates memory inside the guest and returns those pages to the hypervisor, letting the host reclaim RAM for other VMs."
+      }
+    ]
+  },
+  "paravirtualization-and-virtio": {
+    "core": "Emulating real hardware (an Intel e1000 NIC or IDE disk) means the hypervisor must trap and emulate every register access, which is slow. Paravirtualisation makes the guest aware it's virtualised: virtio devices (virtio-net, virtio-blk, virtio-scsi, virtio-balloon, virtio-rng) use shared-memory ring queues (virtqueues) and batch notifications between guest drivers and the host, giving near-native I/O. Cloud equivalents include AWS ENA and NVMe on Nitro, and SR-IOV goes further with direct hardware access.",
+    "first_principles": {
+      "problem": "A VM using an emulated e1000 NIC peaks at 1 Gbps and high CPU, while virtio reaches 10+ Gbps.",
+      "truths": [
+        "Emulating hardware is costly.",
+        "Cooperative drivers avoid traps.",
+        "Shared rings batch work."
+      ],
+      "derivation": [
+        "Use **virtio-net/blk/scsi** devices.",
+        "Install **guest drivers** (Linux built-in; Windows virtio-win).",
+        "Enable **multi-queue virtio**.",
+        "Use **vhost** (in-kernel backend).",
+        "Consider **SR-IOV** for max performance."
+      ]
+    },
+    "analogy": {
+      "title": "Speaking the same language with the host instead of miming",
+      "story": "Instead of acting out every request (emulation), guest and host agree on a direct vocabulary.",
+      "mapping": [
+        [
+          "Miming",
+          "Emulated hardware"
+        ],
+        [
+          "Shared vocabulary",
+          "virtio protocol"
+        ],
+        [
+          "Notes on a shared board",
+          "Virtqueues"
+        ]
+      ],
+      "breaks": "Languages are learned once; guests need the right drivers installed."
+    },
+    "mindmap": {
+      "center": "virtio",
+      "branches": [
+        {
+          "label": "Devices",
+          "children": [
+            "virtio-net",
+            "virtio-blk",
+            "virtio-scsi",
+            "virtio-balloon",
+            "virtio-rng",
+            "virtio-fs"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Virtqueues",
+            "Shared memory",
+            "Batched kicks"
+          ]
+        },
+        {
+          "label": "Backends",
+          "children": [
+            "QEMU",
+            "vhost-net",
+            "vhost-user (DPDK)"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "AWS ENA",
+            "Nitro NVMe",
+            "gVNIC"
+          ]
+        },
+        {
+          "label": "Beyond",
+          "children": [
+            "SR-IOV",
+            "VFIO passthrough"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check device type",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms paravirtual devices in use."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "lspci | grep -i -E 'virtio|ethernet'\n# 00:03.0 Ethernet controller: Red Hat, Inc. Virtio network device\nethtool -i eth0 | grep driver       # virtio_net\nethtool -l eth0                     # multi-queue channels"
+        }
+      ],
+      "outcome": "near-native virtual I/O."
+    },
+    "summary": {
+      "points": [
+        "Emulation is slow.",
+        "virtio cooperates.",
+        "Rings batch I/O."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is virtio faster than an emulated NIC like e1000?",
+        "a": "The guest driver communicates with the host through shared-memory queues with batched notifications, avoiding costly trap-and-emulate for every register access."
+      }
+    ]
+  },
+  "storage-virtualization-and-the-thin-provisioning-trap": {
+    "core": "Virtual disks are usually files (qcow2, VMDK, VHDX) or volumes on shared storage, often thin-provisioned: a 500 GB virtual disk only consumes what's written. That enables overcommit and fast cloning (copy-on-write snapshots), but if the datastore fills up, every VM on it can pause or fail writes at once. Long snapshot chains also slow I/O. Monitor actual pool usage, keep headroom, use TRIM/discard to reclaim space and consolidate snapshots.",
+    "first_principles": {
+      "problem": "A datastore hits 100% and fifty VMs freeze simultaneously, though each guest showed plenty of free disk.",
+      "truths": [
+        "Guests see logical size.",
+        "Pools hold physical usage.",
+        "Overcommit can exhaust the pool."
+      ],
+      "derivation": [
+        "Monitor **pool/datastore usage**.",
+        "Keep **headroom** (alerts at 70–80%).",
+        "Enable **discard/TRIM** in guests.",
+        "Avoid **long snapshot chains**.",
+        "Use **thick/reserved** for critical VMs."
+      ]
+    },
+    "analogy": {
+      "title": "A self-storage company renting more units than it has space",
+      "story": "It works while most customers keep units half-empty, until everyone fills up at once.",
+      "mapping": [
+        [
+          "Rented units",
+          "Virtual disks"
+        ],
+        [
+          "Real warehouse space",
+          "Datastore"
+        ],
+        [
+          "Everyone filling up",
+          "Pool exhaustion"
+        ]
+      ],
+      "breaks": "Storage companies turn customers away; full datastores pause running VMs."
+    },
+    "mindmap": {
+      "center": "Storage Virtualisation",
+      "branches": [
+        {
+          "label": "Formats",
+          "children": [
+            "qcow2",
+            "VMDK",
+            "VHDX",
+            "raw"
+          ]
+        },
+        {
+          "label": "Thin",
+          "children": [
+            "Allocate on write",
+            "Overcommit",
+            "Fast clones"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Pool exhaustion",
+            "Snapshot chains",
+            "Write amplification"
+          ]
+        },
+        {
+          "label": "Mitigation",
+          "children": [
+            "Monitoring",
+            "Headroom",
+            "TRIM/discard",
+            "Consolidation"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "EBS gp3",
+            "Provisioned IOPS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check real vs virtual",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Real usage tracked; space reclaimed via TRIM."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "qemu-img info /var/lib/libvirt/images/web01.qcow2\n#  virtual size: 500 GiB   disk size: 62 GiB\ndf -h /var/lib/libvirt/images                 # pool usage\n# guest: enable discard\nfstrim -av\n# libvirt disk: <driver name='qemu' type='qcow2' discard='unmap'/>"
+        }
+      ],
+      "outcome": "thin provisioning managed safely."
+    },
+    "summary": {
+      "points": [
+        "Logical vs physical.",
+        "Pools can exhaust.",
+        "Monitor and TRIM."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main risk of thin-provisioned virtual disks?",
+        "a": "The shared storage pool can fill up even though each guest sees free space, causing many VMs to pause or fail writes at once."
+      }
+    ]
+  }
+}

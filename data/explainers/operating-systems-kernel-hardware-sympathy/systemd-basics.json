@@ -1,0 +1,875 @@
+{
+  "introduction-the-orchestra-conductor": {
+    "core": "systemd is PID 1 and the system and service manager on most Linux distros. It starts units in parallel by dependency graph, supervises services (restarts and watchdogs), manages cgroups for resource control, collects logs (journald), handles timers (cron replacement), mounts, sockets, devices and user sessions, and provides uniform tooling (systemctl, journalctl, systemd-analyze). Understanding units and dependencies replaces a pile of init scripts.",
+    "first_principles": {
+      "problem": "A team manages services with ad-hoc shell scripts and nohup, and processes silently die without restart.",
+      "truths": [
+        "Services need supervision.",
+        "Boot order follows dependencies.",
+        "Uniform tooling reduces errors."
+      ],
+      "derivation": [
+        "Define **units** declaratively.",
+        "Express **dependencies**.",
+        "Use **Restart=** policies.",
+        "Use **journald** for logs.",
+        "Use **timers** instead of cron."
+      ]
+    },
+    "analogy": {
+      "title": "An orchestra conductor",
+      "story": "Cues each section at the right time, notices when someone stops playing, and brings them back in.",
+      "mapping": [
+        [
+          "Conductor",
+          "systemd"
+        ],
+        [
+          "Sections",
+          "Units"
+        ],
+        [
+          "Cues",
+          "Dependencies"
+        ]
+      ],
+      "breaks": "Conductors improvise; systemd follows unit files."
+    },
+    "mindmap": {
+      "center": "systemd",
+      "branches": [
+        {
+          "label": "Roles",
+          "children": [
+            "PID 1",
+            "Service supervision",
+            "cgroups",
+            "Logging",
+            "Timers"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "systemctl",
+            "journalctl",
+            "systemd-analyze",
+            "systemd-run"
+          ]
+        },
+        {
+          "label": "Concepts",
+          "children": [
+            "Units",
+            "Targets",
+            "Dependencies",
+            "Drop-ins"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Basic operations",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Uniform lifecycle and logs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemctl status nginx\nsystemctl enable --now nginx\nsystemctl restart nginx\njournalctl -u nginx -f\nsystemctl list-units --type=service --state=failed"
+        }
+      ],
+      "outcome": "systemd's role clear."
+    },
+    "summary": {
+      "points": [
+        "Manages everything.",
+        "Declarative units.",
+        "Supervision and logs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name three things systemd manages besides starting services.",
+        "a": "Logging (journald), timers, mounts, sockets, cgroup resource limits and user sessions (any three)."
+      }
+    ]
+  },
+  "unit-files-the-instructions-systemd-reads": {
+    "core": "A unit file has sections. [Unit] holds description, documentation and dependencies; the type-specific section ([Service]) holds Type= (simple, exec, forking, oneshot, notify), ExecStart=, User=, Restart=, Environment and EnvironmentFile, working directory, limits and sandboxing; [Install] holds WantedBy= for enablement. Vendor units live in /usr/lib/systemd/system and admin units in /etc/systemd/system. Run daemon-reload after edits and use systemd-analyze verify to lint.",
+    "first_principles": {
+      "problem": "A custom service unit starts, but systemd reports it 'active (exited)' while the process keeps running untracked.",
+      "truths": [
+        "systemd must know how the process behaves.",
+        "Type= describes startup semantics.",
+        "Locations determine precedence."
+      ],
+      "derivation": [
+        "Pick correct **Type=** (simple/exec/notify).",
+        "Set **User/Group**.",
+        "Set **Restart=on-failure**.",
+        "Add **sandboxing** (ProtectSystem, NoNewPrivileges).",
+        "**daemon-reload** and **verify**."
+      ]
+    },
+    "analogy": {
+      "title": "A job description for a worker",
+      "story": "It states who they are, when they start, how to tell they're working, and what to do if they stop.",
+      "mapping": [
+        [
+          "Job description",
+          "Unit file"
+        ],
+        [
+          "Start time",
+          "Dependencies"
+        ],
+        [
+          "Health check",
+          "Type=/watchdog"
+        ]
+      ],
+      "breaks": "Workers read descriptions once; systemd re-reads on daemon-reload."
+    },
+    "mindmap": {
+      "center": "Unit Files",
+      "branches": [
+        {
+          "label": "[Unit]",
+          "children": [
+            "Description",
+            "After",
+            "Wants/Requires"
+          ]
+        },
+        {
+          "label": "[Service]",
+          "children": [
+            "Type",
+            "ExecStart",
+            "User",
+            "Restart",
+            "Environment",
+            "Limit*",
+            "Protect*"
+          ]
+        },
+        {
+          "label": "[Install]",
+          "children": [
+            "WantedBy"
+          ]
+        },
+        {
+          "label": "Paths",
+          "children": [
+            "/usr/lib/systemd/system",
+            "/etc/systemd/system"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "daemon-reload",
+            "systemd-analyze verify",
+            "systemctl cat"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hardened service",
+      "scenario": "Unit.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Supervised, sandboxed, restartable service."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[Unit]\nDescription=Orders API\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nUser=orders\nExecStart=/opt/orders/bin/server --config /etc/orders/config.yaml\nRestart=on-failure\nRestartSec=2\nLimitNOFILE=65536\nNoNewPrivileges=yes\nProtectSystem=strict\nReadWritePaths=/var/lib/orders\n\n[Install]\nWantedBy=multi-user.target"
+        }
+      ],
+      "outcome": "well-formed units."
+    },
+    "summary": {
+      "points": [
+        "Sections and keys.",
+        "Correct Type=.",
+        "Sandbox by default."
+      ]
+    },
+    "check": [
+      {
+        "q": "When should a service use Type=forking?",
+        "a": "Only for traditional daemons that fork into the background and exit the parent; modern services should use simple/exec or notify."
+      }
+    ]
+  },
+  "types-of-units-services-timers-mounts-and-more": {
+    "core": "systemd manages many unit types. .service (processes), .socket (socket activation: systemd listens and starts the service on first connection), .timer (scheduled activation with calendar or monotonic triggers, persistent catch-up), .mount and .automount (filesystems, generated from fstab), .target (synchronisation points and groups), .path (activate on file changes), .slice (cgroup hierarchy), .scope (externally started processes) and .device (udev devices). Each is managed with the same systemctl verbs.",
+    "first_principles": {
+      "problem": "A nightly cron job silently fails, with no logs, retries or dependency on the network being up.",
+      "truths": [
+        "Different resources need different activation.",
+        "Uniform management simplifies ops.",
+        "Timers integrate with logging and dependencies."
+      ],
+      "derivation": [
+        "**.timer + .service** instead of cron.",
+        "**.socket** for on-demand start.",
+        "**.path** for file-triggered jobs.",
+        "**.mount/.automount** for filesystems.",
+        "**.slice** for resource groups."
+      ]
+    },
+    "analogy": {
+      "title": "Different kinds of staff rotas",
+      "story": "Shift workers (services), on-call staff who start when the phone rings (sockets), and scheduled cleaners (timers).",
+      "mapping": [
+        [
+          "Shift workers",
+          "Services"
+        ],
+        [
+          "On-call",
+          "Socket activation"
+        ],
+        [
+          "Scheduled cleaners",
+          "Timers"
+        ]
+      ],
+      "breaks": "Rotas are separate documents; systemd manages all with one tool."
+    },
+    "mindmap": {
+      "center": "Unit Types",
+      "branches": [
+        {
+          "label": "Core",
+          "children": [
+            ".service",
+            ".target"
+          ]
+        },
+        {
+          "label": "Activation",
+          "children": [
+            ".socket",
+            ".timer",
+            ".path"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            ".mount",
+            ".automount",
+            ".swap"
+          ]
+        },
+        {
+          "label": "Resources",
+          "children": [
+            ".slice",
+            ".scope"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            ".device"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Timer replacing cron",
+      "scenario": "Units.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Logged, dependency-aware, catch-up scheduled job."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# /etc/systemd/system/report.timer\n[Timer]\nOnCalendar=*-*-* 02:15:00\nPersistent=true\nRandomizedDelaySec=300\n[Install]\nWantedBy=timers.target\n\n# /etc/systemd/system/report.service\n[Unit]\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=oneshot\nExecStart=/opt/report/run.sh\n# systemctl enable --now report.timer ; systemctl list-timers"
+        }
+      ],
+      "outcome": "right unit type for each job."
+    },
+    "summary": {
+      "points": [
+        "Many unit types.",
+        "Timers beat cron.",
+        "Same tooling."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Persistent=true do in a systemd timer?",
+        "a": "Runs a missed job at the next boot if the system was off at the scheduled time."
+      }
+    ]
+  },
+  "dependency-management-wants-requires-and-after": {
+    "core": "systemd separates requirement from ordering. Wants= is a weak dependency (start the other unit too, but don't fail if it fails), Requires= is strong (if it fails to start or stops, this unit stops too), BindsTo= is stronger still (tied to the other's active state), and PartOf= propagates stop and restart. Ordering is separate: After= and Before= only set sequence. Requires= without After= starts both in parallel, a common mistake.",
+    "first_principles": {
+      "problem": "An app with Requires=postgresql.service still starts before Postgres is ready and crashes.",
+      "truths": [
+        "Needing a unit differs from ordering after it.",
+        "Weak dependencies improve resilience.",
+        "Readiness needs proper Type=notify."
+      ],
+      "derivation": [
+        "Use **Wants=** by default.",
+        "Use **Requires=** for hard needs.",
+        "Always add **After=** for ordering.",
+        "Use **network-online.target** (with Wants) for network.",
+        "Make dependencies signal **readiness** (Type=notify)."
+      ]
+    },
+    "analogy": {
+      "title": "Inviting a friend vs waiting for them to arrive",
+      "story": "Saying 'bring Alex' (Wants/Requires) doesn't mean waiting until Alex arrives (After).",
+      "mapping": [
+        [
+          "Inviting",
+          "Wants/Requires"
+        ],
+        [
+          "Waiting for arrival",
+          "After"
+        ],
+        [
+          "Leaving if friend leaves",
+          "BindsTo"
+        ]
+      ],
+      "breaks": "Friends text when they arrive; services need notify/readiness to signal it."
+    },
+    "mindmap": {
+      "center": "Dependencies",
+      "branches": [
+        {
+          "label": "Requirement",
+          "children": [
+            "Wants (weak)",
+            "Requires (strong)",
+            "BindsTo",
+            "PartOf",
+            "Requisite"
+          ]
+        },
+        {
+          "label": "Ordering",
+          "children": [
+            "After",
+            "Before"
+          ]
+        },
+        {
+          "label": "Common targets",
+          "children": [
+            "network-online.target",
+            "multi-user.target"
+          ]
+        },
+        {
+          "label": "Readiness",
+          "children": [
+            "Type=notify",
+            "sd_notify"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "systemctl list-dependencies",
+            "systemd-analyze critical-chain"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Correct dependency",
+      "scenario": "Unit.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "API starts only after Postgres is ready."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[Unit]\nDescription=Orders API\nRequires=postgresql.service\nAfter=postgresql.service network-online.target\nWants=network-online.target\n# Postgres unit uses Type=notify, so 'After' waits for real readiness"
+        }
+      ],
+      "outcome": "correct start ordering."
+    },
+    "summary": {
+      "points": [
+        "Need ≠ order.",
+        "Pair Requires with After.",
+        "Readiness via notify."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does Requires= alone ensure a unit starts after its dependency?",
+        "a": "No, Requires= only declares the dependency; you also need After= to enforce ordering."
+      }
+    ]
+  },
+  "targets-grouping-units-together": {
+    "core": "Targets are named synchronisation points that group units, much like the old runlevels but more flexible. multi-user.target is the normal server state, graphical.target adds a desktop, rescue.target is single-user with basic services, emergency.target is a minimal shell, and network-online.target means the network is configured. Units hook in via WantedBy= in [Install]. Change the default with systemctl set-default, and switch at runtime with systemctl isolate.",
+    "first_principles": {
+      "problem": "A server needs to boot into a maintenance state without starting applications.",
+      "truths": [
+        "Systems have named states.",
+        "Units join states via WantedBy.",
+        "States can be switched."
+      ],
+      "derivation": [
+        "Know **multi-user, graphical, rescue, emergency**.",
+        "Hook units with **WantedBy=**.",
+        "Set **default target**.",
+        "**isolate** to switch.",
+        "Boot with **systemd.unit=rescue.target**."
+      ]
+    },
+    "analogy": {
+      "title": "Building modes: open, after-hours, maintenance, lockdown",
+      "story": "Each mode switches on a defined set of systems.",
+      "mapping": [
+        [
+          "Open",
+          "multi-user/graphical"
+        ],
+        [
+          "Maintenance",
+          "rescue"
+        ],
+        [
+          "Lockdown",
+          "emergency"
+        ]
+      ],
+      "breaks": "Building modes are manual; targets are dependency graphs."
+    },
+    "mindmap": {
+      "center": "Targets",
+      "branches": [
+        {
+          "label": "Common",
+          "children": [
+            "multi-user",
+            "graphical",
+            "rescue",
+            "emergency",
+            "network-online",
+            "timers"
+          ]
+        },
+        {
+          "label": "Hooks",
+          "children": [
+            "WantedBy",
+            "RequiredBy"
+          ]
+        },
+        {
+          "label": "Commands",
+          "children": [
+            "get-default",
+            "set-default",
+            "isolate",
+            "list-dependencies"
+          ]
+        },
+        {
+          "label": "Boot",
+          "children": [
+            "systemd.unit=…"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Maintenance mode",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Maintenance without apps running."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemctl get-default                 # multi-user.target\nsystemctl isolate rescue.target       # stop apps, keep basic system\nsystemctl list-dependencies multi-user.target | head\n# or at boot: add systemd.unit=rescue.target to kernel cmdline"
+        }
+      ],
+      "outcome": "system states managed."
+    },
+    "summary": {
+      "points": [
+        "Targets group units.",
+        "Runlevel successors.",
+        "Switch with isolate."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between rescue.target and emergency.target?",
+        "a": "rescue starts basic system services and mounts in single-user mode; emergency gives a minimal shell with almost nothing started."
+      }
+    ]
+  },
+  "the-journal-centralized-logging-with-journalctl": {
+    "core": "journald collects logs from the kernel, early boot, service stdout and stderr, syslog and the native API into an indexed, structured binary journal with metadata (_SYSTEMD_UNIT, _PID, PRIORITY, _BOOT_ID). journalctl queries it: -u unit, -b boot, -p priority, --since and --until, -f follow, -o json, and _PID= field matches. Persist with Storage=persistent (or a /var/log/journal directory), and control size with SystemMaxUse=. Forward to central logging.",
+    "first_principles": {
+      "problem": "A service crashed overnight, and the team can't find its logs because stdout went nowhere.",
+      "truths": [
+        "Service output needs capture.",
+        "Metadata enables filtering.",
+        "Retention must be configured."
+      ],
+      "derivation": [
+        "Log to **stdout/stderr**.",
+        "Query with **journalctl -u -b -p**.",
+        "Persist with **Storage=persistent**.",
+        "Cap with **SystemMaxUse**.",
+        "Forward via **agent** (Fluent Bit, Vector)."
+      ]
+    },
+    "analogy": {
+      "title": "A central flight recorder for every system",
+      "story": "Everything said or done is recorded with time and source, searchable later.",
+      "mapping": [
+        [
+          "Flight recorder",
+          "Journal"
+        ],
+        [
+          "Source tags",
+          "Fields"
+        ],
+        [
+          "Search",
+          "journalctl filters"
+        ]
+      ],
+      "breaks": "Recorders are crash-proof; volatile journals vanish on reboot unless persisted."
+    },
+    "mindmap": {
+      "center": "journald",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Kernel",
+            "stdout/stderr",
+            "syslog",
+            "sd_journal"
+          ]
+        },
+        {
+          "label": "Fields",
+          "children": [
+            "_SYSTEMD_UNIT",
+            "_PID",
+            "PRIORITY",
+            "_BOOT_ID"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "-u",
+            "-b",
+            "-p",
+            "--since",
+            "-f",
+            "-o json"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "Storage=",
+            "SystemMaxUse=",
+            "RateLimit*"
+          ]
+        },
+        {
+          "label": "Forwarding",
+          "children": [
+            "ForwardToSyslog",
+            "Agents"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Investigate a crash",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Crash cause found in the previous boot's log."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "journalctl -u orders.service -b -1 -p warning --no-pager | tail -30   # previous boot\njournalctl -u orders.service --since '02:00' --until '02:30' -o short-precise\njournalctl _PID=4123 -o json-pretty | head\njournalctl --disk-usage"
+        }
+      ],
+      "outcome": "centralised, queryable logs."
+    },
+    "summary": {
+      "points": [
+        "Captures everything.",
+        "Rich filters.",
+        "Persist and forward."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you view logs for a service from the previous boot?",
+        "a": "journalctl -u <service> -b -1 (with persistent journal storage enabled)."
+      }
+    ]
+  },
+  "best-practice-overrides-and-drop-in-files": {
+    "core": "Never edit vendor unit files in /usr/lib/systemd/system, because package updates overwrite them. Instead create drop-ins with systemctl edit unit, which writes /etc/systemd/system/unit.d/override.conf; only the specified settings are merged on top. List-type settings like ExecStart= must first be cleared with an empty assignment. systemctl cat shows the merged result and systemd-delta lists overrides. A full copy in /etc replaces the unit entirely, which is rarely wanted.",
+    "first_principles": {
+      "problem": "A team edits nginx.service directly, and the next package upgrade silently reverts their LimitNOFILE change.",
+      "truths": [
+        "Packages own vendor files.",
+        "Drop-ins merge partially.",
+        "Some keys accumulate."
+      ],
+      "derivation": [
+        "Use **systemctl edit** for drop-ins.",
+        "Clear lists with **ExecStart=** empty first.",
+        "Inspect with **systemctl cat**.",
+        "Audit with **systemd-delta**.",
+        "Manage drop-ins via **config management**."
+      ]
+    },
+    "analogy": {
+      "title": "Sticky notes on a manual",
+      "story": "You add notes that override specific instructions without rewriting the printed manual, which may be reissued.",
+      "mapping": [
+        [
+          "Printed manual",
+          "Vendor unit"
+        ],
+        [
+          "Sticky notes",
+          "Drop-ins"
+        ],
+        [
+          "Reissued manual",
+          "Package update"
+        ]
+      ],
+      "breaks": "Sticky notes fall off; drop-ins persist until removed."
+    },
+    "mindmap": {
+      "center": "Drop-ins",
+      "branches": [
+        {
+          "label": "Create",
+          "children": [
+            "systemctl edit",
+            "/etc/systemd/system/X.d/*.conf"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Partial merge",
+            "Clear list keys first",
+            "Lexical order"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "systemctl cat",
+            "systemd-delta"
+          ]
+        },
+        {
+          "label": "Full override",
+          "children": [
+            "systemctl edit --full (rare)"
+          ]
+        },
+        {
+          "label": "Revert",
+          "children": [
+            "systemctl revert"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Override safely",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Changes survive package upgrades."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemctl edit nginx\n# [Service]\n# LimitNOFILE=65536\n# ExecStart=\n# ExecStart=/usr/sbin/nginx -g 'daemon off; worker_processes 8;'\nsystemctl daemon-reload && systemctl restart nginx\nsystemctl cat nginx | tail -8\nsystemd-delta --type=extended"
+        }
+      ],
+      "outcome": "maintainable unit customisation."
+    },
+    "summary": {
+      "points": [
+        "Never edit vendor units.",
+        "Drop-ins merge.",
+        "Clear list keys."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you add an empty 'ExecStart=' line in a drop-in before setting a new one?",
+        "a": "ExecStart is a list setting; without clearing it, the new value is added to the original instead of replacing it."
+      }
+    ]
+  },
+  "the-nuclear-option-masking-services": {
+    "core": "systemctl disable removes a unit's enablement symlinks, but it can still start manually or as a dependency. systemctl mask links the unit to /dev/null so it can't start at all, by hand, by dependency or by socket activation, until unmasked. Use it to prevent conflicting services (iptables vs firewalld), stop unwanted auto-starts (packagekit, cloud services on bare metal), or lock out risky services during incidents. Masked units show as 'masked' in status.",
+    "first_principles": {
+      "problem": "A disabled service keeps starting because another unit Wants= it.",
+      "truths": [
+        "Disable only removes auto-start.",
+        "Dependencies can still start units.",
+        "Masking blocks all starts."
+      ],
+      "derivation": [
+        "**disable** to stop auto-start.",
+        "**mask** to forbid any start.",
+        "**unmask** to restore.",
+        "Check with **systemctl is-enabled**.",
+        "Document masks in **config management**."
+      ]
+    },
+    "analogy": {
+      "title": "Removing a phone from speed dial vs disconnecting the line",
+      "story": "Disabling removes it from speed dial, but others can still call it; masking cuts the line.",
+      "mapping": [
+        [
+          "Speed dial",
+          "Enablement"
+        ],
+        [
+          "Others calling",
+          "Dependencies"
+        ],
+        [
+          "Cut line",
+          "Mask"
+        ]
+      ],
+      "breaks": "Cut lines are visible; masked units look normal until you check status."
+    },
+    "mindmap": {
+      "center": "Masking",
+      "branches": [
+        {
+          "label": "disable",
+          "children": [
+            "No auto-start",
+            "Still startable"
+          ]
+        },
+        {
+          "label": "mask",
+          "children": [
+            "Symlink to /dev/null",
+            "Cannot start at all"
+          ]
+        },
+        {
+          "label": "unmask",
+          "children": [
+            "Restore"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Conflicting services",
+            "Unwanted auto-start",
+            "Incident lockout"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "is-enabled",
+            "status"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Block a service",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Service can't start by any path."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemctl disable --now cups\nsystemctl start cups          # still works\nsystemctl mask --now cups\nsystemctl start cups          # Failed: Unit cups.service is masked.\nsystemctl is-enabled cups     # masked"
+        }
+      ],
+      "outcome": "services definitively blocked."
+    },
+    "summary": {
+      "points": [
+        "Disable vs mask.",
+        "Mask blocks dependencies.",
+        "Unmask to restore."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between disabling and masking a systemd unit?",
+        "a": "Disable removes auto-start links but allows manual/dependency starts; mask links the unit to /dev/null so it can't be started at all."
+      }
+    ]
+  }
+}

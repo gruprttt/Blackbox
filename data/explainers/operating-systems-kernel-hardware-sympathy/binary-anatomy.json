@@ -1,0 +1,769 @@
+{
+  "introduction-what-is-a-binary": {
+    "core": "A binary is a file the kernel can turn into a running process. On Linux that's an ELF file: a header saying what CPU and type it is, program headers telling the loader which pieces to map into memory, and sections holding code, data, symbols and relocation info. Understanding the format explains startup errors, library problems, binary size and how tools like gdb or ldd work.",
+    "first_principles": {
+      "problem": "A binary built on a laptop fails on a server with 'cannot execute binary file: Exec format error'.",
+      "truths": [
+        "The kernel needs a known format.",
+        "Headers describe architecture and layout.",
+        "Code and data live in separate regions."
+      ],
+      "derivation": [
+        "Identify format with **file**.",
+        "Read the **ELF header** (arch, type, entry).",
+        "Inspect **program headers** (segments).",
+        "Inspect **sections** (code, data, symbols).",
+        "Check **dynamic dependencies**."
+      ]
+    },
+    "analogy": {
+      "title": "A flat-pack furniture kit",
+      "story": "The box label says what it is and for which room; the instructions say which parts go where; the parts are the code and data.",
+      "mapping": [
+        [
+          "Box label",
+          "ELF header"
+        ],
+        [
+          "Assembly instructions",
+          "Program headers"
+        ],
+        [
+          "Parts",
+          "Sections"
+        ]
+      ],
+      "breaks": "Furniture is assembled once; binaries are mapped into memory on every run."
+    },
+    "mindmap": {
+      "center": "Binaries",
+      "branches": [
+        {
+          "label": "Format",
+          "children": [
+            "ELF",
+            "PE (Windows)",
+            "Mach-O (macOS)"
+          ]
+        },
+        {
+          "label": "ELF parts",
+          "children": [
+            "Header",
+            "Program headers",
+            "Sections",
+            "Symbols"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Executable",
+            "Shared object",
+            "Relocatable",
+            "Core"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "file",
+            "readelf",
+            "objdump",
+            "nm",
+            "ldd"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exec format error explained: wrong architecture."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "file ./app\n# app: ELF 64-bit LSB pie executable, ARM aarch64, dynamically linked, interpreter /lib/ld-linux-aarch64.so.1\nreadelf -h ./app | grep -E 'Class|Machine|Type|Entry'\n# Machine: AArch64  → won't run on x86_64 server"
+        }
+      ],
+      "outcome": "binaries demystified."
+    },
+    "summary": {
+      "points": [
+        "ELF format.",
+        "Header, segments, sections.",
+        "Inspect with readelf/file."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does 'Exec format error' usually mean?",
+        "a": "The binary's format or architecture (e.g. ARM vs x86_64) doesn't match what the kernel can execute."
+      }
+    ]
+  },
+  "anatomy-of-elf-sections-text-data-bss-rodata": {
+    "core": "Sections group content by purpose. .text holds machine code (read and execute), .rodata constants and string literals (read-only), .data initialised globals (read-write), and .bss zero-initialised globals, which take no file space and are just a size the loader zero-fills. Others include .symtab and .dynsym for symbols, .rela for relocations, .plt and .got for dynamic calls, and .debug_* for debuggers. The loader maps them as segments with matching permissions.",
+    "first_principles": {
+      "problem": "A binary is 300 MB, and the team doesn't know whether it's code, data or debug info.",
+      "truths": [
+        "Different content needs different permissions.",
+        "Zero-initialised data needn't be stored.",
+        "Debug info can dwarf code."
+      ],
+      "derivation": [
+        "**.text** code (r-x).",
+        "**.rodata** constants (r--).",
+        "**.data** initialised vars (rw-).",
+        "**.bss** zeroed vars (no file bytes).",
+        "Strip **.debug_*** for production."
+      ]
+    },
+    "analogy": {
+      "title": "Rooms in a house with different locks",
+      "story": "The workshop (code) is usable but not changeable, the library (constants) is read-only, and the storage room (data) is free to rearrange.",
+      "mapping": [
+        [
+          "Workshop",
+          ".text"
+        ],
+        [
+          "Library",
+          ".rodata"
+        ],
+        [
+          "Storage room",
+          ".data/.bss"
+        ]
+      ],
+      "breaks": "Houses don't zero rooms on entry; the loader zero-fills .bss."
+    },
+    "mindmap": {
+      "center": "ELF Sections",
+      "branches": [
+        {
+          "label": "Code",
+          "children": [
+            ".text",
+            ".plt"
+          ]
+        },
+        {
+          "label": "Read-only",
+          "children": [
+            ".rodata",
+            ".eh_frame"
+          ]
+        },
+        {
+          "label": "Writable",
+          "children": [
+            ".data",
+            ".bss",
+            ".got"
+          ]
+        },
+        {
+          "label": "Symbols",
+          "children": [
+            ".symtab",
+            ".dynsym",
+            ".strtab"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            ".debug_info",
+            ".debug_line"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "readelf -S",
+            "size",
+            "strip"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Size breakdown",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Debug info was 97% of size."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "size ./app\n#    text    data     bss     dec\n# 8123456   23456  100352  ...\nreadelf -S --wide ./app | grep -E 'debug|text'\nstrip --strip-debug -o app.stripped ./app && ls -lh app app.stripped   # 300M → 9M"
+        }
+      ],
+      "outcome": "section roles clear."
+    },
+    "summary": {
+      "points": [
+        "Sections by purpose.",
+        "Permissions differ.",
+        "Debug info can be stripped."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does .bss take no space in the file?",
+        "a": "It holds zero-initialised data, so only its size is recorded and the loader allocates zeroed memory at runtime."
+      }
+    ]
+  },
+  "object-files-and-the-linking-process": {
+    "core": "Compiling turns each source file into a relocatable object file (.o) with code, data, a symbol table (defined and undefined symbols), and relocations: placeholders for addresses not yet known. The linker combines objects and libraries, resolves undefined symbols to definitions, lays out sections and patches the relocations into an executable or shared library. 'Undefined reference' and 'multiple definition' errors come from this step.",
+    "first_principles": {
+      "problem": "A build fails with 'undefined reference to curl_easy_init' even though the code compiles.",
+      "truths": [
+        "Compilation is per file.",
+        "Cross-file references are resolved later.",
+        "Libraries must be named to the linker."
+      ],
+      "derivation": [
+        "**Compile** to .o with symbols + relocations.",
+        "**Link** resolves symbols across objects.",
+        "Pass **libraries** (-lcurl) in correct order.",
+        "Use **nm** to see defined/undefined.",
+        "Watch **duplicate symbols**."
+      ]
+    },
+    "analogy": {
+      "title": "Writing chapters with 'see page ?' references",
+      "story": "Each author writes a chapter with placeholders; the editor assembles the book and fills in page numbers.",
+      "mapping": [
+        [
+          "Chapters",
+          "Object files"
+        ],
+        [
+          "'See page ?'",
+          "Relocations"
+        ],
+        [
+          "Editor",
+          "Linker"
+        ]
+      ],
+      "breaks": "Editors can guess missing chapters; linkers just fail."
+    },
+    "mindmap": {
+      "center": "Linking",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            ".o files",
+            "Static libs .a",
+            "Shared libs .so"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Symbol resolution",
+            "Section layout",
+            "Relocation"
+          ]
+        },
+        {
+          "label": "Errors",
+          "children": [
+            "Undefined reference",
+            "Multiple definition",
+            "Library order"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "nm",
+            "ld",
+            "readelf -r"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnose undefined symbol",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Linker finds definition in libcurl."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "gcc -c main.c -o main.o\nnm main.o | grep curl\n#                 U curl_easy_init     (U = undefined)\ngcc main.o -o app            # undefined reference\ngcc main.o -o app -lcurl     # resolved"
+        }
+      ],
+      "outcome": "link errors understood."
+    },
+    "summary": {
+      "points": [
+        "Objects have placeholders.",
+        "Linker resolves.",
+        "Name your libraries."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a 'U' next to a symbol in nm output mean?",
+        "a": "The symbol is undefined in that object and must be resolved from another object or library at link time."
+      }
+    ]
+  },
+  "static-vs-dynamic-linking": {
+    "core": "Static linking copies library code into the executable, so it's self-contained, portable across distros and fast to start, but larger, and security fixes require rebuilding. Dynamic linking records dependencies (DT_NEEDED) and loads shared libraries (.so) at runtime: smaller binaries, shared memory pages and system-wide patching, at the cost of dependency hell (missing or incompatible versions). Containers and Go often favour static; distros favour dynamic.",
+    "first_principles": {
+      "problem": "A binary runs on Ubuntu but fails on Alpine with 'not found' because it needs glibc.",
+      "truths": [
+        "Copying code removes runtime dependencies.",
+        "Sharing code saves memory and patching effort.",
+        "Library versions differ between systems."
+      ],
+      "derivation": [
+        "**Static** for portability (scratch images).",
+        "**Dynamic** for shared patching/memory.",
+        "Check deps with **ldd**.",
+        "Mind **glibc vs musl**.",
+        "Use **sonames** for compatibility."
+      ]
+    },
+    "analogy": {
+      "title": "Packing your own tools vs using the workshop's",
+      "story": "Bring all your tools and you can work anywhere; rely on the workshop's tools and you travel light, but need the right workshop.",
+      "mapping": [
+        [
+          "Own toolbox",
+          "Static linking"
+        ],
+        [
+          "Workshop tools",
+          "Shared libraries"
+        ],
+        [
+          "Wrong workshop",
+          "Missing .so"
+        ]
+      ],
+      "breaks": "Tools don't get security patches; libraries do, and static binaries miss them."
+    },
+    "mindmap": {
+      "center": "Static vs Dynamic",
+      "branches": [
+        {
+          "label": "Static",
+          "children": [
+            "Self-contained",
+            "Portable",
+            "Larger",
+            "Rebuild to patch"
+          ]
+        },
+        {
+          "label": "Dynamic",
+          "children": [
+            "Small",
+            "Shared pages",
+            "Central patching",
+            "Dependency issues"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "glibc vs musl",
+            "NSS/DNS with static glibc"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ldd",
+            "readelf -d",
+            "file"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Compare",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Static binary runs anywhere with matching arch."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ldd ./app-dyn\n#   libssl.so.3 => /lib/x86_64-linux-gnu/libssl.so.3\n#   libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6\nCGO_ENABLED=0 go build -o app-static .\nfile app-static   # statically linked → runs in FROM scratch"
+        }
+      ],
+      "outcome": "informed linking choice."
+    },
+    "summary": {
+      "points": [
+        "Static: portable.",
+        "Dynamic: shared and patchable.",
+        "Watch libc."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a glibc-linked binary often fail on Alpine Linux?",
+        "a": "Alpine uses musl libc, so the glibc shared libraries and loader the binary expects aren't present."
+      }
+    ]
+  },
+  "the-loader-ldso": {
+    "core": "For dynamically linked programs, the kernel maps the executable and then runs the interpreter named in PT_INTERP, the dynamic loader ld-linux.so. It reads DT_NEEDED entries, searches for libraries (RPATH/RUNPATH, LD_LIBRARY_PATH, ld.so.cache, default paths), maps them, performs relocations, runs initialisers, and jumps to main. Function calls resolve lazily via PLT and GOT unless BIND_NOW is set.",
+    "first_principles": {
+      "problem": "An app fails with 'error while loading shared libraries: libfoo.so.2: cannot open shared object file'.",
+      "truths": [
+        "The kernel delegates linking to user space.",
+        "Search order determines which library loads.",
+        "Lazy binding defers work."
+      ],
+      "derivation": [
+        "Kernel runs **PT_INTERP** loader.",
+        "Loader resolves **DT_NEEDED** libs.",
+        "Search: **RUNPATH, LD_LIBRARY_PATH, ld.so.cache, defaults**.",
+        "**Relocate** and run initialisers.",
+        "Debug with **LD_DEBUG=libs**."
+      ]
+    },
+    "analogy": {
+      "title": "A stage manager before the show",
+      "story": "They gather every actor (library) the script lists, place them on stage, and cue the start.",
+      "mapping": [
+        [
+          "Stage manager",
+          "ld.so"
+        ],
+        [
+          "Cast list",
+          "DT_NEEDED"
+        ],
+        [
+          "Curtain up",
+          "Jump to main"
+        ]
+      ],
+      "breaks": "Stage managers improvise for missing actors; the loader aborts."
+    },
+    "mindmap": {
+      "center": "Dynamic Loader",
+      "branches": [
+        {
+          "label": "Trigger",
+          "children": [
+            "PT_INTERP"
+          ]
+        },
+        {
+          "label": "Search order",
+          "children": [
+            "RPATH/RUNPATH",
+            "LD_LIBRARY_PATH",
+            "ld.so.cache",
+            "/lib /usr/lib"
+          ]
+        },
+        {
+          "label": "Work",
+          "children": [
+            "Map",
+            "Relocate",
+            "Init",
+            "Start"
+          ]
+        },
+        {
+          "label": "Binding",
+          "children": [
+            "Lazy PLT/GOT",
+            "BIND_NOW",
+            "RELRO"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "LD_DEBUG",
+            "ldd",
+            "ldconfig -p"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Trace loading",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See exactly where the loader looked."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "LD_DEBUG=libs ./app 2>&1 | grep -E 'find library|trying file' | head\nldconfig -p | grep libfoo\nreadelf -d ./app | grep -E 'NEEDED|RUNPATH'\n# fix: install lib, add RUNPATH, or ldconfig"
+        }
+      ],
+      "outcome": "library loading understood."
+    },
+    "summary": {
+      "points": [
+        "Kernel hands to ld.so.",
+        "Search order matters.",
+        "LD_DEBUG reveals all."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which environment variable shows the dynamic loader's library search in detail?",
+        "a": "LD_DEBUG=libs (or LD_DEBUG=all)."
+      }
+    ]
+  },
+  "ld_preload-the-ultimate-hook": {
+    "core": "LD_PRELOAD tells the dynamic loader to load named shared libraries before all others, so their symbols win symbol resolution. That lets you override functions like malloc, open or connect without recompiling: for memory allocators (jemalloc), debugging, profiling, faking time, or sandboxing. It's also an attack vector (rootkits via /etc/ld.so.preload), and it's ignored for setuid binaries and has no effect on statically linked programs.",
+    "first_principles": {
+      "problem": "A team wants to try jemalloc for a closed-source binary without rebuilding it.",
+      "truths": [
+        "The first definition wins symbol lookup.",
+        "Preloaded libraries come first.",
+        "Security restrictions apply to privileged binaries."
+      ],
+      "derivation": [
+        "Write/obtain a **shared lib** defining the function.",
+        "Run with **LD_PRELOAD=lib.so**.",
+        "Call original via **dlsym(RTLD_NEXT)**.",
+        "Remember **static/setuid** exclusions.",
+        "Monitor **/etc/ld.so.preload** for abuse."
+      ]
+    },
+    "analogy": {
+      "title": "A stand-in actor who goes on first",
+      "story": "Whoever is on stage first gets the role, so slipping in a stand-in changes the performance without rewriting the play.",
+      "mapping": [
+        [
+          "Stand-in",
+          "Preloaded library"
+        ],
+        [
+          "Role",
+          "Function symbol"
+        ],
+        [
+          "Original actor",
+          "RTLD_NEXT"
+        ]
+      ],
+      "breaks": "Stand-ins are visible; preloaded hooks are invisible to the app."
+    },
+    "mindmap": {
+      "center": "LD_PRELOAD",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Loaded first",
+            "Symbol interposition"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "jemalloc/tcmalloc",
+            "Debug hooks",
+            "libfaketime",
+            "Sandboxing"
+          ]
+        },
+        {
+          "label": "Original",
+          "children": [
+            "dlsym(RTLD_NEXT)"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Static binaries",
+            "setuid ignored"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "/etc/ld.so.preload rootkits"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Swap allocator",
+      "scenario": "Commands + hook.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Behaviour changed without recompiling."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "// count.c: log every open()\n#define _GNU_SOURCE\n#include <dlfcn.h>\n#include <stdio.h>\nint open(const char *p, int f, ...) {\n    static int (*real)(const char*, int, ...);\n    if (!real) real = dlsym(RTLD_NEXT, \"open\");\n    fprintf(stderr, \"open(%s)\\n\", p);\n    return real(p, f, 0644);\n}\n// gcc -shared -fPIC count.c -o count.so -ldl\n// LD_PRELOAD=./count.so ./app\n// LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2 ./app"
+        }
+      ],
+      "outcome": "powerful runtime hooking."
+    },
+    "summary": {
+      "points": [
+        "Preloaded symbols win.",
+        "Hook and forward.",
+        "Watch for abuse."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't LD_PRELOAD affect statically linked binaries?",
+        "a": "They don't use the dynamic loader; all code is already linked in, so there's no runtime symbol resolution to interpose."
+      }
+    ]
+  },
+  "vdso-the-virtual-library": {
+    "core": "Some syscalls, like clock_gettime and gettimeofday, are called extremely often, and a real syscall's mode switch is costly. The vDSO is a small shared library the kernel maps into every process (shown as [vdso] in /proc/self/maps) that implements them in user space by reading kernel-maintained data pages. Time reads cost nanoseconds without entering the kernel; libc calls it automatically.",
+    "first_principles": {
+      "problem": "A high-frequency trading app calls clock_gettime millions of times per second, and engineers worry about syscall overhead.",
+      "truths": [
+        "Syscalls cost a mode switch.",
+        "Some data can be safely exposed read-only.",
+        "Hot paths need user-space speed."
+      ],
+      "derivation": [
+        "Kernel maps **vDSO** into every process.",
+        "Exposes **read-only time data**.",
+        "libc calls **vDSO functions** first.",
+        "Falls back to **real syscall** if needed.",
+        "Clock source matters (**TSC** good, HPET slow)."
+      ]
+    },
+    "analogy": {
+      "title": "A clock on the office wall vs calling the reception desk",
+      "story": "Instead of phoning reception for the time, you glance at a clock they keep synchronised.",
+      "mapping": [
+        [
+          "Wall clock",
+          "vDSO time data"
+        ],
+        [
+          "Calling reception",
+          "Syscall"
+        ],
+        [
+          "Reception syncing clock",
+          "Kernel updating vvar page"
+        ]
+      ],
+      "breaks": "Wall clocks can be wrong; vDSO falls back if the clock source isn't usable."
+    },
+    "mindmap": {
+      "center": "vDSO",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Fast common syscalls"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "clock_gettime",
+            "gettimeofday",
+            "time",
+            "getcpu"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Mapped shared object",
+            "vvar data page"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "Clock source (TSC vs HPET)",
+            "VM clock issues"
+          ]
+        },
+        {
+          "label": "See",
+          "children": [
+            "/proc/self/maps [vdso]"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "See it and its effect",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Time calls avoid the kernel entirely."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "grep -E 'vdso|vvar' /proc/self/maps\ncat /sys/devices/system/clocksource/clocksource0/current_clocksource   # tsc\nstrace -c -e clock_gettime ./bench   # ~0 syscalls: served by vDSO"
+        }
+      ],
+      "outcome": "fast time without syscalls."
+    },
+    "summary": {
+      "points": [
+        "Kernel-provided user library.",
+        "Time in nanoseconds.",
+        "Clock source matters."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might clock_gettime suddenly become slow on a VM?",
+        "a": "If the clock source isn't vDSO-capable (e.g. HPET or certain hypervisor clocks), calls fall back to real syscalls."
+      }
+    ]
+  }
+}

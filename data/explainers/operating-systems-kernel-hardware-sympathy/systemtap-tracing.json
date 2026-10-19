@@ -1,0 +1,549 @@
+{
+  "introduction-the-precursor-to-ebpf": {
+    "core": "Before eBPF matured, SystemTap (Red Hat, around 2005) gave Linux dynamic tracing. You write scripts in a probe language, SystemTap translates them to C, compiles a kernel module and loads it to instrument kernel and user functions. It's powerful and still used on older enterprise kernels (RHEL 6 and 7), but it needs kernel debuginfo and a compiler, and loads real modules. Its ideas (probes, tapsets, aggregates) shaped bpftrace.",
+    "first_principles": {
+      "problem": "A RHEL 7 production system lacks modern eBPF support, but the team needs to trace kernel function latency.",
+      "truths": [
+        "Dynamic tracing needs code in the kernel.",
+        "Older kernels lack eBPF features.",
+        "Modules are powerful but riskier."
+      ],
+      "derivation": [
+        "Use **SystemTap** on older kernels.",
+        "Install **kernel-debuginfo** matching uname -r.",
+        "Write **probe scripts**.",
+        "Prefer **eBPF/bpftrace** on modern kernels.",
+        "Test in **staging** first."
+      ]
+    },
+    "analogy": {
+      "title": "An older, heavier diagnostic machine",
+      "story": "It does the job before the portable modern device existed, but needs more setup and care.",
+      "mapping": [
+        [
+          "Older machine",
+          "SystemTap"
+        ],
+        [
+          "Portable device",
+          "eBPF/bpftrace"
+        ],
+        [
+          "Setup",
+          "debuginfo + compiler"
+        ]
+      ],
+      "breaks": "Old machines are safe once set up; kernel modules can crash the system if buggy."
+    },
+    "mindmap": {
+      "center": "SystemTap",
+      "branches": [
+        {
+          "label": "Era",
+          "children": [
+            "2005+",
+            "Pre-eBPF"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Script → C → kernel module"
+          ]
+        },
+        {
+          "label": "Needs",
+          "children": [
+            "kernel-debuginfo",
+            "gcc",
+            "kernel-devel"
+          ]
+        },
+        {
+          "label": "Strengths",
+          "children": [
+            "Powerful",
+            "Old kernels"
+          ]
+        },
+        {
+          "label": "Successor",
+          "children": [
+            "eBPF",
+            "bpftrace"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hello trace",
+      "scenario": "SystemTap.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Traces file opens on an older kernel."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# stap -e 'probe syscall.openat { printf(\"%s(%d) %s\\n\", execname(), pid(), filename) }' -c 'cat /etc/hostname'\n# requires: yum install systemtap kernel-devel-$(uname -r) kernel-debuginfo-$(uname -r)"
+        }
+      ],
+      "outcome": "SystemTap's place understood."
+    },
+    "summary": {
+      "points": [
+        "Pre-eBPF tracing.",
+        "Compiles modules.",
+        "Use on older kernels."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is eBPF generally preferred over SystemTap on modern kernels?",
+        "a": "eBPF programs are verified and JIT-compiled without building kernel modules or needing debuginfo, so they're safer and easier to deploy."
+      }
+    ]
+  },
+  "architecture-the-translation-loop": {
+    "core": "SystemTap runs in five passes. (1) Parse the script, (2) elaborate by resolving probe points and tapset symbols using debuginfo, (3) translate to C, (4) compile into a kernel module (stap_XXXX.ko) against kernel headers, (5) load the module with staprun, collect output and unload on exit. Compiled modules can be cached or cross-compiled and shipped to hosts without compilers using stap -p4 and staprun.",
+    "first_principles": {
+      "problem": "Production hosts can't have compilers installed, but the team needs SystemTap tracing.",
+      "truths": [
+        "Scripts become modules.",
+        "Compilation needs debuginfo and headers.",
+        "Modules can be prebuilt."
+      ],
+      "derivation": [
+        "Understand **5 passes**.",
+        "**Cache** compiled modules.",
+        "**Cross-compile** with -r kernel version.",
+        "Run with **staprun** on targets.",
+        "Restrict to **stapusr/stapdev** groups."
+      ]
+    },
+    "analogy": {
+      "title": "Translating and printing a manual before delivery",
+      "story": "Write it in one language, translate, print and bind it, then deliver the finished booklet to sites without printers.",
+      "mapping": [
+        [
+          "Writing",
+          "Script"
+        ],
+        [
+          "Translation",
+          "To C"
+        ],
+        [
+          "Printing",
+          "Compile .ko"
+        ],
+        [
+          "Delivery",
+          "staprun"
+        ]
+      ],
+      "breaks": "Manuals don't depend on exact site details; modules must match the exact kernel version."
+    },
+    "mindmap": {
+      "center": "Translation Loop",
+      "branches": [
+        {
+          "label": "Passes",
+          "children": [
+            "Parse",
+            "Elaborate",
+            "Translate",
+            "Compile",
+            "Run"
+          ]
+        },
+        {
+          "label": "Artifacts",
+          "children": [
+            "stap_*.c",
+            "stap_*.ko"
+          ]
+        },
+        {
+          "label": "Deployment",
+          "children": [
+            "stap -p4",
+            "-r <kernel>",
+            "staprun"
+          ]
+        },
+        {
+          "label": "Permissions",
+          "children": [
+            "stapusr",
+            "stapdev",
+            "stapsys"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Prebuild and ship",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Tracing without compilers on production."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# on build host with debuginfo\nstap -r 3.10.0-1160.el7.x86_64 -p4 -m iolat iolat.stp     # → iolat.ko\nscp iolat.ko prod01:/tmp/\n# on production host (no compiler)\nstaprun /tmp/iolat.ko"
+        }
+      ],
+      "outcome": "SystemTap pipeline understood."
+    },
+    "summary": {
+      "points": [
+        "Five passes.",
+        "Module per script.",
+        "Prebuild for production."
+      ]
+    },
+    "check": [
+      {
+        "q": "What tool loads a precompiled SystemTap module on a host without a compiler?",
+        "a": "staprun."
+      }
+    ]
+  },
+  "syntax-the-probe-language": {
+    "core": "SystemTap scripts are made of probes and handlers: probe <point> { statements }. Points include kernel.function(\"vfs_read\"), kernel.function(\"...\").return, syscall.*, process(\"/path\").function(\"name\"), timer.s(1), begin and end. Handlers use built-ins (execname(), pid(), tid(), gettimeofday_us()), $variables for context (function arguments via debuginfo, $return), global associative arrays and statistical aggregates (<<< with @count, @avg, @hist_log).",
+    "first_principles": {
+      "problem": "The team needs per-process average latency of vfs_read on an older kernel.",
+      "truths": [
+        "Entry and return probes bracket functions.",
+        "Debuginfo exposes arguments.",
+        "Aggregates summarise efficiently."
+      ],
+      "derivation": [
+        "Probe **entry** and **.return**.",
+        "Store start time in **global array** keyed by tid.",
+        "Aggregate with **<<<**.",
+        "Print in **end** or **timer** probes.",
+        "Use **@hist_log** for distributions."
+      ]
+    },
+    "analogy": {
+      "title": "A stopwatch at every door",
+      "story": "Start the watch when someone enters a room, stop when they leave, and record the time in a ledger by name.",
+      "mapping": [
+        [
+          "Enter room",
+          "Function entry"
+        ],
+        [
+          "Leave",
+          ".return"
+        ],
+        [
+          "Ledger",
+          "Aggregate"
+        ]
+      ],
+      "breaks": "Ledgers grow forever; SystemTap arrays have size limits."
+    },
+    "mindmap": {
+      "center": "Probe Language",
+      "branches": [
+        {
+          "label": "Probes",
+          "children": [
+            "kernel.function",
+            ".return",
+            "syscall.*",
+            "process().function",
+            "timer",
+            "begin/end"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "$args",
+            "$return",
+            "execname()",
+            "pid()"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "global arrays",
+            "Aggregates <<<"
+          ]
+        },
+        {
+          "label": "Stats",
+          "children": [
+            "@count",
+            "@avg",
+            "@max",
+            "@hist_log"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "vfs_read latency",
+      "scenario": "SystemTap.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Top processes by read latency."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "global start, lat\nprobe kernel.function(\"vfs_read\") { start[tid()] = gettimeofday_us() }\nprobe kernel.function(\"vfs_read\").return {\n  if (tid() in start) { lat[execname()] <<< gettimeofday_us() - start[tid()]; delete start[tid()] }\n}\nprobe end {\n  foreach (p in lat- limit 10) printf(\"%-16s avg=%dus max=%dus n=%d\\n\", p, @avg(lat[p]), @max(lat[p]), @count(lat[p]))\n}"
+        }
+      ],
+      "outcome": "SystemTap scripts written."
+    },
+    "summary": {
+      "points": [
+        "Probes + handlers.",
+        "Entry/return timing.",
+        "Aggregates."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the <<< operator do in SystemTap?",
+        "a": "Adds a value to a statistical aggregate, which can later be queried with @count, @avg, @max or histograms."
+      }
+    ]
+  },
+  "tapsets-the-standard-library": {
+    "core": "Tapsets are SystemTap's library of reusable probe aliases and functions (in /usr/share/systemtap/tapset). They expose stable, friendly names like syscall.open, ioblock.request, tcp.sendmsg, scheduler.cpu_on and vm.pagefault, with prepared variables (filename, size, devname) that hide kernel internals that change between versions. Example scripts in /usr/share/systemtap/examples cover many common investigations ready-made.",
+    "first_principles": {
+      "problem": "A script written for one kernel version breaks on another because internal function names changed.",
+      "truths": [
+        "Kernel internals change.",
+        "Abstractions can absorb differences.",
+        "Common tasks repeat."
+      ],
+      "derivation": [
+        "Use **tapset aliases** over raw functions.",
+        "Use provided **variables** (filename, size).",
+        "Browse **tapset docs** (man stapprobes).",
+        "Start from **example scripts**.",
+        "Write **custom tapsets** for your team."
+      ]
+    },
+    "analogy": {
+      "title": "A standard phrasebook",
+      "story": "Instead of knowing local slang in every town, you use phrases that work everywhere.",
+      "mapping": [
+        [
+          "Phrasebook",
+          "Tapsets"
+        ],
+        [
+          "Local slang",
+          "Kernel internals"
+        ],
+        [
+          "Common phrases",
+          "Probe aliases"
+        ]
+      ],
+      "breaks": "Phrasebooks rarely change; tapsets evolve with SystemTap releases."
+    },
+    "mindmap": {
+      "center": "Tapsets",
+      "branches": [
+        {
+          "label": "Location",
+          "children": [
+            "/usr/share/systemtap/tapset"
+          ]
+        },
+        {
+          "label": "Aliases",
+          "children": [
+            "syscall.*",
+            "ioblock.*",
+            "tcp.*",
+            "scheduler.*",
+            "vm.*"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Stable names",
+            "Prepared variables",
+            "Portability"
+          ]
+        },
+        {
+          "label": "Docs",
+          "children": [
+            "man stapprobes",
+            "man tapset::*"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "/usr/share/systemtap/examples"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Use tapset aliases",
+      "scenario": "SystemTap.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Portable script across kernel versions."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "probe ioblock.request {\n  if (bio_rw_num(rw) == BIO_WRITE)\n    printf(\"%s %s %d bytes\\n\", execname(), devname, size)\n}\n# examples: /usr/share/systemtap/examples/io/iotop.stp, network/nettop.stp"
+        }
+      ],
+      "outcome": "reusable, stable probes."
+    },
+    "summary": {
+      "points": [
+        "Library of aliases.",
+        "Hide internals.",
+        "Start from examples."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefer tapset probes like syscall.open over raw kernel.function probes?",
+        "a": "Tapsets provide stable, version-independent names and prepared variables, while internal function names can change between kernels."
+      }
+    ]
+  },
+  "safety-the-guru-mode": {
+    "core": "By default SystemTap enforces safety. Probe handlers have time and loop limits, memory access through $variables is checked, and embedded C code is forbidden. Guru mode (-g) lifts these restrictions, allowing embedded C (%{ ... %}), writes to kernel memory and modification of variables. It's useful for experiments or for patching a bug live as a band-aid, but a mistake can crash or corrupt the kernel, so reserve it for experts and test systems.",
+    "first_principles": {
+      "problem": "An engineer uses guru mode to modify a kernel variable in production and triggers a panic.",
+      "truths": [
+        "Default mode is constrained for safety.",
+        "Guru mode removes guardrails.",
+        "Kernel writes are dangerous."
+      ],
+      "derivation": [
+        "Keep **default safe mode**.",
+        "Use **-g** only when unavoidable.",
+        "Test **on staging**.",
+        "Prefer **eBPF** (verifier-enforced).",
+        "Restrict **stapdev** group membership."
+      ]
+    },
+    "analogy": {
+      "title": "A maintenance override key",
+      "story": "It lets a technician bypass safety interlocks, which is essential for rare repairs and dangerous if misused.",
+      "mapping": [
+        [
+          "Interlocks",
+          "Safety limits"
+        ],
+        [
+          "Override key",
+          "Guru mode"
+        ],
+        [
+          "Technician",
+          "Expert operator"
+        ]
+      ],
+      "breaks": "Override keys are physical; guru mode is just a flag."
+    },
+    "mindmap": {
+      "center": "Guru Mode",
+      "branches": [
+        {
+          "label": "Default safety",
+          "children": [
+            "Time/loop limits",
+            "Checked memory reads",
+            "No embedded C"
+          ]
+        },
+        {
+          "label": "Guru (-g)",
+          "children": [
+            "Embedded C",
+            "Kernel writes",
+            "Modify $vars"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Experiments",
+            "Live band-aid"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Panics",
+            "Corruption"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Group permissions",
+            "Staging only"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Guru vs safe",
+      "scenario": "SystemTap.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows the boundary between observe and modify."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# safe mode: read-only observation\nstap -e 'probe kernel.function(\"tcp_retransmit_skb\") { printf(\"%s\\n\", execname()) }'\n# guru mode: embedded C, writes allowed — dangerous\n# stap -g -e 'probe kernel.function(\"foo\") { $flag = 0 }'"
+        }
+      ],
+      "outcome": "safety boundaries respected."
+    },
+    "summary": {
+      "points": [
+        "Safe by default.",
+        "Guru removes limits.",
+        "Use with extreme care."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does SystemTap guru mode allow that default mode doesn't?",
+        "a": "Embedded C code and writing to kernel memory/variables, bypassing the default safety restrictions."
+      }
+    ]
+  }
+}

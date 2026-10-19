@@ -1,0 +1,1004 @@
+{
+  "introduction-the-journey-of-a-write": {
+    "core": "A write() travels a long path. The syscall enters the VFS, the filesystem (ext4, XFS) maps it to blocks, and data lands in the page cache (dirty pages); the call returns. Later, writeback creates bios for the block layer, I/O schedulers and multi-queue (blk-mq) dispatch them to the driver (NVMe or SCSI), and the device's own cache and firmware finally persist them. Durability needs fsync to force every layer to flush.",
+    "first_principles": {
+      "problem": "An app writes data, gets success, the server loses power, and the data is gone.",
+      "truths": [
+        "write() usually returns after caching.",
+        "Many layers buffer data.",
+        "Durability requires explicit flush."
+      ],
+      "derivation": [
+        "Trace **syscall → VFS → FS → page cache**.",
+        "Then **writeback → block layer → driver → device**.",
+        "Call **fsync/fdatasync** for durability.",
+        "Measure **latency per layer**.",
+        "Choose **buffered vs direct** I/O."
+      ]
+    },
+    "analogy": {
+      "title": "Posting a letter",
+      "story": "Dropping it in a postbox (write) feels done, but it goes through collection, sorting and delivery; only a signed receipt (fsync) proves it arrived.",
+      "mapping": [
+        [
+          "Postbox",
+          "Page cache"
+        ],
+        [
+          "Sorting office",
+          "Block layer"
+        ],
+        [
+          "Signed receipt",
+          "fsync"
+        ]
+      ],
+      "breaks": "Letters rarely vanish; unflushed page cache is lost on power failure."
+    },
+    "mindmap": {
+      "center": "I/O Path",
+      "branches": [
+        {
+          "label": "Layers",
+          "children": [
+            "Syscall",
+            "VFS",
+            "Filesystem",
+            "Page cache",
+            "Block layer",
+            "Driver",
+            "Device"
+          ]
+        },
+        {
+          "label": "Durability",
+          "children": [
+            "fsync",
+            "fdatasync",
+            "O_SYNC",
+            "O_DIRECT"
+          ]
+        },
+        {
+          "label": "Writeback",
+          "children": [
+            "dirty_ratio",
+            "flusher threads"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "iostat",
+            "biolatency",
+            "blktrace"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Durable write",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Data survives power loss after fsync returns."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import os\nfd = os.open(\"orders.log\", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)\nos.write(fd, b'order 42 paid\\n')    # in page cache only\nos.fsync(fd)                          # forces FS + device flush\nos.close(fd)"
+        }
+      ],
+      "outcome": "I/O path mapped."
+    },
+    "summary": {
+      "points": [
+        "Many layers.",
+        "write() isn't durable.",
+        "fsync to persist."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can data written with write() be lost after it returns success?",
+        "a": "It's often only in the page cache (and device caches); without fsync it hasn't been persisted to stable storage."
+      }
+    ]
+  },
+  "the-virtual-filesystem-vfs-one-api-to-rule-them-all": {
+    "core": "The VFS is the kernel's abstraction layer that gives every filesystem (ext4, XFS, Btrfs, NFS, tmpfs, procfs, FUSE) the same API: open, read, write, stat, mmap. It maintains common objects (superblocks, inodes, dentries and the dentry cache, open files) and dispatches operations to each filesystem's implementation through operation tables. That's why cat works identically on a local disk, NFS or /proc, and why dentry and inode caches speed up path lookups.",
+    "first_principles": {
+      "problem": "Engineers wonder why listing a huge directory is fast the second time and slow after a reboot.",
+      "truths": [
+        "Many filesystems need one interface.",
+        "Common objects can be cached.",
+        "Path lookups are frequent."
+      ],
+      "derivation": [
+        "VFS defines **common operations**.",
+        "Filesystems implement **ops tables**.",
+        "Caches: **dentry and inode caches**.",
+        "Page cache for **file data**.",
+        "Mount table joins **filesystems into one tree**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal remote control",
+      "story": "One set of buttons works across TVs from different makers, each translating the commands internally.",
+      "mapping": [
+        [
+          "Buttons",
+          "Syscalls"
+        ],
+        [
+          "TV makers",
+          "Filesystems"
+        ],
+        [
+          "Translation",
+          "Ops tables"
+        ]
+      ],
+      "breaks": "Remotes don't cache; VFS caches names and metadata aggressively."
+    },
+    "mindmap": {
+      "center": "VFS",
+      "branches": [
+        {
+          "label": "Objects",
+          "children": [
+            "superblock",
+            "inode",
+            "dentry",
+            "file"
+          ]
+        },
+        {
+          "label": "Caches",
+          "children": [
+            "dcache",
+            "icache",
+            "page cache"
+          ]
+        },
+        {
+          "label": "Filesystems",
+          "children": [
+            "ext4",
+            "XFS",
+            "NFS",
+            "tmpfs",
+            "procfs",
+            "FUSE"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Uniform API"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "slabtop dentry/inode",
+            "vfsstat"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cache effect",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cached metadata speeds lookups."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "time ls -R /usr >/dev/null      # cold: 2.1 s\ntime ls -R /usr >/dev/null      # warm: 0.3 s (dcache/icache)\nvfsstat-bpfcc 1 3                # VFS ops per second"
+        }
+      ],
+      "outcome": "VFS role understood."
+    },
+    "summary": {
+      "points": [
+        "One API.",
+        "Per-FS implementations.",
+        "Metadata caches."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the dentry cache speed up?",
+        "a": "Path name lookups, by caching directory entries mapping names to inodes."
+      }
+    ]
+  },
+  "buffered-io-vs-direct-io": {
+    "core": "Buffered I/O goes through the page cache: reads may be served from memory, readahead prefetches sequential data, and writes are absorbed and flushed later. That's great for most workloads. Direct I/O (O_DIRECT) bypasses the page cache, moving data between user buffers and the device, which needs aligned buffers and offsets. Databases with their own buffer pools use it to avoid double caching and to control I/O timing.",
+    "first_principles": {
+      "problem": "A database caches data in its buffer pool and the OS page cache, wasting half the RAM.",
+      "truths": [
+        "The page cache helps generic workloads.",
+        "Apps with their own caches double-cache.",
+        "Bypass needs alignment."
+      ],
+      "derivation": [
+        "Use **buffered** by default.",
+        "Use **O_DIRECT** for DB buffer pools.",
+        "**Align** buffers and offsets.",
+        "Still use **fsync/O_DSYNC** for durability.",
+        "Measure with **fio --direct=1**."
+      ]
+    },
+    "analogy": {
+      "title": "Using a shared warehouse vs your own stockroom",
+      "story": "Most shops use the shared warehouse; a big store with its own stockroom ships straight to it, avoiding storing goods twice.",
+      "mapping": [
+        [
+          "Shared warehouse",
+          "Page cache"
+        ],
+        [
+          "Own stockroom",
+          "DB buffer pool"
+        ],
+        [
+          "Direct shipping",
+          "O_DIRECT"
+        ]
+      ],
+      "breaks": "Stockrooms don't need alignment; O_DIRECT requires block-aligned I/O."
+    },
+    "mindmap": {
+      "center": "Buffered vs Direct",
+      "branches": [
+        {
+          "label": "Buffered",
+          "children": [
+            "Page cache",
+            "Readahead",
+            "Write-back",
+            "Default"
+          ]
+        },
+        {
+          "label": "Direct",
+          "children": [
+            "O_DIRECT",
+            "Alignment",
+            "No double caching",
+            "Predictable"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "PostgreSQL (buffered)",
+            "MySQL InnoDB O_DIRECT",
+            "Oracle",
+            "ScyllaDB"
+          ]
+        },
+        {
+          "label": "Durability",
+          "children": [
+            "fsync still needed (device cache)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Benchmark both",
+      "scenario": "fio.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No double caching for the DB."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "fio --name=buf --rw=randread --bs=4k --size=4G --direct=0 --runtime=30 --time_based\nfio --name=dio --rw=randread --bs=4k --size=4G --direct=1 --iodepth=32 --ioengine=io_uring --runtime=30 --time_based\n# MySQL: innodb_flush_method = O_DIRECT"
+        }
+      ],
+      "outcome": "right caching strategy."
+    },
+    "summary": {
+      "points": [
+        "Buffered by default.",
+        "Direct for self-caching apps.",
+        "Align and still fsync."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do some databases use O_DIRECT?",
+        "a": "They manage their own buffer cache, so bypassing the page cache avoids double caching and gives them control over I/O."
+      }
+    ]
+  },
+  "synchronous-vs-asynchronous-io": {
+    "core": "Synchronous blocking I/O (read or write) makes the thread wait until data is ready or accepted, which is simple but needs one thread per concurrent operation. Non-blocking I/O returns EAGAIN if not ready, so readiness notification (select, poll, epoll) lets one thread manage many sockets. True asynchronous I/O submits operations and is notified on completion (Linux AIO for direct I/O, io_uring for everything). Event-driven servers combine non-blocking sockets with readiness or completion APIs to scale.",
+    "first_principles": {
+      "problem": "A server using a thread per connection collapses at 10,000 concurrent clients.",
+      "truths": [
+        "Blocking ties up threads.",
+        "Threads are costly at scale.",
+        "The kernel can notify readiness or completion."
+      ],
+      "derivation": [
+        "Know **blocking vs non-blocking**.",
+        "Use **readiness APIs** (epoll) for sockets.",
+        "Use **completion APIs** (io_uring) for files/sockets.",
+        "Use **event loops** (libuv, Netty, Tokio).",
+        "Size **threads ≈ cores**."
+      ]
+    },
+    "analogy": {
+      "title": "Waiting at each shop counter vs leaving orders and getting texts",
+      "story": "Blocking is standing in line; async is leaving the order and being texted when it's ready.",
+      "mapping": [
+        [
+          "Standing in line",
+          "Blocking I/O"
+        ],
+        [
+          "Texts",
+          "Notifications"
+        ],
+        [
+          "One person, many orders",
+          "Event loop"
+        ]
+      ],
+      "breaks": "Texts arrive by phone; I/O completions arrive via kernel queues."
+    },
+    "mindmap": {
+      "center": "Sync vs Async",
+      "branches": [
+        {
+          "label": "Blocking",
+          "children": [
+            "Simple",
+            "Thread per op"
+          ]
+        },
+        {
+          "label": "Non-blocking",
+          "children": [
+            "EAGAIN",
+            "Readiness (epoll)"
+          ]
+        },
+        {
+          "label": "Async",
+          "children": [
+            "Linux AIO",
+            "io_uring",
+            "Completion-based"
+          ]
+        },
+        {
+          "label": "Frameworks",
+          "children": [
+            "libuv",
+            "Netty",
+            "Tokio",
+            "asyncio"
+          ]
+        },
+        {
+          "label": "C10K",
+          "children": [
+            "Event loops"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Event loop",
+      "scenario": "Python asyncio.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Scales to 10k+ connections on one core."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import asyncio\nasync def handle(reader, writer):\n    data = await reader.read(4096)     # yields instead of blocking a thread\n    writer.write(data); await writer.drain(); writer.close()\nasync def main():\n    server = await asyncio.start_server(handle, '0.0.0.0', 8080)\n    async with server: await server.serve_forever()\nasyncio.run(main())   # thousands of connections, one thread"
+        }
+      ],
+      "outcome": "I/O models compared."
+    },
+    "summary": {
+      "points": [
+        "Blocking is simple.",
+        "Readiness vs completion.",
+        "Event loops scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between readiness-based and completion-based async I/O?",
+        "a": "Readiness APIs (epoll) say when an operation can proceed without blocking; completion APIs (io_uring) tell you when a submitted operation has finished."
+      }
+    ]
+  },
+  "generation-1-select-and-poll": {
+    "core": "select() and poll() let one thread wait on many file descriptors. You pass the full set of FDs of interest, the kernel scans every one, sleeps until one is ready, and returns, and then you scan the set again to find which. Cost is O(n) per call in both kernel and user space, select is limited to 1,024 FDs (FD_SETSIZE), and the whole set is copied each time. That's fine for dozens of connections and painful for tens of thousands.",
+    "first_principles": {
+      "problem": "A chat server using select() stalls when connections exceed 1,024 and burns CPU at 5,000.",
+      "truths": [
+        "Passing all FDs each call is O(n).",
+        "Scanning many idle FDs wastes time.",
+        "select has a hard limit."
+      ],
+      "derivation": [
+        "Understand **O(n) per call**.",
+        "Note **FD_SETSIZE 1024** for select.",
+        "poll removes limit but **not O(n)**.",
+        "Move to **epoll** for scale.",
+        "Keep select/poll for **small, portable** cases."
+      ]
+    },
+    "analogy": {
+      "title": "Asking every guest at a party whether they need a drink, every minute",
+      "story": "Fine for ten guests; with ten thousand you spend all your time asking.",
+      "mapping": [
+        [
+          "Guests",
+          "FDs"
+        ],
+        [
+          "Asking everyone",
+          "Scanning the set"
+        ],
+        [
+          "Every minute",
+          "Every call"
+        ]
+      ],
+      "breaks": "Party hosts remember who asked; select/poll keep no state between calls."
+    },
+    "mindmap": {
+      "center": "select & poll",
+      "branches": [
+        {
+          "label": "select",
+          "children": [
+            "fd_set bitmaps",
+            "1024 limit",
+            "O(n)"
+          ]
+        },
+        {
+          "label": "poll",
+          "children": [
+            "pollfd array",
+            "No hard limit",
+            "O(n)"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Copy set each call",
+            "Scan all"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Small sets",
+            "Portability"
+          ]
+        },
+        {
+          "label": "Successor",
+          "children": [
+            "epoll",
+            "kqueue (BSD)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "poll loop",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Works, but cost grows with total connections."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "struct pollfd fds[MAX];\n/* fill fds[i].fd and .events = POLLIN for every connection */\nint n = poll(fds, nfds, -1);          /* kernel scans all nfds */\nfor (int i = 0; i < nfds && n; i++)   /* user scans all again */\n    if (fds[i].revents & POLLIN) { handle(fds[i].fd); n--; }"
+        }
+      ],
+      "outcome": "why select/poll don't scale."
+    },
+    "summary": {
+      "points": [
+        "Many FDs one thread.",
+        "O(n) per call.",
+        "1024 limit for select."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do select and poll scale poorly to many connections?",
+        "a": "Every call passes and scans the entire FD set, so cost is O(n) even when few descriptors are ready."
+      }
+    ]
+  },
+  "generation-2-epoll-the-event-list": {
+    "core": "epoll keeps the interest set in the kernel. epoll_create makes an instance, epoll_ctl adds, modifies or removes FDs once, and epoll_wait returns only the ready FDs. Cost scales with ready events, not total FDs, which solved C10K for nginx, Node.js (libuv), Redis and Netty. Edge-triggered mode reports state changes and needs draining until EAGAIN; level-triggered reports while ready. EPOLLEXCLUSIVE helps avoid thundering herds.",
+    "first_principles": {
+      "problem": "A proxy must handle 100,000 mostly idle WebSocket connections on a few cores.",
+      "truths": [
+        "Interest sets change rarely.",
+        "Ready events are the minority.",
+        "Kernel-side state avoids copying."
+      ],
+      "derivation": [
+        "**epoll_create1** instance.",
+        "**epoll_ctl** add FDs once.",
+        "**epoll_wait** returns ready list.",
+        "Choose **level vs edge-triggered**.",
+        "Use **EPOLLEXCLUSIVE/ONESHOT** where needed."
+      ]
+    },
+    "analogy": {
+      "title": "Guests raising their hand when they need something",
+      "story": "The host registers everyone once, then only attends to raised hands.",
+      "mapping": [
+        [
+          "Registering guests",
+          "epoll_ctl"
+        ],
+        [
+          "Raised hands",
+          "Ready list"
+        ],
+        [
+          "Attending",
+          "epoll_wait results"
+        ]
+      ],
+      "breaks": "Hands stay up until served; edge-triggered epoll notifies once per change."
+    },
+    "mindmap": {
+      "center": "epoll",
+      "branches": [
+        {
+          "label": "Calls",
+          "children": [
+            "epoll_create1",
+            "epoll_ctl",
+            "epoll_wait"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Level-triggered",
+            "Edge-triggered",
+            "ONESHOT",
+            "EXCLUSIVE"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "O(ready)"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "nginx",
+            "libuv",
+            "Redis",
+            "Netty",
+            "Go netpoller"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "ET must drain to EAGAIN",
+            "Files always ready"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "epoll loop",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "100k idle connections cost nothing per wait."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "int ep = epoll_create1(0);\nstruct epoll_event ev = { .events = EPOLLIN | EPOLLET, .data.fd = conn };\nepoll_ctl(ep, EPOLL_CTL_ADD, conn, &ev);        /* once per connection */\nstruct epoll_event ready[256];\nint n = epoll_wait(ep, ready, 256, -1);          /* only ready FDs */\nfor (int i = 0; i < n; i++) drain_until_eagain(ready[i].data.fd);"
+        }
+      ],
+      "outcome": "scalable readiness notification."
+    },
+    "summary": {
+      "points": [
+        "Kernel-held interest set.",
+        "Returns ready only.",
+        "Mind edge-triggered draining."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't epoll help with regular file I/O?",
+        "a": "Regular files are always reported 'ready'; reads can still block on disk, so completion-based APIs like io_uring are needed."
+      }
+    ]
+  },
+  "generation-3-io_uring-the-new-king": {
+    "core": "io_uring (Linux 5.1+) uses two ring buffers shared between user space and the kernel: a submission queue and a completion queue. Apps write requests (read, write, accept, send, fsync, openat and many more) into the SQ and reap results from the CQ, batching many operations per syscall, or none with SQPOLL kernel polling. It provides true async for files and sockets, fixed buffers and files, and linked ops. It's very fast, but it has had security issues and some environments disable it.",
+    "first_principles": {
+      "problem": "A storage service doing millions of small random reads spends most CPU on syscall overhead.",
+      "truths": [
+        "Syscalls have per-call cost.",
+        "Shared memory rings avoid copies.",
+        "Batching amortises overhead."
+      ],
+      "derivation": [
+        "Set up **SQ/CQ rings** (liburing).",
+        "**Batch** submissions.",
+        "Use **fixed buffers/files**.",
+        "Optionally **SQPOLL** to avoid syscalls.",
+        "Check **security policy** (disabled in some containers)."
+      ]
+    },
+    "analogy": {
+      "title": "A conveyor belt between restaurant and kitchen",
+      "story": "Waiters place many orders on the belt and collect finished dishes from another belt, without walking into the kitchen for each.",
+      "mapping": [
+        [
+          "Order belt",
+          "Submission queue"
+        ],
+        [
+          "Dish belt",
+          "Completion queue"
+        ],
+        [
+          "Walking into kitchen",
+          "Syscall"
+        ]
+      ],
+      "breaks": "Belts are physical; rings are shared memory requiring careful ordering."
+    },
+    "mindmap": {
+      "center": "io_uring",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "SQ ring",
+            "CQ ring",
+            "SQEs",
+            "CQEs"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "read/write",
+            "accept/send/recv",
+            "fsync",
+            "openat",
+            "splice"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Batching",
+            "SQPOLL",
+            "Fixed buffers",
+            "Linked ops",
+            "Multishot"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "liburing",
+            "tokio-uring",
+            "Java/Netty incubator"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "Security history",
+            "seccomp/sysctl disable"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Batched reads",
+      "scenario": "liburing C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Syscall overhead cut by an order of magnitude."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "struct io_uring ring; io_uring_queue_init(256, &ring, 0);\nfor (int i = 0; i < 64; i++) {\n    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);\n    io_uring_prep_read(sqe, fd, bufs[i], 4096, offsets[i]);\n    sqe->user_data = i;\n}\nio_uring_submit(&ring);                    /* one syscall for 64 reads */\nstruct io_uring_cqe *cqe;\nwhile (io_uring_wait_cqe(&ring, &cqe) == 0) { handle(cqe->user_data, cqe->res); io_uring_cqe_seen(&ring, cqe); }"
+        }
+      ],
+      "outcome": "modern async I/O."
+    },
+    "summary": {
+      "points": [
+        "Shared rings.",
+        "Batch and async everything.",
+        "Mind security settings."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does io_uring reduce syscall overhead?",
+        "a": "Requests and completions are exchanged through shared-memory rings, allowing many operations per submit syscall (or none with SQPOLL)."
+      }
+    ]
+  },
+  "the-block-layer-and-the-bio-struct": {
+    "core": "Below filesystems, the block layer handles requests to block devices. Filesystems build bios (block I/O descriptors listing device, sector and memory segments), which are merged into requests, scheduled, and dispatched through blk-mq: per-CPU software queues mapped to hardware queues, which matters for NVMe with up to 64K queues. Stats in /sys/block/<dev>/stat and iostat (r/s, w/s, await, aqu-sz, %util) and tracing (blktrace, biolatency) observe it.",
+    "first_principles": {
+      "problem": "An NVMe drive rated at 1M IOPS delivers only 200k because the application issues I/O with queue depth 1.",
+      "truths": [
+        "Block requests carry sectors and buffers.",
+        "Merging reduces operations.",
+        "Modern devices need parallel queues."
+      ],
+      "derivation": [
+        "Understand **bio → request → dispatch**.",
+        "Use **blk-mq** multi-queue.",
+        "Drive **queue depth** for NVMe.",
+        "Read **iostat -x** fields correctly.",
+        "Trace with **biolatency/blktrace**."
+      ]
+    },
+    "analogy": {
+      "title": "Mail being bundled and routed to many loading bays",
+      "story": "Letters (bios) going to the same street are bundled (merged), then sent to many bays (hardware queues) at once.",
+      "mapping": [
+        [
+          "Letters",
+          "bios"
+        ],
+        [
+          "Bundles",
+          "Requests"
+        ],
+        [
+          "Loading bays",
+          "Hardware queues"
+        ]
+      ],
+      "breaks": "Mail bays are few; NVMe has thousands of queues."
+    },
+    "mindmap": {
+      "center": "Block Layer",
+      "branches": [
+        {
+          "label": "Units",
+          "children": [
+            "bio",
+            "request"
+          ]
+        },
+        {
+          "label": "Path",
+          "children": [
+            "Merge",
+            "Schedule",
+            "blk-mq dispatch"
+          ]
+        },
+        {
+          "label": "Queues",
+          "children": [
+            "Per-CPU software",
+            "Hardware queues"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "r/s",
+            "w/s",
+            "await",
+            "aqu-sz",
+            "%util"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "iostat",
+            "biolatency",
+            "blktrace",
+            "bpftrace block:*"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Queue depth matters",
+      "scenario": "fio + iostat.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "IOPS scales with queue depth."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "fio --name=qd1  --rw=randread --bs=4k --iodepth=1  --ioengine=io_uring --direct=1 --filename=/dev/nvme0n1 --runtime=20 --time_based --readonly\nfio --name=qd64 --rw=randread --bs=4k --iodepth=64 --ioengine=io_uring --direct=1 --filename=/dev/nvme0n1 --runtime=20 --time_based --readonly\niostat -x 1 nvme0n1     # aqu-sz shows queue depth in use"
+        }
+      ],
+      "outcome": "block layer understood."
+    },
+    "summary": {
+      "points": [
+        "bios and requests.",
+        "Multi-queue dispatch.",
+        "Queue depth for NVMe."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is %util in iostat misleading for NVMe devices?",
+        "a": "NVMe processes many requests in parallel, so 100% util (time busy) doesn't mean the device is saturated."
+      }
+    ]
+  },
+  "io-schedulers-the-elevator-algorithm": {
+    "core": "I/O schedulers order and merge requests. Classic elevators reordered by sector to minimise disk head seeks on HDDs. Modern blk-mq schedulers: none (pass-through, often best for fast NVMe), mq-deadline (bounded latency with read priority; good for SATA SSDs and HDDs), bfq (fairness per process, desktop interactivity, and cgroup io.weight proportional sharing) and kyber (latency targets for fast devices). Choose per device via /sys/block/<dev>/queue/scheduler.",
+    "first_principles": {
+      "problem": "An HDD-based backup server has erratic latency with 'none', while an NVMe database is slowed by bfq overhead.",
+      "truths": [
+        "Mechanical disks benefit from ordering.",
+        "Fast devices suffer from scheduler overhead.",
+        "Fairness needs scheduling."
+      ],
+      "derivation": [
+        "**none** for NVMe.",
+        "**mq-deadline** for SATA SSD/HDD servers.",
+        "**bfq** for desktops/fair sharing.",
+        "**kyber** for latency targets.",
+        "Persist via **udev rules**."
+      ]
+    },
+    "analogy": {
+      "title": "A lift deciding stop order",
+      "story": "For a slow old lift, sweeping floors in order saves time; for an instant teleporter, just go where asked.",
+      "mapping": [
+        [
+          "Old lift",
+          "HDD"
+        ],
+        [
+          "Sweeping floors",
+          "Elevator ordering"
+        ],
+        [
+          "Teleporter",
+          "NVMe with none"
+        ]
+      ],
+      "breaks": "Lifts carry people; schedulers also enforce fairness and deadlines."
+    },
+    "mindmap": {
+      "center": "I/O Schedulers",
+      "branches": [
+        {
+          "label": "none",
+          "children": [
+            "NVMe",
+            "Minimal overhead"
+          ]
+        },
+        {
+          "label": "mq-deadline",
+          "children": [
+            "Deadlines",
+            "Read priority",
+            "SSD/HDD"
+          ]
+        },
+        {
+          "label": "bfq",
+          "children": [
+            "Fairness",
+            "Interactivity",
+            "io.weight"
+          ]
+        },
+        {
+          "label": "kyber",
+          "children": [
+            "Latency targets"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "/sys/block/X/queue/scheduler",
+            "udev rules"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Set per device type",
+      "scenario": "udev.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right scheduler per device."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# /etc/udev/rules.d/60-iosched.rules\nACTION==\"add|change\", KERNEL==\"nvme[0-9]*n[0-9]*\", ATTR{queue/scheduler}=\"none\"\nACTION==\"add|change\", KERNEL==\"sd[a-z]\", ATTR{queue/rotational}==\"1\", ATTR{queue/scheduler}=\"mq-deadline\"\n# check: cat /sys/block/nvme0n1/queue/scheduler  → [none] mq-deadline kyber bfq"
+        }
+      ],
+      "outcome": "scheduler matched to hardware."
+    },
+    "summary": {
+      "points": [
+        "Ordering for HDD.",
+        "None for NVMe.",
+        "bfq for fairness."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is the 'none' scheduler often best for NVMe?",
+        "a": "NVMe devices handle huge parallel queues with minimal latency, so extra scheduler reordering only adds CPU overhead."
+      }
+    ]
+  }
+}

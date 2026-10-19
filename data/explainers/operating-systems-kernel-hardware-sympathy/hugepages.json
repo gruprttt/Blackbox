@@ -1,0 +1,865 @@
+{
+  "introduction-the-4kb-problem": {
+    "core": "Linux manages memory in 4 KB pages by default. A process using 64 GB needs about 16 million page-table entries, and the CPU's TLB (the cache of address translations) holds only a few thousand, so large-memory workloads (databases, JVMs, caches) constantly miss the TLB and walk page tables, wasting cycles. Huge pages (2 MB or 1 GB) cut the number of translations by 512× or 262,144×.",
+    "first_principles": {
+      "problem": "A 128 GB in-memory database spends 15% of CPU on page-table walks.",
+      "truths": [
+        "Every access needs translation.",
+        "TLB capacity is small.",
+        "Bigger pages cover more memory per entry."
+      ],
+      "derivation": [
+        "Measure **TLB misses** (dTLB-load-misses).",
+        "Use **2 MB pages** for big heaps.",
+        "Consider **1 GB pages** for huge fixed allocations.",
+        "Choose **explicit vs transparent** huge pages.",
+        "Configure **applications** to use them."
+      ]
+    },
+    "analogy": {
+      "title": "Street addresses vs postcodes",
+      "story": "Looking up every house individually is slow; looking up whole postcodes needs far fewer entries in your address book.",
+      "mapping": [
+        [
+          "House",
+          "4 KB page"
+        ],
+        [
+          "Postcode",
+          "2 MB huge page"
+        ],
+        [
+          "Address book",
+          "TLB"
+        ]
+      ],
+      "breaks": "Postcodes are fixed; huge pages must be contiguous physical memory."
+    },
+    "mindmap": {
+      "center": "Huge Pages",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "4 KB pages",
+            "TLB misses",
+            "Page walks"
+          ]
+        },
+        {
+          "label": "Sizes",
+          "children": [
+            "2 MB",
+            "1 GB"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Explicit (hugetlbfs)",
+            "Transparent (THP)"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "Databases",
+            "JVMs",
+            "DPDK",
+            "VMs"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "perf dTLB-load-misses"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Translation count",
+      "scenario": "Numbers.",
+      "flow": [
+        "64 GB / 4 KB = 16,777,216 pages",
+        "64 GB / 2 MB = 32,768 pages",
+        "64 GB / 1 GB = 64 pages",
+        "TLB holds ~1,500–3,000 entries"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows why huge pages slash TLB misses."
+        }
+      ],
+      "code": [],
+      "outcome": "the case for huge pages."
+    },
+    "summary": {
+      "points": [
+        "4 KB too small for big heaps.",
+        "TLB is tiny.",
+        "Huge pages cut translations."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do huge pages improve performance for large-memory applications?",
+        "a": "Each TLB entry covers far more memory, drastically reducing TLB misses and page-table walks."
+      }
+    ]
+  },
+  "the-tlb-why-page-size-determines-cpu-speed": {
+    "core": "Every virtual address must be translated to a physical one. The TLB caches recent translations; on a miss the hardware walks a 4- or 5-level page table in memory, up to 4 or 5 dependent memory reads, though some may hit cache. TLB reach (entries × page size) determines how much memory can be accessed without misses: 1,536 entries × 4 KB is 6 MB, but × 2 MB is 3 GB. Random access over large datasets suffers most.",
+    "first_principles": {
+      "problem": "Hash-table lookups across 50 GB are slow even though the hash function is fast.",
+      "truths": [
+        "Translation precedes every access.",
+        "Page walks are dependent memory reads.",
+        "Reach equals entries × page size."
+      ],
+      "derivation": [
+        "Compute **TLB reach**.",
+        "Compare to **working set**.",
+        "Measure **dTLB/iTLB misses**.",
+        "Use **huge pages** when working set ≫ reach.",
+        "Mind **virtualisation** (2D page walks)."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist's speed-dial list",
+      "story": "Numbers on speed dial connect instantly; others need looking up in a thick directory with several indexes.",
+      "mapping": [
+        [
+          "Speed dial",
+          "TLB"
+        ],
+        [
+          "Directory indexes",
+          "Page table levels"
+        ],
+        [
+          "More numbers per entry",
+          "Huge pages"
+        ]
+      ],
+      "breaks": "Directories don't nest 5 deep; page tables do, and in VMs it doubles."
+    },
+    "mindmap": {
+      "center": "TLB",
+      "branches": [
+        {
+          "label": "Function",
+          "children": [
+            "Cache virtual→physical"
+          ]
+        },
+        {
+          "label": "Miss cost",
+          "children": [
+            "Page walk 4–5 levels",
+            "Dependent loads"
+          ]
+        },
+        {
+          "label": "Reach",
+          "children": [
+            "Entries × page size"
+          ]
+        },
+        {
+          "label": "Worst case",
+          "children": [
+            "Random access",
+            "Large heaps",
+            "VMs (nested paging)"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "perf dTLB-load-misses",
+            "dtlb_load_misses.walk_active"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure",
+      "scenario": "perf.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Quantifies TLB impact."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "perf stat -e dTLB-loads,dTLB-load-misses,page-faults ./hashbench\n# dTLB-load-misses: 18% of loads   → TLB-bound\n# after enabling 2 MB pages: 0.4%"
+        }
+      ],
+      "outcome": "TLB behaviour understood."
+    },
+    "summary": {
+      "points": [
+        "Every access translated.",
+        "Reach = entries × size.",
+        "Misses cost page walks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is TLB reach?",
+        "a": "The total memory addressable without TLB misses: number of TLB entries multiplied by the page size."
+      }
+    ]
+  },
+  "explicit-hugepages-hugetlb": {
+    "core": "Explicit huge pages (hugetlbfs) are reserved in advance via vm.nr_hugepages or the kernel boot line, removed from the general pool and never swapped. Applications request them with mmap(MAP_HUGETLB), shmget(SHM_HUGETLB) or files on a hugetlbfs mount. They're guaranteed and predictable, with no compaction delays, but the memory is unavailable to anything else and must be sized correctly, since allocation fails if there aren't enough.",
+    "first_principles": {
+      "problem": "A database needs guaranteed huge pages at startup without unpredictable latency from the kernel.",
+      "truths": [
+        "Reservation guarantees availability.",
+        "Reserved memory is unusable otherwise.",
+        "Applications must opt in."
+      ],
+      "derivation": [
+        "Reserve with **vm.nr_hugepages**.",
+        "Reserve at **boot** for reliability (fragmentation).",
+        "Mount **hugetlbfs** if needed.",
+        "Grant **permissions** (hugetlb_shm_group).",
+        "Monitor **HugePages_Free**."
+      ]
+    },
+    "analogy": {
+      "title": "Reserving a private dining room",
+      "story": "Booked in advance and guaranteed for your party, but nobody else can use it even when you're not there.",
+      "mapping": [
+        [
+          "Private room",
+          "Reserved huge pages"
+        ],
+        [
+          "Booking",
+          "nr_hugepages"
+        ],
+        [
+          "Empty room",
+          "Unused reserved memory"
+        ]
+      ],
+      "breaks": "Rooms can be re-let at short notice; reserved pages stay reserved."
+    },
+    "mindmap": {
+      "center": "Explicit HugeTLB",
+      "branches": [
+        {
+          "label": "Reserve",
+          "children": [
+            "vm.nr_hugepages",
+            "Boot param hugepages="
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "MAP_HUGETLB",
+            "SHM_HUGETLB",
+            "hugetlbfs"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Guaranteed",
+            "No swap",
+            "No compaction latency"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Wasted if unused",
+            "Sizing",
+            "Fragmentation if late"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "/proc/meminfo HugePages_*"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reserve and check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "32 GB guaranteed in 2 MB pages."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl -w vm.nr_hugepages=16384           # 16384 × 2 MB = 32 GB\necho 'vm.nr_hugepages=16384' > /etc/sysctl.d/90-hugepages.conf\ngrep -i huge /proc/meminfo\n# HugePages_Total: 16384  HugePages_Free: 16384  Hugepagesize: 2048 kB"
+        }
+      ],
+      "outcome": "predictable huge pages."
+    },
+    "summary": {
+      "points": [
+        "Reserve in advance.",
+        "Opt in per app.",
+        "Size carefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why reserve explicit huge pages at boot rather than later?",
+        "a": "Memory becomes fragmented over time, so the kernel may be unable to find enough contiguous 2 MB regions later."
+      }
+    ]
+  },
+  "transparent-hugepages-thp": {
+    "core": "Transparent Huge Pages let the kernel automatically back anonymous memory with 2 MB pages when aligned and available, and khugepaged collapses 4 KB pages into huge pages in the background. It needs no app changes, but compaction stalls, memory bloat (a 2 MB page for sparse use) and khugepaged CPU can cause latency spikes. Many databases (Redis, MongoDB, Oracle) recommend 'madvise' or 'never' rather than 'always'.",
+    "first_principles": {
+      "problem": "Redis shows periodic 100 ms latency spikes traced to THP compaction.",
+      "truths": [
+        "Automatic is convenient.",
+        "Compaction takes time.",
+        "Sparse usage wastes huge pages."
+      ],
+      "derivation": [
+        "Know modes: **always, madvise, never**.",
+        "Prefer **madvise** (apps opt in).",
+        "Set **defrag** to defer/madvise.",
+        "Follow **DB vendor guidance**.",
+        "Monitor **thp_* counters**."
+      ]
+    },
+    "analogy": {
+      "title": "An automatic furniture upgrade service",
+      "story": "It swaps your small tables for big ones when it can, but sometimes rearranges the room while you're trying to eat.",
+      "mapping": [
+        [
+          "Automatic upgrade",
+          "THP"
+        ],
+        [
+          "Rearranging room",
+          "Compaction"
+        ],
+        [
+          "Big table for one plate",
+          "Memory bloat"
+        ]
+      ],
+      "breaks": "Furniture swaps are visible; THP stalls are invisible latency."
+    },
+    "mindmap": {
+      "center": "THP",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "always",
+            "madvise",
+            "never"
+          ]
+        },
+        {
+          "label": "Defrag",
+          "children": [
+            "always",
+            "defer",
+            "defer+madvise",
+            "madvise",
+            "never"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "No app changes"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Compaction stalls",
+            "Bloat",
+            "khugepaged CPU"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "/proc/vmstat thp_*",
+            "AnonHugePages"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Configure",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Latency spikes gone; opted-in apps still benefit."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat /sys/kernel/mm/transparent_hugepage/enabled     # [always] madvise never\necho madvise > /sys/kernel/mm/transparent_hugepage/enabled\necho defer+madvise > /sys/kernel/mm/transparent_hugepage/defrag\ngrep AnonHugePages /proc/meminfo\ngrep thp_ /proc/vmstat | head"
+        }
+      ],
+      "outcome": "THP tuned for workload."
+    },
+    "summary": {
+      "points": [
+        "Automatic huge pages.",
+        "Compaction risk.",
+        "Prefer madvise."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do many databases recommend disabling THP or using madvise?",
+        "a": "THP compaction and khugepaged activity can cause unpredictable latency spikes and memory bloat."
+      }
+    ]
+  },
+  "one-gigabyte-pages-1gb-hugepages": {
+    "core": "1 GB huge pages give the maximum TLB reach. A few dozen entries cover tens of gigabytes, ideal for very large, long-lived, fixed allocations: VM guest memory, DPDK packet buffers, large database buffer pools and in-memory analytics. They must be reserved at boot (default_hugepagesz=1G hugepagesz=1G hugepages=N) because finding contiguous 1 GB regions later is practically impossible. They're only for explicit hugetlbfs, never THP.",
+    "first_principles": {
+      "problem": "A hypervisor hosting large VMs wants to minimise nested page-walk overhead.",
+      "truths": [
+        "Bigger pages mean fewer entries.",
+        "1 GB contiguity needs early reservation.",
+        "Granularity becomes coarse."
+      ],
+      "derivation": [
+        "Check CPU support (**pdpe1gb** flag).",
+        "Reserve via **kernel boot params**.",
+        "Use for **VMs, DPDK, big pools**.",
+        "Mount **hugetlbfs pagesize=1G**.",
+        "Accept **coarse granularity**."
+      ]
+    },
+    "analogy": {
+      "title": "Renting whole floors instead of rooms",
+      "story": "Few contracts to manage, but you need to book early and can't rent half a floor.",
+      "mapping": [
+        [
+          "Whole floor",
+          "1 GB page"
+        ],
+        [
+          "Rooms",
+          "4 KB pages"
+        ],
+        [
+          "Early booking",
+          "Boot-time reservation"
+        ]
+      ],
+      "breaks": "Floors can be sublet; 1 GB pages can't be split for other uses."
+    },
+    "mindmap": {
+      "center": "1 GB Pages",
+      "branches": [
+        {
+          "label": "Requirements",
+          "children": [
+            "pdpe1gb CPU flag",
+            "Boot-time reservation"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "VM memory",
+            "DPDK",
+            "Huge buffer pools"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Max TLB reach"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Coarse",
+            "Inflexible",
+            "Boot-only"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "default_hugepagesz",
+            "hugepagesz=1G hugepages=N"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Boot config",
+      "scenario": "GRUB.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "64 GB backed by just 64 TLB entries."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "grep -o pdpe1gb /proc/cpuinfo | head -1\n# /etc/default/grub\n# GRUB_CMDLINE_LINUX=\"default_hugepagesz=1G hugepagesz=1G hugepages=64\"\nupdate-grub && reboot\nmount -t hugetlbfs -o pagesize=1G none /dev/hugepages1G"
+        }
+      ],
+      "outcome": "maximum TLB reach for big allocations."
+    },
+    "summary": {
+      "points": [
+        "Biggest reach.",
+        "Boot-time only.",
+        "Large fixed allocations."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must 1 GB huge pages usually be reserved on the kernel command line?",
+        "a": "After boot, memory fragments and the kernel can rarely find contiguous, aligned 1 GB physical regions."
+      }
+    ]
+  },
+  "calculating-the-right-vmnr_hugepages-value": {
+    "core": "Size the explicit huge-page pool to what applications will actually map: the database's shared buffers, JVM heap, or DPDK pools, plus a small overhead margin, divided by the page size. Too few and the app fails to start or silently falls back to 4 KB pages; too many and the reserved memory is wasted and can starve the OS. On NUMA systems, reserve per node. Verify after startup that HugePages_Free is near zero and HugePages_Rsvd is accounted for.",
+    "first_principles": {
+      "problem": "PostgreSQL starts without huge pages because nr_hugepages was 10% too small, and nobody notices.",
+      "truths": [
+        "Apps need a specific amount.",
+        "Over-reserving wastes memory.",
+        "Per-node pools matter on NUMA."
+      ],
+      "derivation": [
+        "Find **app requirement** (e.g. postgres shared_memory_size_in_huge_pages).",
+        "Add **small margin**.",
+        "Divide by **Hugepagesize**.",
+        "Reserve **per NUMA node** if pinned.",
+        "Verify **Free/Rsvd** after start."
+      ]
+    },
+    "analogy": {
+      "title": "Booking hotel rooms for a conference",
+      "story": "Count attendees plus a couple of spares; too few and people are turned away, too many and you pay for empty rooms.",
+      "mapping": [
+        [
+          "Attendees",
+          "Memory needed"
+        ],
+        [
+          "Spare rooms",
+          "Margin"
+        ],
+        [
+          "Room size",
+          "Page size"
+        ]
+      ],
+      "breaks": "Hotels refund sometimes; reserved RAM is just unavailable."
+    },
+    "mindmap": {
+      "center": "Sizing nr_hugepages",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "App shared memory",
+            "Heap size",
+            "Page size"
+          ]
+        },
+        {
+          "label": "Formula",
+          "children": [
+            "ceil(need / pagesize) + margin"
+          ]
+        },
+        {
+          "label": "NUMA",
+          "children": [
+            "/sys/devices/system/node/node*/hugepages"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "HugePages_Free",
+            "HugePages_Rsvd",
+            "App logs"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Fallback to 4 KB",
+            "OOM from over-reserve"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "PostgreSQL sizing",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exact pool; startup fails loudly if wrong."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "postgres -D $PGDATA -C shared_memory_size_in_huge_pages   # e.g. 16450\nsysctl -w vm.nr_hugepages=16500\n# postgresql.conf: huge_pages = on   (fail rather than silently fall back)\ngrep -E 'HugePages_(Total|Free|Rsvd)' /proc/meminfo"
+        }
+      ],
+      "outcome": "right-sized huge page pool."
+    },
+    "summary": {
+      "points": [
+        "Size to real need.",
+        "Small margin.",
+        "Verify after start."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why set PostgreSQL's huge_pages to 'on' instead of 'try'?",
+        "a": "So startup fails loudly if huge pages aren't available, rather than silently falling back to 4 KB pages."
+      }
+    ]
+  },
+  "configuring-postgres-for-hugepages": {
+    "core": "PostgreSQL's shared_buffers and other shared memory live in one large segment, a prime candidate for huge pages. Set huge_pages = on (or try), size vm.nr_hugepages from shared_memory_size_in_huge_pages, optionally set huge_page_size, ensure the postgres user's memlock limits allow it under systemd, and set THP to madvise or never. Benefits are fewer TLB misses and smaller page tables per backend process, important with many connections.",
+    "first_principles": {
+      "problem": "A Postgres server with 500 connections uses 20 GB just for page tables because each backend maps shared_buffers with 4 KB pages.",
+      "truths": [
+        "Each backend maps shared memory.",
+        "Page tables are per process.",
+        "Huge pages shrink page tables."
+      ],
+      "derivation": [
+        "Compute pages via **-C shared_memory_size_in_huge_pages**.",
+        "Set **vm.nr_hugepages**.",
+        "Set **huge_pages = on**.",
+        "Set **THP madvise/never**.",
+        "Check **PageTables** in meminfo drop."
+      ]
+    },
+    "analogy": {
+      "title": "Every employee carrying a map of the shared warehouse",
+      "story": "With street-level detail each map is huge; with a district-level map it's tiny.",
+      "mapping": [
+        [
+          "Employees",
+          "Backend processes"
+        ],
+        [
+          "Map detail",
+          "Page size"
+        ],
+        [
+          "Warehouse",
+          "shared_buffers"
+        ]
+      ],
+      "breaks": "Paper maps are copied; page tables are rebuilt per process."
+    },
+    "mindmap": {
+      "center": "Postgres + Huge Pages",
+      "branches": [
+        {
+          "label": "Settings",
+          "children": [
+            "huge_pages on/try",
+            "huge_page_size",
+            "shared_buffers"
+          ]
+        },
+        {
+          "label": "OS",
+          "children": [
+            "vm.nr_hugepages",
+            "THP madvise",
+            "memlock"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "TLB misses ↓",
+            "PageTables ↓"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "pg log",
+            "/proc/meminfo PageTables",
+            "HugePages_Free"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before/after",
+      "scenario": "meminfo.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "~19 GB of RAM reclaimed from page tables."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# before: shared_buffers=32GB, 500 backends\ngrep PageTables /proc/meminfo     # PageTables: 19876543 kB\n# after huge_pages=on\ngrep PageTables /proc/meminfo     # PageTables: 412345 kB\ngrep -E 'HugePages_(Free|Rsvd)' /proc/meminfo"
+        }
+      ],
+      "outcome": "efficient Postgres memory."
+    },
+    "summary": {
+      "points": [
+        "shared_buffers on huge pages.",
+        "Size precisely.",
+        "Page tables shrink."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do huge pages especially help PostgreSQL with many connections?",
+        "a": "Each backend process maps shared_buffers; with 4 KB pages each needs huge page tables, which huge pages shrink dramatically."
+      }
+    ]
+  },
+  "configuring-java-jvm-for-hugepages": {
+    "core": "Large JVM heaps benefit from huge pages too. -XX:+UseLargePages uses explicit hugetlbfs pages (sized via nr_hugepages to cover -Xmx plus metaspace and code cache margin); -XX:+UseTransparentHugePages asks for THP via madvise (with THP enabled=madvise); -XX:LargePageSizeInBytes=1g selects 1 GB pages. Pair with -XX:+AlwaysPreTouch to fault the heap in at startup, avoiding page faults and latency later.",
+    "first_principles": {
+      "problem": "A 64 GB-heap trading JVM shows GC pause variance linked to TLB misses and page faults.",
+      "truths": [
+        "JVM heaps are large, contiguous regions.",
+        "Pre-touching avoids runtime faults.",
+        "THP via madvise is safer than always."
+      ],
+      "derivation": [
+        "Use **-XX:+UseTransparentHugePages** (simple).",
+        "Or **-XX:+UseLargePages** with reserved pool.",
+        "Set **-Xms = -Xmx**.",
+        "Add **-XX:+AlwaysPreTouch**.",
+        "Verify in **-Xlog:pagesize** output."
+      ]
+    },
+    "analogy": {
+      "title": "Laying out a large exhibition hall in advance",
+      "story": "Set up all the stands before doors open, using big floor sections, so nothing has to be rearranged during the show.",
+      "mapping": [
+        [
+          "Big floor sections",
+          "Huge pages"
+        ],
+        [
+          "Setting up before doors open",
+          "AlwaysPreTouch"
+        ],
+        [
+          "Show",
+          "Runtime"
+        ]
+      ],
+      "breaks": "Halls can be expanded; fixed heaps can't grow beyond -Xmx."
+    },
+    "mindmap": {
+      "center": "JVM + Huge Pages",
+      "branches": [
+        {
+          "label": "Flags",
+          "children": [
+            "-XX:+UseTransparentHugePages",
+            "-XX:+UseLargePages",
+            "-XX:LargePageSizeInBytes",
+            "-XX:+AlwaysPreTouch"
+          ]
+        },
+        {
+          "label": "Sizing",
+          "children": [
+            "Xms = Xmx",
+            "Heap + metaspace + code cache"
+          ]
+        },
+        {
+          "label": "OS",
+          "children": [
+            "THP madvise",
+            "nr_hugepages"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "-Xlog:pagesize",
+            "AnonHugePages"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Launch",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stable latency; heap backed by 2 MB pages."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "java -Xms64g -Xmx64g \\\n  -XX:+UseTransparentHugePages -XX:+AlwaysPreTouch \\\n  -XX:+UseZGC -Xlog:pagesize:file=/tmp/pagesize.log \\\n  -jar trader.jar\ngrep -i 'large page' /tmp/pagesize.log"
+        }
+      ],
+      "outcome": "huge-page-backed JVM."
+    },
+    "summary": {
+      "points": [
+        "THP or explicit.",
+        "Pre-touch heap.",
+        "Verify with logging."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does -XX:+AlwaysPreTouch do?",
+        "a": "Touches every heap page at JVM startup so memory is faulted in (and huge pages allocated) before the application runs, avoiding later page-fault latency."
+      }
+    ]
+  }
+}

@@ -1,0 +1,804 @@
+{
+  "introduction-everything-is-a-file": {
+    "core": "Unix exposes most resources through one interface: the file. Regular files, directories, devices (/dev/sda, /dev/null), pipes, sockets and kernel state (/proc, /sys) can all be opened, read and written with the same system calls. Tools that read text work on everything, and permissions apply uniformly. Understanding inodes, file descriptors, links, mounts and virtual filesystems makes the whole system navigable.",
+    "first_principles": {
+      "problem": "An engineer doesn't realise they can read a process's open files or the CPU frequency with cat.",
+      "truths": [
+        "One interface reduces complexity.",
+        "Tools compose on files.",
+        "The kernel exposes state as files."
+      ],
+      "derivation": [
+        "Use **open/read/write** universally.",
+        "Know **file types** (regular, dir, char, block, fifo, socket, symlink).",
+        "Inspect state via **/proc and /sys**.",
+        "Apply **permissions** uniformly.",
+        "Compose with **text tools**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal socket adaptor",
+      "story": "Every device plugs into the same socket, so one set of tools works with all of them.",
+      "mapping": [
+        [
+          "Universal socket",
+          "File interface"
+        ],
+        [
+          "Devices",
+          "Resources"
+        ],
+        [
+          "Tools",
+          "cat, grep, echo"
+        ]
+      ],
+      "breaks": "Adaptors are physical; some 'files' (sockets) need special calls like connect()."
+    },
+    "mindmap": {
+      "center": "Everything Is a File",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Regular",
+            "Directory",
+            "Char device",
+            "Block device",
+            "FIFO",
+            "Socket",
+            "Symlink"
+          ]
+        },
+        {
+          "label": "Interfaces",
+          "children": [
+            "open",
+            "read",
+            "write",
+            "close",
+            "ioctl"
+          ]
+        },
+        {
+          "label": "Virtual",
+          "children": [
+            "/proc",
+            "/sys",
+            "/dev"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Uniform tools",
+            "Uniform permissions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Files everywhere",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Devices, sockets and kernel state as files."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ls -l /dev/null /dev/sda /run/docker.sock\n# crw-rw-rw- ... /dev/null   brw-rw---- ... /dev/sda   srw-rw---- ... docker.sock\ncat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq\nls -l /proc/self/fd/"
+        }
+      ],
+      "outcome": "Unix's unifying idea."
+    },
+    "summary": {
+      "points": [
+        "One interface.",
+        "Many file types.",
+        "Kernel state as files."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do the first characters 'c', 'b' and 's' mean in ls -l output?",
+        "a": "Character device, block device and socket respectively."
+      }
+    ]
+  },
+  "inodes-the-metadata-beneath-the-surface": {
+    "core": "An inode is a filesystem's record for one file: type, permissions, owner, size, timestamps, link count and pointers to data blocks, but not its name. Names live in directories, which map names to inode numbers. Filesystems have a fixed or limited number of inodes (ext4 sets it at format time), so millions of tiny files can exhaust inodes while plenty of disk space remains, causing 'No space left on device'.",
+    "first_principles": {
+      "problem": "'No space left on device' appears while df shows 40% free.",
+      "truths": [
+        "Metadata is separate from names.",
+        "Inodes are finite.",
+        "Small files consume inodes fast."
+      ],
+      "derivation": [
+        "Check **df -i** for inode usage.",
+        "Find dirs with **many files**.",
+        "Clean up **tiny-file** accumulations (sessions, caches).",
+        "Choose **inode ratio** at mkfs or use XFS (dynamic).",
+        "Inspect with **stat/ls -i**."
+      ]
+    },
+    "analogy": {
+      "title": "Library catalogue cards",
+      "story": "Each book has one card with its details; the shelves can have space while the card drawer is full.",
+      "mapping": [
+        [
+          "Catalogue card",
+          "Inode"
+        ],
+        [
+          "Book title on shelf label",
+          "Directory entry"
+        ],
+        [
+          "Full card drawer",
+          "Inode exhaustion"
+        ]
+      ],
+      "breaks": "Libraries add drawers; ext4 can't add inodes without reformatting."
+    },
+    "mindmap": {
+      "center": "Inodes",
+      "branches": [
+        {
+          "label": "Contains",
+          "children": [
+            "Type",
+            "Mode",
+            "UID/GID",
+            "Size",
+            "Timestamps",
+            "Link count",
+            "Block pointers"
+          ]
+        },
+        {
+          "label": "Not",
+          "children": [
+            "Filename"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "ext4 fixed at mkfs",
+            "XFS dynamic"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "df -i",
+            "stat",
+            "ls -i",
+            "find -inum"
+          ]
+        },
+        {
+          "label": "Failure",
+          "children": [
+            "ENOSPC with free blocks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inode exhaustion",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stale PHP sessions exhausted inodes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "df -h /var ; df -i /var\n# IUse% 100%\nfor d in /var/*; do echo \"$(find \"$d\" -xdev | wc -l) $d\"; done | sort -n | tail -3\n# 9800000 /var/lib/php/sessions\nstat /etc/passwd | grep -E 'Inode|Links'"
+        }
+      ],
+      "outcome": "inode-aware storage."
+    },
+    "summary": {
+      "points": [
+        "Metadata without names.",
+        "Finite inodes.",
+        "Check df -i."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a disk report 'No space left' while df -h shows free space?",
+        "a": "The filesystem has run out of inodes, typically from very many small files."
+      }
+    ]
+  },
+  "file-descriptors-the-universal-connectors": {
+    "core": "When a process opens a file, socket or pipe, the kernel returns a small integer: a file descriptor indexing the process's FD table, which points to open file descriptions (offset, flags) and then to inodes. 0, 1 and 2 are stdin, stdout and stderr. FDs are inherited across fork (unless CLOEXEC), are limited per process (ulimit -n) and system-wide (fs.file-max), and leaking them causes 'Too many open files'.",
+    "first_principles": {
+      "problem": "A service crashes with 'Too many open files' after running for two days.",
+      "truths": [
+        "FDs are per-process handles.",
+        "Limits exist.",
+        "Unclosed handles leak."
+      ],
+      "derivation": [
+        "Inspect **/proc/<pid>/fd**.",
+        "Count with **ls | wc -l** or lsof.",
+        "Raise **ulimit -n** (LimitNOFILE) sensibly.",
+        "Fix **leaks** (close, CLOEXEC).",
+        "Monitor **process_open_fds** metric."
+      ]
+    },
+    "analogy": {
+      "title": "Cloakroom tickets",
+      "story": "Each item you check in gets a numbered ticket; if you never return tickets, the cloakroom runs out.",
+      "mapping": [
+        [
+          "Ticket number",
+          "FD"
+        ],
+        [
+          "Checked item",
+          "Open file/socket"
+        ],
+        [
+          "Running out",
+          "EMFILE"
+        ]
+      ],
+      "breaks": "Tickets are paper; FDs also hold offsets and flags."
+    },
+    "mindmap": {
+      "center": "File Descriptors",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "FD table",
+            "Open file description",
+            "Inode"
+          ]
+        },
+        {
+          "label": "Standard",
+          "children": [
+            "0 stdin",
+            "1 stdout",
+            "2 stderr"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "ulimit -n",
+            "LimitNOFILE",
+            "fs.file-max"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Leaks",
+            "Inheritance without CLOEXEC"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "/proc/pid/fd",
+            "lsof",
+            "ss"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find the leak",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Leak traced to sockets not being closed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "pid=$(pgrep -o api)\nls /proc/$pid/fd | wc -l           # 65530\ngrep 'open files' /proc/$pid/limits\nls -l /proc/$pid/fd | awk '{print $NF}' | sed 's/[0-9]*//g' | sort | uniq -c | sort -rn | head\n# 64000 socket:[] → unclosed HTTP client connections"
+        }
+      ],
+      "outcome": "FD issues diagnosed."
+    },
+    "summary": {
+      "points": [
+        "Integer handles.",
+        "Limited per process.",
+        "Leaks cause EMFILE."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the error 'Too many open files' (EMFILE) mean?",
+        "a": "The process reached its file descriptor limit, often due to a leak of unclosed files or sockets."
+      }
+    ]
+  },
+  "hard-links-vs-soft-symbolic-links": {
+    "core": "A hard link is another directory entry pointing to the same inode, so both names are equal, the data persists until the link count reaches zero, and hard links can't cross filesystems or (usually) point to directories. A symbolic link is a small file containing a path; it can cross filesystems and point to directories, but breaks (dangles) if the target moves or is deleted. Deployments use symlinks for atomic version switches (current → releases/v42).",
+    "first_principles": {
+      "problem": "Deleting a log file doesn't free space because a hard link (or open FD) still references the inode.",
+      "truths": [
+        "Names point to inodes.",
+        "Data lives while references exist.",
+        "Symlinks are just paths."
+      ],
+      "derivation": [
+        "**ln** creates hard links (same inode).",
+        "**ln -s** creates symlinks (path).",
+        "Check **link count** in ls -l/stat.",
+        "Use **symlinks** for atomic switches.",
+        "Find **dangling** links with find -xtype l."
+      ]
+    },
+    "analogy": {
+      "title": "Two names on the same house vs a signpost to it",
+      "story": "A hard link is a second street name for the same house; a symlink is a signpost that's wrong if the house moves.",
+      "mapping": [
+        [
+          "Second street name",
+          "Hard link"
+        ],
+        [
+          "Signpost",
+          "Symlink"
+        ],
+        [
+          "House",
+          "Inode/data"
+        ]
+      ],
+      "breaks": "Houses don't vanish when one name is removed, and neither do inodes with remaining links."
+    },
+    "mindmap": {
+      "center": "Links",
+      "branches": [
+        {
+          "label": "Hard",
+          "children": [
+            "Same inode",
+            "No cross-fs",
+            "No dirs",
+            "Link count"
+          ]
+        },
+        {
+          "label": "Soft",
+          "children": [
+            "Stores path",
+            "Cross-fs",
+            "Dirs OK",
+            "Can dangle"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Atomic deploy symlinks",
+            "Backup dedupe (hard)",
+            "Config indirection"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ln",
+            "ln -s",
+            "readlink -f",
+            "find -xtype l"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Atomic deploy",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Instant, atomic version switch."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ln -sfn /srv/app/releases/v42 /srv/app/current.tmp\nmv -T /srv/app/current.tmp /srv/app/current      # atomic rename\nreadlink -f /srv/app/current\nstat -c '%h links  %i inode' bigfile.log"
+        }
+      ],
+      "outcome": "links used correctly."
+    },
+    "summary": {
+      "points": [
+        "Hard = same inode.",
+        "Soft = path.",
+        "Atomic symlink swaps."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't deleting a file always free its disk space?",
+        "a": "Its inode may still be referenced by another hard link or an open file descriptor, so data remains until all references are gone."
+      }
+    ]
+  },
+  "the-filesystem-hierarchy-standard-fhs": {
+    "core": "The FHS defines where things live. /bin and /sbin hold essential commands (now merged into /usr on most distros); /etc holds system configuration; /var holds variable data (logs, caches, spools, databases); /tmp and /run hold temporary and runtime state (often tmpfs); /home holds user data; /opt holds add-on packages; /usr holds read-only shareable programs and libraries; /usr/local holds locally installed software; and /proc, /sys and /dev are virtual. Following it makes systems predictable and supports read-only roots and image-based OSes.",
+    "first_principles": {
+      "problem": "An app writes logs into /usr/lib/app/logs, which fills the root partition and breaks on a read-only /usr.",
+      "truths": [
+        "Locations signal purpose.",
+        "Some areas should be read-only.",
+        "Variable data grows."
+      ],
+      "derivation": [
+        "Config in **/etc**.",
+        "Variable data in **/var**.",
+        "Runtime state in **/run**.",
+        "Programs in **/usr** (read-only).",
+        "Local software in **/usr/local** or **/opt**."
+      ]
+    },
+    "analogy": {
+      "title": "A well-organised kitchen",
+      "story": "Recipes in one drawer, ingredients in the pantry, dirty dishes in the sink, appliances in their place; anyone can find things.",
+      "mapping": [
+        [
+          "Recipe drawer",
+          "/etc"
+        ],
+        [
+          "Pantry",
+          "/usr"
+        ],
+        [
+          "Sink",
+          "/var/tmp, /tmp"
+        ],
+        [
+          "Appliances",
+          "/dev"
+        ]
+      ],
+      "breaks": "Kitchens vary; FHS is a shared standard across distros."
+    },
+    "mindmap": {
+      "center": "FHS",
+      "branches": [
+        {
+          "label": "Config",
+          "children": [
+            "/etc"
+          ]
+        },
+        {
+          "label": "Programs",
+          "children": [
+            "/usr/bin",
+            "/usr/lib",
+            "/usr/local",
+            "/opt"
+          ]
+        },
+        {
+          "label": "Variable",
+          "children": [
+            "/var/log",
+            "/var/lib",
+            "/var/cache"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "/run",
+            "/tmp"
+          ]
+        },
+        {
+          "label": "User",
+          "children": [
+            "/home",
+            "/root"
+          ]
+        },
+        {
+          "label": "Virtual",
+          "children": [
+            "/proc",
+            "/sys",
+            "/dev"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Where things go",
+      "scenario": "Layout.",
+      "flow": [
+        "Binary: /usr/bin/app (or /opt/app/bin)",
+        "Config: /etc/app/app.yaml",
+        "Data: /var/lib/app/",
+        "Logs: /var/log/app/ (or journald)",
+        "PID/socket: /run/app/"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Read-only /usr works; logs isolated on /var."
+        }
+      ],
+      "code": [],
+      "outcome": "predictable file placement."
+    },
+    "summary": {
+      "points": [
+        "Standard locations.",
+        "/usr read-only.",
+        "/var for growth."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should an application store its persistent state data according to FHS?",
+        "a": "Under /var/lib/<app>."
+      }
+    ]
+  },
+  "mount-points-attaching-filesystems": {
+    "core": "Linux has a single directory tree. Additional filesystems (disks, partitions, NFS, tmpfs, overlay) are attached at mount points, and the mounted filesystem hides whatever was in that directory before. /etc/fstab (or systemd mount units) defines mounts at boot, with options like noexec, nosuid, nodev, ro, noatime and nofail. Mount namespaces let containers have their own mount trees, and bind mounts expose a directory at another path.",
+    "first_principles": {
+      "problem": "After a reboot the server hangs in emergency mode because an NFS mount in fstab is unreachable.",
+      "truths": [
+        "One tree, many filesystems.",
+        "Mounts hide underlying content.",
+        "Boot can block on mounts."
+      ],
+      "derivation": [
+        "Define in **fstab** (by UUID).",
+        "Use **nofail, x-systemd.automount** for optional mounts.",
+        "Harden with **noexec, nosuid, nodev**.",
+        "Use **bind mounts** to re-expose paths.",
+        "Inspect with **findmnt**."
+      ]
+    },
+    "analogy": {
+      "title": "Plugging extra rooms into a house's corridors",
+      "story": "A door in the hallway opens into a separate building; what was behind the door before is hidden.",
+      "mapping": [
+        [
+          "Door",
+          "Mount point"
+        ],
+        [
+          "Separate building",
+          "Filesystem"
+        ],
+        [
+          "Hidden cupboard",
+          "Covered directory contents"
+        ]
+      ],
+      "breaks": "Doors are physical; mounts can be stacked and namespaced."
+    },
+    "mindmap": {
+      "center": "Mounts",
+      "branches": [
+        {
+          "label": "Config",
+          "children": [
+            "/etc/fstab",
+            "systemd .mount units"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "ro",
+            "noexec",
+            "nosuid",
+            "nodev",
+            "noatime",
+            "nofail"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "ext4/xfs",
+            "nfs",
+            "tmpfs",
+            "overlay",
+            "bind"
+          ]
+        },
+        {
+          "label": "Namespaces",
+          "children": [
+            "Containers",
+            "Propagation"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "mount",
+            "findmnt",
+            "umount -l"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Resilient fstab",
+      "scenario": "Line + check.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Unreachable NFS no longer blocks boot."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "UUID=3f1c...  /data   xfs   defaults,noatime,nofail                    0 2\nnfs01:/share /mnt/share nfs  _netdev,nofail,x-systemd.automount,timeo=50 0 0\ntmpfs         /tmp    tmpfs  nosuid,nodev,noexec,size=2G                0 0\n# verify: findmnt --verify && mount -a"
+        }
+      ],
+      "outcome": "robust, secure mounts."
+    },
+    "summary": {
+      "points": [
+        "One tree.",
+        "fstab options matter.",
+        "nofail for optional."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the nofail mount option do?",
+        "a": "Lets boot continue even if that filesystem can't be mounted, instead of dropping into emergency mode."
+      }
+    ]
+  },
+  "virtual-filesystems-proc-and-sys": {
+    "core": "/proc and /sys aren't on disk; the kernel generates their contents on read. /proc exposes processes (/proc/<pid>/status, fd, maps, cmdline) and kernel state (meminfo, cpuinfo, loadavg, /proc/sys tunables). /sys (sysfs) exposes the device model: devices, drivers, buses, block queues, cgroups and NUMA nodes, one value per file. Writing to some files changes kernel behaviour at runtime (sysctl writes /proc/sys).",
+    "first_principles": {
+      "problem": "An engineer wants a process's environment, limits and memory without any tools installed in a minimal container.",
+      "truths": [
+        "The kernel can present state as files.",
+        "Reading generates current values.",
+        "Writes can tune behaviour."
+      ],
+      "derivation": [
+        "Read **/proc/<pid>/*** for process info.",
+        "Read **/proc/meminfo, loadavg** for system.",
+        "Tune via **/proc/sys** (sysctl).",
+        "Explore devices in **/sys**.",
+        "Script with **cat/echo**."
+      ]
+    },
+    "analogy": {
+      "title": "A live control panel shaped like filing cabinets",
+      "story": "Opening a drawer shows the current reading; writing on certain cards changes the setting.",
+      "mapping": [
+        [
+          "Drawers",
+          "Files in /proc,/sys"
+        ],
+        [
+          "Current reading",
+          "Generated content"
+        ],
+        [
+          "Writing on cards",
+          "Tunables"
+        ]
+      ],
+      "breaks": "Filing cabinets store; these files are computed on every read."
+    },
+    "mindmap": {
+      "center": "/proc & /sys",
+      "branches": [
+        {
+          "label": "/proc process",
+          "children": [
+            "status",
+            "cmdline",
+            "environ",
+            "fd/",
+            "maps",
+            "limits"
+          ]
+        },
+        {
+          "label": "/proc system",
+          "children": [
+            "meminfo",
+            "cpuinfo",
+            "loadavg",
+            "pressure/"
+          ]
+        },
+        {
+          "label": "/proc/sys",
+          "children": [
+            "net",
+            "vm",
+            "kernel",
+            "fs tunables"
+          ]
+        },
+        {
+          "label": "/sys",
+          "children": [
+            "devices",
+            "block",
+            "class",
+            "fs/cgroup",
+            "kernel/mm"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "cat",
+            "echo",
+            "sysctl"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "No tools needed",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Full introspection without extra tools."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "pid=1\ntr '\\0' '\\n' < /proc/$pid/environ | head\ngrep -E 'VmRSS|Threads' /proc/$pid/status\ncat /proc/$pid/limits | grep 'open files'\ncat /sys/block/nvme0n1/queue/scheduler\necho 1 > /proc/sys/net/ipv4/ip_forward    # runtime tunable"
+        }
+      ],
+      "outcome": "kernel state at your fingertips."
+    },
+    "summary": {
+      "points": [
+        "Generated on read.",
+        "Process and system info.",
+        "Runtime tuning."
+      ]
+    },
+    "check": [
+      {
+        "q": "Do files under /proc and /sys take disk space?",
+        "a": "No, they're virtual; the kernel generates their content on demand when read."
+      }
+    ]
+  }
+}

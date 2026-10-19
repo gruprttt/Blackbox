@@ -1,0 +1,537 @@
+{
+  "introduction-the-doorbell-problem": {
+    "core": "Devices tell the CPU 'something happened' (packet arrived, disk I/O done, timer fired) by raising an interrupt. The CPU pauses what it's doing, saves state and runs the handler. That's efficient at low rates, but at millions of events per second interrupt overhead can consume whole cores, and a single CPU receiving all interrupts becomes a bottleneck. Kernel design (top and bottom halves, NAPI, affinity) manages it.",
+    "first_principles": {
+      "problem": "A 25 Gbps server shows CPU 0 at 100% in hardware and software interrupts while other cores idle.",
+      "truths": [
+        "Interrupts preempt current work.",
+        "Each costs cycles.",
+        "Distribution across cores is configurable."
+      ],
+      "derivation": [
+        "Measure **interrupt rates** (/proc/interrupts).",
+        "Split **urgent vs deferred** work.",
+        "Switch to **polling** under load (NAPI).",
+        "**Spread** IRQs across cores.",
+        "Watch **si/hi** in top."
+      ]
+    },
+    "analogy": {
+      "title": "A doorbell that rings for every parcel",
+      "story": "One or two deliveries are fine; a thousand per minute and you never finish anything else.",
+      "mapping": [
+        [
+          "Doorbell",
+          "Interrupt"
+        ],
+        [
+          "Parcels",
+          "Device events"
+        ],
+        [
+          "You",
+          "CPU core"
+        ]
+      ],
+      "breaks": "Doorbells don't run code; interrupt handlers do."
+    },
+    "mindmap": {
+      "center": "Interrupts",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "NICs",
+            "Disks",
+            "Timers",
+            "IPIs"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Context save",
+            "Cache pollution",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Top/bottom halves",
+            "Softirqs",
+            "NAPI"
+          ]
+        },
+        {
+          "label": "Distribution",
+          "children": [
+            "IRQ affinity",
+            "irqbalance",
+            "RSS"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "/proc/interrupts",
+            "/proc/softirqs",
+            "top hi/si"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spot the hot CPU",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Identifies interrupt concentration."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mpstat -P ALL 1 1 | awk '$NF ~ /[0-9]/ {print $3, $(NF-4), $(NF-5)}' | head   # %soft %irq per CPU\ngrep -E 'eth0|mlx' /proc/interrupts | head\n# all counts on CPU0 → affinity problem"
+        }
+      ],
+      "outcome": "interrupt load understood."
+    },
+    "summary": {
+      "points": [
+        "Devices interrupt CPUs.",
+        "High rates are costly.",
+        "Distribute and batch."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do the 'hi' and 'si' columns in top represent?",
+        "a": "Time spent servicing hardware interrupts (hi) and software interrupts/softirqs (si)."
+      }
+    ]
+  },
+  "top-half-vs-bottom-half-the-two-phase-design": {
+    "core": "Interrupt handling is split. The top half (hard IRQ handler) runs immediately with that interrupt masked, doing the minimum: acknowledge the device, grab data pointers, schedule further work. The bottom half (softirqs, tasklets, workqueues or threaded IRQs) does the heavy processing later with interrupts enabled, such as protocol processing and waking processes. That keeps hard-IRQ latency tiny and the system responsive.",
+    "first_principles": {
+      "problem": "A custom driver does heavy processing in its interrupt handler, causing missed interrupts and latency spikes.",
+      "truths": [
+        "Hard IRQ context blocks other work.",
+        "Deferred work can be scheduled flexibly.",
+        "Responsiveness needs short handlers."
+      ],
+      "derivation": [
+        "**Top half**: ack, minimal work.",
+        "**Bottom half**: heavy processing.",
+        "Use **softirqs** for networking/block.",
+        "Use **workqueues/threaded IRQs** if sleeping needed.",
+        "Measure via **/proc/softirqs**."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist and a back office",
+      "story": "The receptionist signs for the parcel quickly and passes it back; the back office unpacks and processes it.",
+      "mapping": [
+        [
+          "Receptionist",
+          "Top half"
+        ],
+        [
+          "Back office",
+          "Bottom half"
+        ],
+        [
+          "Signing",
+          "Acknowledging IRQ"
+        ]
+      ],
+      "breaks": "Back offices work in parallel; softirqs run per CPU with limits."
+    },
+    "mindmap": {
+      "center": "Two-Phase Interrupts",
+      "branches": [
+        {
+          "label": "Top half",
+          "children": [
+            "Hard IRQ",
+            "Ack device",
+            "Schedule work"
+          ]
+        },
+        {
+          "label": "Bottom half",
+          "children": [
+            "Softirqs",
+            "Tasklets",
+            "Workqueues",
+            "Threaded IRQs"
+          ]
+        },
+        {
+          "label": "Softirq types",
+          "children": [
+            "NET_RX",
+            "NET_TX",
+            "BLOCK",
+            "TIMER",
+            "RCU"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "/proc/softirqs",
+            "ksoftirqd"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "See softirq work",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows where deferred work runs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "watch -n1 -d 'grep -E \"NET_RX|NET_TX|BLOCK|TIMER\" /proc/softirqs'\n# NET_RX increments dominate on CPU0 → network bottom-half work concentrated"
+        }
+      ],
+      "outcome": "interrupt design understood."
+    },
+    "summary": {
+      "points": [
+        "Short top half.",
+        "Deferred bottom half.",
+        "Softirqs for network/block."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should hard interrupt handlers do minimal work?",
+        "a": "They run with interrupts masked and preempt everything, so long handlers increase latency and risk missing other interrupts."
+      }
+    ]
+  },
+  "ksoftirqd-the-kernels-cleanup-crew": {
+    "core": "Softirqs normally run on return from a hard interrupt or when re-enabled. If too many are pending (they keep re-raising under heavy load), the kernel defers them to a per-CPU kernel thread, ksoftirqd/N, which competes with normal processes under the scheduler. High ksoftirqd CPU means sustained softirq load, usually network receive processing that one core can't keep up with, which leads to packet drops.",
+    "first_principles": {
+      "problem": "ksoftirqd/0 sits at 100% CPU and network packets are dropped under load.",
+      "truths": [
+        "Softirqs run inline first.",
+        "Overflow is deferred to a thread.",
+        "One CPU can saturate."
+      ],
+      "derivation": [
+        "Check **ksoftirqd CPU** per core.",
+        "Check **/proc/net/softnet_stat** drops.",
+        "**Spread** load (RSS/RPS).",
+        "Tune **netdev_budget**.",
+        "Increase **backlog** if needed."
+      ]
+    },
+    "analogy": {
+      "title": "A cleanup crew called when tidying overflows",
+      "story": "Normally staff tidy as they go; when mess piles up, a dedicated crew comes in but competes for the same space.",
+      "mapping": [
+        [
+          "Tidying as you go",
+          "Inline softirqs"
+        ],
+        [
+          "Cleanup crew",
+          "ksoftirqd"
+        ],
+        [
+          "Overflowing mess",
+          "Pending softirqs"
+        ]
+      ],
+      "breaks": "Crews can be added; ksoftirqd is one thread per CPU."
+    },
+    "mindmap": {
+      "center": "ksoftirqd",
+      "branches": [
+        {
+          "label": "Role",
+          "children": [
+            "Deferred softirq execution",
+            "Per-CPU thread"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "High ksoftirqd CPU",
+            "softnet_stat drops/squeeze"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "net.core.netdev_budget",
+            "netdev_budget_usecs",
+            "netdev_max_backlog"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "RSS",
+            "RPS",
+            "IRQ affinity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Drops and squeezes",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Identifies saturated CPU and drops."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "top -b -n1 | grep ksoftirqd\ncat /proc/net/softnet_stat | awk '{print \"cpu\"NR-1, \"processed=\"strtonum(\"0x\"$1), \"dropped=\"strtonum(\"0x\"$2), \"squeezed=\"strtonum(\"0x\"$3)}'\nsysctl -w net.core.netdev_budget=600 net.core.netdev_max_backlog=5000"
+        }
+      ],
+      "outcome": "softirq overload diagnosed."
+    },
+    "summary": {
+      "points": [
+        "Overflow goes to ksoftirqd.",
+        "High CPU = sustained load.",
+        "Spread and tune."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a rising 'time_squeeze' count in softnet_stat indicate?",
+        "a": "The softirq ran out of budget or time before processing all packets, a sign one CPU can't keep up."
+      }
+    ]
+  },
+  "napi-switching-from-interrupts-to-polling-under-load": {
+    "core": "NAPI combines interrupts and polling for network drivers. When the first packet arrives, the NIC interrupts; the driver disables further RX interrupts and schedules a poll. The softirq then polls the RX ring, processing up to a budget (often 64 packets) per call. If packets remain it keeps polling, and when the ring is empty it re-enables interrupts. Low load stays interrupt-driven and low-latency; high load becomes efficient batched polling.",
+    "first_principles": {
+      "problem": "Under packet floods, per-packet interrupts cause livelock where the CPU only handles interrupts and makes no progress.",
+      "truths": [
+        "Interrupts are cheap at low rates.",
+        "Polling is efficient at high rates.",
+        "Budgets prevent starvation."
+      ],
+      "derivation": [
+        "Interrupt on **first packet**.",
+        "**Disable** RX interrupts, schedule poll.",
+        "Poll up to **budget** per round.",
+        "**Re-enable** when ring empty.",
+        "Tune **budget/coalescing**."
+      ]
+    },
+    "analogy": {
+      "title": "Checking the mailbox",
+      "story": "When a letter arrives you're notified; if mail keeps coming, you just stand by the box collecting batches until it stops.",
+      "mapping": [
+        [
+          "Notification",
+          "Interrupt"
+        ],
+        [
+          "Standing by the box",
+          "Polling"
+        ],
+        [
+          "Batch size",
+          "NAPI budget"
+        ]
+      ],
+      "breaks": "You'd stop collecting eventually; budgets enforce fairness across devices."
+    },
+    "mindmap": {
+      "center": "NAPI",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "IRQ",
+            "Mask",
+            "Poll",
+            "Budget",
+            "Unmask"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No livelock",
+            "Batching",
+            "Low latency at low load"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "netdev_budget",
+            "Interrupt coalescing",
+            "Busy polling"
+          ]
+        },
+        {
+          "label": "Related",
+          "children": [
+            "GRO",
+            "XDP runs in NAPI poll"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Observe mode switch",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Interrupt rate plateaus while packet rate climbs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ethtool -S eth0 | grep -E 'rx_packets|rx_napi|poll'\nwatch -n1 'grep eth0-rx /proc/interrupts'   # interrupt count grows slowly under heavy load\nsysctl net.core.netdev_budget net.core.dev_weight"
+        }
+      ],
+      "outcome": "adaptive receive processing."
+    },
+    "summary": {
+      "points": [
+        "Interrupt then poll.",
+        "Budgeted batches.",
+        "Prevents livelock."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does NAPI prevent receive livelock?",
+        "a": "Under load it disables per-packet interrupts and polls in budgeted batches, so the CPU makes progress instead of handling endless interrupts."
+      }
+    ]
+  },
+  "cpu-affinity-and-irq-pinning-smp_affinity": {
+    "core": "Each IRQ has an affinity mask in /proc/irq/<n>/smp_affinity (or smp_affinity_list) controlling which CPUs may service it. irqbalance spreads IRQs automatically, but for performance-critical systems you pin each NIC queue's IRQ to a distinct core on the NIC's NUMA node, keep application threads on other cores (or the same, for cache locality, depending on design), and isolate latency-critical cores from interrupts entirely.",
+    "first_principles": {
+      "problem": "All 16 NIC queue interrupts land on CPU 0 because irqbalance was disabled and defaults were never changed.",
+      "truths": [
+        "IRQs can be routed to chosen CPUs.",
+        "Locality reduces cache misses.",
+        "Isolation reduces jitter."
+      ],
+      "derivation": [
+        "List IRQs per **NIC queue**.",
+        "Pin each to a **separate local core**.",
+        "Keep **irqbalance** off for manual pinning (or use hints).",
+        "**Isolate** latency-critical cores.",
+        "Verify with **/proc/interrupts** deltas."
+      ]
+    },
+    "analogy": {
+      "title": "Assigning phone lines to receptionists",
+      "story": "Spread incoming lines evenly across receptionists near the right department, and keep the CEO's assistant off the general lines.",
+      "mapping": [
+        [
+          "Phone lines",
+          "IRQs/queues"
+        ],
+        [
+          "Receptionists",
+          "CPU cores"
+        ],
+        [
+          "CEO's assistant",
+          "Isolated core"
+        ]
+      ],
+      "breaks": "Receptionists can hand off calls; IRQ affinity is a fixed mask."
+    },
+    "mindmap": {
+      "center": "IRQ Affinity",
+      "branches": [
+        {
+          "label": "Files",
+          "children": [
+            "/proc/irq/N/smp_affinity",
+            "smp_affinity_list",
+            "effective_affinity"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "irqbalance",
+            "set_irq_affinity scripts",
+            "tuna"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "One queue per core",
+            "NUMA-local cores",
+            "Isolate critical cores"
+          ]
+        },
+        {
+          "label": "Kernel params",
+          "children": [
+            "isolcpus",
+            "irqaffinity",
+            "nohz_full"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pin queues",
+      "scenario": "Script.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Interrupt load spread across 16 cores."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemctl stop irqbalance\ni=0\nfor irq in $(grep 'eth0-TxRx' /proc/interrupts | awk -F: '{print $1}'); do\n  echo $i > /proc/irq/$irq/smp_affinity_list\n  i=$((i+1))\ndone\nwatch -n1 -d 'grep eth0-TxRx /proc/interrupts'"
+        }
+      ],
+      "outcome": "balanced, local interrupt handling."
+    },
+    "summary": {
+      "points": [
+        "Affinity masks per IRQ.",
+        "Spread queues locally.",
+        "Isolate critical cores."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why pin NIC IRQs to cores on the NIC's NUMA node?",
+        "a": "Packet buffers and the device are local to that node, avoiding cross-socket memory traffic during interrupt processing."
+      }
+    ]
+  }
+}

@@ -1,0 +1,913 @@
+{
+  "introduction-seeing-inside-the-black-box": {
+    "core": "When a production system misbehaves (slow syscalls, mysterious latency, unexplained network drops), you need to see inside the kernel and applications without restarting or adding logging. Linux tracing tools range from strace (syscalls of one process, heavy overhead) and tcpdump (packets) through perf (sampling and tracepoints) to eBPF (safe, programmable, low-overhead in-kernel tracing via bcc and bpftrace). Each answers different questions at different costs.",
+    "first_principles": {
+      "problem": "A service has intermittent 2-second stalls in production, and adding logs and redeploying would take a day.",
+      "truths": [
+        "Production can't always be restarted.",
+        "The kernel sees everything.",
+        "Overhead must stay low."
+      ],
+      "derivation": [
+        "Start with **USE/RED** metrics.",
+        "Use **strace** sparingly (high overhead).",
+        "Use **perf** for sampling.",
+        "Use **eBPF tools** for targeted low-overhead tracing.",
+        "Capture **packets** with tcpdump when network is suspect."
+      ]
+    },
+    "analogy": {
+      "title": "Medical imaging instead of surgery",
+      "story": "X-rays, ultrasound and MRI let you see inside without cutting the patient open.",
+      "mapping": [
+        [
+          "Surgery",
+          "Redeploy with logging"
+        ],
+        [
+          "X-ray",
+          "perf sampling"
+        ],
+        [
+          "MRI",
+          "eBPF tracing"
+        ]
+      ],
+      "breaks": "Imaging is passive; some tracing (strace) slows the patient considerably."
+    },
+    "mindmap": {
+      "center": "Linux Observability",
+      "branches": [
+        {
+          "label": "Classic",
+          "children": [
+            "strace",
+            "ltrace",
+            "tcpdump"
+          ]
+        },
+        {
+          "label": "Sampling",
+          "children": [
+            "perf",
+            "flamegraphs"
+          ]
+        },
+        {
+          "label": "eBPF",
+          "children": [
+            "bcc",
+            "bpftrace",
+            "libbpf tools"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "Question",
+            "Overhead",
+            "Scope"
+          ]
+        },
+        {
+          "label": "Methods",
+          "children": [
+            "USE",
+            "60-second checklist"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Stall hunt",
+      "scenario": "Flow.",
+      "flow": [
+        "biolatency shows 2 s disk outliers",
+        "biosnoop identifies the process and file",
+        "ext4 fsync on huge log file",
+        "Fix: async logging"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Root cause found live in minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "tracing toolkit oriented."
+    },
+    "summary": {
+      "points": [
+        "See without redeploying.",
+        "Choose tool by question.",
+        "Mind overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is eBPF preferred over strace for production tracing?",
+        "a": "eBPF runs filtered, aggregated logic in the kernel with low overhead, while strace stops the process on every syscall via ptrace."
+      }
+    ]
+  },
+  "the-old-guard-system-call-tracing-with-strace": {
+    "core": "strace uses ptrace to stop a process at every syscall entry and exit and print the call, arguments, return value and errno. It's invaluable for 'why does this fail?' questions: which file is missing (ENOENT), which permission (EACCES), which connect hangs, what config is read. But ptrace stops make the process 10–100× slower for syscall-heavy workloads, so use filters (-e trace=), summaries (-c), short attachments, or eBPF alternatives in production.",
+    "first_principles": {
+      "problem": "A program exits with a vague 'configuration error' and no logs.",
+      "truths": [
+        "Programs interact with the OS via syscalls.",
+        "Syscall results reveal failures.",
+        "ptrace stops are expensive."
+      ],
+      "derivation": [
+        "Run **strace -f -e trace=file,network**.",
+        "Look for **errno** (ENOENT, EACCES).",
+        "Use **-c** for summary.",
+        "Attach briefly with **-p**.",
+        "Prefer **eBPF** under heavy load."
+      ]
+    },
+    "analogy": {
+      "title": "A court stenographer who stops proceedings for every sentence",
+      "story": "You get a perfect transcript, but the trial takes ten times longer.",
+      "mapping": [
+        [
+          "Transcript",
+          "strace output"
+        ],
+        [
+          "Stopping proceedings",
+          "ptrace stops"
+        ],
+        [
+          "Trial",
+          "Process"
+        ]
+      ],
+      "breaks": "Stenographers can't be filtered; strace can be limited to specific syscalls."
+    },
+    "mindmap": {
+      "center": "strace",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "ptrace",
+            "Stop per syscall"
+          ]
+        },
+        {
+          "label": "Flags",
+          "children": [
+            "-f follow forks",
+            "-e trace=",
+            "-c summary",
+            "-T time",
+            "-p attach",
+            "-y fd paths"
+          ]
+        },
+        {
+          "label": "Finds",
+          "children": [
+            "ENOENT",
+            "EACCES",
+            "Hanging connect",
+            "Config reads"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "10–100× slowdown"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "perf trace",
+            "bpftrace",
+            "bcc opensnoop"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find the missing file",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exact missing path revealed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "strace -f -e trace=openat,stat -o /tmp/trace.txt ./app\ngrep -E 'ENOENT|EACCES' /tmp/trace.txt | head\n# openat(AT_FDCWD, \"/etc/app/config.yaml\", O_RDONLY) = -1 ENOENT\nstrace -c -p $(pgrep -o app) -- sleep 5   # syscall summary"
+        }
+      ],
+      "outcome": "syscall-level debugging."
+    },
+    "summary": {
+      "points": [
+        "Every syscall visible.",
+        "Great for failures.",
+        "Heavy overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can strace dramatically slow down the traced process?",
+        "a": "ptrace stops the process at every syscall entry and exit to report it, adding large overhead to syscall-heavy programs."
+      }
+    ]
+  },
+  "the-network-sniffer-tcpdump": {
+    "core": "tcpdump captures packets from an interface using kernel packet sockets and classic BPF filters (host, port, tcp flags), showing headers or writing pcap files for Wireshark. It answers whether packets arrive, whether the handshake completes, who resets connections, whether retransmits happen, and what DNS returns. Capture on the right interface and namespace (containers, veth), limit snaplen, and use precise filters to keep overhead and file sizes small.",
+    "first_principles": {
+      "problem": "A service times out calling an API, and both teams claim their side is fine.",
+      "truths": [
+        "Packets don't lie.",
+        "Filters reduce overhead.",
+        "Captures must be at the right point."
+      ],
+      "derivation": [
+        "Capture on **correct interface/namespace**.",
+        "Use **filters** (host, port, flags).",
+        "Use **-w pcap** for Wireshark.",
+        "Limit **-s snaplen** and **-c count**.",
+        "Look for **SYN without SYN-ACK, RST, retransmits**."
+      ]
+    },
+    "analogy": {
+      "title": "A traffic camera at the border",
+      "story": "It records every vehicle crossing, settling disputes about whether the delivery truck ever arrived.",
+      "mapping": [
+        [
+          "Camera",
+          "tcpdump"
+        ],
+        [
+          "Vehicles",
+          "Packets"
+        ],
+        [
+          "Border",
+          "Interface"
+        ]
+      ],
+      "breaks": "Cameras see all; tcpdump only sees traffic on the interface and namespace you choose."
+    },
+    "mindmap": {
+      "center": "tcpdump",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "AF_PACKET",
+            "cBPF filters"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "host",
+            "port",
+            "net",
+            "tcp[tcpflags]"
+          ]
+        },
+        {
+          "label": "Flags",
+          "children": [
+            "-i",
+            "-nn",
+            "-s",
+            "-c",
+            "-w",
+            "-G rotate"
+          ]
+        },
+        {
+          "label": "Look for",
+          "children": [
+            "SYN no reply",
+            "RST",
+            "Retransmits",
+            "DNS answers"
+          ]
+        },
+        {
+          "label": "Containers",
+          "children": [
+            "nsenter -n",
+            "veth"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Who's failing?",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No SYN-ACK: firewall/routing issue on the path."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "tcpdump -nni any 'host 10.0.5.20 and port 443' -c 50\n# 10.0.1.15.51234 > 10.0.5.20.443: Flags [S]\n# 10.0.1.15.51234 > 10.0.5.20.443: Flags [S]  (retransmit, no SYN-ACK)\n# capture inside a pod's network namespace\nnsenter -t $(pgrep -o app) -n tcpdump -nni eth0 port 53"
+        }
+      ],
+      "outcome": "network ground truth."
+    },
+    "summary": {
+      "points": [
+        "Packets are evidence.",
+        "Filter precisely.",
+        "Capture in the right namespace."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does seeing repeated SYNs with no SYN-ACK in tcpdump indicate?",
+        "a": "The connection attempt isn't being answered: packets are dropped by a firewall, routing problem, or the server isn't reachable."
+      }
+    ]
+  },
+  "the-broader-observability-ecosystem-perf-and-flame-graphs": {
+    "core": "perf is the kernel's built-in profiler and tracer. perf stat counts hardware events (cycles, instructions, cache and branch misses); perf top shows live hottest functions; perf record -g samples stacks for flame graphs; perf trace is a lower-overhead strace; and perf can use tracepoints, kprobes and uprobes. Flame graphs (Brendan Gregg) visualise sampled stacks so hot code paths, user and kernel alike, are obvious at a glance.",
+    "first_principles": {
+      "problem": "A service burns 100% CPU, and nobody knows which functions are responsible.",
+      "truths": [
+        "Sampling stacks reveals hotspots.",
+        "Hardware counters reveal efficiency.",
+        "Visualisation speeds analysis."
+      ],
+      "derivation": [
+        "**perf stat** for counters.",
+        "**perf top** for live hotspots.",
+        "**perf record -g** + flamegraph.",
+        "**perf trace** for syscalls.",
+        "Ensure **symbols/frame pointers**."
+      ]
+    },
+    "analogy": {
+      "title": "A time-lapse of a busy factory",
+      "story": "Snapshots every few milliseconds show which machines are always busy.",
+      "mapping": [
+        [
+          "Snapshots",
+          "Stack samples"
+        ],
+        [
+          "Busy machines",
+          "Hot functions"
+        ],
+        [
+          "Time-lapse summary",
+          "Flame graph"
+        ]
+      ],
+      "breaks": "Factories are visible; code paths need symbols to be readable."
+    },
+    "mindmap": {
+      "center": "perf",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "stat",
+            "top",
+            "record/report",
+            "trace",
+            "sched"
+          ]
+        },
+        {
+          "label": "Events",
+          "children": [
+            "Hardware counters",
+            "Tracepoints",
+            "kprobes",
+            "uprobes"
+          ]
+        },
+        {
+          "label": "Visual",
+          "children": [
+            "Flame graphs",
+            "perf script"
+          ]
+        },
+        {
+          "label": "Prereqs",
+          "children": [
+            "Symbols",
+            "Frame pointers",
+            "perf_event_paranoid"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CPU flame graph",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hot JSON serialisation path spotted."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "perf record -F 99 -a -g -- sleep 30\nperf script > out.perf\n./stackcollapse-perf.pl out.perf | ./flamegraph.pl > cpu.svg\nperf stat -e cycles,instructions,cache-misses -p $(pgrep -o api) -- sleep 10"
+        }
+      ],
+      "outcome": "CPU hotspots visible."
+    },
+    "summary": {
+      "points": [
+        "Counters and sampling.",
+        "Flame graphs.",
+        "Symbols required."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does perf record -F 99 -a -g do?",
+        "a": "Samples stacks on all CPUs at 99 Hz with call graphs, producing data for profiles and flame graphs."
+      }
+    ]
+  },
+  "the-revolution-introduction-to-ebpf": {
+    "core": "eBPF lets you load small, verified programs into the kernel and attach them to events: syscalls, kernel functions (kprobes or fentry), tracepoints, user functions (uprobes), network hooks and perf events. Programs aggregate data in maps (histograms, counters) inside the kernel and send only summaries to user space, which gives very low overhead. It turns the kernel into a programmable observability platform without kernel modules or reboots.",
+    "first_principles": {
+      "problem": "Engineers want per-process disk latency histograms in production without overhead or reboots.",
+      "truths": [
+        "The kernel sees all events.",
+        "Aggregation in-kernel reduces overhead.",
+        "Safety must be guaranteed."
+      ],
+      "derivation": [
+        "**Write** eBPF programs (C/bpftrace).",
+        "**Verify** for safety.",
+        "**Attach** to hooks.",
+        "**Aggregate** in maps.",
+        "**Read** summaries in user space."
+      ]
+    },
+    "analogy": {
+      "title": "Installing tiny, inspected sensors inside the engine",
+      "story": "They're checked for safety before installation and only report summaries, not every vibration.",
+      "mapping": [
+        [
+          "Sensors",
+          "eBPF programs"
+        ],
+        [
+          "Safety inspection",
+          "Verifier"
+        ],
+        [
+          "Summaries",
+          "Maps"
+        ]
+      ],
+      "breaks": "Sensors are physical; eBPF programs load and unload in seconds."
+    },
+    "mindmap": {
+      "center": "eBPF",
+      "branches": [
+        {
+          "label": "Hooks",
+          "children": [
+            "kprobes/fentry",
+            "tracepoints",
+            "uprobes",
+            "USDT",
+            "perf events",
+            "XDP/TC"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Maps",
+            "Ring buffers",
+            "Histograms"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Verifier",
+            "JIT"
+          ]
+        },
+        {
+          "label": "Frontends",
+          "children": [
+            "bpftrace",
+            "bcc",
+            "libbpf/CO-RE"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Tracing",
+            "Networking",
+            "Security"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Disk latency histogram",
+      "scenario": "bpftrace.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Live latency histogram at negligible overhead."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "bpftrace -e 'tracepoint:block:block_rq_issue { @s[args->dev, args->sector] = nsecs; }\n  tracepoint:block:block_rq_complete /@s[args->dev, args->sector]/ {\n    @usecs = hist((nsecs - @s[args->dev, args->sector]) / 1000); delete(@s[args->dev, args->sector]); }'"
+        }
+      ],
+      "outcome": "programmable kernel observability."
+    },
+    "summary": {
+      "points": [
+        "Programs in kernel.",
+        "Aggregate in maps.",
+        "Safe and low overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is eBPF tracing low overhead compared with logging every event?",
+        "a": "Programs aggregate data (counts, histograms) in kernel maps, sending only summaries to user space."
+      }
+    ]
+  },
+  "ebpf-architecture-safety-the-verifier": {
+    "core": "An eBPF program goes through several steps. It's compiled (clang to BPF bytecode), loaded via the bpf() syscall, checked by the verifier (all paths terminate, memory accesses are bounds-checked, only allowed helpers are called, no unsafe pointer leaks, complexity limits), JIT-compiled to native code, and attached to a hook. CO-RE (compile once, run everywhere) with BTF type info lets one binary work across kernel versions. Loading requires CAP_BPF/CAP_PERFMON or root.",
+    "first_principles": {
+      "problem": "Security teams worry eBPF programs could crash or compromise the kernel.",
+      "truths": [
+        "Kernel code must be safe.",
+        "Static analysis can prove properties.",
+        "Kernel structures vary across versions."
+      ],
+      "derivation": [
+        "**Compile** to BPF bytecode.",
+        "**Verify** paths, bounds, helpers.",
+        "**JIT** to native.",
+        "Use **CO-RE/BTF** for portability.",
+        "Restrict with **capabilities**."
+      ]
+    },
+    "analogy": {
+      "title": "An airport security checkpoint for code",
+      "story": "Every program is scanned and proven harmless before it boards the kernel.",
+      "mapping": [
+        [
+          "Checkpoint",
+          "Verifier"
+        ],
+        [
+          "Boarding",
+          "Attach"
+        ],
+        [
+          "Passport",
+          "Capabilities"
+        ]
+      ],
+      "breaks": "Security scans can miss things; the verifier is conservative and rejects anything unproven."
+    },
+    "mindmap": {
+      "center": "eBPF Architecture",
+      "branches": [
+        {
+          "label": "Pipeline",
+          "children": [
+            "clang → bytecode",
+            "bpf() load",
+            "Verifier",
+            "JIT",
+            "Attach"
+          ]
+        },
+        {
+          "label": "Verifier checks",
+          "children": [
+            "Termination",
+            "Bounds",
+            "Helper use",
+            "Pointer safety",
+            "Complexity"
+          ]
+        },
+        {
+          "label": "Portability",
+          "children": [
+            "BTF",
+            "CO-RE",
+            "libbpf"
+          ]
+        },
+        {
+          "label": "Privileges",
+          "children": [
+            "CAP_BPF",
+            "CAP_PERFMON",
+            "unprivileged disabled"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect loaded programs",
+      "scenario": "bpftool.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See what's running and confirm restrictions."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "bpftool prog list | head\nbpftool prog show id 42 --json | jq '.name,.type,.jited'\nbpftool btf dump file /sys/kernel/btf/vmlinux format c | head    # BTF for CO-RE\nsysctl kernel.unprivileged_bpf_disabled"
+        }
+      ],
+      "outcome": "trustworthy kernel extensions."
+    },
+    "summary": {
+      "points": [
+        "Verified before run.",
+        "JIT for speed.",
+        "CO-RE for portability."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does CO-RE provide for eBPF programs?",
+        "a": "Compile once, run everywhere: using BTF type info to relocate field accesses so one binary works across kernel versions."
+      }
+    ]
+  },
+  "modern-ebpf-tools-i-bcc-bpf-compiler-collection": {
+    "core": "BCC is a toolkit of ready-made eBPF tools plus Python and Lua frontends. Classics include execsnoop (new processes), opensnoop (file opens), biolatency and biosnoop (disk I/O latency), tcpconnect, tcpaccept and tcpretrans (TCP events), runqlat (scheduler run-queue latency), cachestat (page cache hit ratio), ext4slower (slow filesystem ops) and profile (CPU stacks). Many now have libbpf-tools versions that don't need compilers at runtime.",
+    "first_principles": {
+      "problem": "Something on a host spawns thousands of short-lived processes per second, invisible to top.",
+      "truths": [
+        "Short-lived events escape sampling tools.",
+        "Prebuilt tools answer common questions.",
+        "Low overhead permits production use."
+      ],
+      "derivation": [
+        "**execsnoop** for process churn.",
+        "**opensnoop** for file access.",
+        "**biolatency/biosnoop** for disk.",
+        "**tcpconnect/tcpretrans** for network.",
+        "**runqlat** for CPU scheduling delay."
+      ]
+    },
+    "analogy": {
+      "title": "A ready-made diagnostic kit",
+      "story": "Specialised instruments for each common ailment, no assembly required.",
+      "mapping": [
+        [
+          "Instruments",
+          "BCC tools"
+        ],
+        [
+          "Ailments",
+          "Common performance questions"
+        ],
+        [
+          "Kit",
+          "bcc-tools package"
+        ]
+      ],
+      "breaks": "Kits don't adapt; for custom questions you write bpftrace or BCC scripts."
+    },
+    "mindmap": {
+      "center": "BCC Tools",
+      "branches": [
+        {
+          "label": "Processes",
+          "children": [
+            "execsnoop",
+            "exitsnoop"
+          ]
+        },
+        {
+          "label": "Files",
+          "children": [
+            "opensnoop",
+            "filetop",
+            "ext4slower"
+          ]
+        },
+        {
+          "label": "Disk",
+          "children": [
+            "biolatency",
+            "biosnoop",
+            "biotop"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "tcpconnect",
+            "tcpaccept",
+            "tcpretrans",
+            "tcplife"
+          ]
+        },
+        {
+          "label": "CPU",
+          "children": [
+            "runqlat",
+            "profile",
+            "offcputime"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "cachestat",
+            "oomkill",
+            "memleak"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find process churn",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Health-check script spawning shells found."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "execsnoop-bpfcc -t | head\n# TIME  PCOMM  PID   PPID  RET ARGS\n# 0.01  sh     8812  1203  0   /bin/sh -c curl -s localhost/health\nrunqlat-bpfcc 10 1     # histogram of scheduling delay\ntcpretrans-bpfcc"
+        }
+      ],
+      "outcome": "instant answers to common questions."
+    },
+    "summary": {
+      "points": [
+        "Prebuilt eBPF tools.",
+        "Short-lived events visible.",
+        "Production-safe."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which BCC tool reveals short-lived processes that top never shows?",
+        "a": "execsnoop, which traces every exec() call."
+      }
+    ]
+  },
+  "modern-ebpf-tools-ii-bpftrace": {
+    "core": "bpftrace is an awk-like high-level language for one-liners and short scripts. You write probe /filter/ { action } with built-ins (pid, comm, nsecs, kstack, ustack, args), maps (@name[key] = count(), hist(), sum()) and probes for kprobe, kretprobe, tracepoint, uprobe, usdt, profile and interval. It's ideal for ad-hoc questions that no prebuilt tool answers, written in minutes during an incident.",
+    "first_principles": {
+      "problem": "During an incident, the team needs a histogram of read() sizes by process, and no tool exists for it.",
+      "truths": [
+        "Ad-hoc questions need quick tooling.",
+        "A small language can express many probes.",
+        "Maps aggregate efficiently."
+      ],
+      "derivation": [
+        "Pick a **probe** (tracepoint preferred).",
+        "Add a **filter** (/comm == \"app\"/).",
+        "Aggregate with **@map**.",
+        "Print on **interval/exit**.",
+        "List probes with **bpftrace -l**."
+      ]
+    },
+    "analogy": {
+      "title": "A pocket calculator for the kernel",
+      "story": "Quick custom calculations on the spot, instead of commissioning a full report.",
+      "mapping": [
+        [
+          "Calculator",
+          "bpftrace"
+        ],
+        [
+          "Quick formula",
+          "One-liner"
+        ],
+        [
+          "Full report",
+          "Custom C eBPF tool"
+        ]
+      ],
+      "breaks": "Calculators are safe for any input; bpftrace scripts still need care on hot probes."
+    },
+    "mindmap": {
+      "center": "bpftrace",
+      "branches": [
+        {
+          "label": "Syntax",
+          "children": [
+            "probe /filter/ { action }"
+          ]
+        },
+        {
+          "label": "Probes",
+          "children": [
+            "tracepoint",
+            "kprobe/kretprobe",
+            "uprobe",
+            "usdt",
+            "profile",
+            "interval"
+          ]
+        },
+        {
+          "label": "Built-ins",
+          "children": [
+            "pid",
+            "comm",
+            "nsecs",
+            "kstack",
+            "ustack",
+            "args",
+            "retval"
+          ]
+        },
+        {
+          "label": "Maps",
+          "children": [
+            "count()",
+            "hist()",
+            "sum()",
+            "avg()"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "bpftrace -l",
+            "-lv"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One-liners",
+      "scenario": "bpftrace.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Custom answers in minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# read sizes per process\nbpftrace -e 'tracepoint:syscalls:sys_exit_read /args->ret > 0/ { @bytes[comm] = hist(args->ret); }'\n# syscalls per second by process\nbpftrace -e 'tracepoint:raw_syscalls:sys_enter { @[comm] = count(); } interval:s:1 { print(@); clear(@); }'\n# who calls fsync, with stacks\nbpftrace -e 'kprobe:vfs_fsync_range { @[comm, ustack(5)] = count(); }'"
+        }
+      ],
+      "outcome": "ad-hoc kernel questions answered."
+    },
+    "summary": {
+      "points": [
+        "awk-like language.",
+        "Probes, filters, maps.",
+        "Incident-friendly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why prefer tracepoints over kprobes in bpftrace when both are available?",
+        "a": "Tracepoints are stable kernel ABI with defined arguments; kprobes attach to internal functions that can change between kernel versions."
+      }
+    ]
+  }
+}

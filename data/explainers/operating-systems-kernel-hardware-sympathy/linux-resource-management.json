@@ -1,0 +1,790 @@
+{
+  "introduction-the-noisy-neighbor-problem": {
+    "core": "Processes on one host share CPU, memory, disk I/O, network and kernel resources (PIDs, file descriptors). Without limits, one runaway process (a fork bomb, memory leak, or I/O-heavy backup) degrades everyone. Linux provides three layers: ulimits for per-process quotas, cgroups for budgets per group of processes, and namespaces for isolated views of the system. Containers are built from them.",
+    "first_principles": {
+      "problem": "A log compression job saturates disk I/O and makes the database on the same host time out.",
+      "truths": [
+        "Resources are shared.",
+        "One process can starve others.",
+        "Limits must be enforced by the kernel."
+      ],
+      "derivation": [
+        "Use **ulimits** per process.",
+        "Use **cgroups** per workload.",
+        "Use **namespaces** for isolation.",
+        "Monitor **PSI** for contention.",
+        "Combine all three (**containers**)."
+      ]
+    },
+    "analogy": {
+      "title": "Flatmates sharing utilities",
+      "story": "Without rules, one flatmate's endless showers leave everyone without hot water.",
+      "mapping": [
+        [
+          "Hot water",
+          "Disk I/O / CPU"
+        ],
+        [
+          "House rules",
+          "cgroups"
+        ],
+        [
+          "Separate rooms",
+          "Namespaces"
+        ]
+      ],
+      "breaks": "Flatmates negotiate; kernels enforce mechanically."
+    },
+    "mindmap": {
+      "center": "Resource Management",
+      "branches": [
+        {
+          "label": "Shared",
+          "children": [
+            "CPU",
+            "Memory",
+            "I/O",
+            "Network",
+            "PIDs",
+            "FDs"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ulimit",
+            "cgroups",
+            "namespaces"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "PSI",
+            "Throttling stats"
+          ]
+        },
+        {
+          "label": "Built on",
+          "children": [
+            "Containers",
+            "systemd slices"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Throttle the backup",
+      "scenario": "systemd-run.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Noisy neighbour tamed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemd-run --scope -p IOWeight=10 -p CPUWeight=20 -p MemoryMax=2G tar czf /backup/logs.tgz /var/log\n# database unaffected; backup slower but contained"
+        }
+      ],
+      "outcome": "resource isolation framework."
+    },
+    "summary": {
+      "points": [
+        "Shared resources.",
+        "Three layers.",
+        "Kernel enforcement."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the three Linux layers for controlling and isolating resources?",
+        "a": "ulimits (per-process limits), cgroups (resource budgets for groups) and namespaces (isolated views)."
+      }
+    ]
+  },
+  "ulimit-the-personal-quota": {
+    "core": "ulimits (setrlimit) cap per-process resources: open files (nofile), processes per user (nproc), core dump size, locked memory (memlock), stack size, CPU time and file size. Each has a soft limit (current, adjustable up to hard) and a hard limit (ceiling, raisable only by root). They're set via /etc/security/limits.conf for PAM logins, systemd LimitNOFILE= for services and ulimit in shells. Services ignore limits.conf, a classic gotcha.",
+    "first_principles": {
+      "problem": "A service still hits 'Too many open files' after the team raised nofile in limits.conf.",
+      "truths": [
+        "Limits are per process and inherited.",
+        "Soft can rise up to hard.",
+        "systemd services don't read limits.conf."
+      ],
+      "derivation": [
+        "Check **/proc/<pid>/limits**.",
+        "Set services via **LimitNOFILE=**.",
+        "Set logins via **limits.conf**.",
+        "Use **soft ≤ hard**.",
+        "Raise **memlock** for RT/huge pages."
+      ]
+    },
+    "analogy": {
+      "title": "A personal spending card with a daily limit",
+      "story": "You can raise your daily limit up to the bank's maximum; only the bank can raise the maximum.",
+      "mapping": [
+        [
+          "Daily limit",
+          "Soft limit"
+        ],
+        [
+          "Bank maximum",
+          "Hard limit"
+        ],
+        [
+          "Bank",
+          "root"
+        ]
+      ],
+      "breaks": "Cards apply everywhere; services get limits from systemd, not your login profile."
+    },
+    "mindmap": {
+      "center": "ulimit",
+      "branches": [
+        {
+          "label": "Common",
+          "children": [
+            "nofile",
+            "nproc",
+            "memlock",
+            "core",
+            "stack",
+            "as"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Soft",
+            "Hard"
+          ]
+        },
+        {
+          "label": "Set",
+          "children": [
+            "ulimit -n",
+            "limits.conf (PAM)",
+            "systemd LimitNOFILE=",
+            "prlimit"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "/proc/pid/limits"
+          ]
+        },
+        {
+          "label": "Gotcha",
+          "children": [
+            "Services ignore limits.conf"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fix a service",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Service now allowed 65,536 FDs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "grep 'open files' /proc/$(pgrep -o api)/limits    # 1024 4096\nmkdir -p /etc/systemd/system/api.service.d\nprintf '[Service]\\nLimitNOFILE=65536\\n' > /etc/systemd/system/api.service.d/limits.conf\nsystemctl daemon-reload && systemctl restart api\nprlimit --pid $(pgrep -o api) --nofile"
+        }
+      ],
+      "outcome": "correct per-process limits."
+    },
+    "summary": {
+      "points": [
+        "Soft and hard.",
+        "Per process, inherited.",
+        "systemd for services."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't editing /etc/security/limits.conf affect a systemd service?",
+        "a": "limits.conf is applied by PAM at login; systemd services get limits from unit settings like LimitNOFILE=."
+      }
+    ]
+  },
+  "cgroups-the-group-budget": {
+    "core": "Control groups organise processes into a hierarchy and apply resource controllers to each node. cpu (weight, quota via cpu.max), memory (memory.max, memory.high, swap), io (weights and bandwidth limits), pids (max processes) and cpuset (pin to CPUs and NUMA nodes). Limits apply to all processes in a group and their children, with accounting in files like memory.current and cpu.stat. systemd manages cgroups as slices, services and scopes, and Kubernetes maps pod requests and limits onto them.",
+    "first_principles": {
+      "problem": "A container's runaway threads consume all CPUs and starve system daemons.",
+      "truths": [
+        "Groups of processes need shared budgets.",
+        "Hierarchies allow nested policies.",
+        "Accounting enables visibility."
+      ],
+      "derivation": [
+        "Create **groups** (slices/services).",
+        "Set **cpu.weight / cpu.max**.",
+        "Set **memory.max / memory.high**.",
+        "Set **io.weight / io.max**, **pids.max**.",
+        "Monitor **cpu.stat throttling**, memory.events."
+      ]
+    },
+    "analogy": {
+      "title": "Departmental budgets in a company",
+      "story": "Each department gets a budget its teams share; sub-teams can have their own sub-budgets.",
+      "mapping": [
+        [
+          "Departments",
+          "cgroups"
+        ],
+        [
+          "Budget",
+          "Limits/weights"
+        ],
+        [
+          "Expense reports",
+          "Accounting files"
+        ]
+      ],
+      "breaks": "Budgets can be overspent with approval; cgroup limits are enforced instantly."
+    },
+    "mindmap": {
+      "center": "cgroups",
+      "branches": [
+        {
+          "label": "Controllers",
+          "children": [
+            "cpu",
+            "memory",
+            "io",
+            "pids",
+            "cpuset",
+            "hugetlb"
+          ]
+        },
+        {
+          "label": "Key files",
+          "children": [
+            "cpu.max",
+            "cpu.weight",
+            "memory.max",
+            "memory.high",
+            "io.max",
+            "pids.max"
+          ]
+        },
+        {
+          "label": "Accounting",
+          "children": [
+            "cpu.stat",
+            "memory.current",
+            "memory.events",
+            "io.stat",
+            "PSI"
+          ]
+        },
+        {
+          "label": "Managers",
+          "children": [
+            "systemd",
+            "Kubernetes",
+            "container runtimes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Limit a service",
+      "scenario": "systemd + files.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Worker capped at 2 CPUs, 4 GB, 512 tasks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "systemctl set-property worker.service CPUQuota=200% MemoryMax=4G TasksMax=512\ncat /sys/fs/cgroup/system.slice/worker.service/cpu.max     # 200000 100000\ngrep -E 'nr_throttled|throttled_usec' /sys/fs/cgroup/system.slice/worker.service/cpu.stat"
+        }
+      ],
+      "outcome": "group-level resource control."
+    },
+    "summary": {
+      "points": [
+        "Hierarchy of groups.",
+        "Controllers per resource.",
+        "Accounting built in."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does cpu.max '200000 100000' mean in cgroup v2?",
+        "a": "The group may use 200 ms of CPU every 100 ms period, i.e. up to 2 CPUs' worth."
+      }
+    ]
+  },
+  "cgroups-v1-vs-v2-clearing-the-mess": {
+    "core": "cgroup v1 mounted each controller as a separate hierarchy (cpu, memory and blkio could have different trees), which caused inconsistency and poor I/O control for buffered writes. cgroup v2 has a single unified hierarchy under /sys/fs/cgroup, consistent interfaces, delegation rules, writeback-aware I/O control, memory.high throttling and PSI per cgroup. Modern distros and Kubernetes 1.25+ default to v2, though older tooling may need updating.",
+    "first_principles": {
+      "problem": "A monitoring agent reads /sys/fs/cgroup/memory/... and breaks on new nodes using cgroup v2.",
+      "truths": [
+        "Multiple hierarchies caused confusion.",
+        "One tree is simpler.",
+        "Tools must match the version."
+      ],
+      "derivation": [
+        "Check version (**stat -fc %T /sys/fs/cgroup**).",
+        "Use **unified paths** in v2.",
+        "Update **tools/agents** for v2.",
+        "Use **v2 features** (memory.high, PSI).",
+        "Switch via **systemd.unified_cgroup_hierarchy=1** if needed."
+      ]
+    },
+    "analogy": {
+      "title": "Separate filing systems per department vs one company archive",
+      "story": "v1 had different folder trees for finance and HR about the same people; v2 uses one archive.",
+      "mapping": [
+        [
+          "Separate filing systems",
+          "v1 hierarchies"
+        ],
+        [
+          "One archive",
+          "v2 unified tree"
+        ],
+        [
+          "Same people",
+          "Same processes"
+        ]
+      ],
+      "breaks": "Archives can be reorganised gradually; switching cgroup version needs a reboot."
+    },
+    "mindmap": {
+      "center": "v1 vs v2",
+      "branches": [
+        {
+          "label": "v1",
+          "children": [
+            "Per-controller trees",
+            "blkio",
+            "Inconsistent files"
+          ]
+        },
+        {
+          "label": "v2",
+          "children": [
+            "Unified tree",
+            "io",
+            "memory.high",
+            "PSI",
+            "Delegation"
+          ]
+        },
+        {
+          "label": "Detect",
+          "children": [
+            "cgroup2fs",
+            "tmpfs"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "Kernel param",
+            "Tool updates",
+            "K8s 1.25+"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detect and read",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Agent fixed to read v2 files."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "stat -fc %T /sys/fs/cgroup      # cgroup2fs → v2, tmpfs → v1\n# v1 path\ncat /sys/fs/cgroup/memory/system.slice/api.service/memory.usage_in_bytes\n# v2 path\ncat /sys/fs/cgroup/system.slice/api.service/memory.current"
+        }
+      ],
+      "outcome": "version-aware cgroup usage."
+    },
+    "summary": {
+      "points": [
+        "v1 fragmented.",
+        "v2 unified.",
+        "Update tools."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can you tell whether a host uses cgroup v2?",
+        "a": "Run stat -fc %T /sys/fs/cgroup; cgroup2fs means v2 (unified), tmpfs indicates v1."
+      }
+    ]
+  },
+  "namespaces-the-illusion-of-isolation": {
+    "core": "Namespaces give a process its own view of a global resource. pid (own process tree, its PID 1), net (own interfaces, routes, iptables), mnt (own mount tree), uts (hostname), ipc (own SysV and POSIX IPC), user (map UIDs, root inside but not outside), cgroup (own cgroup root view) and time (offset clocks). They isolate what a process can see; cgroups limit what it can use. Containers combine both, but namespaces aren't a full security boundary like VMs.",
+    "first_principles": {
+      "problem": "A team believes containers are fully isolated VMs and runs untrusted code as root inside them.",
+      "truths": [
+        "Namespaces change visibility.",
+        "The kernel is still shared.",
+        "User namespaces remap root."
+      ],
+      "derivation": [
+        "Know the **namespace types**.",
+        "Use **user namespaces** (rootless).",
+        "Combine with **seccomp, LSMs, capabilities**.",
+        "Inspect with **lsns, nsenter**.",
+        "Use **VMs/gVisor/Kata** for untrusted code."
+      ]
+    },
+    "analogy": {
+      "title": "Rooms with one-way glass",
+      "story": "Each tenant sees only their room, but all share the building's foundations and plumbing (kernel).",
+      "mapping": [
+        [
+          "Rooms",
+          "Namespaces"
+        ],
+        [
+          "Foundations",
+          "Shared kernel"
+        ],
+        [
+          "Separate building",
+          "VM"
+        ]
+      ],
+      "breaks": "Walls are physical; kernel bugs can break namespace isolation."
+    },
+    "mindmap": {
+      "center": "Namespaces",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "pid",
+            "net",
+            "mnt",
+            "uts",
+            "ipc",
+            "user",
+            "cgroup",
+            "time"
+          ]
+        },
+        {
+          "label": "Isolates",
+          "children": [
+            "Visibility"
+          ]
+        },
+        {
+          "label": "Not",
+          "children": [
+            "Resource limits (cgroups)",
+            "Full security"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "unshare",
+            "nsenter",
+            "lsns",
+            "ip netns"
+          ]
+        },
+        {
+          "label": "Hardening",
+          "children": [
+            "User ns",
+            "seccomp",
+            "AppArmor/SELinux",
+            "Drop caps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Make a namespace",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolated views without a VM."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "unshare --fork --pid --mount-proc --uts --net bash -c 'hostname sandbox; ps aux; ip link'\n# PID 1 is bash, only 'lo' interface, hostname sandbox\nlsns -t net | head\nnsenter -t $(pgrep -o nginx) -n ss -ltn    # enter a container's netns"
+        }
+      ],
+      "outcome": "namespaces understood."
+    },
+    "summary": {
+      "points": [
+        "Own view of resources.",
+        "Visibility, not limits.",
+        "Shared kernel."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the difference between namespaces and cgroups?",
+        "a": "Namespaces isolate what a process can see (PIDs, network, mounts); cgroups limit how much it can use (CPU, memory, I/O)."
+      }
+    ]
+  },
+  "putting-it-together-how-docker-uses-all-three": {
+    "core": "docker run creates namespaces (pid, net, mnt, uts, ipc, optionally user) so the container sees its own processes, network and filesystem; places processes in a cgroup with limits from --cpus, --memory and --pids-limit; sets rlimits (--ulimit nofile=...); then layers capability dropping, seccomp filters, AppArmor or SELinux profiles, and an overlay filesystem from image layers. Knowing that lets you debug containers with standard Linux tools.",
+    "first_principles": {
+      "problem": "A containerised app is OOMKilled, and the developer thinks Docker itself has a bug.",
+      "truths": [
+        "Containers are processes.",
+        "Limits come from cgroups.",
+        "Isolation comes from namespaces."
+      ],
+      "derivation": [
+        "Map **flags → kernel features**.",
+        "Find **cgroup** of the container.",
+        "Read **memory.events** for OOMs.",
+        "**nsenter** to debug inside.",
+        "Check **capabilities/seccomp** for EPERM."
+      ]
+    },
+    "analogy": {
+      "title": "Assembling an apartment from parts",
+      "story": "Walls (namespaces), metered utilities (cgroups), house rules (ulimits) and locks (seccomp, capabilities) together make a 'separate home'.",
+      "mapping": [
+        [
+          "Walls",
+          "Namespaces"
+        ],
+        [
+          "Meters",
+          "cgroups"
+        ],
+        [
+          "House rules",
+          "ulimits"
+        ],
+        [
+          "Locks",
+          "seccomp/caps"
+        ]
+      ],
+      "breaks": "Apartments have separate foundations; containers share the kernel."
+    },
+    "mindmap": {
+      "center": "Docker Internals",
+      "branches": [
+        {
+          "label": "Namespaces",
+          "children": [
+            "pid",
+            "net",
+            "mnt",
+            "uts",
+            "ipc",
+            "user"
+          ]
+        },
+        {
+          "label": "cgroups",
+          "children": [
+            "--cpus",
+            "--memory",
+            "--pids-limit"
+          ]
+        },
+        {
+          "label": "rlimits",
+          "children": [
+            "--ulimit"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Capabilities",
+            "seccomp",
+            "AppArmor/SELinux"
+          ]
+        },
+        {
+          "label": "FS",
+          "children": [
+            "overlayfs layers"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "nsenter",
+            "cgroup files",
+            "dmesg"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Trace a container",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "OOM traced to 512m limit; standard tools work."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "docker run -d --name api --memory 512m --cpus 1.5 --pids-limit 200 --ulimit nofile=65536 app:1.4\npid=$(docker inspect -f '{{.State.Pid}}' api)\ncat /proc/$pid/cgroup\ncat /sys/fs/cgroup/system.slice/docker-$(docker inspect -f '{{.Id}}' api).scope/memory.events\nnsenter -t $pid -n -m ss -ltn"
+        }
+      ],
+      "outcome": "containers demystified."
+    },
+    "summary": {
+      "points": [
+        "Namespaces + cgroups + limits.",
+        "Plus security layers.",
+        "Debug with Linux tools."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which kernel feature enforces a container's --memory limit?",
+        "a": "The memory controller of cgroups (memory.max in v2)."
+      }
+    ]
+  },
+  "war-story-the-silent-tcp-drop": {
+    "core": "A real-world pattern: a busy service starts dropping connections with no application errors. The cause is hidden resource limits: the accept backlog (somaxconn) overflowing, conntrack table full ('nf_conntrack: table full, dropping packet'), ephemeral port exhaustion, or the per-process FD limit, each silently refusing or dropping connections. Look at kernel counters (netstat -s, nstat, conntrack -S, ss -lnt Recv-Q), not just app logs.",
+    "first_principles": {
+      "problem": "Clients see intermittent connection timeouts, but the service logs show nothing wrong.",
+      "truths": [
+        "Kernels drop silently when tables fill.",
+        "Counters record drops.",
+        "Application logs don't see kernel drops."
+      ],
+      "derivation": [
+        "Check **listen backlog** (ss -lnt Recv-Q vs Send-Q).",
+        "Check **ListenOverflows** (nstat).",
+        "Check **conntrack** usage/drops.",
+        "Check **ephemeral ports/TIME_WAIT**.",
+        "Check **FD limits**."
+      ]
+    },
+    "analogy": {
+      "title": "A shop whose doorway queue overflows outside",
+      "story": "The shopkeeper inside sees no complaints; customers just walk away when the queue on the street is full.",
+      "mapping": [
+        [
+          "Doorway queue",
+          "Accept backlog"
+        ],
+        [
+          "Walking away",
+          "Dropped SYN"
+        ],
+        [
+          "Shopkeeper",
+          "Application"
+        ]
+      ],
+      "breaks": "Queues outside are visible; kernel drops show only in counters."
+    },
+    "mindmap": {
+      "center": "Silent TCP Drops",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Backlog overflow",
+            "conntrack full",
+            "Ephemeral port exhaustion",
+            "FD limit",
+            "SYN flood protection"
+          ]
+        },
+        {
+          "label": "Counters",
+          "children": [
+            "ListenOverflows",
+            "ListenDrops",
+            "conntrack drop",
+            "TcpExtTCPTimeWaitOverflow"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ss -lnt",
+            "nstat -az",
+            "conntrack -S",
+            "dmesg"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "somaxconn + app backlog",
+            "nf_conntrack_max",
+            "ip_local_port_range",
+            "LimitNOFILE"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Investigate",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Drops stop; backlog sized for bursts."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ss -lnt 'sport = :8080'          # Recv-Q 129 Send-Q 128 → backlog full\nnstat -az TcpExtListenOverflows TcpExtListenDrops\ndmesg | grep -i conntrack\nsysctl -w net.core.somaxconn=4096 net.ipv4.tcp_max_syn_backlog=8192\n# and raise app listen(backlog) to match"
+        }
+      ],
+      "outcome": "hidden limits uncovered."
+    },
+    "summary": {
+      "points": [
+        "Kernel drops silently.",
+        "Read the counters.",
+        "Tune limits together."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does ss -lnt showing Recv-Q greater than Send-Q on a listening socket indicate?",
+        "a": "The accept queue is full (backlog overflow), so new connections are being dropped."
+      }
+    ]
+  }
+}

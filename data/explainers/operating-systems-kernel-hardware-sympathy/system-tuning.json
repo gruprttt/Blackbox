@@ -1,0 +1,655 @@
+{
+  "introduction-runtime-kernel-tuning": {
+    "core": "The kernel exposes hundreds of tunables through /proc/sys (sysctl): network buffers and backlogs, VM behaviour (swappiness, dirty ratios, overcommit), filesystem limits (file-max, inotify), and kernel behaviour (pid_max, panic settings). Changing them takes effect immediately without reboot, and persisting them in /etc/sysctl.d makes them survive restarts. Tune from measured bottlenecks, one change at a time, and document why.",
+    "first_principles": {
+      "problem": "A team copies a 'Linux performance tuning' blog's 50 sysctls into production and introduces instability.",
+      "truths": [
+        "Defaults are general-purpose.",
+        "Runtime changes are immediate.",
+        "Uninformed changes can harm."
+      ],
+      "derivation": [
+        "**Measure** first.",
+        "**Identify** relevant tunable.",
+        "**Change** with sysctl -w.",
+        "**Verify** effect.",
+        "**Persist** in /etc/sysctl.d with comments."
+      ]
+    },
+    "analogy": {
+      "title": "Adjusting a mixing desk during a concert",
+      "story": "Small, deliberate tweaks while listening, not pushing every fader to max.",
+      "mapping": [
+        [
+          "Faders",
+          "Tunables"
+        ],
+        [
+          "Listening",
+          "Measuring"
+        ],
+        [
+          "Every fader max",
+          "Copy-paste tuning"
+        ]
+      ],
+      "breaks": "Sound engineers hear instantly; some tunable effects only show under load."
+    },
+    "mindmap": {
+      "center": "Runtime Tuning",
+      "branches": [
+        {
+          "label": "Interfaces",
+          "children": [
+            "/proc/sys",
+            "sysctl",
+            "/etc/sysctl.d"
+          ]
+        },
+        {
+          "label": "Areas",
+          "children": [
+            "net",
+            "vm",
+            "fs",
+            "kernel"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Measure",
+            "Change one",
+            "Verify",
+            "Persist",
+            "Document"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Namespaced net sysctls",
+            "Container limits"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Change and persist",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Change applied and persistent, with rationale."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl net.core.somaxconn\nsysctl -w net.core.somaxconn=4096\ncat > /etc/sysctl.d/90-web.conf <<'EOF'\n# bursty accept queue for nginx (INC-1832)\nnet.core.somaxconn = 4096\nEOF\nsysctl --system"
+        }
+      ],
+      "outcome": "disciplined tuning."
+    },
+    "summary": {
+      "points": [
+        "Runtime tunables.",
+        "Measure first.",
+        "Persist and document."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where should persistent sysctl settings be stored on modern distros?",
+        "a": "In drop-in files under /etc/sysctl.d/, applied with sysctl --system at boot."
+      }
+    ]
+  },
+  "cpu-bound-vs-io-bound": {
+    "core": "CPU-bound work is limited by computation: high user or system CPU and the run queue full; speed it up with more or faster cores, better algorithms, or parallelism. I/O-bound work is limited by waiting for disk or network: low CPU, high iowait or blocked tasks, latency in storage or remote calls; speed it up with faster I/O, caching, concurrency and async I/O. Misdiagnosing the type leads to useless fixes, such as adding CPUs to a disk-bound job.",
+    "first_principles": {
+      "problem": "A team doubles the CPU count of a slow ETL job, and it runs at the same speed.",
+      "truths": [
+        "Bottlenecks determine fixes.",
+        "CPU and I/O waits look different.",
+        "Tools distinguish them."
+      ],
+      "derivation": [
+        "Check **CPU usage vs iowait** (vmstat, mpstat).",
+        "Check **PSI cpu vs io**.",
+        "Check **D-state** count.",
+        "Profile **on-CPU vs off-CPU**.",
+        "Fix the **actual bottleneck**."
+      ]
+    },
+    "analogy": {
+      "title": "A kitchen slowed by cooks vs by deliveries",
+      "story": "If chefs are overwhelmed, hire chefs; if they're waiting for ingredients, fix deliveries.",
+      "mapping": [
+        [
+          "Busy chefs",
+          "CPU-bound"
+        ],
+        [
+          "Waiting for ingredients",
+          "I/O-bound"
+        ],
+        [
+          "Hiring chefs",
+          "Adding CPUs"
+        ]
+      ],
+      "breaks": "Kitchens are visible; bottlenecks need metrics."
+    },
+    "mindmap": {
+      "center": "CPU vs I/O Bound",
+      "branches": [
+        {
+          "label": "CPU-bound",
+          "children": [
+            "High us/sy",
+            "Run queue",
+            "cpu PSI"
+          ]
+        },
+        {
+          "label": "I/O-bound",
+          "children": [
+            "High wa",
+            "D states",
+            "io PSI",
+            "Low CPU"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "vmstat",
+            "mpstat",
+            "iostat",
+            "pidstat -d",
+            "offcputime"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "CPU: algorithms, parallelism",
+            "I/O: caching, faster storage, async"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnose",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Disk is the bottleneck; add caching instead of CPUs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "vmstat 1 5\n#  r  b   us sy id wa\n#  1 12    8  4 40 48   ← blocked tasks + iowait → I/O-bound\npidstat -d 1 3 | sort -k6 -n | tail -3    # top disk readers/writers\ncat /proc/pressure/io"
+        }
+      ],
+      "outcome": "correct bottleneck diagnosis."
+    },
+    "summary": {
+      "points": [
+        "Classify the bottleneck.",
+        "Different signals.",
+        "Fix what limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "What vmstat signs indicate an I/O-bound workload?",
+        "a": "High wa (iowait) and many processes in the b (blocked) column while CPU user time is low."
+      }
+    ]
+  },
+  "load-average-the-most-misinterpreted-metric": {
+    "core": "Load average is the number of tasks running, runnable or in uninterruptible I/O sleep, averaged over 1, 5 and 15 minutes. It's meaningful only relative to CPU count and alongside CPU and I/O metrics. Load 4 on 64 cores is idle; load 4 on 2 cores is overloaded. Rising D-state tasks from NFS hangs inflate load without CPU use. Trends (1 vs 15 minutes) show whether a problem is growing or easing.",
+    "first_principles": {
+      "problem": "An alert 'load > 10' fires constantly on 96-core servers and is ignored.",
+      "truths": [
+        "Load scales with core count.",
+        "It includes I/O waiters.",
+        "Trends matter."
+      ],
+      "derivation": [
+        "Normalise: **load / nproc**.",
+        "Compare **1 vs 15 min** trend.",
+        "Check **CPU% and D-states**.",
+        "Alert on **PSI** instead.",
+        "Never use **absolute thresholds** across sizes."
+      ]
+    },
+    "analogy": {
+      "title": "People in a bank compared to tellers",
+      "story": "Ten people is a crowd with two tellers but nothing with fifty.",
+      "mapping": [
+        [
+          "People",
+          "Load"
+        ],
+        [
+          "Tellers",
+          "CPUs"
+        ],
+        [
+          "People waiting for paperwork",
+          "D-state tasks"
+        ]
+      ],
+      "breaks": "Banks show queues; load averages smooth over minutes."
+    },
+    "mindmap": {
+      "center": "Load Average",
+      "branches": [
+        {
+          "label": "Includes",
+          "children": [
+            "R",
+            "D"
+          ]
+        },
+        {
+          "label": "Windows",
+          "children": [
+            "1",
+            "5",
+            "15"
+          ]
+        },
+        {
+          "label": "Normalise",
+          "children": [
+            "÷ nproc"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Absolute thresholds",
+            "D inflation",
+            "Smoothing lag"
+          ]
+        },
+        {
+          "label": "Prefer",
+          "children": [
+            "PSI",
+            "Run queue latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Normalised view",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One threshold works across server sizes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "read l1 l5 l15 _ < /proc/loadavg; n=$(nproc)\nawk -v l=$l1 -v n=$n 'BEGIN { printf \"normalised load: %.2f\\n\", l/n }'\n# PromQL: node_load5 / count without(cpu, mode) (node_cpu_seconds_total{mode=\"idle\"})"
+        }
+      ],
+      "outcome": "load interpreted correctly."
+    },
+    "summary": {
+      "points": [
+        "Relative to cores.",
+        "Includes I/O waiters.",
+        "Prefer PSI."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is a load average of 8 high?",
+        "a": "It depends on CPU count and context: high for a 2-core machine, low for a 64-core one, and it may reflect I/O waits rather than CPU."
+      }
+    ]
+  },
+  "essential-tunables-vm-swappiness": {
+    "core": "Key VM tunables: vm.swappiness biases reclaim between anonymous memory and file cache (lower keeps app memory resident; 10 is common for databases). vm.dirty_ratio and dirty_background_ratio (or the _bytes variants) control how much dirty page cache accumulates before background and then blocking writeback; large values on big-RAM hosts cause huge write stalls. vm.min_free_kbytes reserves memory for atomic allocations, and vm.overcommit_memory sets allocation strictness.",
+    "first_principles": {
+      "problem": "A 512 GB server stalls for seconds when 100 GB of dirty pages hit dirty_ratio at 20%.",
+      "truths": [
+        "Reclaim needs a bias.",
+        "Dirty pages accumulate.",
+        "Percent-based limits scale badly with RAM."
+      ],
+      "derivation": [
+        "Set **swappiness** per workload.",
+        "Use **dirty_background_bytes / dirty_bytes** on large RAM.",
+        "Keep writeback **smooth** (smaller thresholds).",
+        "Tune **min_free_kbytes** for network-heavy hosts.",
+        "Measure with **/proc/meminfo Dirty, Writeback**."
+      ]
+    },
+    "analogy": {
+      "title": "Letting dishes pile up before washing",
+      "story": "With a huge kitchen, waiting until 20% of the counter is covered means a massive washing session that stops all cooking.",
+      "mapping": [
+        [
+          "Dirty dishes",
+          "Dirty pages"
+        ],
+        [
+          "Washing session",
+          "Writeback stall"
+        ],
+        [
+          "Counter size",
+          "RAM"
+        ]
+      ],
+      "breaks": "Dishes don't get lost; dirty pages are lost on power failure until written."
+    },
+    "mindmap": {
+      "center": "VM Tunables",
+      "branches": [
+        {
+          "label": "Reclaim",
+          "children": [
+            "vm.swappiness"
+          ]
+        },
+        {
+          "label": "Writeback",
+          "children": [
+            "dirty_ratio",
+            "dirty_background_ratio",
+            "dirty_bytes",
+            "dirty_expire_centisecs"
+          ]
+        },
+        {
+          "label": "Reserves",
+          "children": [
+            "min_free_kbytes",
+            "watermark_scale_factor"
+          ]
+        },
+        {
+          "label": "Allocation",
+          "children": [
+            "overcommit_memory"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "Dirty",
+            "Writeback in meminfo",
+            "PSI io"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Large-RAM writeback",
+      "scenario": "sysctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Smooth writeback, no multi-second stalls."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# /etc/sysctl.d/90-vm.conf\nvm.swappiness = 10\nvm.dirty_background_bytes = 268435456   # 256 MB: start background writeback early\nvm.dirty_bytes = 1073741824             # 1 GB: cap before writers block\nvm.min_free_kbytes = 1048576"
+        }
+      ],
+      "outcome": "VM tuned to hardware and workload."
+    },
+    "summary": {
+      "points": [
+        "Swappiness bias.",
+        "Byte-based dirty limits.",
+        "Reserve free memory."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use dirty_bytes instead of dirty_ratio on very large-memory servers?",
+        "a": "Percentage thresholds allow enormous amounts of dirty data on big RAM, causing long writeback stalls; byte limits keep flushing bounded."
+      }
+    ]
+  },
+  "essential-tunables-network-buffers": {
+    "core": "Network tunables size queues and buffers. net.core.somaxconn and tcp_max_syn_backlog set accept and SYN backlogs; netdev_max_backlog and netdev_budget control the per-CPU receive backlog and softirq budget; rmem_max, wmem_max, tcp_rmem and tcp_wmem set socket buffers for high-BDP paths; ip_local_port_range sets ephemeral ports for many outbound connections; tcp_tw_reuse handles TIME_WAIT reuse for clients; and nf_conntrack_max sizes the connection-tracking table.",
+    "first_principles": {
+      "problem": "A busy API gateway drops new connections at peak and exhausts ephemeral ports to backends.",
+      "truths": [
+        "Queues overflow silently.",
+        "Ports are finite per destination.",
+        "Buffers bound throughput."
+      ],
+      "derivation": [
+        "Raise **somaxconn + app backlog**.",
+        "Raise **tcp_max_syn_backlog**.",
+        "Widen **ip_local_port_range**, enable **tcp_tw_reuse**.",
+        "Size **rmem/wmem** to BDP.",
+        "Size **nf_conntrack_max**."
+      ]
+    },
+    "analogy": {
+      "title": "Widening a stadium's entrance queues and parking",
+      "story": "More queue space at gates, more parking spaces for departures, and bigger buses for long trips.",
+      "mapping": [
+        [
+          "Gate queues",
+          "Backlogs"
+        ],
+        [
+          "Parking spaces",
+          "Ephemeral ports"
+        ],
+        [
+          "Bigger buses",
+          "Socket buffers"
+        ]
+      ],
+      "breaks": "Stadiums show crowds; drops show only in counters."
+    },
+    "mindmap": {
+      "center": "Network Tunables",
+      "branches": [
+        {
+          "label": "Backlogs",
+          "children": [
+            "somaxconn",
+            "tcp_max_syn_backlog",
+            "netdev_max_backlog"
+          ]
+        },
+        {
+          "label": "Buffers",
+          "children": [
+            "rmem_max/wmem_max",
+            "tcp_rmem/tcp_wmem"
+          ]
+        },
+        {
+          "label": "Ports",
+          "children": [
+            "ip_local_port_range",
+            "tcp_tw_reuse"
+          ]
+        },
+        {
+          "label": "Tracking",
+          "children": [
+            "nf_conntrack_max"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "nstat",
+            "ss -s",
+            "conntrack -S"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Gateway profile",
+      "scenario": "sysctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No accept drops or port exhaustion at peak."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# /etc/sysctl.d/90-gateway.conf\nnet.core.somaxconn = 8192\nnet.ipv4.tcp_max_syn_backlog = 16384\nnet.core.netdev_max_backlog = 16384\nnet.ipv4.ip_local_port_range = 10240 65535\nnet.ipv4.tcp_tw_reuse = 1\nnet.netfilter.nf_conntrack_max = 1048576"
+        }
+      ],
+      "outcome": "network limits sized for load."
+    },
+    "summary": {
+      "points": [
+        "Backlogs.",
+        "Ports.",
+        "Buffers and conntrack."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens when a client host exhausts ephemeral ports to one backend?",
+        "a": "New outbound connections to that destination fail (EADDRNOTAVAIL) until ports in TIME_WAIT free up."
+      }
+    ]
+  },
+  "the-magic-sysrq-key": {
+    "core": "Magic SysRq lets you send emergency commands directly to the kernel even when userspace is hung, via keyboard (Alt+SysRq+key), serial break, or echo key > /proc/sysrq-trigger. Useful keys: s (sync), u (remount read-only), b (immediate reboot), f (invoke the OOM killer), t (dump task states), w (dump blocked tasks), m (memory info) and c (crash for kdump). The safe reboot sequence is REISUB. Restrict it with kernel.sysrq.",
+    "first_principles": {
+      "problem": "A server is unresponsive over SSH but the console works, and the team needs a safe reboot without corrupting disks.",
+      "truths": [
+        "Kernel can act when userspace can't.",
+        "Some commands are destructive.",
+        "Diagnostics can be dumped."
+      ],
+      "derivation": [
+        "Enable selectively via **kernel.sysrq**.",
+        "Dump info with **t, w, m**.",
+        "Free memory with **f**.",
+        "Safe reboot: **R E I S U B**.",
+        "Trigger **c** for kdump crash dumps."
+      ]
+    },
+    "analogy": {
+      "title": "An emergency override panel",
+      "story": "When normal controls freeze, a sealed panel lets technicians stop the machine safely or record its state.",
+      "mapping": [
+        [
+          "Override panel",
+          "SysRq"
+        ],
+        [
+          "Safe stop sequence",
+          "REISUB"
+        ],
+        [
+          "State recorder",
+          "t/w/m dumps"
+        ]
+      ],
+      "breaks": "Override panels need physical access; SysRq can also be triggered over /proc."
+    },
+    "mindmap": {
+      "center": "Magic SysRq",
+      "branches": [
+        {
+          "label": "Access",
+          "children": [
+            "Alt+SysRq+key",
+            "/proc/sysrq-trigger",
+            "Serial break"
+          ]
+        },
+        {
+          "label": "Info",
+          "children": [
+            "t tasks",
+            "w blocked",
+            "m memory",
+            "l backtraces"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "f OOM kill",
+            "s sync",
+            "u remount ro",
+            "b reboot",
+            "c crash"
+          ]
+        },
+        {
+          "label": "Sequence",
+          "children": [
+            "REISUB"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "kernel.sysrq bitmask"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnose then reboot",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Diagnostics captured; filesystems synced before reboot."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl kernel.sysrq           # e.g. 176 or 1\necho w > /proc/sysrq-trigger  # dump blocked (D) tasks to dmesg\necho m > /proc/sysrq-trigger  # memory info\n# last resort safe reboot\nfor k in s u b; do echo $k > /proc/sysrq-trigger; sleep 2; done"
+        }
+      ],
+      "outcome": "emergency control available."
+    },
+    "summary": {
+      "points": [
+        "Kernel-level emergency keys.",
+        "Dump before acting.",
+        "REISUB for safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the REISUB sequence do?",
+        "a": "Raw keyboard, tErminate, kIll, Sync, Unmount (remount ro), reBoot, a safe emergency reboot."
+      }
+    ]
+  }
+}

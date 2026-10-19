@@ -1,0 +1,679 @@
+{
+  "introduction-why-processes-need-to-talk": {
+    "core": "Processes are isolated: separate address spaces, so they can't read each other's memory. Yet systems are built from cooperating processes (web server and app server, a database and its workers, shells and pipelines). IPC mechanisms trade speed, simplicity and structure: pipes for streams, signals for notifications, Unix sockets for local client/server, shared memory and mmap for zero-copy bulk data, and message queues and TCP for structured or networked communication.",
+    "first_principles": {
+      "problem": "A team uses TCP loopback for a high-frequency local cache and wonders why latency is higher than expected.",
+      "truths": [
+        "Isolation is the default.",
+        "The kernel mediates most IPC.",
+        "Copies and context switches cost time."
+      ],
+      "derivation": [
+        "Use **pipes** for streams between related processes.",
+        "Use **signals** for simple notifications.",
+        "Use **Unix sockets** for local services.",
+        "Use **shared memory** for bulk/zero-copy.",
+        "Use **TCP** only when crossing hosts."
+      ]
+    },
+    "analogy": {
+      "title": "Ways neighbours communicate",
+      "story": "Passing notes under the door (pipes), knocking (signals), an intercom (sockets), or a shared noticeboard (shared memory).",
+      "mapping": [
+        [
+          "Notes under door",
+          "Pipes"
+        ],
+        [
+          "Knocking",
+          "Signals"
+        ],
+        [
+          "Intercom",
+          "Unix sockets"
+        ],
+        [
+          "Noticeboard",
+          "Shared memory"
+        ]
+      ],
+      "breaks": "Neighbours share language; processes need agreed formats and synchronisation."
+    },
+    "mindmap": {
+      "center": "IPC Mechanisms",
+      "branches": [
+        {
+          "label": "Streams",
+          "children": [
+            "Pipes",
+            "FIFOs"
+          ]
+        },
+        {
+          "label": "Notify",
+          "children": [
+            "Signals",
+            "eventfd"
+          ]
+        },
+        {
+          "label": "Client/server",
+          "children": [
+            "Unix sockets",
+            "TCP loopback"
+          ]
+        },
+        {
+          "label": "Bulk",
+          "children": [
+            "Shared memory",
+            "mmap"
+          ]
+        },
+        {
+          "label": "Messages",
+          "children": [
+            "POSIX MQ",
+            "D-Bus"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Copies",
+            "Syscalls",
+            "Sync complexity"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Choosing",
+      "scenario": "Decision.",
+      "flow": [
+        "Shell pipeline → pipes",
+        "Reload config → SIGHUP",
+        "App ↔ local DB → Unix socket",
+        "Video frames between processes → shared memory"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right mechanism per need."
+        }
+      ],
+      "code": [],
+      "outcome": "IPC landscape mapped."
+    },
+    "summary": {
+      "points": [
+        "Processes are isolated.",
+        "Many IPC options.",
+        "Trade speed vs simplicity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do processes need IPC mechanisms at all?",
+        "a": "Each has its own isolated address space, so they can't directly access each other's memory without kernel-provided channels."
+      }
+    ]
+  },
+  "pipes-and-named-pipes-fifos": {
+    "core": "A pipe is a one-way kernel buffer (64 KB by default on Linux) with a write end and a read end, typically created by the shell between related processes (ls | grep). Writers block when it's full and readers block when it's empty, giving natural backpressure; when all writers close, readers see EOF, and writing to a pipe with no reader raises SIGPIPE. Named pipes (FIFOs, via mkfifo) appear in the filesystem so unrelated processes can connect.",
+    "first_principles": {
+      "problem": "A pipeline hangs because the consumer stops reading and the producer blocks on a full pipe buffer.",
+      "truths": [
+        "Kernel buffers have finite size.",
+        "Blocking provides backpressure.",
+        "Closing ends signal EOF."
+      ],
+      "derivation": [
+        "Use **|** for related processes.",
+        "Use **mkfifo** for unrelated ones.",
+        "Respect **backpressure**.",
+        "Handle **SIGPIPE/EPIPE**.",
+        "Tune **F_SETPIPE_SZ** if needed."
+      ]
+    },
+    "analogy": {
+      "title": "A pneumatic tube with limited capacity",
+      "story": "Messages go one way; if the receiver doesn't empty it, the sender has to wait.",
+      "mapping": [
+        [
+          "Tube",
+          "Pipe buffer"
+        ],
+        [
+          "Waiting sender",
+          "Blocked writer"
+        ],
+        [
+          "Removing tube",
+          "EOF/SIGPIPE"
+        ]
+      ],
+      "breaks": "Tubes are physical; pipe capacity is configurable up to pipe-max-size."
+    },
+    "mindmap": {
+      "center": "Pipes",
+      "branches": [
+        {
+          "label": "Properties",
+          "children": [
+            "Unidirectional",
+            "Kernel buffer 64 KB",
+            "Byte stream"
+          ]
+        },
+        {
+          "label": "Behaviour",
+          "children": [
+            "Blocking",
+            "EOF on close",
+            "SIGPIPE"
+          ]
+        },
+        {
+          "label": "Named",
+          "children": [
+            "mkfifo",
+            "Filesystem entry"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "F_SETPIPE_SZ",
+            "pipe-max-size"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Shell pipelines",
+            "Process plumbing"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "FIFO between processes",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Unrelated processes stream data."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mkfifo /tmp/events\n( while read line; do echo \"got: $line\"; done < /tmp/events ) &\necho 'deploy finished' > /tmp/events\n# yes | head -1   → 'yes' gets SIGPIPE when head exits"
+        }
+      ],
+      "outcome": "pipes understood."
+    },
+    "summary": {
+      "points": [
+        "One-way kernel buffer.",
+        "Natural backpressure.",
+        "FIFOs for unrelated processes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens when a process writes to a pipe whose reader has exited?",
+        "a": "It receives SIGPIPE (or EPIPE if the signal is ignored)."
+      }
+    ]
+  },
+  "signals-the-lightweight-notification-channel": {
+    "core": "Signals are asynchronous notifications carrying just a number: SIGTERM, SIGHUP, SIGUSR1/2, SIGCHLD, SIGINT. The kernel interrupts the target process to run its handler or default action. They're good for simple events (reload, shutdown, child exited) but carry no data (beyond siginfo), can coalesce (multiple pending of the same type merge into one), and handlers are restricted to async-signal-safe functions. Use signalfd or the self-pipe trick in event loops.",
+    "first_principles": {
+      "problem": "A signal handler that logs with printf and takes a mutex occasionally deadlocks the process.",
+      "truths": [
+        "Signals interrupt arbitrary code.",
+        "Same-type signals can merge.",
+        "Handlers must be async-safe."
+      ],
+      "derivation": [
+        "Use for **simple events** (reload, stop).",
+        "Keep handlers **minimal** (set a flag).",
+        "Use **signalfd/self-pipe** with event loops.",
+        "Avoid **non-reentrant** calls in handlers.",
+        "Don't rely on **counting** signals."
+      ]
+    },
+    "analogy": {
+      "title": "A doorbell with no message",
+      "story": "It tells you someone's there but not why, and two quick rings can sound like one.",
+      "mapping": [
+        [
+          "Doorbell",
+          "Signal"
+        ],
+        [
+          "No message",
+          "No payload"
+        ],
+        [
+          "Two rings as one",
+          "Coalescing"
+        ]
+      ],
+      "breaks": "Doorbells don't interrupt you mid-sentence; signals interrupt mid-instruction."
+    },
+    "mindmap": {
+      "center": "Signals",
+      "branches": [
+        {
+          "label": "Common",
+          "children": [
+            "SIGTERM",
+            "SIGHUP",
+            "SIGINT",
+            "SIGUSR1/2",
+            "SIGCHLD",
+            "SIGPIPE"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Async",
+            "No payload",
+            "Coalesce",
+            "Masks"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Async-signal-safe only",
+            "Set flag"
+          ]
+        },
+        {
+          "label": "Integration",
+          "children": [
+            "signalfd",
+            "self-pipe",
+            "sigaction"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe reload",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reload without deadlock risk."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "static volatile sig_atomic_t reload = 0;\nstatic void on_hup(int s) { reload = 1; }   // only set a flag\nint main(void) {\n    struct sigaction sa = { .sa_handler = on_hup };\n    sigaction(SIGHUP, &sa, NULL);\n    for (;;) {\n        if (reload) { reload = 0; load_config(); }\n        do_work();\n    }\n}"
+        }
+      ],
+      "outcome": "signals used safely."
+    },
+    "summary": {
+      "points": [
+        "Notifications only.",
+        "Minimal handlers.",
+        "Integrate with event loops."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should signal handlers only set a flag?",
+        "a": "Signals can interrupt any code, so calling non-reentrant functions (printf, malloc, locks) in handlers risks deadlocks or corruption."
+      }
+    ]
+  },
+  "unix-domain-sockets-uds-vs-tcp-loopback": {
+    "core": "Unix domain sockets use the socket API but stay inside the kernel, with no TCP/IP stack, checksums, congestion control or port allocation, so they have lower latency and higher throughput than TCP over 127.0.0.1. They live as filesystem paths (permissions give access control) or abstract names, support stream and datagram modes, pass file descriptors between processes (SCM_RIGHTS), and report peer credentials (SO_PEERCRED). Databases, Docker and systemd use them heavily.",
+    "first_principles": {
+      "problem": "An app talks to a local Redis over TCP localhost at 30% higher latency than necessary.",
+      "truths": [
+        "Local traffic doesn't need IP.",
+        "Filesystem permissions can control access.",
+        "File descriptors can be passed."
+      ],
+      "derivation": [
+        "Use **UDS** for same-host services.",
+        "Secure via **file permissions**.",
+        "Use **SO_PEERCRED** for caller identity.",
+        "Pass **FDs** with SCM_RIGHTS.",
+        "Keep **TCP** for remote/containers across hosts."
+      ]
+    },
+    "analogy": {
+      "title": "An internal mail tube vs posting a letter to yourself",
+      "story": "Both arrive, but the internal tube skips the post office entirely.",
+      "mapping": [
+        [
+          "Internal tube",
+          "Unix socket"
+        ],
+        [
+          "Post office",
+          "TCP/IP stack"
+        ],
+        [
+          "Office door lock",
+          "File permissions"
+        ]
+      ],
+      "breaks": "Mail tubes carry paper; UDS can even pass open file handles."
+    },
+    "mindmap": {
+      "center": "Unix Domain Sockets",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "SOCK_STREAM",
+            "SOCK_DGRAM",
+            "SOCK_SEQPACKET"
+          ]
+        },
+        {
+          "label": "Naming",
+          "children": [
+            "Filesystem path",
+            "Abstract namespace"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "SCM_RIGHTS FD passing",
+            "SO_PEERCRED"
+          ]
+        },
+        {
+          "label": "vs TCP",
+          "children": [
+            "Lower latency",
+            "No ports",
+            "Local only"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "PostgreSQL",
+            "Redis",
+            "Docker",
+            "systemd"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Redis over UDS",
+      "scenario": "Config + benchmark.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Lower latency, higher throughput locally."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# redis.conf\n# unixsocket /run/redis/redis.sock\n# unixsocketperm 770\nredis-benchmark -s /run/redis/redis.sock -t get -n 1000000 -q\nredis-benchmark -h 127.0.0.1 -t get -n 1000000 -q\n# GET: ~180k rps (UDS) vs ~130k rps (TCP loopback)"
+        }
+      ],
+      "outcome": "fast local IPC."
+    },
+    "summary": {
+      "points": [
+        "Sockets without TCP/IP.",
+        "Permissions and credentials.",
+        "FD passing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are Unix domain sockets faster than TCP loopback?",
+        "a": "They bypass the TCP/IP stack (checksums, congestion control, packet processing) and copy data directly between sockets in the kernel."
+      }
+    ]
+  },
+  "shared-memory-the-zero-copy-fast-path": {
+    "core": "Shared memory maps the same physical pages into several processes, via POSIX shm_open plus mmap, System V shmget, or memfd_create, so data written by one is instantly visible to the other with no kernel copies. It's the fastest IPC, used by databases (PostgreSQL shared buffers), browsers and video pipelines, but you must synchronise yourself (futexes, semaphores, lock-free ring buffers with atomics and memory barriers) and handle crash cleanup.",
+    "first_principles": {
+      "problem": "Copying 4K video frames through sockets between processes uses 30% CPU.",
+      "truths": [
+        "Copies cost CPU and bandwidth.",
+        "Same pages can map into many processes.",
+        "Concurrent access needs synchronisation."
+      ],
+      "derivation": [
+        "Create with **shm_open/memfd_create**.",
+        "Map with **mmap MAP_SHARED**.",
+        "Synchronise with **futex/semaphores/atomics**.",
+        "Use **ring buffers** for streams.",
+        "Clean up with **shm_unlink**."
+      ]
+    },
+    "analogy": {
+      "title": "A shared whiteboard between offices",
+      "story": "Everyone sees updates instantly with no memos, but you need rules about who writes when.",
+      "mapping": [
+        [
+          "Whiteboard",
+          "Shared pages"
+        ],
+        [
+          "Memos",
+          "Copies"
+        ],
+        [
+          "Rules",
+          "Synchronisation"
+        ]
+      ],
+      "breaks": "Whiteboards are visible to all; shared memory needs explicit memory barriers for visibility ordering."
+    },
+    "mindmap": {
+      "center": "Shared Memory",
+      "branches": [
+        {
+          "label": "APIs",
+          "children": [
+            "shm_open + mmap",
+            "shmget/shmat",
+            "memfd_create"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Zero-copy",
+            "Lowest latency"
+          ]
+        },
+        {
+          "label": "Challenges",
+          "children": [
+            "Synchronisation",
+            "Memory ordering",
+            "Cleanup",
+            "Security"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "SPSC ring buffer",
+            "Seqlocks"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "PostgreSQL",
+            "Chrome",
+            "GStreamer"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create and map",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Frames shared with no copies; CPU drops sharply."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "int fd = shm_open(\"/frames\", O_CREAT | O_RDWR, 0600);\nftruncate(fd, RING_BYTES);\nstruct ring *r = mmap(NULL, RING_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);\n// producer: write frame, then publish index with release semantics\nmemcpy(r->slots[head % N], frame, FRAME_SZ);\natomic_store_explicit(&r->head, head + 1, memory_order_release);"
+        }
+      ],
+      "outcome": "zero-copy data exchange."
+    },
+    "summary": {
+      "points": [
+        "Same pages, many processes.",
+        "Fastest IPC.",
+        "You own synchronisation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main burden of using shared memory for IPC?",
+        "a": "You must implement synchronisation and memory ordering yourself (locks, atomics, barriers) and handle cleanup."
+      }
+    ]
+  },
+  "mmap-files-masquerading-as-memory": {
+    "core": "mmap maps a file (or anonymous memory) into a process's address space. Reads and writes become memory accesses, with pages loaded lazily via page faults and written back by the kernel (or msync). It avoids read() copies, lets the page cache be shared between processes, and suits random access to large files. The pitfalls are page-fault latency, SIGBUS if a file shrinks, unpredictable I/O timing, and limited control over flushing, which is why some databases avoid it.",
+    "first_principles": {
+      "problem": "A search index uses read() into buffers, doubling memory use with page cache plus user copies.",
+      "truths": [
+        "The page cache already holds file data.",
+        "Mapping avoids copying.",
+        "Faults load on demand."
+      ],
+      "derivation": [
+        "**mmap** file with PROT_READ (and MAP_SHARED to write).",
+        "Rely on **page cache** sharing.",
+        "Use **madvise** (SEQUENTIAL, WILLNEED).",
+        "**msync** for durability points.",
+        "Beware **SIGBUS** and fault latency."
+      ]
+    },
+    "analogy": {
+      "title": "Reading a library book on the shelf vs photocopying it",
+      "story": "Instead of copying pages to your desk, you read directly from the shelf, and others can read the same copy.",
+      "mapping": [
+        [
+          "Shelf copy",
+          "Page cache"
+        ],
+        [
+          "Photocopy",
+          "read() buffer"
+        ],
+        [
+          "Fetching from stacks",
+          "Page fault"
+        ]
+      ],
+      "breaks": "Books don't change size; truncated files cause SIGBUS."
+    },
+    "mindmap": {
+      "center": "mmap",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "File-backed",
+            "Anonymous",
+            "MAP_SHARED",
+            "MAP_PRIVATE"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No copies",
+            "Shared page cache",
+            "Random access"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "madvise",
+            "msync",
+            "mlock"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Fault latency",
+            "SIGBUS",
+            "Flush control",
+            "TLB pressure"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "Lucene",
+            "LMDB",
+            "Shared libraries"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Map a file",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Memory use halved; page cache shared."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import mmap, os\nfd = os.open(\"index.bin\", os.O_RDONLY)\nwith mmap.mmap(fd, 0, prot=mmap.PROT_READ) as m:\n    m.madvise(mmap.MADV_RANDOM)\n    header = m[:64]           # page fault loads only touched pages\n    entry = m[off:off + 128]"
+        }
+      ],
+      "outcome": "files accessed as memory."
+    },
+    "summary": {
+      "points": [
+        "Map instead of copy.",
+        "Lazy page faults.",
+        "Know the pitfalls."
+      ]
+    },
+    "check": [
+      {
+        "q": "What causes SIGBUS when using mmap on a file?",
+        "a": "Accessing a mapped page beyond the file's current end, e.g. after the file was truncated by another process."
+      }
+    ]
+  }
+}

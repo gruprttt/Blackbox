@@ -1,0 +1,745 @@
+{
+  "introduction-the-limitation-of-load-average": {
+    "core": "Load average mixes CPU demand and I/O waits in one number, is unnormalised and smoothed over minutes, and says nothing about how much work is actually delayed. Pressure Stall Information (PSI, Linux 4.20+) directly measures the percentage of time tasks were stalled waiting for CPU, memory or I/O, over 10-, 60- and 300-second windows plus a cumulative total, system-wide and per cgroup. It answers 'how much is contention hurting us?'.",
+    "first_principles": {
+      "problem": "Load average rises to 20, but nobody knows whether it's CPU, memory or disk causing slowness.",
+      "truths": [
+        "Load conflates resources.",
+        "Stall time measures impact.",
+        "Per-resource signals guide action."
+      ],
+      "derivation": [
+        "Read **/proc/pressure/{cpu,memory,io}**.",
+        "Use **some/full** metrics.",
+        "Watch **avg10** for spikes.",
+        "Use **per-cgroup** pressure.",
+        "Alert on **sustained** pressure."
+      ]
+    },
+    "analogy": {
+      "title": "Measuring time spent waiting in each queue",
+      "story": "Instead of counting people in the building, measure how long they wait at the lift, the canteen and the printer.",
+      "mapping": [
+        [
+          "People count",
+          "Load average"
+        ],
+        [
+          "Lift wait",
+          "CPU pressure"
+        ],
+        [
+          "Printer wait",
+          "I/O pressure"
+        ]
+      ],
+      "breaks": "Queues are visible; PSI is inferred from task stalls."
+    },
+    "mindmap": {
+      "center": "PSI",
+      "branches": [
+        {
+          "label": "Resources",
+          "children": [
+            "cpu",
+            "memory",
+            "io",
+            "irq (6.1+)"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "some",
+            "full",
+            "avg10/60/300",
+            "total"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "System",
+            "cgroup v2"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Alerting",
+            "oomd",
+            "Autoscaling",
+            "Diagnosis"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Read PSI",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Resource bottleneck identified directly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat /proc/pressure/cpu\n# some avg10=45.20 avg60=38.11 avg300=20.05 total=987654321\ncat /proc/pressure/io\n# some avg10=2.10 ... full avg10=0.50 ...\n# → CPU contention, not disk"
+        }
+      ],
+      "outcome": "better contention metric."
+    },
+    "summary": {
+      "points": [
+        "Load conflates.",
+        "PSI per resource.",
+        "Measures stall time."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does PSI measure that load average doesn't?",
+        "a": "The percentage of time tasks were actually stalled waiting on a specific resource (CPU, memory or I/O)."
+      }
+    ]
+  },
+  "the-interface-procpressure": {
+    "core": "Each /proc/pressure file reports 'some' and 'full' lines with avg10, avg60 and avg300 percentages and total, the cumulative stall microseconds, which is ideal for rate() in Prometheus. Processes can also register triggers: open the file, write 'some 150000 1000000' (150 ms of stall in a 1 s window), and poll() for events. That's how systemd-oomd, Android's lmkd and autoscalers react to pressure in near real time.",
+    "first_principles": {
+      "problem": "A team wants to react within seconds when memory pressure spikes, not wait for minute-level metrics.",
+      "truths": [
+        "Cumulative totals enable precise rates.",
+        "Triggers give push notifications.",
+        "Short windows catch spikes."
+      ],
+      "derivation": [
+        "Scrape **total** and compute rates.",
+        "Use **avg10** for quick views.",
+        "Register **poll triggers** for alerts.",
+        "Use **node_exporter** pressure metrics.",
+        "Tune **thresholds** per workload."
+      ]
+    },
+    "analogy": {
+      "title": "A meter with a buzzer setting",
+      "story": "You can read the meter whenever, or set it to buzz when waiting exceeds a threshold in any second.",
+      "mapping": [
+        [
+          "Meter reading",
+          "avg/total"
+        ],
+        [
+          "Buzzer",
+          "Trigger"
+        ],
+        [
+          "Threshold",
+          "stall µs per window"
+        ]
+      ],
+      "breaks": "Buzzers are simple; triggers need a process polling the file."
+    },
+    "mindmap": {
+      "center": "PSI Interface",
+      "branches": [
+        {
+          "label": "Files",
+          "children": [
+            "/proc/pressure/cpu",
+            "memory",
+            "io",
+            "irq"
+          ]
+        },
+        {
+          "label": "Fields",
+          "children": [
+            "avg10",
+            "avg60",
+            "avg300",
+            "total µs"
+          ]
+        },
+        {
+          "label": "Triggers",
+          "children": [
+            "write 'some|full <stall> <window>'",
+            "poll() POLLPRI"
+          ]
+        },
+        {
+          "label": "Exporters",
+          "children": [
+            "node_pressure_*_seconds_total"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "systemd-oomd",
+            "lmkd",
+            "Autoscalers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Prometheus rate",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Accurate pressure trends and alerts."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "rate(node_pressure_memory_waiting_seconds_total[1m])     # fraction of time some task waited\nrate(node_pressure_memory_stalled_seconds_total[1m])     # 'full' stall fraction\n# alert if > 0.10 for 5m"
+        }
+      ],
+      "outcome": "PSI consumed programmatically."
+    },
+    "summary": {
+      "points": [
+        "avg and total.",
+        "Triggers for push.",
+        "Rates in Prometheus."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use PSI's 'total' field rather than avg values for monitoring systems?",
+        "a": "It's a cumulative counter of stall time, so you can compute exact rates over any window with rate()."
+      }
+    ]
+  },
+  "some-vs-full-pressure": {
+    "core": "'some' is the share of time at least one task was stalled on the resource, so some work was delayed. 'full' is the share of time all non-idle tasks were stalled at once, so the system made no productive progress. full is the stronger signal of severe trouble such as thrashing or I/O storms. CPU full is reported as zero at system level (CPU can't be fully stalled while something runs) but is meaningful per cgroup.",
+    "first_principles": {
+      "problem": "An engineer sees memory 'some' at 30% and panics, though 'full' is near zero and throughput is fine.",
+      "truths": [
+        "Partial delay differs from total stall.",
+        "full means zero progress.",
+        "Different thresholds suit each."
+      ],
+      "derivation": [
+        "**some** = latency impact.",
+        "**full** = throughput loss.",
+        "Alert harder on **full**.",
+        "Use **some** for early warning.",
+        "Interpret **CPU full** per cgroup."
+      ]
+    },
+    "analogy": {
+      "title": "Some cars waiting vs total gridlock",
+      "story": "Some cars waiting at lights is normal friction; every car stopped is gridlock.",
+      "mapping": [
+        [
+          "Some cars waiting",
+          "some"
+        ],
+        [
+          "Gridlock",
+          "full"
+        ],
+        [
+          "Traffic flow",
+          "Throughput"
+        ]
+      ],
+      "breaks": "Traffic is visible; stalls are measured per task."
+    },
+    "mindmap": {
+      "center": "some vs full",
+      "branches": [
+        {
+          "label": "some",
+          "children": [
+            "≥1 task stalled",
+            "Latency signal",
+            "Early warning"
+          ]
+        },
+        {
+          "label": "full",
+          "children": [
+            "All non-idle stalled",
+            "Productivity lost",
+            "Severe"
+          ]
+        },
+        {
+          "label": "CPU",
+          "children": [
+            "system full undefined (0)",
+            "cgroup full meaningful"
+          ]
+        },
+        {
+          "label": "Alerting",
+          "children": [
+            "Warn on some",
+            "Page on full"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Interpretation",
+      "scenario": "Readings.",
+      "flow": [
+        "memory some avg10=30, full avg10=0.5 → reclaim friction, OK",
+        "memory full avg10=25 → thrashing, act now",
+        "io some 60, full 40 → storage saturated",
+        "cpu some 50 → CPU contention, add cores"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right urgency for each reading."
+        }
+      ],
+      "code": [],
+      "outcome": "nuanced pressure interpretation."
+    },
+    "summary": {
+      "points": [
+        "some = delays.",
+        "full = no progress.",
+        "Alert accordingly."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a high 'full' memory pressure value indicate?",
+        "a": "All non-idle tasks were simultaneously stalled waiting on memory, so the system was making no useful progress (e.g. thrashing)."
+      }
+    ]
+  },
+  "interpreting-cpu-pressure": {
+    "core": "CPU pressure 'some' is the percentage of time runnable tasks waited for a CPU, which is run-queue contention. Low values (<5–10%) are normal; sustained high values mean more demand than cores, or CPU quota throttling in a cgroup (cpu.max), which appears as cgroup CPU pressure even when the host has idle CPUs. Remedies: add capacity, reduce demand, raise quotas, or spread work.",
+    "first_principles": {
+      "problem": "A container is slow with node CPU at 40%, and its cgroup CPU pressure is 60% because of a tight CPU limit.",
+      "truths": [
+        "Waiting for CPU adds latency.",
+        "Quotas throttle even with idle CPUs.",
+        "Per-cgroup PSI reveals local contention."
+      ],
+      "derivation": [
+        "Check **system vs cgroup** cpu.pressure.",
+        "Check **cpu.stat nr_throttled**.",
+        "Raise **cpu.max/limits** or remove limits.",
+        "Add **cores/replicas**.",
+        "Profile **CPU hogs**."
+      ]
+    },
+    "analogy": {
+      "title": "Waiting for a free checkout",
+      "story": "You may wait because all tills are busy, or because your store policy limits you to one till even when others are free.",
+      "mapping": [
+        [
+          "All tills busy",
+          "Host contention"
+        ],
+        [
+          "Policy limit",
+          "cgroup quota"
+        ],
+        [
+          "Wait time",
+          "CPU pressure"
+        ]
+      ],
+      "breaks": "Store policies are visible; quotas are hidden in cgroup files."
+    },
+    "mindmap": {
+      "center": "CPU Pressure",
+      "branches": [
+        {
+          "label": "Means",
+          "children": [
+            "Run-queue waits"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Over-demand",
+            "cgroup quota throttling",
+            "Noisy neighbours"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "cpu.pressure",
+            "cpu.stat throttled_usec",
+            "runqlat"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "More CPU",
+            "Raise limits",
+            "Optimise",
+            "Scale out"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Throttled container",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Raise limit to 2 CPUs; pressure drops."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cg=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/<pod>.slice\ncat $cg/cpu.pressure          # some avg10=61.0\ngrep -E 'nr_throttled|throttled_usec' $cg/cpu.stat\ncat $cg/cpu.max               # 100000 100000 → 1 CPU limit"
+        }
+      ],
+      "outcome": "CPU stalls interpreted."
+    },
+    "summary": {
+      "points": [
+        "Run-queue waits.",
+        "Quotas show as pressure.",
+        "Check per cgroup."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can a container show high CPU pressure while the node has idle CPUs?",
+        "a": "Its cgroup CPU quota (limit) throttles it, so its tasks wait despite free host CPUs."
+      }
+    ]
+  },
+  "interpreting-memory-pressure": {
+    "core": "Memory pressure measures time spent stalled on memory: direct reclaim (the allocating task frees memory itself), refaulting recently evicted pages (workingset thrashing), swap-ins and compaction. 'some' rising means allocations are getting slower; 'full' rising means thrashing. It's the best early warning before OOM, used by systemd-oomd and earlyoom, and per-cgroup values show which workload is squeezed.",
+    "first_principles": {
+      "problem": "A node slowly becomes unresponsive with no OOM kill, because it's thrashing on page cache refaults.",
+      "truths": [
+        "Reclaim and refaults stall tasks.",
+        "Thrashing can happen without OOM.",
+        "Pressure precedes failure."
+      ],
+      "derivation": [
+        "Watch **memory some/full**.",
+        "Correlate with **workingset_refault** (vmstat/memory.stat).",
+        "Check **swap-ins**.",
+        "Act via **oomd/limits** on sustained full.",
+        "Right-size **memory requests**."
+      ]
+    },
+    "analogy": {
+      "title": "A kitchen constantly clearing counter space",
+      "story": "Cooks spend more time moving things back and forth to the pantry than actually cooking.",
+      "mapping": [
+        [
+          "Counter space",
+          "RAM"
+        ],
+        [
+          "Moving to pantry",
+          "Reclaim/refault"
+        ],
+        [
+          "Not cooking",
+          "Stalled tasks"
+        ]
+      ],
+      "breaks": "Cooks notice; kernels need PSI to quantify."
+    },
+    "mindmap": {
+      "center": "Memory Pressure",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Direct reclaim",
+            "Refaults",
+            "Swap-in",
+            "Compaction"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "some rising",
+            "full = thrashing"
+          ]
+        },
+        {
+          "label": "Correlate",
+          "children": [
+            "workingset_refault",
+            "pgmajfault",
+            "memory.events"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "systemd-oomd",
+            "Raise limits",
+            "Reduce footprint"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Thrashing check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Thrashing confirmed; batch slice culprit."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat /proc/pressure/memory\n# full avg10=32.5 → thrashing\ngrep -E 'workingset_refault_file|pgmajfault' /proc/vmstat\ncat /sys/fs/cgroup/batch.slice/memory.pressure"
+        }
+      ],
+      "outcome": "memory stalls understood."
+    },
+    "summary": {
+      "points": [
+        "Reclaim and refaults.",
+        "Pre-OOM warning.",
+        "Act on sustained full."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is memory PSI a better early warning than free memory?",
+        "a": "It measures actual time lost to reclaim and refaults, revealing thrashing that free-memory numbers don't show."
+      }
+    ]
+  },
+  "interpreting-io-pressure": {
+    "core": "I/O pressure measures time tasks were stalled waiting on block I/O: reads, synchronous writes, fsync, and page faults that hit disk. High 'some' means I/O latency affects work; high 'full' means everything is waiting on storage. Combine it with iostat (await, %util, queue depth) and per-cgroup io.pressure to find the noisy workload, then fix with faster storage, caching, I/O limits (io.max or io.weight) or fewer synchronous writes.",
+    "first_principles": {
+      "problem": "A nightly backup makes the database slow, and node-level metrics don't show which workload is suffering.",
+      "truths": [
+        "Storage is shared.",
+        "I/O waits block tasks.",
+        "Per-cgroup pressure isolates victims."
+      ],
+      "derivation": [
+        "Check **io some/full** system-wide.",
+        "Check **per-cgroup io.pressure**.",
+        "Correlate with **iostat await/util**.",
+        "Limit noisy jobs via **io.max/io.weight**.",
+        "Reduce **fsync/sync** writes."
+      ]
+    },
+    "analogy": {
+      "title": "A single loading dock shared by two warehouses",
+      "story": "When one is unloading a huge shipment, the other's trucks wait in line.",
+      "mapping": [
+        [
+          "Loading dock",
+          "Disk"
+        ],
+        [
+          "Huge shipment",
+          "Backup job"
+        ],
+        [
+          "Waiting trucks",
+          "DB I/O stalls"
+        ]
+      ],
+      "breaks": "Docks are visible; I/O stalls need PSI and iostat."
+    },
+    "mindmap": {
+      "center": "I/O Pressure",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "Reads",
+            "Sync writes",
+            "fsync",
+            "Major faults"
+          ]
+        },
+        {
+          "label": "Correlate",
+          "children": [
+            "iostat await/%util/aqu-sz",
+            "biolatency"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "io.pressure per cgroup",
+            "io.max",
+            "io.weight"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Faster disks",
+            "Caching",
+            "Throttle batch",
+            "Async writes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Isolate the noisy neighbour",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "DB I/O pressure drops during backups."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cat /proc/pressure/io                         # some avg10=48\ncat /sys/fs/cgroup/system.slice/postgresql.service/io.pressure   # victim\niostat -x 1 3 | grep nvme0n1                  # await 45 ms, util 99%\nsystemctl set-property backup.service IOWeight=10 IOReadBandwidthMax='/dev/nvme0n1 100M'"
+        }
+      ],
+      "outcome": "I/O contention controlled."
+    },
+    "summary": {
+      "points": [
+        "Stalls on storage.",
+        "Per-cgroup view.",
+        "Throttle noisy jobs."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can you find which workload suffers from I/O contention?",
+        "a": "Compare per-cgroup io.pressure values, which show stall time for each service or container."
+      }
+    ]
+  },
+  "psi-in-cgroup-v2": {
+    "core": "Every cgroup v2 directory has cpu.pressure, memory.pressure and io.pressure (and irq.pressure on newer kernels) with the same format as /proc/pressure, scoped to that group's tasks. That enables per-service and per-pod contention monitoring, PSI triggers on specific cgroups, systemd-oomd policies per slice (ManagedOOMMemoryPressure=kill), and Kubernetes or autoscaler decisions based on real stall time rather than utilisation.",
+    "first_principles": {
+      "problem": "A multi-tenant node needs to know which tenant is suffering contention, not just that the node is busy.",
+      "truths": [
+        "Contention is experienced per workload.",
+        "cgroups group workloads.",
+        "Pressure can be scoped."
+      ],
+      "derivation": [
+        "Read **<cgroup>/{cpu,memory,io}.pressure**.",
+        "Export **per-cgroup PSI** (cAdvisor).",
+        "Set **oomd per slice**.",
+        "Register **triggers** on cgroup files.",
+        "Drive **autoscaling** on stalls."
+      ]
+    },
+    "analogy": {
+      "title": "Measuring wait times per department",
+      "story": "Instead of building-wide averages, each department's queue times show who's actually suffering.",
+      "mapping": [
+        [
+          "Departments",
+          "cgroups"
+        ],
+        [
+          "Queue times",
+          "Pressure"
+        ],
+        [
+          "Building average",
+          "System PSI"
+        ]
+      ],
+      "breaks": "Departments are fixed; cgroups appear and disappear with pods."
+    },
+    "mindmap": {
+      "center": "PSI in cgroups",
+      "branches": [
+        {
+          "label": "Files",
+          "children": [
+            "cpu.pressure",
+            "memory.pressure",
+            "io.pressure",
+            "irq.pressure"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Per-pod monitoring",
+            "oomd per slice",
+            "Triggers",
+            "Autoscaling"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "cAdvisor",
+            "systemd-cgtop",
+            "oomctl"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "ManagedOOMMemoryPressure=",
+            "ManagedOOMMemoryPressureLimit="
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Per-slice OOM policy",
+      "scenario": "systemd.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Batch jobs killed when their pressure exceeds 50%, protecting others."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# /etc/systemd/system/batch.slice.d/oomd.conf\n[Slice]\nManagedOOMMemoryPressure=kill\nManagedOOMMemoryPressureLimit=50%\n# check: oomctl ; cat /sys/fs/cgroup/batch.slice/memory.pressure"
+        }
+      ],
+      "outcome": "workload-scoped pressure."
+    },
+    "summary": {
+      "points": [
+        "Pressure per cgroup.",
+        "Targeted actions.",
+        "Multi-tenant clarity."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does systemd's ManagedOOMMemoryPressure=kill do?",
+        "a": "Lets systemd-oomd kill processes in that cgroup when its memory pressure exceeds the configured limit for a sustained period."
+      }
+    ]
+  }
+}

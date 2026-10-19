@@ -1,0 +1,995 @@
+{
+  "introduction-the-computer-inside-your-computer": {
+    "core": "A GPU is a separate computer on a PCIe card with thousands of simple cores, its own high-bandwidth memory (HBM or GDDR), firmware and schedulers. The CPU doesn't run GPU code directly. Through drivers it copies data to GPU memory, submits command buffers (kernels), and waits for completion. Performance and failures depend on that relationship: PCIe bandwidth, memory capacity, driver versions and hardware health.",
+    "first_principles": {
+      "problem": "A training job runs at 30% GPU utilisation, and engineers assume the model code is the bottleneck.",
+      "truths": [
+        "GPUs have separate memory.",
+        "Data must cross PCIe.",
+        "CPU orchestrates GPU work."
+      ],
+      "derivation": [
+        "Treat the GPU as a **co-processor**.",
+        "Minimise **host↔device transfers**.",
+        "Keep GPUs **fed** (data loading, batching).",
+        "Monitor **utilisation, memory, PCIe**.",
+        "Watch **driver/hardware health**."
+      ]
+    },
+    "analogy": {
+      "title": "A specialised factory next door",
+      "story": "Your office (CPU) sends raw materials by truck (PCIe) to a huge factory (GPU); if trucks are slow, the factory sits idle.",
+      "mapping": [
+        [
+          "Office",
+          "CPU"
+        ],
+        [
+          "Trucks",
+          "PCIe transfers"
+        ],
+        [
+          "Factory",
+          "GPU cores"
+        ]
+      ],
+      "breaks": "Factories store inventory; GPU memory is small relative to datasets."
+    },
+    "mindmap": {
+      "center": "GPU Basics",
+      "branches": [
+        {
+          "label": "Hardware",
+          "children": [
+            "SMs/cores",
+            "HBM/GDDR",
+            "PCIe/NVLink"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "Driver",
+            "Command buffers",
+            "Kernels"
+          ]
+        },
+        {
+          "label": "Bottlenecks",
+          "children": [
+            "Data loading",
+            "PCIe",
+            "Memory capacity",
+            "Sync"
+          ]
+        },
+        {
+          "label": "Health",
+          "children": [
+            "Xid errors",
+            "ECC",
+            "Thermals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Starved GPU",
+      "scenario": "Diagnosis.",
+      "flow": [
+        "nvidia-smi: GPU-Util 30%",
+        "CPU at 100% decoding JPEGs",
+        "Fix: more DataLoader workers, GPU decode",
+        "GPU-Util 92%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bottleneck was feeding, not compute."
+        }
+      ],
+      "code": [],
+      "outcome": "GPU as co-processor."
+    },
+    "summary": {
+      "points": [
+        "Separate computer.",
+        "Data crosses PCIe.",
+        "Keep it fed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a GPU show low utilisation even with heavy model code?",
+        "a": "It may be waiting for data from the CPU (loading, preprocessing, transfers) rather than computing."
+      }
+    ]
+  },
+  "the-driver-stack-kernel-vs-user-space": {
+    "core": "The NVIDIA stack has kernel modules (nvidia.ko for core, nvidia-uvm for unified memory, nvidia-modeset and nvidia-drm) that manage hardware, memory mapping, interrupts and isolation, plus user-space libraries (libcuda.so, the driver API, the CUDA runtime, cuDNN, NCCL) that apps link against. The kernel driver and libcuda versions must match, and the CUDA toolkit version must be supported by the driver. Containers get the user-space libraries injected via the NVIDIA Container Toolkit.",
+    "first_principles": {
+      "problem": "A container fails with 'CUDA driver version is insufficient for CUDA runtime version' after a node image update.",
+      "truths": [
+        "Kernel and user parts must match.",
+        "CUDA runtime needs a minimum driver.",
+        "Containers share the host kernel driver."
+      ],
+      "derivation": [
+        "Kernel **nvidia.ko** manages hardware.",
+        "User **libcuda** matches kernel driver.",
+        "CUDA **toolkit ≤ driver** support.",
+        "Use **NVIDIA Container Toolkit** for containers.",
+        "Pin **driver versions** in node images."
+      ]
+    },
+    "analogy": {
+      "title": "A building's electrical system and plug-in appliances",
+      "story": "The wiring (kernel driver) must match the voltage appliances (CUDA libraries) expect.",
+      "mapping": [
+        [
+          "Wiring",
+          "Kernel module"
+        ],
+        [
+          "Appliance",
+          "CUDA app"
+        ],
+        [
+          "Adapter",
+          "Container toolkit"
+        ]
+      ],
+      "breaks": "Appliances can use adapters; CUDA versions must genuinely be compatible."
+    },
+    "mindmap": {
+      "center": "Driver Stack",
+      "branches": [
+        {
+          "label": "Kernel",
+          "children": [
+            "nvidia.ko",
+            "nvidia-uvm",
+            "nvidia-drm"
+          ]
+        },
+        {
+          "label": "User",
+          "children": [
+            "libcuda.so",
+            "CUDA runtime",
+            "cuDNN",
+            "NCCL"
+          ]
+        },
+        {
+          "label": "Compatibility",
+          "children": [
+            "Driver ↔ libcuda match",
+            "CUDA forward compat"
+          ]
+        },
+        {
+          "label": "Containers",
+          "children": [
+            "NVIDIA Container Toolkit",
+            "device plugin"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "nvidia-smi",
+            "modinfo nvidia"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Version check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Mismatch identified."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nvidia-smi | head -4         # Driver Version: 550.90.07  CUDA Version: 12.4\ncat /proc/driver/nvidia/version\npython -c 'import torch; print(torch.version.cuda)'   # 12.6 > 12.4 → mismatch\n# fix: upgrade driver or use image built for CUDA ≤ 12.4"
+        }
+      ],
+      "outcome": "driver compatibility understood."
+    },
+    "summary": {
+      "points": [
+        "Kernel + user layers.",
+        "Versions must align.",
+        "Containers share host driver."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the 'CUDA Version' in nvidia-smi output mean?",
+        "a": "The maximum CUDA runtime version the installed driver supports, not the toolkit installed."
+      }
+    ]
+  },
+  "pcie-topology-and-numa-affinity": {
+    "core": "GPUs connect via PCIe lanes to a specific CPU socket's root complex, sometimes through PCIe switches. On multi-socket servers, a process on socket 0 using a GPU attached to socket 1 must cross the inter-socket link (UPI/Infinity Fabric) for every transfer, adding latency and reducing bandwidth. Bind processes and memory to the GPU's NUMA node, and pair GPUs with the NICs on the same switch for RDMA.",
+    "first_principles": {
+      "problem": "Two identical GPUs on the same server show 30% different data-loading throughput.",
+      "truths": [
+        "Devices attach to specific sockets.",
+        "Cross-socket traffic is slower.",
+        "Locality can be controlled."
+      ],
+      "derivation": [
+        "Map **GPU → NUMA node**.",
+        "Pin processes with **numactl/taskset**.",
+        "Allocate memory **locally**.",
+        "Pair **GPU and NIC** on same switch.",
+        "Check **PCIe link width/speed**."
+      ]
+    },
+    "analogy": {
+      "title": "Offices on two floors sharing one lift",
+      "story": "Staff on floor 1 using a printer on floor 2 wait for the lift every time.",
+      "mapping": [
+        [
+          "Floors",
+          "CPU sockets"
+        ],
+        [
+          "Lift",
+          "Inter-socket link"
+        ],
+        [
+          "Printer",
+          "GPU"
+        ]
+      ],
+      "breaks": "Lifts are visible; NUMA penalties hide in throughput numbers."
+    },
+    "mindmap": {
+      "center": "PCIe & NUMA",
+      "branches": [
+        {
+          "label": "Topology",
+          "children": [
+            "Root complex",
+            "PCIe switches",
+            "Sockets"
+          ]
+        },
+        {
+          "label": "Penalty",
+          "children": [
+            "Cross-socket latency",
+            "Bandwidth"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "nvidia-smi topo -m",
+            "lspci -tv",
+            "numactl",
+            "lstopo"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Pin CPU + memory",
+            "GPU-NIC pairing"
+          ]
+        },
+        {
+          "label": "Checks",
+          "children": [
+            "Link width x16",
+            "Gen4/5 speed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Affinity",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Both GPUs perform equally."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nvidia-smi topo -m          # CPU Affinity / NUMA Affinity columns\ncat /sys/bus/pci/devices/0000:81:00.0/numa_node   # 1\nnumactl --cpunodebind=1 --membind=1 python train.py --gpu 1\nlspci -vv -s 81:00.0 | grep -E 'LnkSta:'          # Speed 16GT/s, Width x16"
+        }
+      ],
+      "outcome": "locality-aware GPU placement."
+    },
+    "summary": {
+      "points": [
+        "GPUs belong to sockets.",
+        "Pin to local NUMA.",
+        "Check link health."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why bind a GPU workload's CPU threads to the GPU's NUMA node?",
+        "a": "To avoid cross-socket transfers over the interconnect, reducing latency and increasing host-device bandwidth."
+      }
+    ]
+  },
+  "nvlink-vs-pcie-for-multi-gpu-communication": {
+    "core": "Multi-GPU training exchanges gradients constantly through all-reduce. Over PCIe (about 64 GB/s for Gen5 x16, often via the CPU or a switch) that becomes a bottleneck. NVLink and NVSwitch connect GPUs directly with far higher bandwidth (hundreds of GB/s to over 900 GB/s per GPU) and lower latency, enabling efficient tensor and data parallelism. NCCL automatically picks the fastest path, so topology determines scaling efficiency.",
+    "first_principles": {
+      "problem": "Training scales from 1 to 4 GPUs well but barely improves from 4 to 8 on a PCIe-only server.",
+      "truths": [
+        "Gradient sync scales with GPU count.",
+        "Interconnect bandwidth limits sync speed.",
+        "Libraries choose paths by topology."
+      ],
+      "derivation": [
+        "Check **topology** (NVLink vs PIX/PHB/SYS).",
+        "Prefer **NVLink/NVSwitch** for large models.",
+        "Let **NCCL** select rings/trees.",
+        "Debug with **NCCL_DEBUG=INFO**.",
+        "Benchmark with **nccl-tests**."
+      ]
+    },
+    "analogy": {
+      "title": "Teams sharing notes by courier vs a direct hotline",
+      "story": "Couriers (PCIe via CPU) are slow; a dedicated hotline (NVLink) lets teams sync instantly.",
+      "mapping": [
+        [
+          "Courier",
+          "PCIe path"
+        ],
+        [
+          "Hotline",
+          "NVLink"
+        ],
+        [
+          "Meeting notes",
+          "Gradients"
+        ]
+      ],
+      "breaks": "Hotlines are point-to-point; NVSwitch gives all-to-all."
+    },
+    "mindmap": {
+      "center": "Multi-GPU Interconnect",
+      "branches": [
+        {
+          "label": "PCIe",
+          "children": [
+            "~32–64 GB/s",
+            "Via CPU/switch"
+          ]
+        },
+        {
+          "label": "NVLink",
+          "children": [
+            "Direct GPU-GPU",
+            "Hundreds of GB/s"
+          ]
+        },
+        {
+          "label": "NVSwitch",
+          "children": [
+            "All-to-all",
+            "DGX/HGX"
+          ]
+        },
+        {
+          "label": "Software",
+          "children": [
+            "NCCL",
+            "Rings/trees"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "nvidia-smi topo -m",
+            "nccl-tests",
+            "NCCL_DEBUG"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure all-reduce",
+      "scenario": "nccl-tests.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains poor scaling on PCIe servers."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nvidia-smi topo -m      # NV12 between GPUs = NVLink; PHB/SYS = PCIe paths\n./build/all_reduce_perf -b 8M -e 1G -f 2 -g 8\n# busbw: NVSwitch ~400 GB/s vs PCIe ~20 GB/s"
+        }
+      ],
+      "outcome": "interconnect-aware scaling."
+    },
+    "summary": {
+      "points": [
+        "Gradient sync is heavy.",
+        "NVLink far faster.",
+        "Measure with nccl-tests."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do 'SYS' and 'NV#' mean in nvidia-smi topo -m output?",
+        "a": "SYS means traffic crosses the inter-socket link (slow PCIe path); NV# means direct NVLink connections."
+      }
+    ]
+  },
+  "gpudirect-rdma-bypassing-the-cpu-entirely": {
+    "core": "Normally, sending GPU data over the network copies GPU memory to host RAM, then the NIC reads host RAM. GPUDirect RDMA lets RDMA-capable NICs (InfiniBand or RoCE) read and write GPU memory directly over PCIe, bypassing host memory and CPU copies. Combined with NCCL, it's essential for multi-node training at scale, but it needs the GPU and NIC under the same PCIe switch, the right kernel modules (nvidia-peermem) and an RDMA fabric.",
+    "first_principles": {
+      "problem": "Multi-node training is limited by CPU memory copies for every gradient exchange.",
+      "truths": [
+        "Copies through host memory add latency.",
+        "NICs can DMA to any PCIe device.",
+        "Topology determines feasibility."
+      ],
+      "derivation": [
+        "Use **RDMA NICs** (IB/RoCE).",
+        "Load **nvidia-peermem**.",
+        "Place **GPU and NIC under same switch**.",
+        "Configure **NCCL IB** settings.",
+        "Verify with **NCCL_DEBUG** (GDRDMA)."
+      ]
+    },
+    "analogy": {
+      "title": "Loading cargo directly from ship to train",
+      "story": "Instead of unloading to a warehouse first, the crane moves containers straight across.",
+      "mapping": [
+        [
+          "Warehouse",
+          "Host RAM"
+        ],
+        [
+          "Crane",
+          "RDMA NIC DMA"
+        ],
+        [
+          "Ship/train",
+          "GPU/network"
+        ]
+      ],
+      "breaks": "Cranes work anywhere on the dock; RDMA needs PCIe proximity."
+    },
+    "mindmap": {
+      "center": "GPUDirect RDMA",
+      "branches": [
+        {
+          "label": "Path",
+          "children": [
+            "GPU memory ↔ NIC directly"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "IB/RoCE NIC",
+            "nvidia-peermem",
+            "Same PCIe switch",
+            "ATS/ACS settings"
+          ]
+        },
+        {
+          "label": "Software",
+          "children": [
+            "NCCL",
+            "UCX",
+            "MPI"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "NCCL_DEBUG=INFO",
+            "GDRDMA in logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verify path",
+      "scenario": "Env + log.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "GPU-to-GPU across nodes without host copies."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "lsmod | grep nvidia_peermem\nexport NCCL_DEBUG=INFO NCCL_IB_HCA=mlx5 NCCL_NET_GDR_LEVEL=PHB\ntorchrun --nnodes 4 --nproc-per-node 8 train.py 2>&1 | grep -i 'GDRDMA'\n# NCCL INFO Channel 00/0 : 0[0] -> 8[0] [send] via NET/IB/0/GDRDMA"
+        }
+      ],
+      "outcome": "CPU-free network transfers."
+    },
+    "summary": {
+      "points": [
+        "NIC reads GPU memory.",
+        "Needs topology + modules.",
+        "Verify in NCCL logs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What kernel module enables GPUDirect RDMA with NVIDIA GPUs and Mellanox NICs?",
+        "a": "nvidia-peermem (formerly nv_peer_mem)."
+      }
+    ]
+  },
+  "unified-memory-and-gpu-page-faults": {
+    "core": "CUDA Unified Memory (cudaMallocManaged) gives one pointer valid on both CPU and GPU. The nvidia-uvm driver migrates pages on demand: when the GPU touches a page that lives in host memory, a GPU page fault triggers migration. That simplifies code and allows oversubscribing GPU memory, but fault-driven migration can be far slower than explicit bulk copies, so use prefetching (cudaMemPrefetchAsync) and memory hints.",
+    "first_principles": {
+      "problem": "A port to unified memory runs 5× slower due to thousands of page faults per iteration.",
+      "truths": [
+        "Shared address spaces simplify programming.",
+        "On-demand migration has per-fault cost.",
+        "Bulk transfers are efficient."
+      ],
+      "derivation": [
+        "Use **managed memory** for simplicity/oversubscription.",
+        "**Prefetch** before kernels.",
+        "Set **advice** (read-mostly, preferred location).",
+        "Profile **faults** with Nsight Systems.",
+        "Use **explicit copies** for hot paths."
+      ]
+    },
+    "analogy": {
+      "title": "A shared library book that moves on request",
+      "story": "Whoever needs it gets it delivered, but constant back-and-forth requests waste time; better to deliver it in advance.",
+      "mapping": [
+        [
+          "Book delivery",
+          "Page migration"
+        ],
+        [
+          "Request",
+          "Page fault"
+        ],
+        [
+          "Advance delivery",
+          "Prefetch"
+        ]
+      ],
+      "breaks": "Books move one at a time; pages migrate in chunks."
+    },
+    "mindmap": {
+      "center": "Unified Memory",
+      "branches": [
+        {
+          "label": "API",
+          "children": [
+            "cudaMallocManaged"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "nvidia-uvm",
+            "GPU page faults",
+            "Migration"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Simplicity",
+            "Oversubscription"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Fault latency",
+            "Thrashing"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "cudaMemPrefetchAsync",
+            "cudaMemAdvise",
+            "Nsight Systems"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Prefetch",
+      "scenario": "CUDA C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faults eliminated; speed back to explicit-copy level."
+        }
+      ],
+      "code": [
+        {
+          "lang": "cuda",
+          "text": "float *x; cudaMallocManaged(&x, N * sizeof(float));\ninit_on_cpu(x, N);\ncudaMemPrefetchAsync(x, N * sizeof(float), /*device*/ 0, stream);\nkernel<<<blocks, threads, 0, stream>>>(x, N);\ncudaMemPrefetchAsync(x, N * sizeof(float), cudaCpuDeviceId, stream);"
+        }
+      ],
+      "outcome": "unified memory used well."
+    },
+    "summary": {
+      "points": [
+        "One pointer everywhere.",
+        "Faults migrate pages.",
+        "Prefetch for speed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can unified memory be slower than explicit cudaMemcpy?",
+        "a": "Pages migrate on demand via GPU page faults, each with overhead, instead of efficient bulk transfers."
+      }
+    ]
+  },
+  "debugging-with-nvidia-smi-basic-monitoring": {
+    "core": "nvidia-smi is the first tool. It shows per-GPU utilisation (the fraction of time a kernel was running, not how many cores were busy), memory used and total, temperature, power draw against cap, clocks, processes with their memory, ECC errors and persistence mode. Use nvidia-smi dmon or --query-gpu with --format=csv -l 1 for time series, and DCGM exporter for Prometheus. Low utilisation with full memory often means data starvation.",
+    "first_principles": {
+      "problem": "GPUs show 100% 'utilisation', yet training is slow, because utilisation only means a kernel was running.",
+      "truths": [
+        "Utilisation is time-based, not core-based.",
+        "Power and clocks reveal real load.",
+        "Throttling hides in clocks."
+      ],
+      "derivation": [
+        "Watch **util, memory, power, temp, clocks**.",
+        "Check **throttle reasons**.",
+        "Use **dmon/query** for time series.",
+        "Export with **DCGM** for dashboards.",
+        "Use **SM activity** (DCGM) for true load."
+      ]
+    },
+    "analogy": {
+      "title": "A car's dashboard",
+      "story": "'Engine running' (utilisation) doesn't mean full throttle; RPM and fuel use (power, clocks) tell the real story.",
+      "mapping": [
+        [
+          "Engine running",
+          "GPU-Util"
+        ],
+        [
+          "RPM",
+          "SM clocks"
+        ],
+        [
+          "Fuel use",
+          "Power draw"
+        ]
+      ],
+      "breaks": "Cars have one engine; GPUs have many SMs with varying activity."
+    },
+    "mindmap": {
+      "center": "nvidia-smi Basics",
+      "branches": [
+        {
+          "label": "Metrics",
+          "children": [
+            "Util",
+            "Memory",
+            "Temp",
+            "Power",
+            "Clocks",
+            "ECC"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "dmon",
+            "query-gpu csv",
+            "-q -d PERFORMANCE"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Util = time busy, not SM occupancy"
+          ]
+        },
+        {
+          "label": "Fleet",
+          "children": [
+            "DCGM exporter",
+            "Prometheus"
+          ]
+        },
+        {
+          "label": "Throttle",
+          "children": [
+            "Power cap",
+            "Thermal",
+            "Clocks event reasons"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Time series + throttle",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reveals power throttling behind '100%' util."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nvidia-smi --query-gpu=index,utilization.gpu,memory.used,power.draw,temperature.gpu,clocks.sm --format=csv -l 1\nnvidia-smi -q -d PERFORMANCE | grep -A10 'Clocks Event Reasons'\n#   SW Power Cap : Active   ← throttled by power limit"
+        }
+      ],
+      "outcome": "meaningful GPU monitoring."
+    },
+    "summary": {
+      "points": [
+        "Util is time-based.",
+        "Check power/clocks.",
+        "DCGM for fleets."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can GPU-Util be 100% while performance is poor?",
+        "a": "It only shows a kernel was running during the sample; kernels may use few SMs or be throttled by power or thermals."
+      }
+    ]
+  },
+  "debugging-with-nvidia-smi-topology-and-affinity": {
+    "core": "nvidia-smi topo -m prints the connection matrix between GPUs and NICs. NV# means NVLink with that many links; PIX means the same PCIe switch; PXB means multiple switches; PHB means through the CPU host bridge; NODE means same NUMA node across bridges; SYS means across sockets (slowest). It also lists CPU and NUMA affinity per GPU. Use it to place processes, choose GPU pairs for jobs and diagnose slow NCCL rings.",
+    "first_principles": {
+      "problem": "A 2-GPU job gets GPUs 0 and 5, which communicate across sockets, and runs slowly.",
+      "truths": [
+        "Not all GPU pairs are equal.",
+        "The matrix encodes path quality.",
+        "Schedulers can be topology-aware."
+      ],
+      "derivation": [
+        "Read **topo -m matrix**.",
+        "Prefer **NV#/PIX** pairs.",
+        "Avoid **SYS** paths for heavy comms.",
+        "Use **CPU affinity** column for pinning.",
+        "Enable **topology-aware scheduling** (K8s)."
+      ]
+    },
+    "analogy": {
+      "title": "A building's corridor map",
+      "story": "Some offices are next door, others across the courtyard; seat collaborating teams close together.",
+      "mapping": [
+        [
+          "Next door",
+          "NV#/PIX"
+        ],
+        [
+          "Across the courtyard",
+          "SYS"
+        ],
+        [
+          "Seating plan",
+          "GPU allocation"
+        ]
+      ],
+      "breaks": "Corridors don't change; topology differs per server model."
+    },
+    "mindmap": {
+      "center": "Topology Matrix",
+      "branches": [
+        {
+          "label": "Codes",
+          "children": [
+            "NV#",
+            "PIX",
+            "PXB",
+            "PHB",
+            "NODE",
+            "SYS"
+          ]
+        },
+        {
+          "label": "Best→worst",
+          "children": [
+            "NV# > PIX > PXB > PHB > NODE > SYS"
+          ]
+        },
+        {
+          "label": "Columns",
+          "children": [
+            "CPU affinity",
+            "NUMA affinity"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Pair selection",
+            "Pinning",
+            "NIC pairing"
+          ]
+        },
+        {
+          "label": "K8s",
+          "children": [
+            "Topology Manager",
+            "NVIDIA GPU Operator"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pick good pairs",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Job runs 2× faster than on GPUs 0+5."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nvidia-smi topo -m\n#        GPU0  GPU1  GPU5  mlx5_0  CPU Affinity  NUMA\n# GPU0    X    NV12  SYS   PIX     0-31          0\n# GPU1   NV12   X    SYS   PIX     0-31          0\nCUDA_VISIBLE_DEVICES=0,1 numactl -N 0 python train.py   # NVLink pair, local NUMA, local NIC"
+        }
+      ],
+      "outcome": "topology-aware placement."
+    },
+    "summary": {
+      "points": [
+        "Read the matrix.",
+        "Prefer NVLink/PIX.",
+        "Pin to affinity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which topology code indicates the slowest GPU-to-GPU path?",
+        "a": "SYS, meaning traffic crosses the inter-socket interconnect."
+      }
+    ]
+  },
+  "xid-errors-when-hardware-fails": {
+    "core": "Xid messages are NVIDIA driver error reports in the kernel log (dmesg or journal: 'NVRM: Xid (PCI:0000:3b:00): 79...'). Each code indicates a class: 13 and 31 are usually application faults (illegal memory access, page fault); 43 means the GPU stopped processing; 48 and 63/64 relate to ECC errors and row remapping; 74 is NVLink errors; 79 means the GPU fell off the bus (hardware, power or thermal); 92 and 94/95 are ECC errors. Map codes to actions: fix code, reset the GPU, drain the node or RMA.",
+    "first_principles": {
+      "problem": "Training jobs crash randomly on one node, and nobody checks the kernel log.",
+      "truths": [
+        "Drivers log hardware/software faults.",
+        "Codes distinguish app bugs from hardware.",
+        "Repeated errors predict failure."
+      ],
+      "derivation": [
+        "Collect **Xid logs** centrally.",
+        "Classify **app vs hardware** codes.",
+        "**Reset GPU** for transient errors.",
+        "**Drain node** on repeated hardware Xids.",
+        "Track **ECC/row remapping** counters."
+      ]
+    },
+    "analogy": {
+      "title": "Engine warning codes",
+      "story": "Some codes mean 'you put in the wrong fuel' (app bug), others 'the engine block is cracked' (hardware).",
+      "mapping": [
+        [
+          "Wrong fuel",
+          "Xid 13/31"
+        ],
+        [
+          "Cracked block",
+          "Xid 79/48"
+        ],
+        [
+          "Mechanic",
+          "RMA/drain"
+        ]
+      ],
+      "breaks": "Car codes are standardised across makes; Xid codes are NVIDIA-specific."
+    },
+    "mindmap": {
+      "center": "Xid Errors",
+      "branches": [
+        {
+          "label": "App-level",
+          "children": [
+            "13 graphics exception",
+            "31 MMU fault",
+            "43 GPU stopped"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "48 DBE ECC",
+            "63/64 row remap",
+            "92/94/95"
+          ]
+        },
+        {
+          "label": "Interconnect",
+          "children": [
+            "74 NVLink"
+          ]
+        },
+        {
+          "label": "Fatal",
+          "children": [
+            "79 fallen off bus",
+            "119/120 GSP"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Fix code",
+            "Reset",
+            "Drain",
+            "RMA"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "dmesg",
+            "DCGM health",
+            "nvidia-smi -q -d ECC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find and act",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bad GPU removed; jobs stop crashing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "journalctl -k | grep -i 'NVRM: Xid' | tail\n# NVRM: Xid (PCI:0000:3b:00): 79, GPU has fallen off the bus.\nnvidia-smi -q -d ECC,ROW_REMAPPER | grep -E 'Pending|Uncorr'\nkubectl drain gpu-node-12 --ignore-daemonsets   # hardware issue → drain + RMA"
+        }
+      ],
+      "outcome": "GPU faults triaged correctly."
+    },
+    "summary": {
+      "points": [
+        "Xids in kernel log.",
+        "App vs hardware.",
+        "Drain and RMA bad GPUs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Xid 79 typically indicate?",
+        "a": "The GPU has fallen off the PCIe bus, usually a hardware, power or thermal problem requiring node drain and investigation."
+      }
+    ]
+  }
+}

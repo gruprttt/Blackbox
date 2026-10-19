@@ -1,0 +1,1212 @@
+{
+  "introduction-what-is-a-process-really": {
+    "core": "A process is a running program: an address space (code, data, heap, stack, mapped libraries), one or more threads (each with registers and a stack), open file descriptors, credentials (UID, GID, capabilities), signal handlers, resource limits, cgroup membership and namespaces, all tracked in the kernel's task_struct. Linux threads are tasks that share an address space, and /proc/<pid> exposes nearly all of it.",
+    "first_principles": {
+      "problem": "An engineer confuses PIDs, threads and processes and can't explain why one 'process' shows 200 entries in top -H.",
+      "truths": [
+        "Processes bundle resources.",
+        "Threads share an address space.",
+        "The kernel tracks tasks."
+      ],
+      "derivation": [
+        "Know **process components**.",
+        "Linux **threads are tasks** (clone).",
+        "Inspect via **/proc/<pid>**.",
+        "List threads with **ps -L / top -H**.",
+        "Trace lifecycle: **fork, exec, exit, wait**."
+      ]
+    },
+    "analogy": {
+      "title": "A workshop with workers",
+      "story": "The workshop (process) holds tools and materials; workers (threads) share them and each has their own task list.",
+      "mapping": [
+        [
+          "Workshop",
+          "Process"
+        ],
+        [
+          "Workers",
+          "Threads"
+        ],
+        [
+          "Tools",
+          "FDs, memory"
+        ]
+      ],
+      "breaks": "Workshops are physical; threads switch in microseconds."
+    },
+    "mindmap": {
+      "center": "Process Anatomy",
+      "branches": [
+        {
+          "label": "Memory",
+          "children": [
+            "Text",
+            "Data",
+            "Heap",
+            "Stack",
+            "mmaps"
+          ]
+        },
+        {
+          "label": "Execution",
+          "children": [
+            "Threads",
+            "Registers",
+            "Stacks"
+          ]
+        },
+        {
+          "label": "Resources",
+          "children": [
+            "FDs",
+            "Limits",
+            "cgroups",
+            "Namespaces"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "PID",
+            "PPID",
+            "UID/GID",
+            "Capabilities"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "task_struct",
+            "/proc/pid"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One process, many threads (LWPs)."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "pid=$(pgrep -o java)\ngrep -E 'Name|State|PPid|Threads|VmRSS|Uid' /proc/$pid/status\nls /proc/$pid/task | wc -l     # threads\nps -L -o pid,lwp,stat,comm -p $pid | head"
+        }
+      ],
+      "outcome": "process model clear."
+    },
+    "summary": {
+      "points": [
+        "Bundle of resources.",
+        "Threads share memory.",
+        "Visible in /proc."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does Linux implement threads?",
+        "a": "As tasks created with clone() that share the same address space (and other resources) with their thread group."
+      }
+    ]
+  },
+  "the-lifecycle-part-1-birth-by-cloning-fork": {
+    "core": "New processes are created by fork() (or clone/vfork). The child is a near-copy of the parent: same code, memory contents, open FDs and environment, but a new PID. Memory isn't actually copied; copy-on-write marks pages read-only and shares them until either side writes, so fork is fast even for large processes. fork returns 0 in the child and the child's PID in the parent.",
+    "first_principles": {
+      "problem": "A 30 GB Redis forking for a snapshot triggers memory spikes during heavy writes.",
+      "truths": [
+        "Children inherit from parents.",
+        "Copying everything would be slow.",
+        "Writes after fork duplicate pages."
+      ],
+      "derivation": [
+        "**fork** creates a child copy.",
+        "**COW** shares pages until written.",
+        "Child inherits **FDs, env, cwd**.",
+        "Watch **memory during heavy writes** (COW copies).",
+        "Use **vfork/posix_spawn** for immediate exec."
+      ]
+    },
+    "analogy": {
+      "title": "Photocopying a book lazily",
+      "story": "You both share the original until someone wants to write in it; only then is that page photocopied.",
+      "mapping": [
+        [
+          "Shared original",
+          "Shared pages"
+        ],
+        [
+          "Photocopy on write",
+          "COW fault"
+        ],
+        [
+          "Both readers",
+          "Parent and child"
+        ]
+      ],
+      "breaks": "Photocopies are instant to see; COW copies happen silently on page faults."
+    },
+    "mindmap": {
+      "center": "fork",
+      "branches": [
+        {
+          "label": "Effect",
+          "children": [
+            "Child copy",
+            "New PID"
+          ]
+        },
+        {
+          "label": "Inherits",
+          "children": [
+            "Memory (COW)",
+            "FDs",
+            "Env",
+            "cwd",
+            "Signal handlers"
+          ]
+        },
+        {
+          "label": "Returns",
+          "children": [
+            "0 in child",
+            "PID in parent"
+          ]
+        },
+        {
+          "label": "Variants",
+          "children": [
+            "clone",
+            "vfork",
+            "posix_spawn"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "COW memory spikes",
+            "Overcommit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "COW in practice",
+      "scenario": "Concept + commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains snapshot memory spikes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# Redis BGSAVE forks; during heavy writes, modified pages get copied\nredis-cli INFO persistence | grep -E 'rdb_last_cow_size|rdb_bgsave_in_progress'\n# rdb_last_cow_size:3221225472  (3 GB copied due to writes)"
+        }
+      ],
+      "outcome": "fork mechanics understood."
+    },
+    "summary": {
+      "points": [
+        "Child copies parent.",
+        "COW makes it cheap.",
+        "Writes duplicate pages."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is fork() fast even for processes using gigabytes of memory?",
+        "a": "Copy-on-write shares pages between parent and child, copying a page only when one of them writes to it."
+      }
+    ]
+  },
+  "the-lifecycle-part-2-transformation-exec": {
+    "core": "exec (execve) replaces the current process's program with a new one: the kernel loads the new binary, sets up a fresh address space, stack, arguments and environment, and keeps the PID, open FDs (unless close-on-exec), cwd, credentials (adjusted by setuid) and limits. The shell's fork-then-exec pattern creates a child and transforms it into the command. Any FD without O_CLOEXEC leaks into the new program.",
+    "first_principles": {
+      "problem": "A spawned helper process inherits the parent's database connection socket because the FD lacked CLOEXEC.",
+      "truths": [
+        "exec replaces code and memory.",
+        "Some state persists.",
+        "FDs persist unless marked."
+      ],
+      "derivation": [
+        "**fork then exec** to run commands.",
+        "exec keeps **PID, FDs, cwd, env (if passed)**.",
+        "Set **O_CLOEXEC** on internal FDs.",
+        "Use **posix_spawn** for efficiency.",
+        "Trace with **execsnoop**."
+      ]
+    },
+    "analogy": {
+      "title": "A theatre changing the play but keeping the stage",
+      "story": "The actors, script and set change completely, but the venue address and some props in the wings stay.",
+      "mapping": [
+        [
+          "New play",
+          "New program"
+        ],
+        [
+          "Venue address",
+          "PID"
+        ],
+        [
+          "Props left in wings",
+          "Inherited FDs"
+        ]
+      ],
+      "breaks": "Theatres clear props deliberately; FDs remain unless CLOEXEC."
+    },
+    "mindmap": {
+      "center": "exec",
+      "branches": [
+        {
+          "label": "Replaces",
+          "children": [
+            "Code",
+            "Memory",
+            "Stack"
+          ]
+        },
+        {
+          "label": "Keeps",
+          "children": [
+            "PID",
+            "FDs (no CLOEXEC)",
+            "cwd",
+            "Limits",
+            "Credentials"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "fork + exec",
+            "posix_spawn"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "O_CLOEXEC",
+            "close_range"
+          ]
+        },
+        {
+          "label": "Trace",
+          "children": [
+            "execsnoop",
+            "strace -e execve"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "FD leak check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Helper no longer holds parent's sockets."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "pid=$(pgrep -f helper)\nls -l /proc/$pid/fd     # socket:[...] inherited from parent!\n# fix in code: open(..., O_CLOEXEC); socket(..., SOCK_CLOEXEC)\nstrace -f -e trace=execve -o /tmp/ex.txt ./parent && grep execve /tmp/ex.txt"
+        }
+      ],
+      "outcome": "exec behaviour understood."
+    },
+    "summary": {
+      "points": [
+        "Replace program.",
+        "Keep PID and FDs.",
+        "Use CLOEXEC."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which file descriptors survive an exec?",
+        "a": "All open FDs except those marked close-on-exec (O_CLOEXEC / FD_CLOEXEC)."
+      }
+    ]
+  },
+  "the-lifecycle-part-3-death-and-reporting-exit-wait": {
+    "core": "When a process calls exit (or returns from main or is killed), the kernel releases its memory and FDs but keeps a small entry with the exit status until the parent collects it via wait() or waitpid(). The parent gets SIGCHLD. If the parent never waits, the child lingers as a zombie. If the parent dies first, the child is reparented to PID 1 (or a subreaper), which must reap it. Exit codes convey success (0) or failure (1–255; 128+N means killed by signal N).",
+    "first_principles": {
+      "problem": "A container shows hundreds of defunct processes because its app spawns children but never waits.",
+      "truths": [
+        "Exit status must be delivered.",
+        "Parents collect status.",
+        "Orphans need a new parent."
+      ],
+      "derivation": [
+        "Child **exit(status)**.",
+        "Parent receives **SIGCHLD**.",
+        "Parent **waitpid** to reap.",
+        "Orphans reparented to **PID 1/subreaper**.",
+        "Interpret **128+N** as signal death."
+      ]
+    },
+    "analogy": {
+      "title": "A departing employee's exit form",
+      "story": "They leave, but their exit form waits on the manager's desk until signed; unsigned forms pile up.",
+      "mapping": [
+        [
+          "Exit form",
+          "Zombie entry"
+        ],
+        [
+          "Manager signing",
+          "wait()"
+        ],
+        [
+          "HR adopting orphans",
+          "PID 1 reaping"
+        ]
+      ],
+      "breaks": "Forms take no resources; zombies hold PIDs."
+    },
+    "mindmap": {
+      "center": "exit & wait",
+      "branches": [
+        {
+          "label": "Exit",
+          "children": [
+            "Free memory/FDs",
+            "Keep status"
+          ]
+        },
+        {
+          "label": "Parent",
+          "children": [
+            "SIGCHLD",
+            "wait/waitpid"
+          ]
+        },
+        {
+          "label": "Orphans",
+          "children": [
+            "Reparent to PID 1",
+            "Subreaper"
+          ]
+        },
+        {
+          "label": "Exit codes",
+          "children": [
+            "0 success",
+            "1–125 errors",
+            "126/127 exec issues",
+            "128+N signal"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Exit codes",
+      "scenario": "Shell.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exit status decoded."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sleep 100 & pid=$!; kill -TERM $pid; wait $pid; echo $?    # 143 = 128 + 15 (SIGTERM)\nfalse; echo $?                                                 # 1\nnonexistent-cmd; echo $?                                       # 127"
+        }
+      ],
+      "outcome": "process death understood."
+    },
+    "summary": {
+      "points": [
+        "Exit leaves status.",
+        "Parent reaps.",
+        "128+N signals."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an exit code of 137 indicate?",
+        "a": "The process was killed by signal 9 (SIGKILL), since 128 + 9 = 137, often by the OOM killer."
+      }
+    ]
+  },
+  "process-states-running-and-sleeping": {
+    "core": "ps shows each task's state. R (running or runnable, on CPU or in the run queue), S (interruptible sleep, waiting for an event like I/O completion or a timer, and wakeable by signals), D (uninterruptible sleep), T (stopped), t (traced), Z (zombie) and I (idle kernel threads). Most processes are mostly S. Many R tasks mean CPU contention; many D tasks mean I/O or kernel waits.",
+    "first_principles": {
+      "problem": "An engineer sees 'S' for a busy web server and assumes it's hung.",
+      "truths": [
+        "Waiting is normal.",
+        "State reflects scheduler view.",
+        "Counts of R and D reveal bottlenecks."
+      ],
+      "derivation": [
+        "Read **STAT** column.",
+        "**R** = CPU demand.",
+        "**S** = waiting normally.",
+        "**D** = uninterruptible wait.",
+        "Count states with **ps -eo stat | sort | uniq -c**."
+      ]
+    },
+    "analogy": {
+      "title": "Restaurant staff states",
+      "story": "Cooking (R), waiting for an order (S), stuck waiting for a delivery that can't be interrupted (D).",
+      "mapping": [
+        [
+          "Cooking",
+          "R"
+        ],
+        [
+          "Waiting for order",
+          "S"
+        ],
+        [
+          "Stuck on delivery",
+          "D"
+        ]
+      ],
+      "breaks": "Staff can multitask; a task has one state at a time."
+    },
+    "mindmap": {
+      "center": "Process States",
+      "branches": [
+        {
+          "label": "R",
+          "children": [
+            "Running",
+            "Runnable"
+          ]
+        },
+        {
+          "label": "S",
+          "children": [
+            "Interruptible sleep"
+          ]
+        },
+        {
+          "label": "D",
+          "children": [
+            "Uninterruptible sleep"
+          ]
+        },
+        {
+          "label": "T/t",
+          "children": [
+            "Stopped",
+            "Traced"
+          ]
+        },
+        {
+          "label": "Z",
+          "children": [
+            "Zombie"
+          ]
+        },
+        {
+          "label": "I",
+          "children": [
+            "Idle kthread"
+          ]
+        },
+        {
+          "label": "Modifiers",
+          "children": [
+            "s session leader",
+            "l threaded",
+            "+ foreground",
+            "< high prio",
+            "N low prio"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "State census",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Quick health snapshot."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ps -eo stat= | cut -c1 | sort | uniq -c\n#  3 D   240 S   5 R   2 Z\nps -eo pid,stat,wchan:20,comm | awk '$2 ~ /^D/'    # what D tasks wait on"
+        }
+      ],
+      "outcome": "state literacy."
+    },
+    "summary": {
+      "points": [
+        "S is normal.",
+        "R means CPU demand.",
+        "D means blocked waits."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a process in state S mean?",
+        "a": "It's in interruptible sleep, waiting for an event (I/O, timer, lock), which is normal for idle or I/O-bound processes."
+      }
+    ]
+  },
+  "process-states-the-deep-sleep-d-state": {
+    "core": "D state (uninterruptible sleep) means a task is waiting inside the kernel for something that can't be safely interrupted, usually disk or NFS I/O, page faults on slow storage, or certain driver operations. Signals, even SIGKILL, aren't processed until the wait ends. Many D-state tasks point to storage problems (a hung NFS server, failing disk, saturated I/O) and they inflate load average. hung_task warnings appear after 120 s.",
+    "first_principles": {
+      "problem": "kill -9 doesn't remove a process stuck on an unreachable NFS mount.",
+      "truths": [
+        "Some kernel waits can't be interrupted.",
+        "Signals wait until the sleep ends.",
+        "Storage issues cause D states."
+      ],
+      "derivation": [
+        "Identify D tasks with **ps STAT D**.",
+        "See wait point via **wchan / /proc/pid/stack**.",
+        "Check **storage/NFS health**.",
+        "Use **soft/intr NFS** options or fix backend.",
+        "Watch **hung_task** messages."
+      ]
+    },
+    "analogy": {
+      "title": "A person in the middle of a surgery",
+      "story": "You can't call them away until the operation step finishes, no matter how urgent.",
+      "mapping": [
+        [
+          "Surgery step",
+          "Kernel I/O wait"
+        ],
+        [
+          "Calling away",
+          "Signal"
+        ],
+        [
+          "Waiting",
+          "D state"
+        ]
+      ],
+      "breaks": "Surgeries end eventually; a dead NFS server may never return."
+    },
+    "mindmap": {
+      "center": "D State",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Disk I/O",
+            "NFS",
+            "Page faults",
+            "Driver waits"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Ignores signals",
+            "Counts in load average"
+          ]
+        },
+        {
+          "label": "Diagnose",
+          "children": [
+            "wchan",
+            "/proc/pid/stack",
+            "dmesg hung_task",
+            "iostat"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Restore storage",
+            "NFS soft/timeo",
+            "Replace disk"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "What is it waiting on?",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "NFS RPC wait identified; fix the server/mount."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ps -eo pid,stat,wchan:32,comm | awk '$2 ~ /D/'\n# 4123 D rpc_wait_bit_killable  rsync\ncat /proc/4123/stack | head\ndmesg | grep -i 'blocked for more than'"
+        }
+      ],
+      "outcome": "D state diagnosed."
+    },
+    "summary": {
+      "points": [
+        "Uninterruptible.",
+        "Usually storage.",
+        "Fix the backend."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't SIGKILL immediately terminate a process in D state?",
+        "a": "The process is in an uninterruptible kernel wait; signals are only acted on after the wait completes."
+      }
+    ]
+  },
+  "process-states-the-zombie-z": {
+    "core": "A zombie (Z, 'defunct') has exited but hasn't been reaped: its memory and FDs are freed, but its PID and exit status remain in the process table. Zombies use no CPU or memory beyond the entry, but they consume PIDs, and thousands can exhaust pid_max or a cgroup's pids.max. You can't kill a zombie, since it's already dead. Make its parent call wait, or kill the parent so PID 1 adopts and reaps it. In containers, use an init like tini.",
+    "first_principles": {
+      "problem": "A container's app spawns shell helpers and never reaps them, eventually hitting pids.max.",
+      "truths": [
+        "Zombies are already dead.",
+        "Only the parent's wait clears them.",
+        "PID 1 reaps orphans."
+      ],
+      "derivation": [
+        "Find with **ps STAT Z** and **PPID**.",
+        "Fix **parent to wait()** or handle SIGCHLD.",
+        "Kill the **parent** to reparent.",
+        "Use **tini/dumb-init** as container PID 1.",
+        "Monitor **pids.current**."
+      ]
+    },
+    "analogy": {
+      "title": "A ghost on the staff list",
+      "story": "The person left long ago but their name stays on the roster until the manager files the paperwork.",
+      "mapping": [
+        [
+          "Name on roster",
+          "PID entry"
+        ],
+        [
+          "Paperwork",
+          "wait()"
+        ],
+        [
+          "Manager",
+          "Parent"
+        ]
+      ],
+      "breaks": "Ghost names are harmless; too many zombies exhaust PIDs."
+    },
+    "mindmap": {
+      "center": "Zombies",
+      "branches": [
+        {
+          "label": "What",
+          "children": [
+            "Exited",
+            "Unreaped",
+            "PID + status kept"
+          ]
+        },
+        {
+          "label": "Harm",
+          "children": [
+            "PID exhaustion"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Parent waits",
+            "Kill parent",
+            "Init reaper"
+          ]
+        },
+        {
+          "label": "Containers",
+          "children": [
+            "tini",
+            "--init",
+            "shareProcessNamespace"
+          ]
+        },
+        {
+          "label": "Find",
+          "children": [
+            "ps -eo stat,ppid"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find and fix",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Zombies reaped; PIDs stop leaking."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ps -eo pid,ppid,stat,comm | awk '$3 ~ /Z/' | head\n# 9012 4001 Z sh <defunct>\nps -o pid,comm -p 4001          # parent: app\ndocker run --init myapp:1.0    # tini reaps zombies as PID 1"
+        }
+      ],
+      "outcome": "zombie handling."
+    },
+    "summary": {
+      "points": [
+        "Dead but unreaped.",
+        "Consume PIDs.",
+        "Reap via parent or init."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you kill a zombie process?",
+        "a": "It has already exited; only its parent calling wait (or its reparenting to an init that reaps) removes it."
+      }
+    ]
+  },
+  "signals-communicating-with-processes": {
+    "core": "Signals are the kernel's way to notify processes asynchronously. Each has a default action (terminate, ignore, core dump, stop or continue) that processes may override with handlers, except SIGKILL and SIGSTOP. They're sent via kill(), raised by the kernel (SIGSEGV on bad memory, SIGPIPE on a broken pipe, SIGCHLD on child exit) or by terminals (Ctrl-C SIGINT, Ctrl-Z SIGTSTP). Masks block delivery, and pending signals of the same type coalesce.",
+    "first_principles": {
+      "problem": "A service ignores SIGTERM from Kubernetes and gets SIGKILLed after 30 seconds, dropping requests.",
+      "truths": [
+        "Signals have default actions.",
+        "Handlers can override most.",
+        "Some can't be caught."
+      ],
+      "derivation": [
+        "Know **common signals** and defaults.",
+        "Handle **SIGTERM** for graceful shutdown.",
+        "Use **SIGHUP** for reload.",
+        "Remember **KILL/STOP** uncatchable.",
+        "Inspect with **/proc/pid/status SigCgt/SigBlk**."
+      ]
+    },
+    "analogy": {
+      "title": "Different alarms in a building",
+      "story": "Fire alarm means leave (TERM), the master key opens any door (KILL), and the intercom says reload the schedule (HUP).",
+      "mapping": [
+        [
+          "Fire alarm",
+          "SIGTERM"
+        ],
+        [
+          "Forced removal",
+          "SIGKILL"
+        ],
+        [
+          "Schedule update",
+          "SIGHUP"
+        ]
+      ],
+      "breaks": "People can ignore alarms; KILL can't be ignored at all."
+    },
+    "mindmap": {
+      "center": "Signals",
+      "branches": [
+        {
+          "label": "Terminate",
+          "children": [
+            "TERM",
+            "INT",
+            "KILL",
+            "HUP"
+          ]
+        },
+        {
+          "label": "Faults",
+          "children": [
+            "SEGV",
+            "BUS",
+            "FPE",
+            "ABRT"
+          ]
+        },
+        {
+          "label": "Job control",
+          "children": [
+            "STOP",
+            "TSTP",
+            "CONT"
+          ]
+        },
+        {
+          "label": "Info",
+          "children": [
+            "CHLD",
+            "PIPE",
+            "USR1/2"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "SigCgt",
+            "SigBlk",
+            "SigIgn"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Who handles what?",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms whether SIGTERM is handled."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "grep -E 'Sig(Cgt|Blk|Ign)' /proc/$(pgrep -o app)/status\n# SigCgt: 0000000000004000 → bit 15 (SIGTERM) caught? decode:\nprintf '%d\\n' 0x4000   # 16384 = 1<<14 → signal 15 caught\nkill -l"
+        }
+      ],
+      "outcome": "signal semantics clear."
+    },
+    "summary": {
+      "points": [
+        "Async notifications.",
+        "Defaults and handlers.",
+        "KILL/STOP uncatchable."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which two signals cannot be caught, blocked or ignored?",
+        "a": "SIGKILL and SIGSTOP."
+      }
+    ]
+  },
+  "the-polite-signals-sigterm-and-sighup": {
+    "core": "SIGTERM (15) is the standard request to terminate gracefully, sent by kill, systemctl stop, docker stop and Kubernetes pod termination. Apps should stop accepting work, finish in-flight requests, flush, close connections and exit within the grace period. SIGHUP (1) originally meant the terminal hung up; daemons conventionally treat it as 'reload configuration' or reopen logs. In containers, PID 1 ignores signals without handlers, so an app running as PID 1 must handle them (or use an init).",
+    "first_principles": {
+      "problem": "A containerised Node app running as PID 1 doesn't exit on docker stop and is killed after 10 s.",
+      "truths": [
+        "Graceful shutdown needs cooperation.",
+        "PID 1 has special signal semantics.",
+        "Conventions guide meanings."
+      ],
+      "derivation": [
+        "Handle **SIGTERM**: drain and exit.",
+        "Handle **SIGHUP**: reload/reopen logs.",
+        "Use **exec form** in Dockerfiles (no shell wrapper).",
+        "Add **init** (tini) if needed.",
+        "Set **grace periods** appropriately."
+      ]
+    },
+    "analogy": {
+      "title": "Closing time announcement vs schedule change",
+      "story": "'We're closing in 10 minutes, please finish up' (TERM); 'new menu from now' (HUP).",
+      "mapping": [
+        [
+          "Closing announcement",
+          "SIGTERM"
+        ],
+        [
+          "Menu change",
+          "SIGHUP"
+        ],
+        [
+          "Bouncer clearing out",
+          "SIGKILL after grace"
+        ]
+      ],
+      "breaks": "Customers can be persuaded; apps must implement handlers."
+    },
+    "mindmap": {
+      "center": "Polite Signals",
+      "branches": [
+        {
+          "label": "SIGTERM",
+          "children": [
+            "Graceful stop",
+            "docker/k8s/systemd"
+          ]
+        },
+        {
+          "label": "SIGHUP",
+          "children": [
+            "Reload config",
+            "Reopen logs"
+          ]
+        },
+        {
+          "label": "Containers",
+          "children": [
+            "PID 1 semantics",
+            "exec-form CMD",
+            "tini"
+          ]
+        },
+        {
+          "label": "Kubernetes",
+          "children": [
+            "preStop",
+            "terminationGracePeriodSeconds"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Graceful handler",
+      "scenario": "Node.js + Dockerfile.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clean shutdowns; zero dropped requests on deploy."
+        }
+      ],
+      "code": [
+        {
+          "lang": "javascript",
+          "text": "const server = app.listen(8080);\nprocess.on('SIGTERM', () => {\n  server.close(() => { db.end(); process.exit(0); });   // stop accepting, finish in-flight\n  setTimeout(() => process.exit(1), 25000).unref();\n});\nprocess.on('SIGHUP', () => reloadConfig());\n// Dockerfile: CMD [\"node\", \"server.js\"]   (exec form, not sh -c)"
+        }
+      ],
+      "outcome": "graceful lifecycle handling."
+    },
+    "summary": {
+      "points": [
+        "TERM to drain.",
+        "HUP to reload.",
+        "Mind PID 1."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might a containerised app ignore SIGTERM when run as PID 1?",
+        "a": "The kernel doesn't apply default terminate actions to PID 1 in its namespace; without an explicit handler the signal is ignored."
+      }
+    ]
+  },
+  "the-nuclear-option-sigkill": {
+    "core": "SIGKILL (9) terminates a process immediately. It can't be caught, blocked or ignored, so no cleanup runs: buffers aren't flushed, temp files and locks remain, transactions are cut mid-write, and child processes may be orphaned. The kernel's OOM killer, Kubernetes after the grace period, and systemd's final stop step all use it. It's appropriate only after SIGTERM fails, and it doesn't work on D-state processes until their kernel wait ends.",
+    "first_principles": {
+      "problem": "Routine use of kill -9 leaves stale lock files that prevent the service from restarting.",
+      "truths": [
+        "No handler means no cleanup.",
+        "Some resources survive the process.",
+        "Escalation should be gradual."
+      ],
+      "derivation": [
+        "Use **TERM first**, then KILL.",
+        "Expect **stale locks/temp files**.",
+        "Design for **crash safety** (journals, atomic renames).",
+        "Investigate **why** TERM failed.",
+        "Remember **D-state** exception."
+      ]
+    },
+    "analogy": {
+      "title": "Cutting the power to a machine",
+      "story": "It stops instantly, but whatever was half-done stays half-done.",
+      "mapping": [
+        [
+          "Cutting power",
+          "SIGKILL"
+        ],
+        [
+          "Half-done work",
+          "Unflushed state"
+        ],
+        [
+          "Proper shutdown",
+          "SIGTERM handler"
+        ]
+      ],
+      "breaks": "Machines may restart safely; software needs crash-safe design to recover."
+    },
+    "mindmap": {
+      "center": "SIGKILL",
+      "branches": [
+        {
+          "label": "Properties",
+          "children": [
+            "Uncatchable",
+            "Immediate",
+            "No cleanup"
+          ]
+        },
+        {
+          "label": "Senders",
+          "children": [
+            "kill -9",
+            "OOM killer",
+            "k8s after grace",
+            "systemd final"
+          ]
+        },
+        {
+          "label": "Side effects",
+          "children": [
+            "Stale locks",
+            "Partial writes",
+            "Orphans"
+          ]
+        },
+        {
+          "label": "Mitigation",
+          "children": [
+            "TERM first",
+            "Crash-safe design"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Escalation",
+      "scenario": "systemd semantics.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Graceful first, forceful only if needed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[Service]\nKillSignal=SIGTERM\nTimeoutStopSec=30\nSendSIGKILL=yes        # only after 30 s\nKillMode=mixed         # TERM to main, KILL to remaining group"
+        }
+      ],
+      "outcome": "SIGKILL used as last resort."
+    },
+    "summary": {
+      "points": [
+        "Immediate death.",
+        "No cleanup.",
+        "Escalate gradually."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to a process's in-memory buffered writes when it receives SIGKILL?",
+        "a": "They're lost, since no handlers run to flush them before the process is destroyed."
+      }
+    ]
+  },
+  "understanding-load-average": {
+    "core": "Load average (1, 5 and 15-minute exponentially damped averages) on Linux counts tasks that are runnable (R) plus those in uninterruptible sleep (D). It isn't a CPU percentage. Compare it to the number of CPUs: load 8 on an 8-core box means full use on average, and on 2 cores it means queueing. Because D-state tasks count, high load with idle CPUs often means I/O or NFS problems. PSI gives clearer pressure metrics.",
+    "first_principles": {
+      "problem": "Load average is 40 on a 16-core server, yet CPU usage is only 20%.",
+      "truths": [
+        "Load counts R + D tasks.",
+        "It must be compared to core count.",
+        "D tasks inflate load without CPU use."
+      ],
+      "derivation": [
+        "Compare **load to nproc**.",
+        "Check **CPU usage** alongside.",
+        "Count **D-state tasks**.",
+        "Check **I/O wait and storage**.",
+        "Prefer **PSI** for pressure."
+      ]
+    },
+    "analogy": {
+      "title": "A queue at a bank including people waiting for a manager's signature",
+      "story": "The line looks long, but many aren't waiting for tellers; they're stuck on something else.",
+      "mapping": [
+        [
+          "Tellers",
+          "CPUs"
+        ],
+        [
+          "Waiting for tellers",
+          "R tasks"
+        ],
+        [
+          "Waiting for signature",
+          "D tasks"
+        ]
+      ],
+      "breaks": "Bank queues are visible; load is a smoothed number."
+    },
+    "mindmap": {
+      "center": "Load Average",
+      "branches": [
+        {
+          "label": "Counts",
+          "children": [
+            "R runnable",
+            "D uninterruptible"
+          ]
+        },
+        {
+          "label": "Windows",
+          "children": [
+            "1",
+            "5",
+            "15 min damped"
+          ]
+        },
+        {
+          "label": "Interpret",
+          "children": [
+            "vs nproc",
+            "with CPU %",
+            "with D count"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Not CPU %",
+            "D inflation"
+          ]
+        },
+        {
+          "label": "Better",
+          "children": [
+            "PSI"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "High load, idle CPU",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Load is I/O, not CPU."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "uptime ; nproc\n# load average: 40.1, 38.7, 30.2   nproc 16\nmpstat 1 1 | tail -1       # %idle 78, %iowait 15\nps -eo stat | grep -c '^D'  # 34 → I/O-blocked tasks drive load"
+        }
+      ],
+      "outcome": "load interpreted correctly."
+    },
+    "summary": {
+      "points": [
+        "R + D tasks.",
+        "Compare to cores.",
+        "D inflates load."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can Linux load average be high while CPUs are mostly idle?",
+        "a": "Load includes tasks in uninterruptible sleep (D), often waiting on I/O or NFS, which don't use CPU."
+      }
+    ]
+  }
+}

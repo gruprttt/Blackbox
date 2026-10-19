@@ -1,0 +1,1310 @@
+{
+  "introduction-the-security-gatekeeper": {
+    "core": "Linux's basic access control is discretionary: every file has an owner user, an owner group, and permission bits for user, group and others. On every access the kernel checks the process's effective UID and GIDs against them, and root (UID 0) bypasses most checks. Special bits (setuid, setgid, sticky), umask defaults and ACLs extend the model, while LSMs (SELinux, AppArmor) add mandatory controls on top.",
+    "first_principles": {
+      "problem": "A web app can't write its upload directory, and a junior engineer 'fixes' it with chmod 777.",
+      "truths": [
+        "Every file has an owner and group.",
+        "Processes run as users.",
+        "Least privilege limits damage."
+      ],
+      "derivation": [
+        "Identify **process user** (ps -o user).",
+        "Read **file mode/ownership** (ls -l).",
+        "Grant via **ownership or group**, not 777.",
+        "Use **ACLs** for extra principals.",
+        "Respect **least privilege**."
+      ]
+    },
+    "analogy": {
+      "title": "A building with keycards per floor",
+      "story": "Your card opens your office, your team's shared room, and the lobby; 777 is propping every door open.",
+      "mapping": [
+        [
+          "Your office",
+          "User perms"
+        ],
+        [
+          "Team room",
+          "Group perms"
+        ],
+        [
+          "Lobby",
+          "Other perms"
+        ]
+      ],
+      "breaks": "Propped doors are visible; 777 permissions silently invite abuse."
+    },
+    "mindmap": {
+      "center": "Linux Permissions",
+      "branches": [
+        {
+          "label": "Subjects",
+          "children": [
+            "UID",
+            "GIDs",
+            "root"
+          ]
+        },
+        {
+          "label": "Objects",
+          "children": [
+            "Files",
+            "Directories"
+          ]
+        },
+        {
+          "label": "Bits",
+          "children": [
+            "rwx ×3",
+            "setuid",
+            "setgid",
+            "sticky"
+          ]
+        },
+        {
+          "label": "Extensions",
+          "children": [
+            "umask",
+            "ACLs",
+            "Capabilities",
+            "LSMs"
+          ]
+        },
+        {
+          "label": "Principle",
+          "children": [
+            "Least privilege"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fix without 777",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "App writes; others can't."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ps -o user= -p $(pgrep -o gunicorn)     # www-data\nls -ld /srv/app/uploads                  # drwxr-xr-x root root\nchown root:www-data /srv/app/uploads && chmod 2775 /srv/app/uploads\n# group write + setgid so new files keep the group"
+        }
+      ],
+      "outcome": "permissions model grasped."
+    },
+    "summary": {
+      "points": [
+        "Owner, group, others.",
+        "Process identity matters.",
+        "Never 777."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is chmod 777 a poor fix for permission errors?",
+        "a": "It grants every user write and execute access, violating least privilege and enabling tampering or code execution."
+      }
+    ]
+  },
+  "viewing-permissions-the-ls-l-command": {
+    "core": "ls -l shows a 10-character mode: the file type (- regular, d directory, l symlink, c/b device, s socket, p pipe), then three rwx triads for user, group and others, with s, S, t or T marking special bits and a trailing + indicating an ACL. Then come the link count, owner, group, size, modification time and name. stat gives octal mode, inode and all timestamps, and namei -l walks permissions along a whole path.",
+    "first_principles": {
+      "problem": "An engineer can't tell why access fails, because the problem is a parent directory missing x permission.",
+      "truths": [
+        "Mode strings encode type and permissions.",
+        "Parent directories also need permissions.",
+        "Special bits show as s/t."
+      ],
+      "derivation": [
+        "Read **type character**.",
+        "Read **user/group/other triads**.",
+        "Spot **s/S/t/T and +**.",
+        "Use **stat -c '%a %U:%G'**.",
+        "Check **whole path** with namei -l."
+      ]
+    },
+    "analogy": {
+      "title": "Reading a door's sign panel",
+      "story": "Three rows: what the owner, the team and visitors may do, plus symbols for special rules.",
+      "mapping": [
+        [
+          "Rows",
+          "Triads"
+        ],
+        [
+          "Special symbols",
+          "s/t bits"
+        ],
+        [
+          "Door type",
+          "File type character"
+        ]
+      ],
+      "breaks": "Door signs are per door; access also depends on every directory along the path."
+    },
+    "mindmap": {
+      "center": "ls -l Anatomy",
+      "branches": [
+        {
+          "label": "Type",
+          "children": [
+            "-",
+            "d",
+            "l",
+            "c",
+            "b",
+            "s",
+            "p"
+          ]
+        },
+        {
+          "label": "Triads",
+          "children": [
+            "user",
+            "group",
+            "other"
+          ]
+        },
+        {
+          "label": "Special",
+          "children": [
+            "s/S setuid/setgid",
+            "t/T sticky"
+          ]
+        },
+        {
+          "label": "Markers",
+          "children": [
+            "+ ACL",
+            ". SELinux context"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "stat",
+            "namei -l",
+            "getfacl"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Read and trace",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Blocked parent directory found."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ls -l /usr/bin/passwd\n# -rwsr-xr-x 1 root root 68208 ... /usr/bin/passwd   (s = setuid)\nstat -c '%a %A %U:%G %n' /srv/data/report.csv\nnamei -l /srv/data/report.csv\n# drwx------ alice alice data   ← parent blocks others"
+        }
+      ],
+      "outcome": "permissions read accurately."
+    },
+    "summary": {
+      "points": [
+        "Type + triads.",
+        "Special markers.",
+        "Check the whole path."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a lowercase 's' in the user execute position mean?",
+        "a": "The setuid bit is set and the file is executable by the owner."
+      }
+    ]
+  },
+  "the-rwx-triad-read-write-execute": {
+    "core": "For files: r means read contents, w means modify contents, x means execute as a program. For directories, meanings differ: r means list names, w means create, delete or rename entries (with x), and x means traverse (access entries by name and cd into it). So deleting a file depends on the directory's w permission, not the file's, and a directory with x but not r lets you open known names without listing them.",
+    "first_principles": {
+      "problem": "A user can delete a read-only file they don't own because the directory is group-writable.",
+      "truths": [
+        "Files and directories interpret bits differently.",
+        "Deletion is a directory operation.",
+        "Traverse needs x."
+      ],
+      "derivation": [
+        "File **r/w/x**: read/modify/execute.",
+        "Dir **r**: list names.",
+        "Dir **w+x**: create/delete/rename entries.",
+        "Dir **x**: traverse.",
+        "Protect shared dirs with **sticky bit**."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet vs the documents in it",
+      "story": "Permission to rearrange the cabinet (directory w) lets you remove a document even if you can't edit it.",
+      "mapping": [
+        [
+          "Cabinet",
+          "Directory"
+        ],
+        [
+          "Documents",
+          "Files"
+        ],
+        [
+          "Rearranging",
+          "Delete/rename"
+        ]
+      ],
+      "breaks": "Cabinets don't have traverse rights; directories need x to reach anything inside."
+    },
+    "mindmap": {
+      "center": "rwx Semantics",
+      "branches": [
+        {
+          "label": "Files",
+          "children": [
+            "r read",
+            "w write",
+            "x execute"
+          ]
+        },
+        {
+          "label": "Directories",
+          "children": [
+            "r list",
+            "w create/delete (with x)",
+            "x traverse"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Delete depends on dir",
+            "x without r = blind access",
+            "Scripts need r+x"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Sticky bit for shared dirs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Directory semantics",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows directory bits govern deletion."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mkdir box && touch box/f && chmod 111 box   # --x--x--x\nls box          # Permission denied (no r)\ncat box/f       # works if f readable (x allows traversal)\nchmod 755 box && chmod 444 box/f && chmod o+w box\n# other users can now delete box/f despite it being read-only"
+        }
+      ],
+      "outcome": "precise rwx understanding."
+    },
+    "summary": {
+      "points": [
+        "Files vs directories.",
+        "Delete is a dir permission.",
+        "x means traverse."
+      ]
+    },
+    "check": [
+      {
+        "q": "What permission on a directory allows deleting a file inside it?",
+        "a": "Write plus execute (w and x) on the directory, regardless of the file's own permissions (unless the sticky bit is set)."
+      }
+    ]
+  },
+  "changing-permissions-chmod-symbolic-mode": {
+    "core": "Symbolic chmod modifies specific bits relative to current ones: who (u, g, o, a), operator (+ add, - remove, = set exactly), and permissions (r, w, x, X, s, t). For example chmod g+w file, chmod o-rwx secret, chmod u=rwx,g=rx,o= script. X (capital) adds execute only to directories and to files already executable by someone, which makes recursive changes safe (chmod -R g+rX).",
+    "first_principles": {
+      "problem": "chmod -R 755 on a tree makes every data file executable.",
+      "truths": [
+        "Relative changes preserve other bits.",
+        "Recursive changes hit files and dirs alike.",
+        "X distinguishes directories."
+      ],
+      "derivation": [
+        "Use **u/g/o/a** with **+/-/=**.",
+        "Combine with commas.",
+        "Use **X** for recursive trees.",
+        "Prefer **relative** edits for safety.",
+        "Verify with **ls -l**."
+      ]
+    },
+    "analogy": {
+      "title": "Editing a guest list by adding or crossing out names",
+      "story": "You adjust specific entries instead of rewriting the whole list.",
+      "mapping": [
+        [
+          "Adding names",
+          "+"
+        ],
+        [
+          "Crossing out",
+          "-"
+        ],
+        [
+          "Rewriting row",
+          "="
+        ]
+      ],
+      "breaks": "Guest lists have one row; chmod has three triads plus special bits."
+    },
+    "mindmap": {
+      "center": "Symbolic chmod",
+      "branches": [
+        {
+          "label": "Who",
+          "children": [
+            "u",
+            "g",
+            "o",
+            "a"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "+",
+            "-",
+            "="
+          ]
+        },
+        {
+          "label": "Perms",
+          "children": [
+            "r",
+            "w",
+            "x",
+            "X",
+            "s",
+            "t"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "g+w",
+            "o-rwx",
+            "u=rwx,go=rx",
+            "-R g+rX"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "X for trees",
+            "Relative changes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Safe recursive share",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Group can read and traverse; files stay non-executable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "chmod -R g+rX,o-rwx /srv/shared       # dirs traversable, files not made executable\nchmod u+x deploy.sh\nchmod a=r,u+w config.yaml             # 644\nls -l /srv/shared | head"
+        }
+      ],
+      "outcome": "precise relative changes."
+    },
+    "summary": {
+      "points": [
+        "who + op + perm.",
+        "Relative edits.",
+        "X for directories."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does capital X do in chmod -R g+rX?",
+        "a": "Adds execute only for directories (and files already executable), so traversal works without making data files executable."
+      }
+    ]
+  },
+  "changing-permissions-chmod-octal-mode": {
+    "core": "Octal chmod sets all bits at once: each digit is the sum r=4, w=2, x=1 for user, group and others. Common modes: 644 (rw-r--r--, files), 755 (rwxr-xr-x, executables and dirs), 600 (rw-------, secrets), 700 (private dirs), 640 (group-readable configs), and 2775 (shared dir with setgid). It's precise and scriptable but replaces everything, so know the full intended mode.",
+    "first_principles": {
+      "problem": "An SSH private key with mode 644 is rejected with 'UNPROTECTED PRIVATE KEY FILE'.",
+      "truths": [
+        "Bits map to numbers.",
+        "Octal sets absolute modes.",
+        "Some tools enforce strict modes."
+      ],
+      "derivation": [
+        "**r=4, w=2, x=1**, sum per triad.",
+        "Memorise **644, 755, 600, 700, 640**.",
+        "Use for **absolute** settings.",
+        "Prefix fourth digit for **special bits**.",
+        "Check with **stat -c %a**."
+      ]
+    },
+    "analogy": {
+      "title": "A three-digit combination code",
+      "story": "Each digit sets the access for one group of people in one go.",
+      "mapping": [
+        [
+          "Digits",
+          "Triads"
+        ],
+        [
+          "Combination",
+          "Mode"
+        ],
+        [
+          "Changing all digits",
+          "Absolute set"
+        ]
+      ],
+      "breaks": "Combination locks hide codes; modes are visible to everyone."
+    },
+    "mindmap": {
+      "center": "Octal chmod",
+      "branches": [
+        {
+          "label": "Values",
+          "children": [
+            "r=4",
+            "w=2",
+            "x=1"
+          ]
+        },
+        {
+          "label": "Common",
+          "children": [
+            "644",
+            "755",
+            "600",
+            "700",
+            "640",
+            "750"
+          ]
+        },
+        {
+          "label": "Special",
+          "children": [
+            "4 setuid",
+            "2 setgid",
+            "1 sticky"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Absolute modes",
+            "Scripts",
+            "Config management"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Correct modes",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "SSH accepts the key; config readable by app group only."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "chmod 600 ~/.ssh/id_ed25519\nchmod 700 ~/.ssh\nchmod 644 ~/.ssh/id_ed25519.pub\nchmod 640 /etc/app/db.conf && chown root:app /etc/app/db.conf\nstat -c '%a %n' ~/.ssh/*"
+        }
+      ],
+      "outcome": "absolute modes set correctly."
+    },
+    "summary": {
+      "points": [
+        "Sum 4/2/1.",
+        "Common modes.",
+        "Absolute replacement."
+      ]
+    },
+    "check": [
+      {
+        "q": "What octal mode gives the owner read/write and nobody else any access?",
+        "a": "600 (rw-------)."
+      }
+    ]
+  },
+  "changing-ownership-chown-and-chgrp": {
+    "core": "chown user:group file changes owner and group (chown user, chown :group, chown -R for trees), and chgrp group changes only the group. Only root (CAP_CHOWN) can give files away to other users, which prevents quota evasion and spoofing; owners can change a file's group to groups they belong to. Changing ownership clears setuid and setgid bits for safety. Use -h for symlinks themselves, and --reference to copy ownership.",
+    "first_principles": {
+      "problem": "After copying files as root, a service can't read its own data directory because everything is root-owned.",
+      "truths": [
+        "Ownership determines which triad applies.",
+        "Only root can give files away.",
+        "Setuid is cleared on chown."
+      ],
+      "derivation": [
+        "**chown user:group** path.",
+        "**-R** for trees (carefully).",
+        "**chgrp** for group-only changes.",
+        "Use **install -o -g -m** in scripts.",
+        "Verify with **ls -l/stat**."
+      ]
+    },
+    "analogy": {
+      "title": "Transferring a car's registration",
+      "story": "Only the registry (root) can put a car in someone else's name; you can't dump your car on a stranger.",
+      "mapping": [
+        [
+          "Registration",
+          "Ownership"
+        ],
+        [
+          "Registry",
+          "root"
+        ],
+        [
+          "Stranger",
+          "Other user"
+        ]
+      ],
+      "breaks": "Car transfers need paperwork; chown -R can silently change thousands of files."
+    },
+    "mindmap": {
+      "center": "Ownership",
+      "branches": [
+        {
+          "label": "Commands",
+          "children": [
+            "chown user:group",
+            "chgrp",
+            "-R",
+            "-h",
+            "--reference"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Root gives away",
+            "Owner can change to own groups",
+            "Clears setuid/setgid"
+          ]
+        },
+        {
+          "label": "Scripts",
+          "children": [
+            "install -o -g -m"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "chown -R through symlinks",
+            "Wrong recursion root"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fix service data",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Service owns its data; config readable by group."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "chown -R app:app /var/lib/app\ninstall -d -o app -g app -m 0750 /var/lib/app/cache\ninstall -o root -g app -m 0640 app.conf /etc/app/app.conf\nfind /var/lib/app ! -user app -ls | head   # verify"
+        }
+      ],
+      "outcome": "correct ownership."
+    },
+    "summary": {
+      "points": [
+        "user:group.",
+        "Root gives away.",
+        "Use install in scripts."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a normal user chown their file to another user?",
+        "a": "To prevent evading disk quotas and spoofing ownership; giving files away requires root (CAP_CHOWN)."
+      }
+    ]
+  },
+  "default-permissions-umask": {
+    "core": "New files start from 666 and directories from 777, and the process's umask removes bits from that. A umask of 022 gives files 644 and directories 755; 027 gives 640 and 750 (no world access); 077 gives 600 and 700. It's inherited by child processes and set in shell profiles, systemd units (UMask=) or services, and explains why files created by an app are or aren't group-writable.",
+    "first_principles": {
+      "problem": "Files created by a shared build service aren't group-writable, so teammates can't update them.",
+      "truths": [
+        "Creation modes are masked.",
+        "umask is per process and inherited.",
+        "Services need their own setting."
+      ],
+      "derivation": [
+        "Compute **default − umask** (bitwise).",
+        "Use **002/007** for shared group work.",
+        "Use **027/077** for sensitive services.",
+        "Set in **systemd UMask=**.",
+        "Combine with **setgid dirs** for groups."
+      ]
+    },
+    "analogy": {
+      "title": "A stencil over a paint roller",
+      "story": "The roller would paint everything; the stencil blocks the parts you don't want.",
+      "mapping": [
+        [
+          "Roller",
+          "666/777 default"
+        ],
+        [
+          "Stencil",
+          "umask"
+        ],
+        [
+          "Painted pattern",
+          "Resulting mode"
+        ]
+      ],
+      "breaks": "Stencils are physical; umask is invisible unless you check it."
+    },
+    "mindmap": {
+      "center": "umask",
+      "branches": [
+        {
+          "label": "Defaults",
+          "children": [
+            "Files 666",
+            "Dirs 777"
+          ]
+        },
+        {
+          "label": "Common",
+          "children": [
+            "022 → 644/755",
+            "002 → 664/775",
+            "027 → 640/750",
+            "077 → 600/700"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Per process",
+            "Inherited"
+          ]
+        },
+        {
+          "label": "Set",
+          "children": [
+            "Shell profile",
+            "systemd UMask=",
+            "umask()"
+          ]
+        },
+        {
+          "label": "Pair with",
+          "children": [
+            "setgid dirs",
+            "ACL defaults"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shared build service",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New artifacts group-writable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "umask            # 0022\n( umask 002; touch shared.txt; ls -l shared.txt )   # -rw-rw-r--\n# /etc/systemd/system/builder.service.d/umask.conf\n# [Service]\n# UMask=0002"
+        }
+      ],
+      "outcome": "predictable creation modes."
+    },
+    "summary": {
+      "points": [
+        "Mask removes bits.",
+        "Inherited per process.",
+        "Set per service."
+      ]
+    },
+    "check": [
+      {
+        "q": "With umask 027, what permissions will a newly created file and directory get?",
+        "a": "Files 640 (rw-r-----) and directories 750 (rwxr-x---)."
+      }
+    ]
+  },
+  "special-permissions-suid-set-user-id": {
+    "core": "The setuid bit on an executable (shown as s in the user execute slot, octal 4xxx) makes it run with the file owner's effective UID rather than the caller's. That's how passwd (owned by root) can update /etc/shadow for ordinary users. Setuid-root binaries are prime privilege-escalation targets, since any bug becomes root access, so keep them few, audit them, mount untrusted filesystems nosuid, and prefer capabilities or sudo rules.",
+    "first_principles": {
+      "problem": "An attacker with a shell finds a custom setuid-root backup script and escalates to root.",
+      "truths": [
+        "Effective UID determines privileges.",
+        "Setuid borrows the owner's identity.",
+        "Bugs in setuid-root code mean root."
+      ],
+      "derivation": [
+        "Set with **chmod u+s / 4755**.",
+        "**Audit** setuid files regularly.",
+        "Never setuid **scripts** (ignored by kernel, but wrappers are risky).",
+        "Mount untrusted fs **nosuid**.",
+        "Prefer **capabilities/sudo**."
+      ]
+    },
+    "analogy": {
+      "title": "A borrowed master key for one task",
+      "story": "The locksmith lends you their master key only inside a specific room, but if that room has a hidden exit, you're loose with the master key.",
+      "mapping": [
+        [
+          "Master key",
+          "Owner's UID (root)"
+        ],
+        [
+          "Specific room",
+          "Setuid program"
+        ],
+        [
+          "Hidden exit",
+          "Vulnerability"
+        ]
+      ],
+      "breaks": "Borrowed keys can be returned; exploited setuid gives persistent root."
+    },
+    "mindmap": {
+      "center": "Setuid",
+      "branches": [
+        {
+          "label": "Effect",
+          "children": [
+            "Runs as file owner (euid)"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "passwd",
+            "sudo",
+            "ping (older)",
+            "mount"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Privilege escalation",
+            "Path/env injection"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Audit",
+            "nosuid mounts",
+            "Capabilities",
+            "sudo rules"
+          ]
+        },
+        {
+          "label": "Find",
+          "children": [
+            "find / -perm -4000"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Audit setuid",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Unexpected setuid binaries removed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "find / -xdev -perm -4000 -type f -exec ls -l {} + 2>/dev/null\n# compare against package-owned list\nrpm -Vf /usr/bin/passwd 2>/dev/null || dpkg -S /usr/bin/passwd\nchmod u-s /usr/local/bin/backup.sh    # remove unexpected setuid"
+        }
+      ],
+      "outcome": "setuid used sparingly and safely."
+    },
+    "summary": {
+      "points": [
+        "Run as owner.",
+        "High-risk with root.",
+        "Audit and minimise."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a setuid-root binary a common privilege escalation target?",
+        "a": "It runs with root privileges for any user, so any vulnerability in it gives the attacker root."
+      }
+    ]
+  },
+  "special-permissions-sgid-set-group-id": {
+    "core": "setgid on an executable runs it with the file's group as the effective GID, for example to access a group-owned resource. On a directory (more common) it makes new files and subdirectories inherit the directory's group instead of the creator's primary group, and new subdirectories also get setgid. Combined with a group-writable mode and umask 002, it creates reliable shared team directories.",
+    "first_principles": {
+      "problem": "Files in a team share end up owned by each user's personal group, so teammates can't edit them.",
+      "truths": [
+        "New files take the creator's primary group by default.",
+        "setgid on dirs overrides that.",
+        "Inheritance propagates to subdirs."
+      ],
+      "derivation": [
+        "**chmod g+s** (2xxx) on shared dirs.",
+        "Set **group ownership** of the dir.",
+        "Use **umask 002** for group write.",
+        "Add users to the **group**.",
+        "Combine with **default ACLs** if needed."
+      ]
+    },
+    "analogy": {
+      "title": "A team folder that stamps every new document with the team name",
+      "story": "Whoever creates a document, it automatically belongs to the team.",
+      "mapping": [
+        [
+          "Team stamp",
+          "Inherited group"
+        ],
+        [
+          "Folder rule",
+          "setgid bit"
+        ],
+        [
+          "Documents",
+          "New files"
+        ]
+      ],
+      "breaks": "Stamps don't control editing; group write bits and umask still matter."
+    },
+    "mindmap": {
+      "center": "Setgid",
+      "branches": [
+        {
+          "label": "On files",
+          "children": [
+            "Run with file's group"
+          ]
+        },
+        {
+          "label": "On dirs",
+          "children": [
+            "Inherit dir group",
+            "Subdirs inherit setgid"
+          ]
+        },
+        {
+          "label": "Pattern",
+          "children": [
+            "chgrp team",
+            "chmod 2775",
+            "umask 002"
+          ]
+        },
+        {
+          "label": "Display",
+          "children": [
+            "s in group x slot",
+            "S if no x"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Team share",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bob can edit Alice's file."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "groupadd analytics && usermod -aG analytics alice && usermod -aG analytics bob\nmkdir -p /srv/analytics && chgrp analytics /srv/analytics && chmod 2775 /srv/analytics\nsu - alice -c 'umask 002; touch /srv/analytics/q3.csv'\nls -l /srv/analytics/q3.csv     # -rw-rw-r-- alice analytics"
+        }
+      ],
+      "outcome": "working shared directories."
+    },
+    "summary": {
+      "points": [
+        "Inherit group on dirs.",
+        "Pair with group write.",
+        "Shared teams."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does setgid on a directory do?",
+        "a": "New files and subdirectories inherit the directory's group (and subdirectories inherit setgid), instead of the creator's primary group."
+      }
+    ]
+  },
+  "special-permissions-the-sticky-bit": {
+    "core": "The sticky bit on a directory (t in the others execute slot, octal 1xxx) restricts deletion and renaming. In a world-writable directory only the file's owner, the directory's owner or root can delete or rename a file. /tmp is 1777 for this reason: everyone can create files, but nobody can delete others'. Without it, any user could remove or replace other users' temporary files, which enables attacks.",
+    "first_principles": {
+      "problem": "In a shared upload directory, one user deletes everyone else's files.",
+      "truths": [
+        "Directory write allows deleting any entry.",
+        "Shared dirs need ownership-based deletion.",
+        "/tmp is shared by all."
+      ],
+      "derivation": [
+        "Set **chmod +t** (1xxx) on shared writable dirs.",
+        "Keep **/tmp 1777**.",
+        "Combine with **setgid** for teams (3775).",
+        "Audit **world-writable dirs without sticky**.",
+        "Use **private tmp** for services (PrivateTmp=)."
+      ]
+    },
+    "analogy": {
+      "title": "A communal notice board where you can only remove your own notices",
+      "story": "Everyone can pin notices, but only the author or the board manager can take one down.",
+      "mapping": [
+        [
+          "Pinning",
+          "Creating files"
+        ],
+        [
+          "Removing own notice",
+          "Deleting own file"
+        ],
+        [
+          "Board manager",
+          "Directory owner/root"
+        ]
+      ],
+      "breaks": "Notice boards are policed by people; sticky bits by the kernel."
+    },
+    "mindmap": {
+      "center": "Sticky Bit",
+      "branches": [
+        {
+          "label": "Effect",
+          "children": [
+            "Only owner/dir owner/root delete/rename"
+          ]
+        },
+        {
+          "label": "Classic",
+          "children": [
+            "/tmp 1777",
+            "/var/tmp"
+          ]
+        },
+        {
+          "label": "Display",
+          "children": [
+            "t / T"
+          ]
+        },
+        {
+          "label": "Combos",
+          "children": [
+            "3775 setgid+sticky"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "find -perm -0002 ! -perm -1000 -type d"
+          ]
+        },
+        {
+          "label": "Services",
+          "children": [
+            "PrivateTmp="
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Protect shared dir",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Users can only delete their own uploads."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ls -ld /tmp        # drwxrwxrwt\nchmod 1777 /srv/uploads\nfind / -xdev -type d -perm -0002 ! -perm -1000 2>/dev/null   # world-writable without sticky"
+        }
+      ],
+      "outcome": "safe shared directories."
+    },
+    "summary": {
+      "points": [
+        "Restricts deletion.",
+        "/tmp uses it.",
+        "Audit world-writable dirs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does /tmp have the sticky bit set?",
+        "a": "So that although everyone can create files there, users can only delete or rename their own files."
+      }
+    ]
+  },
+  "combining-special-bits-the-four-digit-octal": {
+    "core": "A fourth leading octal digit encodes special bits: 4 is setuid, 2 setgid and 1 sticky, summed like the others. Examples: 4755 (setuid executable), 2775 (setgid shared dir), 1777 (sticky world-writable dir, /tmp) and 3775 (setgid plus sticky team dir). In ls -l, a lowercase s or t means the special bit plus execute; uppercase S or T means the special bit without execute, which is usually a mistake.",
+    "first_principles": {
+      "problem": "A shared directory shows drwxrwSr-x and new files aren't working as expected.",
+      "truths": [
+        "Special bits occupy a fourth digit.",
+        "Display merges with execute slots.",
+        "Uppercase means no execute."
+      ],
+      "derivation": [
+        "**4** setuid, **2** setgid, **1** sticky.",
+        "Prefix to normal mode (e.g. 2775).",
+        "Read **s/S, t/T** correctly.",
+        "Fix **S/T** by adding x.",
+        "Verify with **stat -c %a**."
+      ]
+    },
+    "analogy": {
+      "title": "A fourth dial on the combination lock",
+      "story": "It controls special behaviours on top of the normal three access dials.",
+      "mapping": [
+        [
+          "Fourth dial",
+          "Special bits digit"
+        ],
+        [
+          "Normal dials",
+          "rwx triads"
+        ],
+        [
+          "Mis-set dial",
+          "S/T uppercase"
+        ]
+      ],
+      "breaks": "Locks don't display their combination; ls does, with tricky letter cases."
+    },
+    "mindmap": {
+      "center": "Four-Digit Octal",
+      "branches": [
+        {
+          "label": "Digits",
+          "children": [
+            "4 setuid",
+            "2 setgid",
+            "1 sticky"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "4755",
+            "2775",
+            "1777",
+            "3775"
+          ]
+        },
+        {
+          "label": "Display",
+          "children": [
+            "s/t with x",
+            "S/T without x"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "stat -c '%a %A'"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Read and fix",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Group can traverse; setgid works as intended."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "stat -c '%a %A %n' /srv/team    # 2765 drwxrwSr-x   ← setgid without group x\nchmod 2775 /srv/team\nstat -c '%a %A %n' /srv/team    # 2775 drwxrwsr-x"
+        }
+      ],
+      "outcome": "special bits combined correctly."
+    },
+    "summary": {
+      "points": [
+        "Fourth digit.",
+        "Sum special bits.",
+        "Mind S/T."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does mode 3775 on a directory mean?",
+        "a": "setgid (2) + sticky (1) with rwxrwxr-x: new files inherit the group, and users can only delete their own files."
+      }
+    ]
+  },
+  "access-control-lists-acls-beyond-basic-permissions": {
+    "core": "POSIX ACLs add named entries beyond owner, group and others: user:alice:rw-, group:auditors:r-x, plus a mask limiting maximum group-class permissions, and default ACLs on directories that new files inherit. Manage them with setfacl and getfacl, and look for + in ls -l. They solve 'give one more user or group access' without restructuring groups. Keep them minimal and documented, since they're easy to overlook.",
+    "first_principles": {
+      "problem": "An auditor group needs read-only access to app logs owned by app:app without changing ownership.",
+      "truths": [
+        "Basic permissions allow one group.",
+        "Real needs involve several principals.",
+        "Inheritance keeps new files consistent."
+      ],
+      "derivation": [
+        "**setfacl -m g:auditors:rX** for access.",
+        "**setfacl -d -m** for defaults on dirs.",
+        "Watch the **mask** entry.",
+        "Inspect with **getfacl**.",
+        "Back up with **getfacl -R** / restore."
+      ]
+    },
+    "analogy": {
+      "title": "Adding named guests to a guest list",
+      "story": "Beyond 'owner, family, public', you write specific names with specific rights.",
+      "mapping": [
+        [
+          "Named guests",
+          "Named ACL entries"
+        ],
+        [
+          "House rules cap",
+          "Mask"
+        ],
+        [
+          "Standing invitation",
+          "Default ACL"
+        ]
+      ],
+      "breaks": "Guest lists are visible on the door; ACLs only show as a '+' in ls."
+    },
+    "mindmap": {
+      "center": "ACLs",
+      "branches": [
+        {
+          "label": "Entries",
+          "children": [
+            "user::",
+            "user:name:",
+            "group::",
+            "group:name:",
+            "mask::",
+            "other::"
+          ]
+        },
+        {
+          "label": "Defaults",
+          "children": [
+            "setfacl -d",
+            "Inherited by new files"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "setfacl",
+            "getfacl",
+            "ls -l +"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Mask limits",
+            "cp/archive tools may drop ACLs"
+          ]
+        },
+        {
+          "label": "Support",
+          "children": [
+            "ext4",
+            "xfs",
+            "NFSv4 ACLs differ"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Auditor access",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Auditors read logs; ownership unchanged."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "setfacl -R -m g:auditors:rX /var/log/app\nsetfacl -d -m g:auditors:rX /var/log/app     # new logs inherit\ngetfacl /var/log/app | head\n# group:auditors:r-x\n# default:group:auditors:r-x"
+        }
+      ],
+      "outcome": "fine-grained access without restructuring."
+    },
+    "summary": {
+      "points": [
+        "Named entries.",
+        "Default inheritance.",
+        "Mind the mask."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the ACL mask entry do?",
+        "a": "Limits the maximum effective permissions for named users, named groups and the owning group."
+      }
+    ]
+  }
+}

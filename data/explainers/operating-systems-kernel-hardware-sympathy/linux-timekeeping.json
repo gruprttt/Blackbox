@@ -1,0 +1,550 @@
+{
+  "introduction-hardware-vs-system-time": {
+    "core": "Computers have a battery-backed real-time clock (RTC) that keeps time while powered off, and high-resolution counters (TSC, HPET, ACPI PM timer) used while running. At boot the kernel reads the RTC, then keeps system time by counting ticks from the chosen clocksource. All crystals drift (around tens of ppm, seconds per day), so NTP or PTP continuously disciplines system time and periodically writes it back to the RTC.",
+    "first_principles": {
+      "problem": "Two servers' logs differ by 4 seconds, making incident timelines impossible to reconstruct.",
+      "truths": [
+        "Hardware clocks drift.",
+        "The kernel counts from a clocksource.",
+        "External references correct drift."
+      ],
+      "derivation": [
+        "Know **RTC vs system clock**.",
+        "Check **clocksource** (tsc preferred).",
+        "Discipline with **NTP/PTP**.",
+        "Sync **RTC** from system time.",
+        "Monitor **offset**."
+      ]
+    },
+    "analogy": {
+      "title": "A wristwatch and a radio time signal",
+      "story": "Your watch drifts a little each day; tuning to the radio signal keeps it right.",
+      "mapping": [
+        [
+          "Wristwatch",
+          "System clock"
+        ],
+        [
+          "Battery clock in a drawer",
+          "RTC"
+        ],
+        [
+          "Radio signal",
+          "NTP"
+        ]
+      ],
+      "breaks": "Watches drift slowly; VM clocks can jump after pauses."
+    },
+    "mindmap": {
+      "center": "Hardware vs System Time",
+      "branches": [
+        {
+          "label": "Hardware",
+          "children": [
+            "RTC",
+            "TSC",
+            "HPET",
+            "ACPI PM"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "clocksource",
+            "timekeeping"
+          ]
+        },
+        {
+          "label": "Drift",
+          "children": [
+            "ppm errors",
+            "Temperature"
+          ]
+        },
+        {
+          "label": "Correction",
+          "children": [
+            "NTP",
+            "PTP",
+            "hwclock --systohc"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "timedatectl",
+            "chronyc tracking"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect clocks",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See offset and drift rate."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "timedatectl\ncat /sys/devices/system/clocksource/clocksource0/current_clocksource   # tsc\nhwclock --show\nchronyc tracking | grep -E 'System time|Frequency'"
+        }
+      ],
+      "outcome": "time sources understood."
+    },
+    "summary": {
+      "points": [
+        "RTC and counters.",
+        "Drift happens.",
+        "Discipline continuously."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't a server rely on its hardware clock alone for accurate time?",
+        "a": "Crystal oscillators drift (temperature, manufacturing), accumulating seconds of error over days without external correction."
+      }
+    ]
+  },
+  "wall-clock-vs-monotonic-clock": {
+    "core": "CLOCK_REALTIME (wall clock) is calendar time and can jump backward or forward when NTP corrects it, an admin sets it, or leap seconds occur, so it's right for timestamps but wrong for measuring durations. CLOCK_MONOTONIC only moves forward at a steady rate (slewed by NTP but never stepped) from an arbitrary start, which suits timeouts, intervals and latency. CLOCK_BOOTTIME also counts suspend. Using wall clock for durations causes negative latencies and broken timeouts.",
+    "first_principles": {
+      "problem": "After an NTP step correction, a service computes a negative request duration and its timeout logic fires immediately.",
+      "truths": [
+        "Wall time can jump.",
+        "Durations need a steady clock.",
+        "Different clocks serve different needs."
+      ],
+      "derivation": [
+        "Use **REALTIME** for timestamps.",
+        "Use **MONOTONIC** for durations/timeouts.",
+        "Use **BOOTTIME** if suspend matters.",
+        "Prefer **language monotonic APIs** (time.monotonic, System.nanoTime).",
+        "Never subtract **wall-clock** times for elapsed time."
+      ]
+    },
+    "analogy": {
+      "title": "A calendar clock vs a stopwatch",
+      "story": "The wall clock may be reset for daylight saving; a stopwatch only counts elapsed time.",
+      "mapping": [
+        [
+          "Wall clock",
+          "CLOCK_REALTIME"
+        ],
+        [
+          "Stopwatch",
+          "CLOCK_MONOTONIC"
+        ],
+        [
+          "Clock reset",
+          "NTP step"
+        ]
+      ],
+      "breaks": "Stopwatches stop when you press stop; MONOTONIC keeps running (but not during suspend)."
+    },
+    "mindmap": {
+      "center": "Clock Types",
+      "branches": [
+        {
+          "label": "REALTIME",
+          "children": [
+            "Calendar",
+            "Can jump",
+            "Timestamps"
+          ]
+        },
+        {
+          "label": "MONOTONIC",
+          "children": [
+            "Steady",
+            "Never steps",
+            "Durations"
+          ]
+        },
+        {
+          "label": "BOOTTIME",
+          "children": [
+            "Includes suspend"
+          ]
+        },
+        {
+          "label": "Others",
+          "children": [
+            "MONOTONIC_RAW",
+            "TAI"
+          ]
+        },
+        {
+          "label": "APIs",
+          "children": [
+            "clock_gettime",
+            "time.monotonic",
+            "System.nanoTime"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Right clock for durations",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Durations always correct."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "import time\nstart = time.monotonic()\ndo_work()\nelapsed = time.monotonic() - start          # immune to NTP steps\nlogged_at = time.time()                      # wall clock for timestamp\n# bad: time.time() - start_wall can be negative after a clock step"
+        }
+      ],
+      "outcome": "correct clock usage."
+    },
+    "summary": {
+      "points": [
+        "Wall for timestamps.",
+        "Monotonic for durations.",
+        "Never mix."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should timeouts use a monotonic clock?",
+        "a": "Wall-clock time can jump due to NTP or manual changes, making timeouts fire early or never."
+      }
+    ]
+  },
+  "ntp-and-clock-discipline": {
+    "core": "NTP clients (chrony, ntpd, systemd-timesyncd) query multiple time servers, estimate offset and network delay, filter outliers, and discipline the clock. They slew (gradually adjust frequency) for small offsets, and step only at startup or for large errors, avoiding jumps. chrony handles intermittent networks and VMs well and is the modern default. For microsecond accuracy, PTP with hardware timestamping is used; cloud providers offer local time services (169.254.169.123 on AWS).",
+    "first_principles": {
+      "problem": "Database replicas reject writes due to clock skew because NTP was misconfigured on half the nodes.",
+      "truths": [
+        "Network delay distorts time queries.",
+        "Multiple sources reveal outliers.",
+        "Gradual correction avoids jumps."
+      ],
+      "derivation": [
+        "Run **chrony** with several sources.",
+        "Use **cloud/local time service**.",
+        "Allow **makestep** only at boot.",
+        "Monitor **offset and stratum**.",
+        "Use **PTP** for µs needs."
+      ]
+    },
+    "analogy": {
+      "title": "Asking several people the time and averaging",
+      "story": "You discount the one who's clearly wrong, then nudge your watch gradually instead of jumping it.",
+      "mapping": [
+        [
+          "Several people",
+          "NTP servers"
+        ],
+        [
+          "Discounting outlier",
+          "Filtering"
+        ],
+        [
+          "Nudging",
+          "Slewing"
+        ]
+      ],
+      "breaks": "People answer instantly; NTP must account for network delay."
+    },
+    "mindmap": {
+      "center": "NTP",
+      "branches": [
+        {
+          "label": "Clients",
+          "children": [
+            "chrony",
+            "ntpd",
+            "timesyncd"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "Offset",
+            "Delay",
+            "Filtering",
+            "Slew vs step"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "pool.ntp.org",
+            "Cloud time service",
+            "Local stratum 1"
+          ]
+        },
+        {
+          "label": "Monitoring",
+          "children": [
+            "chronyc tracking",
+            "chronyc sources -v"
+          ]
+        },
+        {
+          "label": "Precision",
+          "children": [
+            "NTP ms",
+            "PTP µs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "chrony config",
+      "scenario": "File + check.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Microsecond-level offset on cloud VMs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# /etc/chrony/chrony.conf\nserver 169.254.169.123 prefer iburst minpoll 4 maxpoll 4\npool 2.pool.ntp.org iburst\nmakestep 1.0 3\nrtcsync\n# chronyc tracking → System time: 0.000012 seconds fast of NTP time"
+        }
+      ],
+      "outcome": "disciplined, consistent time."
+    },
+    "summary": {
+      "points": [
+        "Multiple sources.",
+        "Slew, don't jump.",
+        "Monitor offset."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between slewing and stepping the clock?",
+        "a": "Slewing gradually adjusts clock speed to correct small offsets without jumps; stepping sets the time instantly, causing jumps."
+      }
+    ]
+  },
+  "leap-seconds-and-leap-smearing": {
+    "core": "Leap seconds keep UTC aligned with Earth's rotation by occasionally inserting a 61st second (23:59:60). Software often assumes 60-second minutes, and kernels historically stepped or repeated a second, causing livelocks and crashes (the 2012 incidents). Leap smearing (Google, AWS, Meta) spreads the extra second over hours by slightly slowing clocks, so there's no discontinuity. Don't mix smeared and non-smeared time sources, and note that leap seconds are planned to be abolished by 2035.",
+    "first_principles": {
+      "problem": "On a leap second night, Java and MySQL processes spin at 100% CPU on many servers.",
+      "truths": [
+        "UTC occasionally needs an extra second.",
+        "Discontinuities break assumptions.",
+        "Smearing hides the step."
+      ],
+      "derivation": [
+        "Prefer **smeared time sources** consistently.",
+        "Don't **mix** smeared and unsmeared servers.",
+        "Use **monotonic clocks** for logic.",
+        "Test **leap handling** in critical systems.",
+        "Track **leap second schedule**."
+      ]
+    },
+    "analogy": {
+      "title": "Adding an extra minute to a race by slowing everyone a little all day",
+      "story": "Instead of a sudden pause, every lap is slightly longer, and nobody notices.",
+      "mapping": [
+        [
+          "Sudden pause",
+          "Leap second step"
+        ],
+        [
+          "Slightly longer laps",
+          "Smear"
+        ],
+        [
+          "Race clock",
+          "System time"
+        ]
+      ],
+      "breaks": "Races have one clock; mixed time sources disagree during a smear."
+    },
+    "mindmap": {
+      "center": "Leap Seconds",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Earth rotation",
+            "UTC alignment"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "23:59:60",
+            "Repeated second",
+            "Livelocks"
+          ]
+        },
+        {
+          "label": "Smearing",
+          "children": [
+            "Google",
+            "AWS",
+            "24h linear"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Consistent sources",
+            "Monotonic for logic"
+          ]
+        },
+        {
+          "label": "Future",
+          "children": [
+            "Abolition by 2035"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Consistent smear",
+      "scenario": "chrony.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No discontinuity, no disagreement."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# all nodes use the same smeared source (AWS Time Sync Service smears leap seconds)\nserver 169.254.169.123 prefer iburst\n# do NOT also list pool.ntp.org (non-smeared) on the same hosts\n# chronyc sources → single consistent source"
+        }
+      ],
+      "outcome": "leap-second safety."
+    },
+    "summary": {
+      "points": [
+        "Extra seconds break software.",
+        "Smear gradually.",
+        "Don't mix sources."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is mixing smeared and non-smeared NTP sources dangerous?",
+        "a": "During a leap smear they disagree by up to a second, confusing clients and causing clock jumps or inconsistent time across hosts."
+      }
+    ]
+  },
+  "time-namespaces": {
+    "core": "Time namespaces (Linux 5.6+) let processes see offsets for CLOCK_MONOTONIC and CLOCK_BOOTTIME, so a container's uptime and monotonic clock can start near zero or be shifted. That's mainly used for container checkpoint and restore and migration (CRIU), where restored processes must see continuous monotonic time on a new host. Wall-clock (REALTIME) can't be namespaced, so system time stays global and changing it needs CAP_SYS_TIME on the host.",
+    "first_principles": {
+      "problem": "After live-migrating a checkpointed container, its monotonic timers jump because the new host's uptime differs.",
+      "truths": [
+        "Monotonic time is per host.",
+        "Migration changes the host.",
+        "Offsets can preserve continuity."
+      ],
+      "derivation": [
+        "Create with **unshare --time**.",
+        "Set **offsets** for monotonic/boottime.",
+        "Use for **CRIU restore**.",
+        "Remember **REALTIME isn't namespaced**.",
+        "Inspect **/proc/<pid>/timens_offsets**."
+      ]
+    },
+    "analogy": {
+      "title": "Resetting a stopwatch display for a relocated runner",
+      "story": "The runner keeps their own elapsed time even though the new stadium's clock shows something else.",
+      "mapping": [
+        [
+          "Runner's stopwatch",
+          "Namespaced monotonic clock"
+        ],
+        [
+          "Stadium clock",
+          "Host monotonic"
+        ],
+        [
+          "Offset",
+          "timens_offsets"
+        ]
+      ],
+      "breaks": "Stopwatches are personal; wall-clock time stays shared."
+    },
+    "mindmap": {
+      "center": "Time Namespaces",
+      "branches": [
+        {
+          "label": "Clocks",
+          "children": [
+            "MONOTONIC",
+            "BOOTTIME"
+          ]
+        },
+        {
+          "label": "Not",
+          "children": [
+            "REALTIME"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "CRIU checkpoint/restore",
+            "Container uptime"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "unshare --time",
+            "/proc/pid/timens_offsets"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "5.6+"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Shifted uptime",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Process sees shifted monotonic/boot time."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "unshare --time --fork --boottime 86400 --monotonic 86400 cat /proc/uptime\n# shows uptime ~1 day larger than host\ncat /proc/self/timens_offsets"
+        }
+      ],
+      "outcome": "per-namespace clocks understood."
+    },
+    "summary": {
+      "points": [
+        "Offset monotonic/boottime.",
+        "For migration.",
+        "Wall clock stays global."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which clocks can be offset in a Linux time namespace?",
+        "a": "CLOCK_MONOTONIC and CLOCK_BOOTTIME; CLOCK_REALTIME remains global."
+      }
+    ]
+  }
+}

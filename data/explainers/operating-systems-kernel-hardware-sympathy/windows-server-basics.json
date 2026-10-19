@@ -1,0 +1,668 @@
+{
+  "introduction-the-hybrid-reality": {
+    "core": "Most enterprises run mixed fleets: Linux for web and containers, and Windows Server for Active Directory, Exchange, SQL Server, IIS-hosted .NET apps, file shares and RDS. SREs need enough Windows fluency to operate it: the object-based PowerShell, the registry instead of /etc, NTFS permissions, services and the Event Log, AD identity and Group Policy, and IIS. The concepts map to Linux equivalents, with different tools.",
+    "first_principles": {
+      "problem": "A Linux-focused SRE team is paged for a Windows IIS outage and doesn't know where to look.",
+      "truths": [
+        "Enterprises are hybrid.",
+        "Concepts map across OSes.",
+        "Tools differ significantly."
+      ],
+      "derivation": [
+        "Map **Linux → Windows** concepts.",
+        "Learn **PowerShell** basics.",
+        "Know **Event Viewer/Get-WinEvent**.",
+        "Understand **AD and GPO**.",
+        "Manage **services and IIS**."
+      ]
+    },
+    "analogy": {
+      "title": "Driving on the other side of the road",
+      "story": "The car still has wheels, brakes and gears, but the controls are in different places.",
+      "mapping": [
+        [
+          "Driving rules",
+          "OS concepts"
+        ],
+        [
+          "Control layout",
+          "Tools/commands"
+        ],
+        [
+          "Other side of road",
+          "Windows"
+        ]
+      ],
+      "breaks": "Roads are similar; Windows' object pipeline differs fundamentally from text pipes."
+    },
+    "mindmap": {
+      "center": "Windows Server",
+      "branches": [
+        {
+          "label": "Roles",
+          "children": [
+            "AD DS",
+            "IIS",
+            "SQL Server",
+            "File/Print",
+            "RDS",
+            "Hyper-V"
+          ]
+        },
+        {
+          "label": "Mapping",
+          "children": [
+            "systemd → Services",
+            "/etc → Registry",
+            "journald → Event Log",
+            "bash → PowerShell"
+          ]
+        },
+        {
+          "label": "Management",
+          "children": [
+            "PowerShell remoting",
+            "WAC",
+            "GPO"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Linux ↔ Windows",
+      "scenario": "Mapping.",
+      "flow": [
+        "ps/kill → Get-Process/Stop-Process",
+        "systemctl → Get-Service/Restart-Service",
+        "journalctl → Get-WinEvent",
+        "ss → Get-NetTCPConnection"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster orientation on Windows hosts."
+        }
+      ],
+      "code": [],
+      "outcome": "hybrid readiness."
+    },
+    "summary": {
+      "points": [
+        "Mixed fleets.",
+        "Concepts map.",
+        "Learn the tools."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the Windows equivalent of journalctl for reading system logs?",
+        "a": "Event Viewer, or PowerShell's Get-WinEvent."
+      }
+    ]
+  },
+  "powershell-objects-not-text": {
+    "core": "PowerShell pipelines pass .NET objects with typed properties, not text. Get-Process | Where-Object CPU -gt 100 | Sort-Object WS -Descending | Select-Object -First 5 Name,Id,WS needs no parsing with awk or cut. Commands are Verb-Noun cmdlets (Get-Service, Restart-Service), discoverable via Get-Command and Get-Help, with output inspectable via Get-Member. Remoting (Enter-PSSession, Invoke-Command) manages fleets, and PowerShell 7 runs cross-platform.",
+    "first_principles": {
+      "problem": "A Linux engineer tries to grep PowerShell output and breaks scripts when column widths change.",
+      "truths": [
+        "Objects carry structure.",
+        "Parsing text is fragile.",
+        "Discoverability helps learning."
+      ],
+      "derivation": [
+        "Filter with **Where-Object**.",
+        "Sort/select with **Sort-Object/Select-Object**.",
+        "Inspect with **Get-Member**.",
+        "Discover with **Get-Command/Get-Help**.",
+        "Automate with **Invoke-Command** remoting."
+      ]
+    },
+    "analogy": {
+      "title": "Passing labelled boxes vs reading a printed list",
+      "story": "Each box has named compartments, so the next person picks the field they want without reading text.",
+      "mapping": [
+        [
+          "Labelled boxes",
+          "Objects"
+        ],
+        [
+          "Compartments",
+          "Properties"
+        ],
+        [
+          "Printed list",
+          "Text output"
+        ]
+      ],
+      "breaks": "Boxes are physical; objects live only inside the PowerShell pipeline until formatted."
+    },
+    "mindmap": {
+      "center": "PowerShell",
+      "branches": [
+        {
+          "label": "Model",
+          "children": [
+            "Objects",
+            ".NET types",
+            "Pipeline"
+          ]
+        },
+        {
+          "label": "Cmdlets",
+          "children": [
+            "Verb-Noun",
+            "Get-/Set-/New-/Remove-"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "Get-Command",
+            "Get-Help",
+            "Get-Member"
+          ]
+        },
+        {
+          "label": "Remoting",
+          "children": [
+            "Enter-PSSession",
+            "Invoke-Command",
+            "WinRM/SSH"
+          ]
+        },
+        {
+          "label": "Versions",
+          "children": [
+            "Windows PowerShell 5.1",
+            "PowerShell 7"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Top memory processes + service restart",
+      "scenario": "PowerShell.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Structured results across hosts, no parsing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "powershell",
+          "text": "Get-Process | Sort-Object WorkingSet64 -Descending |\n  Select-Object -First 5 Name, Id, @{n='WS_MB';e={[int]($_.WorkingSet64/1MB)}}\nGet-Service -Name W3SVC | Restart-Service -Verbose\nInvoke-Command -ComputerName web01,web02 { Get-Service W3SVC | Select-Object MachineName, Status }"
+        }
+      ],
+      "outcome": "object-pipeline fluency."
+    },
+    "summary": {
+      "points": [
+        "Objects, not text.",
+        "Verb-Noun discoverability.",
+        "Remoting for fleets."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is parsing PowerShell output with text tools discouraged?",
+        "a": "PowerShell passes structured objects; formatting to text loses structure and can change with display settings, making text parsing fragile."
+      }
+    ]
+  },
+  "the-registry-vs-etc": {
+    "core": "Windows stores much configuration in the registry, a hierarchical database of keys and values. HKLM holds machine-wide settings (services, drivers, software), HKCU per-user settings, and HKCR file associations. Values are typed (REG_SZ, REG_DWORD, REG_MULTI_SZ). Unlike /etc text files it isn't diffable in Git by default, so changes should go through PowerShell (Get-ItemProperty, Set-ItemProperty), Group Policy or DSC, with exports for backup.",
+    "first_principles": {
+      "problem": "A TLS hardening change made by hand in regedit on one server isn't replicated anywhere, and drifts.",
+      "truths": [
+        "Configuration needs a home.",
+        "Binary databases resist version control.",
+        "Automation prevents drift."
+      ],
+      "derivation": [
+        "Navigate **HKLM/HKCU** with PowerShell drives.",
+        "Change via **Set-ItemProperty** scripts.",
+        "Distribute via **GPO/DSC/Ansible**.",
+        "**Export** keys before changes.",
+        "Know common paths (**Services, SCHANNEL**)."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet with locked drawers vs plain notebooks",
+      "story": "Notebooks (/etc) are easy to photocopy and compare; the cabinet (registry) needs special tools to read and copy.",
+      "mapping": [
+        [
+          "Notebooks",
+          "/etc files"
+        ],
+        [
+          "Cabinet",
+          "Registry"
+        ],
+        [
+          "Special tools",
+          "PowerShell/reg.exe"
+        ]
+      ],
+      "breaks": "Cabinets are physical; registry hives are files loaded at boot."
+    },
+    "mindmap": {
+      "center": "Registry",
+      "branches": [
+        {
+          "label": "Hives",
+          "children": [
+            "HKLM",
+            "HKCU",
+            "HKCR",
+            "HKU"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "REG_SZ",
+            "REG_DWORD",
+            "REG_MULTI_SZ",
+            "REG_BINARY"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "regedit",
+            "reg.exe",
+            "PowerShell HKLM:",
+            "Set-ItemProperty"
+          ]
+        },
+        {
+          "label": "Management",
+          "children": [
+            "GPO",
+            "DSC",
+            "Ansible win_regedit"
+          ]
+        },
+        {
+          "label": "Backup",
+          "children": [
+            "reg export"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scripted TLS change",
+      "scenario": "PowerShell.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Repeatable, reviewable registry change."
+        }
+      ],
+      "code": [
+        {
+          "lang": "powershell",
+          "text": "reg export 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL' C:\\backup\\schannel.reg\n$p = 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Server'\nNew-Item -Path $p -Force | Out-Null\nSet-ItemProperty -Path $p -Name Enabled -Value 0 -Type DWord\nGet-ItemProperty -Path $p"
+        }
+      ],
+      "outcome": "registry managed as code."
+    },
+    "summary": {
+      "points": [
+        "Hierarchical typed database.",
+        "Script changes.",
+        "Distribute via GPO/DSC."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which registry hive holds machine-wide settings like services and drivers?",
+        "a": "HKEY_LOCAL_MACHINE (HKLM)."
+      }
+    ]
+  },
+  "ntfs-vs-linux-filesystems": {
+    "core": "NTFS uses rich ACLs: each file and folder has a security descriptor with an owner and ACEs granting or denying specific rights (Read, Write, Modify, Full Control and fine-grained ones) to users and groups, with inheritance from parent folders. Deny entries take precedence. Share permissions on SMB stack with NTFS permissions, and the most restrictive wins. NTFS also has alternate data streams, journaling, compression and encryption (EFS), and case-insensitive (but preserving) names.",
+    "first_principles": {
+      "problem": "A user has 'Full Control' on the NTFS folder but can't write over the network share.",
+      "truths": [
+        "NTFS ACLs are fine-grained.",
+        "Share and NTFS permissions combine.",
+        "Deny overrides allow."
+      ],
+      "derivation": [
+        "Inspect with **Get-Acl/icacls**.",
+        "Combine **share + NTFS** (most restrictive).",
+        "Use **inheritance** deliberately.",
+        "Prefer **group-based** ACEs.",
+        "Avoid explicit **Deny** unless necessary."
+      ]
+    },
+    "analogy": {
+      "title": "Two locked doors in sequence",
+      "story": "The building door (share) and the office door (NTFS) both need to let you in; the stricter lock wins.",
+      "mapping": [
+        [
+          "Building door",
+          "Share permissions"
+        ],
+        [
+          "Office door",
+          "NTFS ACL"
+        ],
+        [
+          "Stricter lock",
+          "Effective permission"
+        ]
+      ],
+      "breaks": "Doors are separate; Windows computes effective access from both automatically."
+    },
+    "mindmap": {
+      "center": "NTFS",
+      "branches": [
+        {
+          "label": "ACLs",
+          "children": [
+            "Owner",
+            "ACEs",
+            "Allow/Deny",
+            "Inheritance"
+          ]
+        },
+        {
+          "label": "Rights",
+          "children": [
+            "Read",
+            "Write",
+            "Modify",
+            "Full Control",
+            "Special"
+          ]
+        },
+        {
+          "label": "Shares",
+          "children": [
+            "SMB share perms",
+            "Most restrictive wins"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Journaling",
+            "ADS",
+            "EFS",
+            "Compression",
+            "Case-insensitive"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "icacls",
+            "Get-Acl",
+            "Set-Acl"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Diagnose access",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Share permission fixed; writes work."
+        }
+      ],
+      "code": [
+        {
+          "lang": "powershell",
+          "text": "icacls D:\\Shares\\Finance\nGet-SmbShareAccess -Name Finance\n# Share: Everyone Read   ← restricts network writes despite NTFS Full Control\nGrant-SmbShareAccess -Name Finance -AccountName 'CORP\\Finance-Editors' -AccessRight Change -Force"
+        }
+      ],
+      "outcome": "Windows file access understood."
+    },
+    "summary": {
+      "points": [
+        "Rich ACLs.",
+        "Share + NTFS combine.",
+        "Deny wins."
+      ]
+    },
+    "check": [
+      {
+        "q": "How are SMB share permissions and NTFS permissions combined for network access?",
+        "a": "Both apply, and the effective permission is the more restrictive of the two."
+      }
+    ]
+  },
+  "active-directory-ad-the-kingdom": {
+    "core": "Active Directory Domain Services is the central identity and policy system for Windows networks. Domain controllers hold a replicated directory of users, groups, computers and OUs; authentication uses Kerberos (with NTLM fallback); Group Policy pushes settings and security baselines to machines by OU; and DNS is tightly integrated. Compromise of AD (Domain Admins, krbtgt) means compromise of everything, which is why tiered admin models and monitoring matter.",
+    "first_principles": {
+      "problem": "A single helpdesk account with Domain Admin rights is phished, giving attackers control of every server.",
+      "truths": [
+        "Central identity simplifies management.",
+        "Central identity concentrates risk.",
+        "Policy can be applied hierarchically."
+      ],
+      "derivation": [
+        "Organise with **OUs** and **groups**.",
+        "Apply **GPOs** by OU.",
+        "Use **Kerberos**, limit NTLM.",
+        "Adopt **tiered admin** (Tier 0/1/2).",
+        "Monitor **privileged groups** and DCs."
+      ]
+    },
+    "analogy": {
+      "title": "A kingdom's royal registry and decrees",
+      "story": "The registry says who everyone is; royal decrees (GPOs) apply to regions; whoever holds the royal seal controls the kingdom.",
+      "mapping": [
+        [
+          "Registry",
+          "AD directory"
+        ],
+        [
+          "Decrees",
+          "Group Policy"
+        ],
+        [
+          "Royal seal",
+          "Domain Admin / krbtgt"
+        ]
+      ],
+      "breaks": "Kingdoms change slowly; AD compromises can spread in hours."
+    },
+    "mindmap": {
+      "center": "Active Directory",
+      "branches": [
+        {
+          "label": "Components",
+          "children": [
+            "Domain controllers",
+            "Forest/domain",
+            "OUs",
+            "Users/Groups/Computers"
+          ]
+        },
+        {
+          "label": "Auth",
+          "children": [
+            "Kerberos",
+            "NTLM",
+            "LDAP"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "GPO",
+            "Security baselines"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Tiered admin",
+            "LAPS",
+            "Protected Users",
+            "Monitoring"
+          ]
+        },
+        {
+          "label": "Integration",
+          "children": [
+            "DNS",
+            "Azure AD/Entra Connect",
+            "Linux via SSSD"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect privilege",
+      "scenario": "PowerShell.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Visibility into who holds the keys."
+        }
+      ],
+      "code": [
+        {
+          "lang": "powershell",
+          "text": "Get-ADGroupMember 'Domain Admins' -Recursive | Select-Object Name, SamAccountName\nGet-ADUser alice -Properties MemberOf, LastLogonDate\ngpresult /r /scope computer       # applied GPOs on this machine\nGet-ADComputer -Filter * -SearchBase 'OU=Web,DC=corp,DC=example,DC=com'"
+        }
+      ],
+      "outcome": "AD fundamentals."
+    },
+    "summary": {
+      "points": [
+        "Central identity.",
+        "GPO policy.",
+        "Protect Tier 0."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is Domain Admin compromise so severe?",
+        "a": "Domain Admins control AD itself, and therefore authentication and policy for every domain-joined machine and user."
+      }
+    ]
+  },
+  "managing-iis-and-rdp": {
+    "core": "IIS hosts web apps in sites (bindings: hostname, port, certificate) running in application pools, isolated worker processes (w3wp.exe) with their own identity, .NET runtime and recycling settings. Logs live in %SystemDrive%\\inetpub\\logs, and the WebAdministration and IISAdministration modules manage it. RDP gives remote desktop access. Secure it with Network Level Authentication, restricted groups, MFA and RD Gateway (never exposed directly to the internet), and use PowerShell remoting for routine work.",
+    "first_principles": {
+      "problem": "An IIS site returns 503 Service Unavailable because its application pool keeps crashing and was auto-stopped by rapid-fail protection.",
+      "truths": [
+        "Sites run inside app pools.",
+        "Pools can be stopped after repeated failures.",
+        "RDP is a high-value attack target."
+      ],
+      "derivation": [
+        "Check **app pool state** (Get-WebAppPoolState).",
+        "Read **Event Log + IIS logs**.",
+        "Tune **recycling/rapid-fail** settings.",
+        "Restrict **RDP** via gateway, NLA, MFA.",
+        "Prefer **PowerShell remoting** to RDP."
+      ]
+    },
+    "analogy": {
+      "title": "A shopping mall with separate shop units",
+      "story": "Each shop (app pool) has its own staff and doors; if one keeps catching fire, security closes it so the mall stays open.",
+      "mapping": [
+        [
+          "Mall",
+          "IIS server"
+        ],
+        [
+          "Shop unit",
+          "App pool"
+        ],
+        [
+          "Closing a shop",
+          "Rapid-fail protection"
+        ]
+      ],
+      "breaks": "Malls reopen shops manually; IIS may need you to start the pool after fixing."
+    },
+    "mindmap": {
+      "center": "IIS & RDP",
+      "branches": [
+        {
+          "label": "IIS",
+          "children": [
+            "Sites",
+            "Bindings",
+            "App pools",
+            "w3wp.exe",
+            "Recycling",
+            "Logs"
+          ]
+        },
+        {
+          "label": "Troubleshooting",
+          "children": [
+            "503 → pool stopped",
+            "Event Log WAS",
+            "Failed request tracing"
+          ]
+        },
+        {
+          "label": "RDP",
+          "children": [
+            "NLA",
+            "RD Gateway",
+            "MFA",
+            "Restricted Admin"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "WebAdministration",
+            "appcmd",
+            "Enter-PSSession"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fix a 503",
+      "scenario": "PowerShell.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Root cause found in WAS events; pool restarted."
+        }
+      ],
+      "code": [
+        {
+          "lang": "powershell",
+          "text": "Import-Module WebAdministration\nGet-WebAppPoolState -Name OrdersPool          # Stopped\nGet-WinEvent -LogName System -MaxEvents 20 | Where-Object ProviderName -eq 'WAS' | Format-List TimeCreated, Message\n# fix config/app error, then:\nStart-WebAppPool -Name OrdersPool"
+        }
+      ],
+      "outcome": "IIS and RDP managed safely."
+    },
+    "summary": {
+      "points": [
+        "Sites in app pools.",
+        "503 often means stopped pool.",
+        "Lock down RDP."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an IIS 503 'Service Unavailable' commonly indicate?",
+        "a": "The site's application pool is stopped, often by rapid-fail protection after repeated worker process crashes."
+      }
+    ]
+  }
+}

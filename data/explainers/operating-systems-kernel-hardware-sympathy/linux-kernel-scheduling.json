@@ -1,0 +1,976 @@
+{
+  "introduction-the-cpus-traffic-cop": {
+    "core": "With hundreds of runnable threads and a handful of cores, the scheduler decides who runs where and for how long. It balances throughput (keep cores busy), latency (respond quickly to interactive or I/O-bound tasks), fairness (no starvation) and locality (keep tasks near their caches and memory). Linux uses scheduling classes (deadline, real-time, fair, idle), each with its own policy, chosen per thread.",
+    "first_principles": {
+      "problem": "A latency-critical service shares cores with a batch job and suffers unpredictable delays.",
+      "truths": [
+        "Cores are fewer than runnable tasks.",
+        "Goals conflict: throughput vs latency.",
+        "Policies differ per workload."
+      ],
+      "derivation": [
+        "Understand **scheduling classes**.",
+        "Use **CFS/EEVDF** for normal tasks.",
+        "Use **RT/deadline** for strict latency.",
+        "Control **nice/weights**.",
+        "Control **placement** (affinity, cgroups)."
+      ]
+    },
+    "analogy": {
+      "title": "A traffic cop at a busy junction",
+      "story": "They decide who goes next, balancing flow, fairness and emergency vehicles.",
+      "mapping": [
+        [
+          "Cars",
+          "Threads"
+        ],
+        [
+          "Lanes",
+          "CPU cores"
+        ],
+        [
+          "Ambulance",
+          "Real-time task"
+        ]
+      ],
+      "breaks": "Cops see the cars; the scheduler infers needs from behaviour and policy."
+    },
+    "mindmap": {
+      "center": "Scheduling",
+      "branches": [
+        {
+          "label": "Goals",
+          "children": [
+            "Throughput",
+            "Latency",
+            "Fairness",
+            "Locality"
+          ]
+        },
+        {
+          "label": "Classes",
+          "children": [
+            "Deadline",
+            "Real-time",
+            "Fair (CFS/EEVDF)",
+            "Idle"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "nice",
+            "chrt",
+            "taskset",
+            "cgroups cpu.weight"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "run queue",
+            "schedstat",
+            "perf sched"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Separate workloads",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Batch no longer disrupts latency service."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nice -n 19 ./batch_job &          # lowest priority among normal tasks\ntaskset -c 4-7 ./latency_service  # dedicated cores\nperf sched latency -s max | head  # scheduling delays per task"
+        }
+      ],
+      "outcome": "scheduler goals understood."
+    },
+    "summary": {
+      "points": [
+        "Scheduler arbitrates cores.",
+        "Classes for workloads.",
+        "Control priority and placement."
+      ]
+    },
+    "check": [
+      {
+        "q": "What competing goals does a CPU scheduler balance?",
+        "a": "Throughput, latency/responsiveness, fairness and cache/NUMA locality."
+      }
+    ]
+  },
+  "scheduling-classes-a-hierarchy-of-priorities": {
+    "core": "Linux checks scheduling classes in strict order. stop (internal), then deadline (SCHED_DEADLINE), then real-time (SCHED_FIFO and SCHED_RR, priorities 1–99), then fair (SCHED_OTHER and SCHED_BATCH: CFS, or EEVDF since 6.6), then idle (SCHED_IDLE). A runnable task in a higher class always preempts lower classes, so one busy RT thread can starve every normal task on that CPU, which is why RT throttling (sched_rt_runtime_us) reserves 5% for others by default.",
+    "first_principles": {
+      "problem": "A misbehaving SCHED_FIFO thread spinning on a core makes the server unresponsive.",
+      "truths": [
+        "Classes are strictly ordered.",
+        "Higher classes preempt lower.",
+        "Throttling prevents total starvation."
+      ],
+      "derivation": [
+        "Know the **class order**.",
+        "Use **RT** only for truly time-critical code.",
+        "Keep **RT throttling** enabled.",
+        "Use **SCHED_BATCH/IDLE** for background work.",
+        "Inspect with **chrt -p**."
+      ]
+    },
+    "analogy": {
+      "title": "Emergency, priority and standard queues at a hospital",
+      "story": "Emergency patients always go first; standard patients wait, and a rule reserves some doctor time so they aren't ignored forever.",
+      "mapping": [
+        [
+          "Emergency",
+          "Deadline/RT"
+        ],
+        [
+          "Standard",
+          "Fair class"
+        ],
+        [
+          "Reserved time",
+          "RT throttling"
+        ]
+      ],
+      "breaks": "Hospitals triage dynamically; class order is fixed."
+    },
+    "mindmap": {
+      "center": "Scheduling Classes",
+      "branches": [
+        {
+          "label": "Order",
+          "children": [
+            "stop",
+            "deadline",
+            "rt",
+            "fair",
+            "idle"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "SCHED_DEADLINE",
+            "SCHED_FIFO",
+            "SCHED_RR",
+            "SCHED_OTHER",
+            "SCHED_BATCH",
+            "SCHED_IDLE"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "sched_rt_runtime_us 950000/1000000"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "chrt",
+            "ps -o cls,rtprio"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect classes",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Find RT threads; batch job deprioritised."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ps -eo pid,cls,rtprio,ni,comm | awk '$2 != \"TS\"' | head    # non-normal classes\nchrt -p $(pgrep -o irq/)\nsysctl kernel.sched_rt_runtime_us kernel.sched_rt_period_us\nchrt -b 0 ./reindex   # SCHED_BATCH"
+        }
+      ],
+      "outcome": "class hierarchy understood."
+    },
+    "summary": {
+      "points": [
+        "Strict order.",
+        "RT preempts fair.",
+        "Throttling protects."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a single SCHED_FIFO thread make a CPU unusable for normal tasks?",
+        "a": "Real-time class always preempts the fair class; a never-sleeping FIFO thread monopolises the CPU apart from RT throttling's reserve."
+      }
+    ]
+  },
+  "the-default-completely-fair-scheduler-cfs": {
+    "core": "CFS, the default fair scheduler from 2.6.23 until EEVDF replaced it in 6.6 with the same goals, aims to give each runnable task a fair share of CPU proportional to its weight (derived from nice: each nice step is about 10% CPU difference). It doesn't use fixed time slices; it tracks how much CPU each task has had and runs the one that has had the least, with a target latency defining how often all runnable tasks get a turn. cgroups extend fairness to groups.",
+    "first_principles": {
+      "problem": "Engineers expect nice 10 to mean 'runs only when idle', but it still gets meaningful CPU.",
+      "truths": [
+        "Fairness is proportional to weight.",
+        "nice maps to weights.",
+        "Groups can share fairly too."
+      ],
+      "derivation": [
+        "Weight from **nice** (−20 to 19).",
+        "Track **CPU consumed**.",
+        "Run the **least-served** task.",
+        "Use **cgroup cpu.weight** for groups.",
+        "Use **SCHED_IDLE** for truly idle-only work."
+      ]
+    },
+    "analogy": {
+      "title": "Sharing a pizza by appetite",
+      "story": "Everyone gets slices proportional to their stated appetite, and whoever has eaten least relative to appetite goes next.",
+      "mapping": [
+        [
+          "Appetite",
+          "Weight/nice"
+        ],
+        [
+          "Slices eaten",
+          "vruntime"
+        ],
+        [
+          "Next turn",
+          "Least vruntime"
+        ]
+      ],
+      "breaks": "Pizza runs out; CPU time is continuously replenished."
+    },
+    "mindmap": {
+      "center": "CFS",
+      "branches": [
+        {
+          "label": "Goal",
+          "children": [
+            "Proportional fairness"
+          ]
+        },
+        {
+          "label": "Weights",
+          "children": [
+            "nice −20..19",
+            "~1.25× per step"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "vruntime",
+            "Red-black tree",
+            "Target latency"
+          ]
+        },
+        {
+          "label": "Groups",
+          "children": [
+            "cgroups cpu.weight"
+          ]
+        },
+        {
+          "label": "Successor",
+          "children": [
+            "EEVDF (6.6+)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Weights in action",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows proportional, not absolute, priority."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# two CPU hogs on one core\ntaskset -c 0 sh -c 'while :; do :; done' &\ntaskset -c 0 nice -n 10 sh -c 'while :; do :; done' &\ntop -b -n1 | grep ' sh$'\n# ~90% vs ~10% CPU (nice 0 weight 1024 vs nice 10 weight 110)"
+        }
+      ],
+      "outcome": "fair scheduling understood."
+    },
+    "summary": {
+      "points": [
+        "Proportional shares.",
+        "nice sets weight.",
+        "Groups via cgroups."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does a nice 19 process only run when the CPU is otherwise idle?",
+        "a": "No, it still gets a small proportional share; use SCHED_IDLE for idle-only behaviour."
+      }
+    ]
+  },
+  "how-cfs-works-virtual-runtime-vruntime": {
+    "core": "Each task has a vruntime: actual runtime scaled by weight (heavier tasks accumulate it more slowly). Runnable tasks sit in a red-black tree ordered by vruntime, and the scheduler picks the leftmost (smallest). Waking tasks get vruntime near the current minimum so sleepers get prompt service without unfair bursts, and preemption happens when the current task's vruntime exceeds another's by a granularity. EEVDF adds lag and virtual deadlines for better latency control.",
+    "first_principles": {
+      "problem": "An I/O-bound interactive task feels sluggish under CPU load, and engineers want to know how it gets scheduled.",
+      "truths": [
+        "Weighted runtime tracks fairness.",
+        "A sorted tree finds the next task fast.",
+        "Sleepers need fair catch-up."
+      ],
+      "derivation": [
+        "**vruntime += runtime × (1024/weight)**.",
+        "Pick **min vruntime** (O(log n) tree).",
+        "Place **wakers** near min_vruntime.",
+        "Preempt after **granularity**.",
+        "Inspect via **/proc/<pid>/sched**."
+      ]
+    },
+    "analogy": {
+      "title": "A queue ordered by 'time served, adjusted for importance'",
+      "story": "VIPs' time counts for less, so they come back to the front sooner.",
+      "mapping": [
+        [
+          "Time served",
+          "vruntime"
+        ],
+        [
+          "Importance",
+          "Weight"
+        ],
+        [
+          "Front of queue",
+          "Leftmost tree node"
+        ]
+      ],
+      "breaks": "Queues are linear; the red-black tree finds the minimum in log time."
+    },
+    "mindmap": {
+      "center": "vruntime",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "runtime × NICE_0_LOAD / weight"
+          ]
+        },
+        {
+          "label": "Structure",
+          "children": [
+            "Red-black tree",
+            "Leftmost cached"
+          ]
+        },
+        {
+          "label": "Wakeups",
+          "children": [
+            "min_vruntime placement"
+          ]
+        },
+        {
+          "label": "Preemption",
+          "children": [
+            "sched_min_granularity",
+            "wakeup granularity"
+          ]
+        },
+        {
+          "label": "EEVDF",
+          "children": [
+            "Lag",
+            "Virtual deadline",
+            "Slice"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Per-task stats",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reveals contention vs I/O behaviour."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "grep -E 'se.vruntime|nr_switches|nr_voluntary|nr_involuntary|prio' /proc/$(pgrep -o nginx)/sched\n# many voluntary switches = I/O bound; many involuntary = CPU contention"
+        }
+      ],
+      "outcome": "vruntime mechanics clear."
+    },
+    "summary": {
+      "points": [
+        "Weighted runtime.",
+        "Smallest goes next.",
+        "Sleepers placed fairly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a higher-weight task accumulate vruntime more slowly?",
+        "a": "Its runtime is scaled down by its weight, so it appears to have used less and is picked more often, giving it a larger CPU share."
+      }
+    ]
+  },
+  "context-switching-the-cost-of-multitasking": {
+    "core": "A context switch saves one task's registers and state and restores another's. Direct cost is a microsecond or so, but the indirect costs matter more: cold caches and TLB (especially across processes), pipeline flushes and, with mitigations, extra overhead. Huge numbers of runnable threads, lock contention or chatty synchronous designs can cause tens of thousands of switches per second per core and degrade throughput.",
+    "first_principles": {
+      "problem": "An app with a 2,000-thread pool on a 16-core machine spends more time switching than working.",
+      "truths": [
+        "Switches save and restore state.",
+        "Caches go cold after switches.",
+        "Too many threads cause thrashing."
+      ],
+      "derivation": [
+        "Measure **cs** in vmstat, **pidstat -w**.",
+        "Distinguish **voluntary vs involuntary**.",
+        "Right-size **thread pools** (~cores for CPU work).",
+        "Use **async I/O/event loops**.",
+        "Reduce **lock contention**."
+      ]
+    },
+    "analogy": {
+      "title": "A chef switching between 20 recipes at once",
+      "story": "Every switch means putting tools away and getting different ones out; too many switches and nothing gets cooked.",
+      "mapping": [
+        [
+          "Switching recipes",
+          "Context switch"
+        ],
+        [
+          "Getting tools out",
+          "Cache warm-up"
+        ],
+        [
+          "Too many recipes",
+          "Oversized thread pool"
+        ]
+      ],
+      "breaks": "Chefs remember steps; CPUs must reload state from memory."
+    },
+    "mindmap": {
+      "center": "Context Switches",
+      "branches": [
+        {
+          "label": "Direct cost",
+          "children": [
+            "Save/restore registers",
+            "~1–5 µs"
+          ]
+        },
+        {
+          "label": "Indirect",
+          "children": [
+            "Cache/TLB misses",
+            "Mitigations"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Voluntary (blocking)",
+            "Involuntary (preemption)"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Huge thread pools",
+            "Lock contention",
+            "Sync I/O"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "vmstat cs",
+            "pidstat -w",
+            "perf sched"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Throughput up 3× with fewer threads."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "vmstat 1 5          # cs column: 450000/s\npidstat -w -p $(pgrep -o api) 1 5\n#   cswch/s 1200   nvcswch/s 38000   ← involuntary: CPU oversubscribed\n# fix: pool 2000 → 32 threads + async IO"
+        }
+      ],
+      "outcome": "switch overhead controlled."
+    },
+    "summary": {
+      "points": [
+        "Switches have hidden costs.",
+        "Watch involuntary switches.",
+        "Right-size concurrency."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a high rate of involuntary context switches indicate?",
+        "a": "Threads are being preempted because more runnable threads compete than there are CPUs (oversubscription)."
+      }
+    ]
+  },
+  "preemption-models": {
+    "core": "The preemption model sets how quickly the kernel can switch to a higher-priority task. PREEMPT_NONE (server) only switches at explicit points, giving maximum throughput but worse latency. PREEMPT_VOLUNTARY (common desktop default) adds more preemption points. PREEMPT (low-latency desktop) allows preemption almost anywhere in kernel code except in critical sections. PREEMPT_RT (merged in 6.12) makes nearly everything preemptible, including interrupt handlers as threads, for hard real-time. PREEMPT_DYNAMIC allows choosing at boot.",
+    "first_principles": {
+      "problem": "An audio processing app on a server kernel has 10 ms latency spikes when the kernel is busy.",
+      "truths": [
+        "Non-preemptible code delays urgent tasks.",
+        "More preemption points reduce latency.",
+        "Preemption adds overhead."
+      ],
+      "derivation": [
+        "Check **current model** (uname -v / dmesg).",
+        "Use **none/voluntary** for throughput servers.",
+        "Use **full preempt** for interactive.",
+        "Use **PREEMPT_RT** for hard real-time.",
+        "Select via **preempt=** with PREEMPT_DYNAMIC."
+      ]
+    },
+    "analogy": {
+      "title": "How often a speaker can be interrupted",
+      "story": "A lecture allows questions only at the end (none), at slide breaks (voluntary), or anytime (full).",
+      "mapping": [
+        [
+          "Questions at end",
+          "PREEMPT_NONE"
+        ],
+        [
+          "At slide breaks",
+          "VOLUNTARY"
+        ],
+        [
+          "Anytime",
+          "PREEMPT/RT"
+        ]
+      ],
+      "breaks": "Speakers can choose; kernels decide at build or boot."
+    },
+    "mindmap": {
+      "center": "Preemption Models",
+      "branches": [
+        {
+          "label": "Models",
+          "children": [
+            "none",
+            "voluntary",
+            "full",
+            "PREEMPT_RT",
+            "lazy"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Throughput",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "Kconfig",
+            "preempt= (dynamic)"
+          ]
+        },
+        {
+          "label": "RT",
+          "children": [
+            "Threaded IRQs",
+            "Sleeping spinlocks",
+            "Mainline 6.12"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "cyclictest"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check and measure",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Max latency drops from 10 ms to < 100 µs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "uname -v                                # ... PREEMPT_DYNAMIC ...\ndmesg | grep -i 'dynamic preempt'       # Dynamic Preempt: voluntary\n# boot with preempt=full\ncyclictest -m -Sp90 -i200 -D60 | tail -2   # max latency µs"
+        }
+      ],
+      "outcome": "preemption chosen per workload."
+    },
+    "summary": {
+      "points": [
+        "Models trade throughput and latency.",
+        "Dynamic selection.",
+        "RT for hard deadlines."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does PREEMPT_RT change compared with standard preemption?",
+        "a": "Makes almost all kernel code preemptible, converting interrupt handlers to threads and spinlocks to sleeping locks, for bounded worst-case latency."
+      }
+    ]
+  },
+  "real-time-scheduling-cutting-the-line": {
+    "core": "Real-time policies serve tasks needing bounded response times: audio, industrial control, trading and telecom. RT tasks preempt all fair-class tasks, run by static priority (1–99), and don't get proportionally shared. Real-time on Linux also needs isolated cores (isolcpus, nohz_full), IRQ affinity away from those cores, locked memory (mlockall) to avoid page faults, a PREEMPT_RT or low-latency kernel, and careful avoidance of blocking syscalls.",
+    "first_principles": {
+      "problem": "A trading engine set to SCHED_FIFO still sees jitter from page faults and interrupts on its core.",
+      "truths": [
+        "Priority alone isn't enough.",
+        "Faults and interrupts add jitter.",
+        "Isolation removes interference."
+      ],
+      "derivation": [
+        "Use **SCHED_FIFO/RR/DEADLINE**.",
+        "**Isolate cores** (isolcpus, nohz_full, rcu_nocbs).",
+        "Move **IRQs** off RT cores.",
+        "**mlockall** memory.",
+        "Measure with **cyclictest**."
+      ]
+    },
+    "analogy": {
+      "title": "An ambulance with a cleared route",
+      "story": "Sirens (priority) help, but you also clear the road (isolation) and pre-fuel (locked memory).",
+      "mapping": [
+        [
+          "Sirens",
+          "RT priority"
+        ],
+        [
+          "Cleared road",
+          "Isolated cores"
+        ],
+        [
+          "Pre-fuelled",
+          "mlockall"
+        ]
+      ],
+      "breaks": "Ambulances can still hit traffic; misconfigured RT tasks still hit faults."
+    },
+    "mindmap": {
+      "center": "Real-Time",
+      "branches": [
+        {
+          "label": "Policies",
+          "children": [
+            "FIFO",
+            "RR",
+            "DEADLINE"
+          ]
+        },
+        {
+          "label": "Isolation",
+          "children": [
+            "isolcpus",
+            "nohz_full",
+            "rcu_nocbs",
+            "IRQ affinity"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "mlockall",
+            "Pre-fault"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "PREEMPT_RT"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "cyclictest",
+            "hwlatdetect"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "RT setup",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bounded latency on isolated core."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# kernel cmdline: isolcpus=4-7 nohz_full=4-7 rcu_nocbs=4-7 irqaffinity=0-3\nchrt -f 80 taskset -c 5 ./engine        # engine calls mlockall(MCL_CURRENT|MCL_FUTURE)\ncyclictest -a 5 -p 80 -m -i 100 -D 300\n# Max: 18 µs"
+        }
+      ],
+      "outcome": "deterministic scheduling."
+    },
+    "summary": {
+      "points": [
+        "Priority plus isolation.",
+        "Lock memory.",
+        "Measure worst case."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why call mlockall in a real-time process?",
+        "a": "To lock its memory in RAM so page faults or swapping can't introduce unpredictable latency."
+      }
+    ]
+  },
+  "rt-policies-sched_fifo-vs-sched_rr-vs-sched_deadline": {
+    "core": "SCHED_FIFO runs the highest-priority task until it blocks, yields or is preempted by a higher priority; equal priorities don't time-share. SCHED_RR is the same but equal-priority tasks rotate on a time slice (sched_rr_timeslice_ms). SCHED_DEADLINE (EDF with CBS) gives each task runtime, deadline and period parameters, and the kernel runs the one with the earliest deadline while admission control guarantees feasibility. It suits periodic workloads.",
+    "first_principles": {
+      "problem": "Two equal-priority SCHED_FIFO threads: one never yields, so the other never runs.",
+      "truths": [
+        "FIFO doesn't time-share equals.",
+        "RR rotates equals.",
+        "Deadline scheduling can guarantee periodic budgets."
+      ],
+      "derivation": [
+        "Use **FIFO** for single critical task per priority.",
+        "Use **RR** for equal-priority sharing.",
+        "Use **DEADLINE** for periodic runtime/period.",
+        "Set params with **chrt**.",
+        "Mind **admission control** errors (EBUSY)."
+      ]
+    },
+    "analogy": {
+      "title": "Speaking orders at a meeting",
+      "story": "FIFO: the speaker talks until done; RR: equal speakers take timed turns; DEADLINE: whoever's report is due soonest speaks first.",
+      "mapping": [
+        [
+          "Talk until done",
+          "FIFO"
+        ],
+        [
+          "Timed turns",
+          "RR"
+        ],
+        [
+          "Due soonest",
+          "EDF"
+        ]
+      ],
+      "breaks": "Meetings can overrun; DEADLINE enforces budgets."
+    },
+    "mindmap": {
+      "center": "RT Policies",
+      "branches": [
+        {
+          "label": "FIFO",
+          "children": [
+            "Run until block/yield",
+            "No time slice"
+          ]
+        },
+        {
+          "label": "RR",
+          "children": [
+            "Time slice among equals"
+          ]
+        },
+        {
+          "label": "DEADLINE",
+          "children": [
+            "runtime",
+            "deadline",
+            "period",
+            "EDF",
+            "Admission control"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "chrt -f/-r/-d",
+            "sched_setattr"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Deadline task",
+      "scenario": "chrt.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Guaranteed 20% CPU with timely deadlines."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# 2 ms of CPU every 10 ms, deadline 10 ms\nchrt -d --sched-runtime 2000000 --sched-deadline 10000000 --sched-period 10000000 0 ./control_loop\nchrt -p $(pgrep control_loop)\n# scheduling policy: SCHED_DEADLINE  runtime/deadline/period: 2000000/10000000/10000000"
+        }
+      ],
+      "outcome": "right RT policy chosen."
+    },
+    "summary": {
+      "points": [
+        "FIFO no rotation.",
+        "RR rotates.",
+        "DEADLINE guarantees budgets."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the key difference between SCHED_FIFO and SCHED_RR?",
+        "a": "SCHED_RR time-slices among tasks of equal priority; SCHED_FIFO lets one run until it blocks or yields."
+      }
+    ]
+  },
+  "cpu-affinity-and-numa-awareness": {
+    "core": "The scheduler load-balances tasks across CPUs within scheduling domains (SMT siblings, cores sharing L3, NUMA nodes), preferring to keep tasks near warm caches and local memory. Affinity (taskset, sched_setaffinity, cpusets and cgroup cpuset.cpus) restricts where a task may run, and automatic NUMA balancing migrates tasks or pages toward each other. Pinning improves predictability and locality but can create imbalance if done badly.",
+    "first_principles": {
+      "problem": "A pinned service runs all threads on one NUMA node while its memory is on the other.",
+      "truths": [
+        "Migration loses cache warmth.",
+        "Domains model hardware hierarchy.",
+        "Pinning trades flexibility for locality."
+      ],
+      "derivation": [
+        "Use **taskset/cpusets** for placement.",
+        "Pair **CPU and memory** (numactl).",
+        "Consider **automatic NUMA balancing**.",
+        "Avoid **SMT siblings** for latency-critical threads.",
+        "Monitor **migrations** (perf sched)."
+      ]
+    },
+    "analogy": {
+      "title": "Assigning workers to workshops",
+      "story": "Keeping a worker in the same workshop with their tools nearby is efficient; moving them around wastes time.",
+      "mapping": [
+        [
+          "Workshop",
+          "Core/NUMA node"
+        ],
+        [
+          "Tools nearby",
+          "Warm caches/local memory"
+        ],
+        [
+          "Moving workers",
+          "Migration"
+        ]
+      ],
+      "breaks": "Workers walk; task migration is instant but loses cache state."
+    },
+    "mindmap": {
+      "center": "Affinity & NUMA",
+      "branches": [
+        {
+          "label": "Domains",
+          "children": [
+            "SMT",
+            "MC (L3)",
+            "NUMA"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "taskset",
+            "sched_setaffinity",
+            "cpuset cgroup",
+            "numactl"
+          ]
+        },
+        {
+          "label": "Auto",
+          "children": [
+            "Load balancing",
+            "NUMA balancing (kernel.numa_balancing)"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Imbalance",
+            "Over-pinning"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "perf sched",
+            "numastat",
+            "/proc/pid/status Cpus_allowed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pin with memory",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Threads and memory co-located."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "numactl --cpunodebind=1 --membind=1 ./service\ngrep Cpus_allowed_list /proc/$(pgrep -o service)/status\nsysctl kernel.numa_balancing\n# Kubernetes: static CPU manager + topology manager for guaranteed pods"
+        }
+      ],
+      "outcome": "locality-aware scheduling."
+    },
+    "summary": {
+      "points": [
+        "Domains guide balancing.",
+        "Pin CPU with memory.",
+        "Avoid over-pinning."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can pinning CPU affinity without memory binding hurt performance?",
+        "a": "Threads may run on one NUMA node while their memory sits on another, making all accesses remote."
+      }
+    ]
+  }
+}

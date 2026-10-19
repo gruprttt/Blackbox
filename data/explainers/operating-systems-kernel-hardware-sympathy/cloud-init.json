@@ -1,0 +1,671 @@
+{
+  "introduction-the-amnesia-patient": {
+    "core": "Every cloud VM boots from a generic image that knows nothing about itself: not its hostname, SSH keys, users, packages or role. cloud-init runs at first boot, reads instance metadata and user-data from the cloud's metadata service or a config drive, and configures the machine: network, users and keys, files, packages, commands. It's how one golden image becomes many differently configured servers.",
+    "first_principles": {
+      "problem": "Every new VM requires an engineer to SSH in and configure users, packages and services by hand.",
+      "truths": [
+        "Images are generic.",
+        "Clouds provide per-instance metadata.",
+        "First-boot automation removes manual setup."
+      ],
+      "derivation": [
+        "Clouds expose **metadata** (IMDS, config drive).",
+        "Supply **user-data** at launch.",
+        "cloud-init **reads and applies** it.",
+        "Runs **once per instance** (per-instance modules).",
+        "Combine with **golden images**."
+      ]
+    },
+    "analogy": {
+      "title": "A new employee reading their welcome pack",
+      "story": "They arrive knowing nothing, read the pack (user-data), and set up their desk, accounts and tools accordingly.",
+      "mapping": [
+        [
+          "Welcome pack",
+          "User-data"
+        ],
+        [
+          "HR records",
+          "Instance metadata"
+        ],
+        [
+          "Setting up desk",
+          "cloud-init modules"
+        ]
+      ],
+      "breaks": "Employees remember; cloud-init tracks state by instance ID."
+    },
+    "mindmap": {
+      "center": "cloud-init",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Metadata (IMDS)",
+            "User-data",
+            "Vendor-data"
+          ]
+        },
+        {
+          "label": "Datasources",
+          "children": [
+            "EC2",
+            "Azure",
+            "GCE",
+            "NoCloud",
+            "ConfigDrive"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Network",
+            "Users/keys",
+            "Files",
+            "Packages",
+            "Commands"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Once per instance",
+            "Modules",
+            "Stages"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Minimal user-data",
+      "scenario": "cloud-config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "VM boots ready to serve."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "#cloud-config\nhostname: web-01\nusers:\n  - name: deploy\n    ssh_authorized_keys: [\"ssh-ed25519 AAAA... deploy@ci\"]\n    sudo: \"ALL=(ALL) NOPASSWD:ALL\"\npackages: [nginx]\nruncmd:\n  - systemctl enable --now nginx"
+        }
+      ],
+      "outcome": "automated first boot."
+    },
+    "summary": {
+      "points": [
+        "Generic images.",
+        "Metadata + user-data.",
+        "Configured on first boot."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where does cloud-init get instance-specific information on AWS?",
+        "a": "From the EC2 instance metadata service (IMDS) at 169.254.169.254, including user-data."
+      }
+    ]
+  },
+  "user-data-vs-cloud-config": {
+    "core": "User-data is whatever you pass at launch, and cloud-init detects its type by the first line. #cloud-config means declarative YAML handled by modules; #!/bin/bash (or any #!) means a shell script run once late in boot; #include means a list of URLs; multi-part MIME combines several parts; and Jinja templates (## template: jinja) can use instance data. Prefer cloud-config for idempotent, readable configuration and use scripts for the rest.",
+    "first_principles": {
+      "problem": "A bash user-data script partially fails on rerun and leaves the VM half-configured.",
+      "truths": [
+        "The first line decides the format.",
+        "Declarative modules handle common tasks.",
+        "Scripts are imperative and fragile."
+      ],
+      "derivation": [
+        "Use **#cloud-config** for users, packages, files.",
+        "Use **runcmd/bootcmd** for small commands.",
+        "Use **scripts** for complex logic.",
+        "Use **MIME multipart** to combine.",
+        "Keep size under **~16 KB** (EC2 limit)."
+      ]
+    },
+    "analogy": {
+      "title": "A checklist vs a handwritten set of instructions",
+      "story": "A checklist (cloud-config) is easy to read and verify; free-form instructions (scripts) are flexible but error-prone.",
+      "mapping": [
+        [
+          "Checklist",
+          "cloud-config"
+        ],
+        [
+          "Handwritten instructions",
+          "Shell script"
+        ],
+        [
+          "Folder of documents",
+          "MIME multipart"
+        ]
+      ],
+      "breaks": "Checklists don't execute; cloud-config modules do."
+    },
+    "mindmap": {
+      "center": "User-Data Formats",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "#cloud-config",
+            "#! script",
+            "#include",
+            "MIME multipart",
+            "Jinja template",
+            "gzip"
+          ]
+        },
+        {
+          "label": "Prefer",
+          "children": [
+            "cloud-config for common tasks"
+          ]
+        },
+        {
+          "label": "Scripts",
+          "children": [
+            "Run once",
+            "Late stage"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "16 KB EC2",
+            "Base64"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Multipart",
+      "scenario": "Terraform cloudinit provider.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Declarative base plus a custom script."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "data \"cloudinit_config\" \"web\" {\n  gzip          = true\n  base64_encode = true\n  part {\n    content_type = \"text/cloud-config\"\n    content      = file(\"cloud-config.yaml\")\n  }\n  part {\n    content_type = \"text/x-shellscript\"\n    content      = file(\"register.sh\")\n  }\n}\nresource \"aws_instance\" \"web\" { user_data_base64 = data.cloudinit_config.web.rendered }"
+        }
+      ],
+      "outcome": "right user-data format."
+    },
+    "summary": {
+      "points": [
+        "First line decides.",
+        "Prefer cloud-config.",
+        "Combine with multipart."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does cloud-init know whether user-data is cloud-config or a script?",
+        "a": "By its first line: '#cloud-config' for YAML config, '#!' for an executable script."
+      }
+    ]
+  },
+  "cloud-config-syntax-essentials": {
+    "core": "Common cloud-config keys: users and groups (with ssh_authorized_keys, sudo, shell), packages, package_update and package_upgrade, write_files (path, content, permissions, owner, encoding), runcmd (commands late in boot) versus bootcmd (every boot, very early), mounts and disk_setup, ntp, timezone, and power_state for reboot. YAML is strict about indentation, and keys are processed by modules in a fixed order, not the order you write them.",
+    "first_principles": {
+      "problem": "A runcmd that starts a service runs before write_files places its config file, or so the engineer assumes.",
+      "truths": [
+        "Modules run in a defined order.",
+        "YAML indentation is semantic.",
+        "Some modules run every boot."
+      ],
+      "derivation": [
+        "Use **write_files** for configs (runs before runcmd).",
+        "Use **packages** instead of apt in runcmd.",
+        "Use **runcmd** for one-time commands.",
+        "Use **bootcmd** sparingly (every boot).",
+        "**Validate** with cloud-init schema."
+      ]
+    },
+    "analogy": {
+      "title": "An assembly line with fixed stations",
+      "story": "You hand over all the parts at once, but they're installed in the line's order, not the order you listed them.",
+      "mapping": [
+        [
+          "Stations",
+          "Modules"
+        ],
+        [
+          "Parts list",
+          "cloud-config keys"
+        ],
+        [
+          "Line order",
+          "Module order"
+        ]
+      ],
+      "breaks": "Assembly lines are visible; module order lives in /etc/cloud/cloud.cfg."
+    },
+    "mindmap": {
+      "center": "cloud-config Keys",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "users",
+            "groups",
+            "hostname",
+            "ssh_authorized_keys"
+          ]
+        },
+        {
+          "label": "Software",
+          "children": [
+            "packages",
+            "package_update",
+            "apt/yum repos"
+          ]
+        },
+        {
+          "label": "Files",
+          "children": [
+            "write_files",
+            "mounts",
+            "disk_setup"
+          ]
+        },
+        {
+          "label": "Commands",
+          "children": [
+            "bootcmd (every boot)",
+            "runcmd (once)"
+          ]
+        },
+        {
+          "label": "Other",
+          "children": [
+            "ntp",
+            "timezone",
+            "power_state"
+          ]
+        },
+        {
+          "label": "Validate",
+          "children": [
+            "cloud-init schema"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Config + service",
+      "scenario": "cloud-config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Files written before runcmd reloads nginx."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "#cloud-config\npackage_update: true\npackages: [nginx]\nwrite_files:\n  - path: /etc/nginx/conf.d/app.conf\n    permissions: '0644'\n    content: |\n      server { listen 80; location / { proxy_pass http://127.0.0.1:8080; } }\nruncmd:\n  - [systemctl, reload, nginx]\n# validate: cloud-init schema --config-file user-data.yaml"
+        }
+      ],
+      "outcome": "correct, ordered configuration."
+    },
+    "summary": {
+      "points": [
+        "Know key modules.",
+        "Order is fixed.",
+        "Validate schema."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between bootcmd and runcmd?",
+        "a": "bootcmd runs very early on every boot; runcmd runs once per instance late in the first boot."
+      }
+    ]
+  },
+  "the-boot-stages-timing-is-everything": {
+    "core": "cloud-init runs in stages tied to systemd. Detect (ds-identify) finds the datasource; Local runs before networking to apply network config; Network runs after networking to fetch user-data and process disks, mounts and bootcmd; Config runs config modules (users, write_files and the like); Final runs late, after other services, doing package installs, runcmd and user scripts. Knowing which stage a module runs in explains ordering and timing bugs.",
+    "first_principles": {
+      "problem": "A user script tries to reach a database before networking and DNS are ready, and fails intermittently.",
+      "truths": [
+        "Boot happens in phases.",
+        "Networking isn't ready early.",
+        "Final stage runs last."
+      ],
+      "derivation": [
+        "**Local**: network config, before net.",
+        "**Network**: datasource, disks, bootcmd.",
+        "**Config**: users, files, ssh.",
+        "**Final**: packages, runcmd, scripts.",
+        "Use **cloud-init status --wait** to sequence."
+      ]
+    },
+    "analogy": {
+      "title": "Opening a shop in the morning",
+      "story": "Unlock doors and turn on power (local), connect phones and internet (network), set up displays (config), then open to customers (final).",
+      "mapping": [
+        [
+          "Power on",
+          "Local"
+        ],
+        [
+          "Phones/internet",
+          "Network"
+        ],
+        [
+          "Displays",
+          "Config"
+        ],
+        [
+          "Open doors",
+          "Final"
+        ]
+      ],
+      "breaks": "Shop staff adapt; stages are fixed sequences."
+    },
+    "mindmap": {
+      "center": "Boot Stages",
+      "branches": [
+        {
+          "label": "Detect",
+          "children": [
+            "ds-identify"
+          ]
+        },
+        {
+          "label": "Local",
+          "children": [
+            "Network config",
+            "Pre-network"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "Fetch user-data",
+            "Disks",
+            "bootcmd"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "users",
+            "write_files",
+            "ssh"
+          ]
+        },
+        {
+          "label": "Final",
+          "children": [
+            "packages",
+            "runcmd",
+            "scripts",
+            "phone_home"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "cloud-init status --wait",
+            "analyze show"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Timing analysis",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See which stage and module took time."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cloud-init status --wait --long\ncloud-init analyze show | head -20\ncloud-init analyze blame | head\n# Finished stage: (modules-final) 42.1 seconds — package installs dominate"
+        }
+      ],
+      "outcome": "boot timing understood."
+    },
+    "summary": {
+      "points": [
+        "Five stages.",
+        "Network not ready early.",
+        "Analyze timings."
+      ]
+    },
+    "check": [
+      {
+        "q": "In which cloud-init stage do runcmd and package installation happen?",
+        "a": "The final stage, late in boot after networking and most services are up."
+      }
+    ]
+  },
+  "debugging-reading-the-logs": {
+    "core": "When cloud-init misbehaves, check cloud-init status --long for the overall result and errors; /var/log/cloud-init.log for detailed module execution with tracebacks; /var/log/cloud-init-output.log for stdout and stderr of scripts and runcmd; /run/cloud-init/ and /var/lib/cloud/instance/ for the rendered user-data, datasource and per-instance state; and cloud-init query to see metadata as cloud-init sees it. cloud-init clean lets you re-run on the next boot for testing.",
+    "first_principles": {
+      "problem": "Packages weren't installed on a new VM and there's no obvious error.",
+      "truths": [
+        "cloud-init logs every module.",
+        "Script output goes to a separate log.",
+        "State is kept per instance."
+      ],
+      "derivation": [
+        "Run **cloud-init status --long**.",
+        "Read **cloud-init.log** for module errors.",
+        "Read **cloud-init-output.log** for script output.",
+        "Inspect **/var/lib/cloud/instance/user-data.txt**.",
+        "Test with **cloud-init clean --logs && reboot**."
+      ]
+    },
+    "analogy": {
+      "title": "A flight's black box and cabin recording",
+      "story": "One records system events (cloud-init.log); the other records what was said (output.log).",
+      "mapping": [
+        [
+          "Black box",
+          "cloud-init.log"
+        ],
+        [
+          "Cabin audio",
+          "cloud-init-output.log"
+        ],
+        [
+          "Flight plan",
+          "user-data.txt"
+        ]
+      ],
+      "breaks": "Black boxes survive crashes; logs vanish if the instance is terminated."
+    },
+    "mindmap": {
+      "center": "cloud-init Logs",
+      "branches": [
+        {
+          "label": "Status",
+          "children": [
+            "cloud-init status --long"
+          ]
+        },
+        {
+          "label": "Logs",
+          "children": [
+            "/var/log/cloud-init.log",
+            "/var/log/cloud-init-output.log"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "/var/lib/cloud/instance/",
+            "/run/cloud-init/"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "cloud-init query",
+            "user-data.txt"
+          ]
+        },
+        {
+          "label": "Rerun",
+          "children": [
+            "cloud-init clean",
+            "single --name"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find the failure",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Root cause: missing package index refresh."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cloud-init status --long\n# status: error  errors: ['Failed to install packages: [nginx]']\ngrep -n -A5 'WARNING\\|Traceback' /var/log/cloud-init.log | head -30\ntail -50 /var/log/cloud-init-output.log\n# E: Unable to locate package nginx → package_update was false"
+        }
+      ],
+      "outcome": "cloud-init failures diagnosed."
+    },
+    "summary": {
+      "points": [
+        "Status first.",
+        "Two log files.",
+        "Inspect rendered data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which log contains the stdout/stderr of runcmd and user scripts?",
+        "a": "/var/log/cloud-init-output.log."
+      }
+    ]
+  },
+  "debugging-the-black-box-cant-ssh-in": {
+    "core": "If cloud-init broke SSH (bad user, wrong key, firewall, network config), you can't log in to read logs. Use out-of-band access instead: the serial or console output (aws ec2 get-console-output, which shows cloud-init and kernel messages), an interactive serial console (EC2 Serial Console, GCP serial port), SSM Session Manager if the agent runs, or as a last resort detach the root volume and attach it to a rescue instance to read /var/log.",
+    "first_principles": {
+      "problem": "A typo in user-data's ssh_authorized_keys locks everyone out of a new instance.",
+      "truths": [
+        "SSH depends on correct config.",
+        "Consoles bypass the network.",
+        "Disks can be inspected elsewhere."
+      ],
+      "derivation": [
+        "Read **console output** first.",
+        "Use **serial console** for interactive access.",
+        "Use **SSM** if available.",
+        "**Rescue**: attach volume to another instance.",
+        "Fix and **relaunch** (instances are cattle)."
+      ]
+    },
+    "analogy": {
+      "title": "Locked out of the house",
+      "story": "Peek through the window (console log), use the back door (serial console), or have a locksmith take the lock to a workshop (rescue instance).",
+      "mapping": [
+        [
+          "Window",
+          "Console output"
+        ],
+        [
+          "Back door",
+          "Serial console"
+        ],
+        [
+          "Locksmith workshop",
+          "Rescue instance"
+        ]
+      ],
+      "breaks": "Houses are worth rescuing; cloud instances are often just replaced."
+    },
+    "mindmap": {
+      "center": "No-SSH Debugging",
+      "branches": [
+        {
+          "label": "Read-only",
+          "children": [
+            "get-console-output",
+            "Screenshot"
+          ]
+        },
+        {
+          "label": "Interactive",
+          "children": [
+            "EC2 Serial Console",
+            "GCP serial port",
+            "Azure serial console"
+          ]
+        },
+        {
+          "label": "Agent",
+          "children": [
+            "SSM Session Manager"
+          ]
+        },
+        {
+          "label": "Rescue",
+          "children": [
+            "Detach root volume",
+            "Mount on helper"
+          ]
+        },
+        {
+          "label": "Prevention",
+          "children": [
+            "Validate user-data",
+            "Test in staging"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Console output",
+      "scenario": "AWS CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cause found without SSH."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 get-console-output --instance-id i-0abc123 --latest --output text | grep -i -E 'cloud-init|ci-info|error' | tail -20\n# ci-info: no authorized SSH keys fingerprints found for user deploy.\n# → key YAML was mis-indented"
+        }
+      ],
+      "outcome": "recovery paths when locked out."
+    },
+    "summary": {
+      "points": [
+        "Console output first.",
+        "Serial or SSM.",
+        "Rescue volume last."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can you see cloud-init output on an EC2 instance you can't SSH into?",
+        "a": "Retrieve the console output with aws ec2 get-console-output, or use the EC2 Serial Console."
+      }
+    ]
+  }
+}

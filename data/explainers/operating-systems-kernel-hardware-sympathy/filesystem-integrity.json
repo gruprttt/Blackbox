@@ -1,0 +1,653 @@
+{
+  "introduction-the-power-failure-nightmare": {
+    "core": "A single logical operation, such as appending to a file, touches several disk locations: data blocks, the inode (size, timestamps), free-space bitmaps and the directory entry. If power fails midway, some writes land and others don't, leaving the filesystem inconsistent (leaked blocks, corrupted metadata, files pointing to garbage). Filesystem integrity techniques (journaling, copy-on-write, barriers, checksums) exist to survive that.",
+    "first_principles": {
+      "problem": "After a power cut, a server spends an hour in fsck and some files contain blocks from other files.",
+      "truths": [
+        "Operations span multiple writes.",
+        "Power can fail between writes.",
+        "Disks may reorder writes."
+      ],
+      "derivation": [
+        "Recognise **multi-step updates**.",
+        "Need **atomicity** for metadata.",
+        "Use **journaling or COW**.",
+        "Ensure **write ordering** (barriers/flush).",
+        "Detect corruption with **checksums**."
+      ]
+    },
+    "analogy": {
+      "title": "Moving house mid-way through a blackout",
+      "story": "Half your boxes are in the new house and the address register still says the old one; nobody knows where anything is.",
+      "mapping": [
+        [
+          "Boxes",
+          "Data blocks"
+        ],
+        [
+          "Address register",
+          "Metadata/inode"
+        ],
+        [
+          "Blackout",
+          "Power failure"
+        ]
+      ],
+      "breaks": "Moves can be redone by hand; filesystems need automatic recovery."
+    },
+    "mindmap": {
+      "center": "Filesystem Integrity",
+      "branches": [
+        {
+          "label": "Threat",
+          "children": [
+            "Torn multi-block updates",
+            "Reordering",
+            "Bit rot"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Journaling",
+            "Copy-on-write",
+            "Barriers/FUA",
+            "Checksums",
+            "Snapshots"
+          ]
+        },
+        {
+          "label": "Filesystems",
+          "children": [
+            "ext4",
+            "XFS",
+            "Btrfs",
+            "ZFS"
+          ]
+        },
+        {
+          "label": "Recovery",
+          "children": [
+            "Journal replay",
+            "fsck"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One append",
+      "scenario": "Writes involved.",
+      "flow": [
+        "Allocate block in free bitmap",
+        "Write data block",
+        "Update inode size + block pointer",
+        "Crash after step 3 before step 2 → inode points to stale data"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows why ordering and atomicity matter."
+        }
+      ],
+      "code": [],
+      "outcome": "the integrity problem framed."
+    },
+    "summary": {
+      "points": [
+        "Updates span many writes.",
+        "Crashes tear them.",
+        "Need atomic, ordered updates."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a power failure corrupt a filesystem even if each individual disk write is atomic?",
+        "a": "A logical operation needs several writes; failing between them leaves metadata and data inconsistent."
+      }
+    ]
+  },
+  "journaling-the-write-ahead-log": {
+    "core": "Journaling filesystems (ext4, XFS) first write the intended changes to a journal, a write-ahead log, then commit a record, then apply the changes to their final locations, then mark the journal entry done. After a crash, the filesystem replays committed journal entries and discards incomplete ones, so recovery takes seconds instead of a full fsck. Modes trade safety for speed: data=journal (all data), data=ordered (the ext4 default: data before metadata commit), and data=writeback (metadata only).",
+    "first_principles": {
+      "problem": "Hour-long fsck runs after every unclean shutdown make recovery painfully slow.",
+      "truths": [
+        "Logging intent first makes recovery possible.",
+        "Replaying a log is fast.",
+        "Journaling data costs double writes."
+      ],
+      "derivation": [
+        "Write changes to **journal** first.",
+        "**Commit** record marks completeness.",
+        "**Checkpoint** to final location.",
+        "On crash, **replay committed**, drop partial.",
+        "Choose **data mode** (ordered default)."
+      ]
+    },
+    "analogy": {
+      "title": "A shopkeeper's ledger before stocking shelves",
+      "story": "Write down 'moving 20 cans to aisle 3' first; if interrupted, the ledger says exactly what to finish or undo.",
+      "mapping": [
+        [
+          "Ledger",
+          "Journal"
+        ],
+        [
+          "Stocking shelves",
+          "Checkpoint"
+        ],
+        [
+          "Reading ledger after interruption",
+          "Replay"
+        ]
+      ],
+      "breaks": "Ledgers are cheap; journaling data doubles write I/O."
+    },
+    "mindmap": {
+      "center": "Journaling",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Log",
+            "Commit",
+            "Checkpoint",
+            "Free"
+          ]
+        },
+        {
+          "label": "Recovery",
+          "children": [
+            "Replay committed",
+            "Discard partial"
+          ]
+        },
+        {
+          "label": "ext4 modes",
+          "children": [
+            "journal",
+            "ordered (default)",
+            "writeback"
+          ]
+        },
+        {
+          "label": "Filesystems",
+          "children": [
+            "ext4 jbd2",
+            "XFS log",
+            "NTFS"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Journal size",
+            "External journal device"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect journal mode",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Seconds of replay, not hours of fsck."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mount | grep ' / '          # ext4 (rw,relatime,data=ordered)\ndumpe2fs -h /dev/nvme0n1p1 2>/dev/null | grep -i journal\n# after crash: kernel log shows 'EXT4-fs: recovery complete' in seconds"
+        }
+      ],
+      "outcome": "fast crash recovery."
+    },
+    "summary": {
+      "points": [
+        "Log intent first.",
+        "Replay after crash.",
+        "Modes trade safety."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does ext4's default data=ordered mode guarantee?",
+        "a": "File data is written to disk before the related metadata is committed to the journal, preventing metadata pointing to stale data."
+      }
+    ]
+  },
+  "overwrite-vs-copy-on-write": {
+    "core": "Overwrite-in-place filesystems (ext4, XFS) update blocks where they live, relying on the journal for consistency. Copy-on-write filesystems (Btrfs, ZFS) never overwrite live data. They write new versions to free space, then atomically switch a root pointer up the tree, so the on-disk state is always consistent and snapshots are nearly free. The trade-offs are fragmentation for random-write workloads (databases, VM images) and write amplification.",
+    "first_principles": {
+      "problem": "A database on Btrfs slows over time due to fragmentation from constant random rewrites.",
+      "truths": [
+        "Overwriting risks torn updates.",
+        "Writing elsewhere then switching pointers is atomic.",
+        "Never-overwrite causes fragmentation."
+      ],
+      "derivation": [
+        "**Overwrite**: in place + journal.",
+        "**COW**: new blocks + atomic root switch.",
+        "COW gives **free snapshots**.",
+        "Mind **fragmentation** for DB/VM files.",
+        "Use **nodatacow** or overwrite FS for DBs."
+      ]
+    },
+    "analogy": {
+      "title": "Editing a document vs saving a new version",
+      "story": "Overwriting changes pages in the binder; COW writes new pages and swaps the table of contents in one step.",
+      "mapping": [
+        [
+          "Binder pages",
+          "Blocks"
+        ],
+        [
+          "New version pages",
+          "COW blocks"
+        ],
+        [
+          "Table of contents",
+          "Root pointer"
+        ]
+      ],
+      "breaks": "Document versions are tidy; COW blocks scatter across disk."
+    },
+    "mindmap": {
+      "center": "Overwrite vs COW",
+      "branches": [
+        {
+          "label": "Overwrite",
+          "children": [
+            "ext4",
+            "XFS",
+            "Journal",
+            "Less fragmentation"
+          ]
+        },
+        {
+          "label": "COW",
+          "children": [
+            "Btrfs",
+            "ZFS",
+            "Atomic root switch",
+            "Snapshots",
+            "Checksums"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Fragmentation",
+            "Write amplification"
+          ]
+        },
+        {
+          "label": "DB tips",
+          "children": [
+            "nodatacow",
+            "recordsize tuning",
+            "XFS/ext4"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "COW update",
+      "scenario": "Sequence.",
+      "flow": [
+        "Write new data block B'",
+        "Write new parent pointing to B'",
+        "… up to new root",
+        "Atomically update superblock to new root"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Crash at any point leaves old or new tree intact."
+        }
+      ],
+      "code": [],
+      "outcome": "update models compared."
+    },
+    "summary": {
+      "points": [
+        "Overwrite + journal.",
+        "COW + pointer switch.",
+        "Pick by workload."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are snapshots cheap on copy-on-write filesystems?",
+        "a": "Old blocks are never overwritten, so a snapshot just keeps a reference to the old root; only changed blocks consume new space."
+      }
+    ]
+  },
+  "write-barriers-preventing-disk-lies": {
+    "core": "Disks and controllers cache writes and may reorder them, acknowledging data that's only in volatile cache. Journaling relies on ordering (journal before commit before checkpoint), so filesystems issue cache flushes and FUA (Force Unit Access) writes, known as barriers, to guarantee order and durability. Disabling barriers (nobarrier) for speed, or using drives that ignore flushes without power-loss protection, risks corruption on power loss. fsync() is the application's version.",
+    "first_principles": {
+      "problem": "A team mounts with nobarrier for performance, and a power cut corrupts the journal itself.",
+      "truths": [
+        "Caches lie about durability.",
+        "Order is essential to journaling.",
+        "Flushes cost latency."
+      ],
+      "derivation": [
+        "Keep **barriers enabled** (default).",
+        "Use drives with **power-loss protection** (PLP).",
+        "Applications call **fsync/fdatasync**.",
+        "Beware **RAID controller caches** without battery.",
+        "Test with **fio** fsync latency."
+      ]
+    },
+    "analogy": {
+      "title": "A courier who says 'delivered' while the parcel is still in the van",
+      "story": "Unless you insist on a signed receipt (flush), 'delivered' might mean 'in the van'.",
+      "mapping": [
+        [
+          "Van",
+          "Volatile write cache"
+        ],
+        [
+          "Signed receipt",
+          "Flush/FUA"
+        ],
+        [
+          "Lying courier",
+          "Drive ignoring flush"
+        ]
+      ],
+      "breaks": "Couriers can be fired; consumer SSDs keep lying."
+    },
+    "mindmap": {
+      "center": "Write Barriers",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Volatile caches",
+            "Reordering",
+            "False acks"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Cache flush",
+            "FUA",
+            "fsync"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "PLP SSDs",
+            "BBU RAID cache"
+          ]
+        },
+        {
+          "label": "Anti-patterns",
+          "children": [
+            "nobarrier",
+            "Ignoring fsync"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "fio --fsync",
+            "diskchecker"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure durability cost",
+      "scenario": "fio.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Durability cost known; barriers kept."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "fio --name=fsync --filename=/data/test --rw=write --bs=4k --size=256m --fsync=1 --ioengine=sync\n# PLP enterprise SSD: ~30 µs fsync; consumer SSD: ~1–5 ms\nmount | grep -c nobarrier   # should be 0"
+        }
+      ],
+      "outcome": "honest durability."
+    },
+    "summary": {
+      "points": [
+        "Caches reorder.",
+        "Barriers enforce order.",
+        "Use PLP hardware."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is mounting with nobarrier dangerous?",
+        "a": "Without flushes and ordering guarantees, cached writes can reach disk out of order or be lost on power failure, breaking journal consistency."
+      }
+    ]
+  },
+  "bit-rot-and-checksums": {
+    "core": "Data can silently corrupt over time: media decay, firmware bugs, misdirected or lost writes, cable and controller errors. Drives' own ECC catches many errors but not all, and traditional filesystems (ext4, XFS) checksum only metadata, not data. ZFS and Btrfs checksum every block and verify on read; with redundancy (mirror, RAID-Z) they self-heal by reading a good copy, and periodic scrubs find latent corruption before you need the data.",
+    "first_principles": {
+      "problem": "A backup restore reveals photos with corrupted blocks that had been silently damaged for a year.",
+      "truths": [
+        "Storage errors can be silent.",
+        "Checksums detect mismatches.",
+        "Redundancy enables repair."
+      ],
+      "derivation": [
+        "Checksum **every block** (ZFS/Btrfs).",
+        "Verify on **every read**.",
+        "Use **redundancy** to self-heal.",
+        "Run **scrubs** regularly.",
+        "Verify **backups** with checksums too."
+      ]
+    },
+    "analogy": {
+      "title": "Sealed envelopes with a fingerprint",
+      "story": "Each document has a fingerprint stored separately; any change is detected, and a duplicate copy replaces the damaged one.",
+      "mapping": [
+        [
+          "Fingerprint",
+          "Checksum"
+        ],
+        [
+          "Duplicate copy",
+          "Mirror/parity"
+        ],
+        [
+          "Audit",
+          "Scrub"
+        ]
+      ],
+      "breaks": "Fingerprints are permanent; checksums must be stored apart from data to be trustworthy."
+    },
+    "mindmap": {
+      "center": "Bit Rot & Checksums",
+      "branches": [
+        {
+          "label": "Causes",
+          "children": [
+            "Media decay",
+            "Firmware bugs",
+            "Misdirected writes",
+            "Controller errors"
+          ]
+        },
+        {
+          "label": "Detection",
+          "children": [
+            "Block checksums",
+            "Verify on read"
+          ]
+        },
+        {
+          "label": "Repair",
+          "children": [
+            "Mirrors",
+            "RAID-Z",
+            "Btrfs RAID1"
+          ]
+        },
+        {
+          "label": "Maintenance",
+          "children": [
+            "Scrubs",
+            "SMART"
+          ]
+        },
+        {
+          "label": "Gaps",
+          "children": [
+            "ext4/XFS data not checksummed"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scrub",
+      "scenario": "ZFS.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Silent corruption found and repaired."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "zpool scrub tank\nzpool status tank\n#   scan: scrub repaired 128K in 02:14:31 with 0 errors\n#   NAME        STATE  READ WRITE CKSUM\n#   mirror-0    ONLINE    0     0     0\n#     sdb       ONLINE    0     0     4   ← corrupted blocks healed from sdc"
+        }
+      ],
+      "outcome": "data integrity verified."
+    },
+    "summary": {
+      "points": [
+        "Corruption is silent.",
+        "Checksum all blocks.",
+        "Scrub and self-heal."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does RAID alone not protect against bit rot?",
+        "a": "Traditional RAID can't tell which copy is correct without checksums; it may return or propagate corrupted data."
+      }
+    ]
+  },
+  "snapshots-the-time-machine": {
+    "core": "A snapshot is a point-in-time, read-only (or writable clone) view of a filesystem or volume. On COW filesystems (ZFS, Btrfs) and with LVM thin provisioning it's created instantly and initially uses no space, then grows as live data diverges. Snapshots enable quick rollback (bad upgrade), consistent backups (snapshot then copy), and replication (zfs send of incremental diffs). They aren't backups on their own, since they live on the same disks.",
+    "first_principles": {
+      "problem": "A package upgrade breaks a server, and restoring from backup would take hours.",
+      "truths": [
+        "Unchanged blocks can be shared.",
+        "Point-in-time views enable rollback.",
+        "Same-disk copies share failure."
+      ],
+      "derivation": [
+        "Take **snapshots before risky changes**.",
+        "**Roll back** quickly when needed.",
+        "Snapshot then **copy for consistent backups**.",
+        "**Send/receive** incrementals off-host.",
+        "**Prune** old snapshots (space)."
+      ]
+    },
+    "analogy": {
+      "title": "Bookmarking a page in a changing book",
+      "story": "You can flip back to exactly how it looked, but if the book burns, the bookmark goes with it.",
+      "mapping": [
+        [
+          "Bookmark",
+          "Snapshot"
+        ],
+        [
+          "Book burning",
+          "Disk failure"
+        ],
+        [
+          "Photocopy elsewhere",
+          "Off-host backup"
+        ]
+      ],
+      "breaks": "Bookmarks cost nothing; snapshots consume space as data changes."
+    },
+    "mindmap": {
+      "center": "Snapshots",
+      "branches": [
+        {
+          "label": "Tech",
+          "children": [
+            "ZFS",
+            "Btrfs",
+            "LVM thin",
+            "Cloud EBS snapshots"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Rollback",
+            "Consistent backups",
+            "Replication",
+            "Clones"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Space growth",
+            "Fragmentation"
+          ]
+        },
+        {
+          "label": "Caveat",
+          "children": [
+            "Not a backup",
+            "App consistency (fsfreeze)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pre-upgrade + replication",
+      "scenario": "ZFS.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Rollback in seconds; offsite copy incremental."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "zfs snapshot rpool/ROOT@pre-upgrade-2026-10-19\napt full-upgrade -y        # breaks things\nzfs rollback rpool/ROOT@pre-upgrade-2026-10-19\n# off-host incremental\nzfs send -i @daily-1 tank/data@daily-2 | ssh backup zfs recv -F pool/data"
+        }
+      ],
+      "outcome": "instant time travel."
+    },
+    "summary": {
+      "points": [
+        "Instant, space-efficient.",
+        "Rollback and backups.",
+        "Not a backup alone."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a snapshot not a substitute for a backup?",
+        "a": "It lives on the same storage, so disk failure, pool corruption or ransomware with access can destroy it along with the data."
+      }
+    ]
+  }
+}

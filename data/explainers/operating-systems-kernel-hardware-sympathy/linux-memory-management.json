@@ -1,0 +1,982 @@
+{
+  "introduction-the-grand-illusion": {
+    "core": "Every process believes it has a large, private, contiguous address space starting at zero. In reality the kernel maps virtual pages to scattered physical frames on demand, shares identical pages (libraries, copy-on-write after fork), uses free RAM as page cache, moves rarely used pages to swap, and reclaims or kills under pressure. Virtual memory provides isolation, convenience and efficiency, and explains why 'used memory' numbers are so confusing.",
+    "first_principles": {
+      "problem": "free shows 'used' at 95% and engineers panic, though the system is healthy.",
+      "truths": [
+        "Addresses are virtual.",
+        "Physical pages are allocated lazily.",
+        "Free RAM is used as cache."
+      ],
+      "derivation": [
+        "Distinguish **virtual vs resident**.",
+        "Read **available**, not free.",
+        "Understand **page cache**.",
+        "Know **reclaim, swap, OOM**.",
+        "Use the right **visibility tools**."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel that promises every guest a whole floor",
+      "story": "It actually assigns rooms only when guests arrive and uses empty rooms for storage until needed.",
+      "mapping": [
+        [
+          "Promised floor",
+          "Virtual address space"
+        ],
+        [
+          "Assigned rooms",
+          "Physical pages"
+        ],
+        [
+          "Storage in empty rooms",
+          "Page cache"
+        ]
+      ],
+      "breaks": "Hotels can't share one room between guests; kernels share read-only pages."
+    },
+    "mindmap": {
+      "center": "Virtual Memory",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Virtual addresses",
+            "Pages/frames",
+            "Page tables",
+            "Lazy allocation"
+          ]
+        },
+        {
+          "label": "Sharing",
+          "children": [
+            "Libraries",
+            "COW",
+            "Shared memory"
+          ]
+        },
+        {
+          "label": "Pressure",
+          "children": [
+            "Reclaim",
+            "Swap",
+            "OOM killer"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "available",
+            "RSS",
+            "PSS",
+            "cache"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Read free correctly",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Healthy system despite low 'free'."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "free -h\n#        total  used  free  shared  buff/cache  available\n# Mem:    62Gi   9Gi  1.2Gi  0.5Gi    52Gi        51Gi\n# → 51 GiB available; cache is reclaimable"
+        }
+      ],
+      "outcome": "virtual memory demystified."
+    },
+    "summary": {
+      "points": [
+        "Addresses are virtual.",
+        "Cache uses free RAM.",
+        "Watch 'available'."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which column of free best indicates how much memory applications can still use?",
+        "a": "available, which estimates memory obtainable without swapping, including reclaimable cache."
+      }
+    ]
+  },
+  "paging-and-page-tables-the-map": {
+    "core": "Memory is divided into pages (4 KB by default). Each process has a multi-level page table (4 or 5 levels on x86-64) mapping virtual page numbers to physical frames with permission bits (read, write, execute, user/kernel, present, dirty, accessed). The MMU walks it on TLB misses. Page tables enable isolation (no mapping means no access), sharing (several processes map the same frame), copy-on-write, and lazy allocation.",
+    "first_principles": {
+      "problem": "An engineer can't explain how two processes can have the same virtual address with different data.",
+      "truths": [
+        "Each process has its own map.",
+        "Maps translate virtual to physical.",
+        "Bits enforce permissions."
+      ],
+      "derivation": [
+        "**Split** addresses into page number + offset.",
+        "**Walk** levels to find frame.",
+        "**Check** permission bits.",
+        "**Cache** in TLB.",
+        "**Share/COW** by mapping same frame."
+      ]
+    },
+    "analogy": {
+      "title": "Each tenant's personal building directory",
+      "story": "'Room 101' in your directory may be a different physical room than 'Room 101' in your neighbour's directory.",
+      "mapping": [
+        [
+          "Personal directory",
+          "Page table"
+        ],
+        [
+          "Room number",
+          "Virtual address"
+        ],
+        [
+          "Physical room",
+          "Frame"
+        ]
+      ],
+      "breaks": "Directories are flat; page tables are multi-level trees."
+    },
+    "mindmap": {
+      "center": "Paging",
+      "branches": [
+        {
+          "label": "Structure",
+          "children": [
+            "4/5-level tables",
+            "PTE bits"
+          ]
+        },
+        {
+          "label": "Bits",
+          "children": [
+            "Present",
+            "RW",
+            "NX",
+            "User",
+            "Dirty",
+            "Accessed"
+          ]
+        },
+        {
+          "label": "Hardware",
+          "children": [
+            "MMU",
+            "TLB"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Isolation",
+            "Sharing",
+            "COW",
+            "Lazy alloc"
+          ]
+        },
+        {
+          "label": "Inspect",
+          "children": [
+            "/proc/pid/maps",
+            "/proc/pid/pagemap"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same address, different data",
+      "scenario": "Concept.",
+      "flow": [
+        "Process A: 0x7f00...1000 → frame 0x1a2b3",
+        "Process B: 0x7f00...1000 → frame 0x99c01",
+        "Shared libc text: both → frame 0x40000 (read-only)",
+        "After fork: both → same frame, COW on write"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolation and sharing via mappings."
+        }
+      ],
+      "code": [],
+      "outcome": "page tables understood."
+    },
+    "summary": {
+      "points": [
+        "Per-process maps.",
+        "Multi-level walk.",
+        "Permissions and sharing."
+      ]
+    },
+    "check": [
+      {
+        "q": "How can two processes share a library's code without copying it?",
+        "a": "Both page tables map their virtual pages to the same physical frames, marked read-only/executable."
+      }
+    ]
+  },
+  "page-faults-when-the-map-fails": {
+    "core": "A page fault happens when an access hits a missing or protected mapping. Minor faults are resolved without disk I/O: first touch of anonymous memory (allocate a zero page), a page already in the page cache, or copy-on-write after fork. Major faults require disk I/O: reading from a file or swapping in. Invalid accesses (unmapped or wrong permission) become SIGSEGV. Major faults are slow (microseconds to milliseconds) and visible as latency.",
+    "first_principles": {
+      "problem": "A service has random 50 ms latency spikes correlated with major page faults after memory pressure evicted its pages.",
+      "truths": [
+        "Mappings are filled lazily.",
+        "Some faults need disk.",
+        "Invalid accesses crash."
+      ],
+      "derivation": [
+        "Count **minor vs major** faults.",
+        "Find **major fault** sources (swap, mmap files).",
+        "**Pre-fault/mlock** hot memory.",
+        "Reduce **memory pressure**.",
+        "Debug **SIGSEGV** via core dumps."
+      ]
+    },
+    "analogy": {
+      "title": "Asking for a book not on your shelf",
+      "story": "If it's in the next room (minor), it's quick; if it must be ordered from storage (major), you wait; if it doesn't exist, you get thrown out (segfault).",
+      "mapping": [
+        [
+          "Next room",
+          "Minor fault"
+        ],
+        [
+          "Storage order",
+          "Major fault"
+        ],
+        [
+          "Nonexistent book",
+          "SIGSEGV"
+        ]
+      ],
+      "breaks": "Libraries can lend copies; COW faults create private copies."
+    },
+    "mindmap": {
+      "center": "Page Faults",
+      "branches": [
+        {
+          "label": "Minor",
+          "children": [
+            "First touch",
+            "Page cache hit",
+            "COW"
+          ]
+        },
+        {
+          "label": "Major",
+          "children": [
+            "Disk read",
+            "Swap-in"
+          ]
+        },
+        {
+          "label": "Invalid",
+          "children": [
+            "SIGSEGV"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "ps -o min_flt,maj_flt",
+            "perf stat page-faults",
+            "sar -B"
+          ]
+        },
+        {
+          "label": "Mitigate",
+          "children": [
+            "mlock",
+            "AlwaysPreTouch",
+            "Less pressure"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure faults",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Major faults traced to swapped-out heap."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ps -o pid,min_flt,maj_flt,cmd -p $(pgrep -o api)\nsar -B 1 5           # majflt/s column\nperf trace -F maj --pid $(pgrep -o api) -- sleep 10   # which addresses/files"
+        }
+      ],
+      "outcome": "fault behaviour understood."
+    },
+    "summary": {
+      "points": [
+        "Minor is cheap.",
+        "Major hits disk.",
+        "Invalid crashes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between a minor and a major page fault?",
+        "a": "A minor fault is resolved in memory (e.g. first touch, page cache); a major fault requires reading from disk or swap."
+      }
+    ]
+  },
+  "memory-overcommitment-the-calculated-gamble": {
+    "core": "Linux lets processes allocate more virtual memory than physically exists, because most allocations are never fully used (sparse arrays, fork before exec, reserved heaps). vm.overcommit_memory 0 is heuristic (the default; refuses obviously excessive requests), 1 always allows, and 2 is strict, limiting commit to swap plus overcommit_ratio% of RAM. Overcommit improves utilisation but means that when everyone does use their memory, something must give: reclaim, swap, or the OOM killer.",
+    "first_principles": {
+      "problem": "malloc never fails, yet processes get OOM-killed: the team doesn't understand why allocation succeeded.",
+      "truths": [
+        "Allocation reserves addresses, not pages.",
+        "Most reservations are never touched.",
+        "Real use can exceed RAM."
+      ],
+      "derivation": [
+        "Know **overcommit modes** 0/1/2.",
+        "Watch **Committed_AS vs CommitLimit**.",
+        "Use **mode 2** for strict environments.",
+        "Set **limits** (cgroups) per workload.",
+        "Expect **OOM** under real exhaustion."
+      ]
+    },
+    "analogy": {
+      "title": "Airlines overbooking flights",
+      "story": "They sell more tickets than seats because some passengers don't show; occasionally someone gets bumped.",
+      "mapping": [
+        [
+          "Tickets",
+          "Virtual allocations"
+        ],
+        [
+          "Seats",
+          "Physical RAM"
+        ],
+        [
+          "Bumped passenger",
+          "OOM-killed process"
+        ]
+      ],
+      "breaks": "Airlines compensate bumped passengers; OOM kills just terminate."
+    },
+    "mindmap": {
+      "center": "Overcommit",
+      "branches": [
+        {
+          "label": "Modes",
+          "children": [
+            "0 heuristic",
+            "1 always",
+            "2 strict"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "Committed_AS",
+            "CommitLimit"
+          ]
+        },
+        {
+          "label": "Why",
+          "children": [
+            "Sparse use",
+            "fork/COW",
+            "Reservations"
+          ]
+        },
+        {
+          "label": "Risk",
+          "children": [
+            "OOM under real use"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "vm.overcommit_ratio",
+            "cgroup memory.max"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check commitments",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains why malloc succeeds but OOM occurs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl vm.overcommit_memory vm.overcommit_ratio\ngrep -E 'CommitLimit|Committed_AS' /proc/meminfo\n# Committed_AS: 180 GB  CommitLimit: 70 GB  (mode 0 allows; risk if all used)"
+        }
+      ],
+      "outcome": "overcommit risk understood."
+    },
+    "summary": {
+      "points": [
+        "Allocations are promises.",
+        "Modes control strictness.",
+        "OOM is the fallback."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does malloc rarely fail on Linux even when memory is low?",
+        "a": "Overcommit lets the kernel grant virtual allocations without backing them, deferring physical allocation until pages are touched."
+      }
+    ]
+  },
+  "swap-the-overflow-parking-lot": {
+    "core": "Swap is disk space where the kernel can move anonymous pages (heap, stack) that aren't file-backed, freeing RAM for active use. A little swap lets the kernel evict cold anonymous pages rather than dropping useful page cache, but heavy swapping of active pages (thrashing) destroys performance. Options include disk swap, swap files, zram (compressed RAM swap) and zswap (a compressed cache in front of disk swap). Kubernetes historically required swap off, with newer versions adding limited support.",
+    "first_principles": {
+      "problem": "A server with no swap OOM-kills a process during a short spike, while another server with too much swap becomes unresponsive.",
+      "truths": [
+        "Anonymous pages need somewhere to go.",
+        "Disk is far slower than RAM.",
+        "Compression can stretch RAM."
+      ],
+      "derivation": [
+        "Provide **modest swap** for cold pages.",
+        "Prefer **zram/zswap** for speed.",
+        "Monitor **si/so** rates (vmstat).",
+        "Avoid **thrashing** (memory sizing).",
+        "Tune with **swappiness**."
+      ]
+    },
+    "analogy": {
+      "title": "An overflow car park",
+      "story": "Rarely used cars move to a distant lot, freeing nearby spaces, but if everyone keeps fetching cars from there, traffic grinds to a halt.",
+      "mapping": [
+        [
+          "Nearby spaces",
+          "RAM"
+        ],
+        [
+          "Distant lot",
+          "Swap"
+        ],
+        [
+          "Constant fetching",
+          "Thrashing"
+        ]
+      ],
+      "breaks": "Car parks don't compress cars; zram compresses pages."
+    },
+    "mindmap": {
+      "center": "Swap",
+      "branches": [
+        {
+          "label": "Holds",
+          "children": [
+            "Anonymous pages"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Partition",
+            "Swap file",
+            "zram",
+            "zswap"
+          ]
+        },
+        {
+          "label": "Good",
+          "children": [
+            "Evict cold pages",
+            "Absorb spikes"
+          ]
+        },
+        {
+          "label": "Bad",
+          "children": [
+            "Thrashing",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "vmstat si/so",
+            "/proc/meminfo SwapCached",
+            "PSI memory"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "zram setup",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Compressed swap absorbs spikes quickly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "modprobe zram && echo zstd > /sys/block/zram0/comp_algorithm\necho 8G > /sys/block/zram0/disksize\nmkswap /dev/zram0 && swapon -p 100 /dev/zram0\nswapon --show\nvmstat 1 5     # watch si/so"
+        }
+      ],
+      "outcome": "swap used wisely."
+    },
+    "summary": {
+      "points": [
+        "Anonymous overflow.",
+        "Modest is good.",
+        "Thrashing is bad."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does sustained high si/so in vmstat indicate?",
+        "a": "Active pages are constantly being swapped in and out (thrashing), meaning the working set exceeds RAM."
+      }
+    ]
+  },
+  "swappiness-controlling-the-trigger": {
+    "core": "vm.swappiness (0–200, default 60) sets the kernel's relative preference between reclaiming anonymous pages (by swapping) and file-backed page cache when memory is needed. Low values favour dropping cache and keeping anonymous pages in RAM; high values swap anonymous pages more readily, which suits zram. It doesn't disable swap or set a threshold. Databases often use 1–10; cgroup v2 offers per-cgroup memory.swap.max.",
+    "first_principles": {
+      "problem": "A database's buffer pool gets swapped out while the kernel keeps backup file cache in RAM.",
+      "truths": [
+        "Reclaim must choose a victim.",
+        "Anonymous and file pages have different costs.",
+        "Workloads differ in what matters."
+      ],
+      "derivation": [
+        "Know **swappiness semantics** (relative cost).",
+        "Lower it for **latency-sensitive DBs**.",
+        "Raise it with **zram**.",
+        "Use **cgroup swap limits** for isolation.",
+        "Measure impact with **PSI and faults**."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing what to put in the attic",
+      "story": "You decide whether to store away clothes (anonymous) or books you can re-borrow from the library (file cache).",
+      "mapping": [
+        [
+          "Clothes",
+          "Anonymous pages"
+        ],
+        [
+          "Re-borrowable books",
+          "File cache"
+        ],
+        [
+          "Preference",
+          "Swappiness"
+        ]
+      ],
+      "breaks": "Attics don't decide; swappiness biases kernel reclaim heuristics."
+    },
+    "mindmap": {
+      "center": "Swappiness",
+      "branches": [
+        {
+          "label": "Range",
+          "children": [
+            "0–200",
+            "Default 60"
+          ]
+        },
+        {
+          "label": "Meaning",
+          "children": [
+            "Anon vs file reclaim bias",
+            "Not a threshold"
+          ]
+        },
+        {
+          "label": "Low",
+          "children": [
+            "DBs",
+            "Latency-sensitive"
+          ]
+        },
+        {
+          "label": "High",
+          "children": [
+            "zram setups"
+          ]
+        },
+        {
+          "label": "Per-cgroup",
+          "children": [
+            "memory.swap.max",
+            "memory.swappiness (v1)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tune for DB",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Buffer pool stays resident; cache dropped instead."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl vm.swappiness\nsysctl -w vm.swappiness=10\necho 'vm.swappiness=10' > /etc/sysctl.d/90-swappiness.conf\ncat /sys/fs/cgroup/db.slice/memory.swap.max    # or set 0 for the DB cgroup"
+        }
+      ],
+      "outcome": "reclaim tuned to workload."
+    },
+    "summary": {
+      "points": [
+        "Relative preference.",
+        "Low for DBs.",
+        "Per-cgroup options."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does setting vm.swappiness=0 disable swap?",
+        "a": "No, it strongly biases reclaim toward file cache, but the kernel can still swap under severe pressure."
+      }
+    ]
+  },
+  "the-oom-killer-the-grim-reaper": {
+    "core": "When the kernel can't reclaim enough memory to satisfy an allocation, the OOM killer picks a victim and kills it to free memory. It chooses the process with the highest oom_score, roughly its share of memory (RSS plus swap plus page tables) adjusted by oom_score_adj. In cgroup v2, exceeding memory.max triggers an OOM kill within that cgroup only (container OOMKilled). Logs show the chosen process and memory state.",
+    "first_principles": {
+      "problem": "The main database is killed overnight instead of the leaking batch job, because it used the most memory.",
+      "truths": [
+        "Something must be freed when memory runs out.",
+        "The biggest consumer is the default victim.",
+        "Scores can be adjusted."
+      ],
+      "derivation": [
+        "Read **OOM logs** (dmesg/journal).",
+        "Check **oom_score** per process.",
+        "Protect critical ones via **oom_score_adj**.",
+        "Use **cgroup limits** to contain.",
+        "Consider **userspace OOM** (systemd-oomd, earlyoom)."
+      ]
+    },
+    "analogy": {
+      "title": "A lifeboat that must lose weight",
+      "story": "The captain throws overboard whoever carries the most luggage, unless they're marked essential crew.",
+      "mapping": [
+        [
+          "Lifeboat",
+          "RAM"
+        ],
+        [
+          "Most luggage",
+          "Largest memory user"
+        ],
+        [
+          "Essential crew",
+          "Negative oom_score_adj"
+        ]
+      ],
+      "breaks": "Captains deliberate; the OOM killer acts in milliseconds by formula."
+    },
+    "mindmap": {
+      "center": "OOM Killer",
+      "branches": [
+        {
+          "label": "Trigger",
+          "children": [
+            "Reclaim fails",
+            "cgroup memory.max"
+          ]
+        },
+        {
+          "label": "Selection",
+          "children": [
+            "oom_score",
+            "badness ~ memory share"
+          ]
+        },
+        {
+          "label": "Logs",
+          "children": [
+            "dmesg 'Out of memory: Killed process'",
+            "OOMKilled"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "oom_score_adj",
+            "cgroups",
+            "systemd-oomd",
+            "earlyoom"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Read and influence",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Batch job becomes the victim next time."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "journalctl -k | grep -A3 'Out of memory'\n# Out of memory: Killed process 4123 (postgres) total-vm:... anon-rss:41GB\nfor p in $(pgrep -f 'postgres|batch'); do echo \"$p $(cat /proc/$p/oom_score) $(cat /proc/$p/comm)\"; done\necho -900 > /proc/$(pgrep -o postgres)/oom_score_adj   # protect (prefer OOMScoreAdjust= in unit)"
+        }
+      ],
+      "outcome": "OOM behaviour controlled."
+    },
+    "summary": {
+      "points": [
+        "Kills to free memory.",
+        "Score by memory share.",
+        "Adjust and contain."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does cgroup v2 change OOM behaviour for containers?",
+        "a": "Exceeding a cgroup's memory.max triggers an OOM kill within that cgroup, so only processes in that container are candidates."
+      }
+    ]
+  },
+  "influencing-the-oom-killer": {
+    "core": "Shape OOM outcomes deliberately. Set oom_score_adj (−1000 to 1000; −1000 exempts) via systemd OOMScoreAdjust= or Kubernetes QoS classes (Guaranteed pods get low scores, BestEffort high). Contain workloads with cgroup memory.max and memory.high (throttling before OOM). Use userspace killers (systemd-oomd with PSI thresholds, earlyoom) to act earlier and more intelligently. Fix the root cause: leaks, unbounded caches or undersized limits.",
+    "first_principles": {
+      "problem": "Kernel OOM happens too late, after the system has thrashed for minutes and become unresponsive.",
+      "truths": [
+        "Kernel OOM is a last resort.",
+        "Earlier action avoids thrashing.",
+        "Containment limits blast radius."
+      ],
+      "derivation": [
+        "Set **OOMScoreAdjust** for critical services.",
+        "Use **memory.high** to throttle early.",
+        "Use **memory.max** to cap.",
+        "Run **systemd-oomd** on PSI.",
+        "Use **K8s QoS** and limits correctly."
+      ]
+    },
+    "analogy": {
+      "title": "Fire safety rules in a building",
+      "story": "Sprinklers in each room (cgroup limits), early smoke alarms (PSI-based oomd), and marking which rooms must never be evacuated last (score adjust).",
+      "mapping": [
+        [
+          "Room sprinklers",
+          "cgroup limits"
+        ],
+        [
+          "Smoke alarms",
+          "systemd-oomd"
+        ],
+        [
+          "Priority rooms",
+          "oom_score_adj"
+        ]
+      ],
+      "breaks": "Fires spread physically; memory pressure spreads through shared reclaim."
+    },
+    "mindmap": {
+      "center": "Influencing OOM",
+      "branches": [
+        {
+          "label": "Scores",
+          "children": [
+            "oom_score_adj",
+            "OOMScoreAdjust=",
+            "K8s QoS"
+          ]
+        },
+        {
+          "label": "cgroups",
+          "children": [
+            "memory.high",
+            "memory.max",
+            "memory.oom.group"
+          ]
+        },
+        {
+          "label": "Userspace",
+          "children": [
+            "systemd-oomd",
+            "earlyoom"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "PSI memory"
+          ]
+        },
+        {
+          "label": "Root cause",
+          "children": [
+            "Leaks",
+            "Limits",
+            "Caches"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "systemd config",
+      "scenario": "Unit drop-ins.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "DB protected; runaway slices killed early."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# /etc/systemd/system/postgresql.service.d/oom.conf\n[Service]\nOOMScoreAdjust=-900\nMemoryHigh=48G\nMemoryMax=56G\n\n# /etc/systemd/oomd.conf\n[OOM]\nDefaultMemoryPressureLimit=60%\nDefaultMemoryPressureDurationSec=20s"
+        }
+      ],
+      "outcome": "predictable memory pressure handling."
+    },
+    "summary": {
+      "points": [
+        "Adjust scores.",
+        "Throttle and cap with cgroups.",
+        "Act early on PSI."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does cgroup v2 memory.high do differently from memory.max?",
+        "a": "memory.high throttles and reclaims aggressively when exceeded, slowing the workload; memory.max is a hard cap that triggers OOM."
+      }
+    ]
+  },
+  "memory-visibility-tools-reading-the-systems-mind": {
+    "core": "The memory toolkit: free -h (available is key), /proc/meminfo (MemAvailable, Cached, Dirty, Slab, AnonPages, Shmem, Committed_AS), vmstat (si/so, free, cache, b), sar -r and -B (history, faults), /proc/pressure/memory (PSI stall time), slabtop (kernel caches), smem and smaps (per-process PSS), and cgroup memory.stat and memory.events for containers. Combine them to tell cache from leak, pressure from usage, and kernel from user memory.",
+    "first_principles": {
+      "problem": "A container shows OOMKilled while the node's free memory looks fine.",
+      "truths": [
+        "Different views answer different questions.",
+        "Containers have their own limits.",
+        "Pressure differs from usage."
+      ],
+      "derivation": [
+        "Node: **free, meminfo, vmstat**.",
+        "Pressure: **PSI memory**.",
+        "Kernel: **slabtop**.",
+        "Process: **smaps/smem PSS**.",
+        "Container: **memory.stat, memory.events**."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor's full set of tests",
+      "story": "Blood pressure, blood tests and scans each reveal different aspects; diagnosis comes from combining them.",
+      "mapping": [
+        [
+          "Blood pressure",
+          "PSI"
+        ],
+        [
+          "Blood test",
+          "meminfo"
+        ],
+        [
+          "Scan",
+          "smaps"
+        ]
+      ],
+      "breaks": "Doctors interpret; tools only report."
+    },
+    "mindmap": {
+      "center": "Memory Tools",
+      "branches": [
+        {
+          "label": "Node",
+          "children": [
+            "free",
+            "/proc/meminfo",
+            "vmstat",
+            "sar"
+          ]
+        },
+        {
+          "label": "Pressure",
+          "children": [
+            "/proc/pressure/memory"
+          ]
+        },
+        {
+          "label": "Kernel",
+          "children": [
+            "slabtop"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "smaps_rollup",
+            "smem",
+            "pmap"
+          ]
+        },
+        {
+          "label": "Container",
+          "children": [
+            "memory.current",
+            "memory.stat",
+            "memory.events"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Container OOM",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "OOM explained by pod limit, not node memory."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cg=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod<uid>.slice\ncat $cg/memory.max $cg/memory.current\ngrep -E 'anon |file |shmem ' $cg/memory.stat\ncat $cg/memory.events     # oom_kill 3\n# limit 512Mi, anon 500Mi → app heap exceeds pod limit"
+        }
+      ],
+      "outcome": "complete memory visibility."
+    },
+    "summary": {
+      "points": [
+        "Many lenses.",
+        "Pressure vs usage.",
+        "Container views."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a container be OOMKilled while the node has free memory?",
+        "a": "The container hit its own cgroup memory limit (memory.max), regardless of node-wide free memory."
+      }
+    ]
+  }
+}
