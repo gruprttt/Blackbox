@@ -1,0 +1,647 @@
+{
+  "introduction-the-it-works-on-my-machine-problem": {
+    "core": "Metrics say CPU is at 90%, and traces say a span took 2 s, but neither says which function burned the CPU or allocated the memory. Profilers answer that, but traditionally only locally, briefly and on demand, so production-only issues (real data, real concurrency) are missed. Continuous profiling samples stack traces in production all the time at low overhead, so you can see code-level hotspots for any service at any time.",
+    "first_principles": {
+      "problem": "A service uses twice the CPU in production as in staging, and nobody can reproduce it locally.",
+      "truths": [
+        "Production behaviour differs from dev.",
+        "Code-level detail needs stack samples.",
+        "Sampling can be cheap."
+      ],
+      "derivation": [
+        "**Sample stacks** periodically in production.",
+        "Keep overhead **~1–2%**.",
+        "**Store** profiles over time.",
+        "**Compare** across versions/time.",
+        "**Link** to metrics and traces."
+      ]
+    },
+    "analogy": {
+      "title": "A fitness tracker vs a one-off doctor visit",
+      "story": "A tracker records all day, catching what a brief check-up never sees.",
+      "mapping": [
+        [
+          "Tracker",
+          "Continuous profiler"
+        ],
+        [
+          "Check-up",
+          "Local profiling session"
+        ],
+        [
+          "All-day data",
+          "Production profiles"
+        ]
+      ],
+      "breaks": "Trackers measure one person; profilers aggregate across a fleet."
+    },
+    "mindmap": {
+      "center": "Continuous Profiling",
+      "branches": [
+        {
+          "label": "Gap",
+          "children": [
+            "Metrics say what",
+            "Traces say where",
+            "Profiles say which code"
+          ]
+        },
+        {
+          "label": "Approach",
+          "children": [
+            "Always-on sampling",
+            "Low overhead"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "CPU hotspots",
+            "Memory",
+            "Regressions",
+            "Cost cuts"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Pyroscope",
+            "Parca",
+            "Datadog",
+            "Cloud Profiler"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Production-only hotspot",
+      "scenario": "Flow.",
+      "flow": [
+        "CPU 2× staging",
+        "Flamegraph: 40% in JSON regex validation",
+        "Only triggered by real payload shapes",
+        "Precompile regex → CPU −35%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Found without reproducing locally."
+        }
+      ],
+      "code": [],
+      "outcome": "code-level visibility in production."
+    },
+    "summary": {
+      "points": [
+        "Metrics lack code detail.",
+        "Sample always.",
+        "Find production-only issues."
+      ]
+    },
+    "check": [
+      {
+        "q": "What question does profiling answer that metrics and traces don't?",
+        "a": "Which functions or lines of code are consuming CPU or memory."
+      }
+    ]
+  },
+  "how-it-works-sampling-and-stack-traces": {
+    "core": "Sampling profilers interrupt a process at a fixed rate (say 100 times per second), record the current call stack, and count how often each stack appears. Functions present in many samples are where time is spent. Stacks are symbolised (addresses to function names) and aggregated into profiles per interval. Low rates keep overhead small but statistically accurate over time, and different profile types sample different events (CPU time, allocations, locks).",
+    "first_principles": {
+      "problem": "Instrumenting every function call to measure time slows the service by 10× and skews results.",
+      "truths": [
+        "Frequent stacks reveal hotspots.",
+        "Sampling bounds overhead.",
+        "Statistics converge with enough samples."
+      ],
+      "derivation": [
+        "**Interrupt** at fixed frequency.",
+        "**Capture stack** each time.",
+        "**Count** identical stacks.",
+        "**Symbolise** addresses.",
+        "**Aggregate** over intervals (e.g. 10 s)."
+      ]
+    },
+    "analogy": {
+      "title": "Photographing an office every few seconds",
+      "story": "Count how often people are seen in each room to know where time is spent, without timing every movement.",
+      "mapping": [
+        [
+          "Photos",
+          "Stack samples"
+        ],
+        [
+          "Rooms",
+          "Functions"
+        ],
+        [
+          "Counts",
+          "Profile weights"
+        ]
+      ],
+      "breaks": "Photos might miss brief visits; rare short functions can be under-sampled."
+    },
+    "mindmap": {
+      "center": "Sampling Profilers",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Timer interrupt",
+            "Stack capture",
+            "Counting"
+          ]
+        },
+        {
+          "label": "Rate",
+          "children": [
+            "~100 Hz",
+            "Low overhead"
+          ]
+        },
+        {
+          "label": "Processing",
+          "children": [
+            "Symbolisation",
+            "Aggregation"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "CPU",
+            "Wall",
+            "Alloc",
+            "Heap",
+            "Lock/mutex"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Statistical",
+            "Needs symbols"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Go pprof",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hotspot from 30 s of samples."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -s 'http://svc:6060/debug/pprof/profile?seconds=30' > cpu.pb.gz\ngo tool pprof -top cpu.pb.gz | head\n#  flat  flat%   cum   cum%\n#  4.2s  35.0%  4.5s  37.5%  regexp.(*Regexp).doExecute"
+        }
+      ],
+      "outcome": "how profiles are made."
+    },
+    "summary": {
+      "points": [
+        "Sample stacks periodically.",
+        "Count and aggregate.",
+        "Cheap and statistical."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are sampling profilers suitable for production while instrumenting profilers often aren't?",
+        "a": "Sampling has small, bounded overhead; instrumenting every call adds large overhead and distorts timings."
+      }
+    ]
+  },
+  "the-visualization-flamegraphs": {
+    "core": "A flamegraph stacks call frames vertically, with the root at the bottom and callees above. Each box's width is proportional to the number of samples containing that frame, meaning time spent in it and its children. The x-axis is not time; it's sorted alphabetically to merge identical stacks. Look for wide plateaus at the top (self time) and wide towers to find hotspots, and use diff flamegraphs to compare versions.",
+    "first_principles": {
+      "problem": "Engineers stare at a flamegraph thinking left-to-right is a timeline and draw wrong conclusions.",
+      "truths": [
+        "Width encodes sample share.",
+        "Height encodes call depth.",
+        "Order is alphabetical, not temporal."
+      ],
+      "derivation": [
+        "Read **width as cost**.",
+        "Find **wide top frames** (self time).",
+        "**Zoom** into towers.",
+        "Use **diff flamegraphs** (red grew, blue shrank).",
+        "Use **icicle** (top-down) if preferred."
+      ]
+    },
+    "analogy": {
+      "title": "A city skyline where width is floor area",
+      "story": "Wide buildings hold the most people (time); tall buildings are just deep call chains.",
+      "mapping": [
+        [
+          "Building width",
+          "Sample share"
+        ],
+        [
+          "Floors",
+          "Call depth"
+        ],
+        [
+          "Rooftops",
+          "Self time"
+        ]
+      ],
+      "breaks": "Skylines are geographic; flamegraph order is alphabetical."
+    },
+    "mindmap": {
+      "center": "Flamegraphs",
+      "branches": [
+        {
+          "label": "Axes",
+          "children": [
+            "Width = samples",
+            "Height = depth",
+            "X not time"
+          ]
+        },
+        {
+          "label": "Reading",
+          "children": [
+            "Wide plateaus",
+            "Self vs total",
+            "Zoom"
+          ]
+        },
+        {
+          "label": "Variants",
+          "children": [
+            "Icicle",
+            "Diff",
+            "Sandwich view"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Brendan Gregg scripts",
+            "Pyroscope UI",
+            "speedscope"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Reading one",
+      "scenario": "Walkthrough.",
+      "flow": [
+        "Root main() 100% width",
+        "handler() 80% → serialize() 50%",
+        "json.Marshal() wide flat top = self time",
+        "Fix: cache serialized responses"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hotspot visually obvious."
+        }
+      ],
+      "code": [],
+      "outcome": "flamegraphs read correctly."
+    },
+    "summary": {
+      "points": [
+        "Width is cost.",
+        "Not a timeline.",
+        "Diff for regressions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the horizontal axis of a flamegraph represent?",
+        "a": "Not time; frames are sorted (usually alphabetically) so identical stacks merge, and width shows share of samples."
+      }
+    ]
+  },
+  "memory-profiling-its-not-just-cpu": {
+    "core": "Memory profiles answer different questions. Allocation profiles show which code allocates the most bytes or objects (driving GC pressure and CPU); in-use or heap profiles show what currently holds memory (leaks, bloat); and goroutine, thread or lock profiles show blocking. In GC'd languages, reducing allocations often cuts CPU and latency more than optimising compute. Compare heap profiles over time to find leaks.",
+    "first_principles": {
+      "problem": "A Java service's p99 latency spikes during GC pauses, but CPU profiles show nothing obvious.",
+      "truths": [
+        "Allocations drive GC.",
+        "Retained objects drive memory growth.",
+        "Leaks grow over time."
+      ],
+      "derivation": [
+        "Profile **alloc_space/alloc_objects**.",
+        "Profile **inuse_space** for retention.",
+        "**Compare heap** profiles over hours.",
+        "Reduce **allocation churn** (pools, reuse).",
+        "Check **lock/blocking** profiles too."
+      ]
+    },
+    "analogy": {
+      "title": "Tracking shopping vs what's in the cupboard",
+      "story": "Receipts show what you buy (allocations); the cupboard shows what you keep (heap). A cupboard that keeps filling means you never throw anything out.",
+      "mapping": [
+        [
+          "Receipts",
+          "Allocation profile"
+        ],
+        [
+          "Cupboard",
+          "In-use heap"
+        ],
+        [
+          "Never throwing out",
+          "Leak"
+        ]
+      ],
+      "breaks": "Cupboards are visible; heaps need profiles to inspect."
+    },
+    "mindmap": {
+      "center": "Memory Profiling",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Allocations",
+            "In-use heap",
+            "Goroutines/threads",
+            "Locks"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "GC pressure",
+            "Leaks",
+            "Bloat",
+            "Contention"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "Diff over time",
+            "Object pooling",
+            "Reduce copies"
+          ]
+        },
+        {
+          "label": "Languages",
+          "children": [
+            "Go pprof",
+            "Java JFR",
+            "Python memray"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Leak hunt",
+      "scenario": "Go pprof diff.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Leak located in an unbounded cache."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -s http://svc:6060/debug/pprof/heap > heap1.pb.gz\nsleep 3600\ncurl -s http://svc:6060/debug/pprof/heap > heap2.pb.gz\ngo tool pprof -base heap1.pb.gz -sample_index=inuse_space -top heap2.pb.gz | head\n# growth concentrated in cache.(*LRU).Add → unbounded map"
+        }
+      ],
+      "outcome": "memory issues diagnosed."
+    },
+    "summary": {
+      "points": [
+        "Alloc vs in-use.",
+        "GC pressure costs CPU.",
+        "Diff heaps for leaks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between allocation and in-use heap profiles?",
+        "a": "Allocation profiles show total memory allocated over time (GC pressure); in-use profiles show memory currently retained (leaks/bloat)."
+      }
+    ]
+  },
+  "the-tools-pyroscope-and-parca": {
+    "core": "Grafana Pyroscope stores and queries continuous profiles from language SDKs (Go, Java, Python, Ruby, .NET, Node) and from eBPF agents via Grafana Alloy, with flamegraph and diff UIs and labels for slicing by service, version or pod. Parca is an open-source, eBPF-first profiler (Parca Agent) with symbolisation, storage and pprof compatibility. Both use labels like metrics and support comparing time ranges.",
+    "first_principles": {
+      "problem": "The team needs fleet-wide always-on profiling without adding SDKs to every legacy service.",
+      "truths": [
+        "SDKs give rich, language-aware profiles.",
+        "eBPF gives zero-instrumentation coverage.",
+        "Labels enable slicing and comparison."
+      ],
+      "derivation": [
+        "Use **eBPF agents** for broad CPU coverage.",
+        "Use **SDKs** for alloc/lock profiles and app labels.",
+        "**Label** by service, version, region.",
+        "**Compare** versions with diff views.",
+        "Integrate with **Grafana** dashboards."
+      ]
+    },
+    "analogy": {
+      "title": "A city-wide CCTV system with searchable tags",
+      "story": "Cameras everywhere (eBPF) plus detailed cameras in key buildings (SDKs), all searchable by location and time.",
+      "mapping": [
+        [
+          "City cameras",
+          "eBPF agent"
+        ],
+        [
+          "Building cameras",
+          "Language SDKs"
+        ],
+        [
+          "Search tags",
+          "Labels"
+        ]
+      ],
+      "breaks": "CCTV records video; profilers aggregate statistics."
+    },
+    "mindmap": {
+      "center": "Profiling Tools",
+      "branches": [
+        {
+          "label": "Pyroscope",
+          "children": [
+            "SDKs",
+            "Alloy eBPF",
+            "Grafana integration",
+            "Diff views"
+          ]
+        },
+        {
+          "label": "Parca",
+          "children": [
+            "eBPF-first",
+            "pprof",
+            "Symbolisation"
+          ]
+        },
+        {
+          "label": "Shared",
+          "children": [
+            "Labels",
+            "Time-range compare",
+            "Low overhead"
+          ]
+        },
+        {
+          "label": "Others",
+          "children": [
+            "Datadog",
+            "Google Cloud Profiler",
+            "Elastic"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pyroscope Go SDK",
+      "scenario": "Code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "CPU, memory and lock profiles labelled by version."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "pyroscope.Start(pyroscope.Config{\n    ApplicationName: \"checkout\",\n    ServerAddress:   \"http://pyroscope:4040\",\n    Tags:            map[string]string{\"version\": version, \"region\": region},\n    ProfileTypes: []pyroscope.ProfileType{\n        pyroscope.ProfileCPU, pyroscope.ProfileAllocSpace, pyroscope.ProfileInuseSpace, pyroscope.ProfileMutexDuration,\n    },\n})"
+        }
+      ],
+      "outcome": "fleet-wide profiling platform."
+    },
+    "summary": {
+      "points": [
+        "Pyroscope and Parca.",
+        "SDK + eBPF.",
+        "Labels and diffs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do language SDK profilers offer that eBPF CPU profilers often don't?",
+        "a": "Allocation, heap and lock profiles with language-level detail and custom application labels."
+      }
+    ]
+  },
+  "connecting-profiling-to-the-rest-of-your-observability-stack": {
+    "core": "Profiles become far more useful when linked to other signals. Metrics show a CPU spike, so jump to profiles for that service and time. A trace shows a slow span, so span profiles (profiles tagged with span or trace IDs) show which code ran during it. Deploy annotations tell you to compare profiles before and after the release. Shared labels such as service, version and pod make those jumps seamless.",
+    "first_principles": {
+      "problem": "Engineers see a slow span in a trace but can't tell what code made it slow without manual profiling.",
+      "truths": [
+        "Each signal answers a different question.",
+        "Shared labels enable navigation.",
+        "Span IDs can tag profiles."
+      ],
+      "derivation": [
+        "Use **consistent labels** across signals.",
+        "Enable **span profiles** (trace-to-profile).",
+        "Link **metrics → profiles** by time + service.",
+        "Compare **before/after deploys**.",
+        "Build **drill-down dashboards**."
+      ]
+    },
+    "analogy": {
+      "title": "A detective's case board",
+      "story": "Strings connect the CCTV (metrics), witness statements (traces) and forensic lab report (profiles) for the same event.",
+      "mapping": [
+        [
+          "CCTV",
+          "Metrics"
+        ],
+        [
+          "Witness statements",
+          "Traces"
+        ],
+        [
+          "Lab report",
+          "Profiles"
+        ],
+        [
+          "Strings",
+          "Shared labels/IDs"
+        ]
+      ],
+      "breaks": "Detectives connect clues manually; tools do it via labels."
+    },
+    "mindmap": {
+      "center": "Connected Profiling",
+      "branches": [
+        {
+          "label": "Links",
+          "children": [
+            "Metrics → profiles",
+            "Traces → span profiles",
+            "Deploys → diffs"
+          ]
+        },
+        {
+          "label": "Glue",
+          "children": [
+            "service",
+            "version",
+            "pod",
+            "span_id"
+          ]
+        },
+        {
+          "label": "Workflow",
+          "children": [
+            "Detect",
+            "Locate",
+            "Explain"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Grafana Traces-to-Profiles",
+            "Datadog code hotspots"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Drill-down",
+      "scenario": "Flow.",
+      "flow": [
+        "Alert: checkout CPU 90%",
+        "Dashboard link → Pyroscope checkout, same time",
+        "Trace with slow span → span profile",
+        "Diff v2.4 vs v2.3: new regex in validation"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "From alert to line of code in minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "profiles as part of observability."
+    },
+    "summary": {
+      "points": [
+        "Link signals.",
+        "Span profiles.",
+        "Diff around deploys."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are span profiles?",
+        "a": "Profiling samples tagged with trace/span IDs, letting you see exactly which code executed during a specific slow span."
+      }
+    ]
+  }
+}

@@ -1,0 +1,753 @@
+{
+  "introduction-what-are-metrics": {
+    "core": "A metric is a number measured over time: request count, latency, memory used. Each sample is cheap (a timestamp and a float), so metrics can be kept for months, aggregated across thousands of instances, and alerted on in real time. They answer 'is something wrong and how much?' but not 'why exactly?'. That's what logs and traces add.",
+    "first_principles": {
+      "problem": "A team only has logs and must grep millions of lines to learn whether error rates went up.",
+      "truths": [
+        "Numbers compress behaviour.",
+        "Time series show trends.",
+        "Aggregation hides individual detail."
+      ],
+      "derivation": [
+        "Record **numeric samples** over time.",
+        "Identify series by **name + labels**.",
+        "**Aggregate** across instances.",
+        "**Alert** on thresholds and rates.",
+        "Pair with **logs/traces** for detail."
+      ]
+    },
+    "analogy": {
+      "title": "A car dashboard",
+      "story": "Speed, fuel and temperature tell you at a glance whether things are fine, but not why the engine light is on.",
+      "mapping": [
+        [
+          "Gauges",
+          "Metrics"
+        ],
+        [
+          "Engine light",
+          "Alert"
+        ],
+        [
+          "Mechanic's scan",
+          "Logs/traces"
+        ]
+      ],
+      "breaks": "Dashboards show one car; metrics aggregate fleets."
+    },
+    "mindmap": {
+      "center": "Metrics",
+      "branches": [
+        {
+          "label": "Shape",
+          "children": [
+            "Name",
+            "Labels",
+            "Timestamp",
+            "Value"
+          ]
+        },
+        {
+          "label": "Strengths",
+          "children": [
+            "Cheap",
+            "Aggregatable",
+            "Long retention",
+            "Alerting"
+          ]
+        },
+        {
+          "label": "Weakness",
+          "children": [
+            "No per-event detail"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Prometheus",
+            "OpenTelemetry",
+            "Datadog"
+          ]
+        },
+        {
+          "label": "Partners",
+          "children": [
+            "Logs",
+            "Traces"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "A time series",
+      "scenario": "Exposition.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Error rate computable across all pods in one query."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# HELP http_requests_total Total HTTP requests\n# TYPE http_requests_total counter\nhttp_requests_total{method=\"GET\",route=\"/api/orders\",status=\"200\"} 18342\nhttp_requests_total{method=\"GET\",route=\"/api/orders\",status=\"500\"} 27"
+        }
+      ],
+      "outcome": "metrics' role understood."
+    },
+    "summary": {
+      "points": [
+        "Numbers over time.",
+        "Cheap and aggregatable.",
+        "Detect, not explain."
+      ]
+    },
+    "check": [
+      {
+        "q": "What question do metrics answer well, and which do they answer poorly?",
+        "a": "They're great for 'is something wrong and how much'; poor at 'why did this specific request fail'."
+      }
+    ]
+  },
+  "the-four-core-metric-types": {
+    "core": "Counters only go up (requests, errors, bytes) and reset on restart; you use their rate. Gauges go up and down (memory, queue depth, temperature) and you read their current value. Histograms count observations into buckets (latency ≤100 ms, ≤250 ms...) so you can compute quantiles across instances. Summaries compute quantiles client-side, which is accurate per instance but impossible to aggregate across them.",
+    "first_principles": {
+      "problem": "A team records latency as a gauge of the last request's duration and misses all the slow requests between scrapes.",
+      "truths": [
+        "Monotonic totals tolerate missed scrapes.",
+        "Point-in-time values can be sampled.",
+        "Distributions need buckets to aggregate."
+      ],
+      "derivation": [
+        "Use **counters** for events/totals.",
+        "Use **gauges** for current levels.",
+        "Use **histograms** for latency/sizes.",
+        "Avoid **summaries** when aggregating.",
+        "Query counters with **rate()**."
+      ]
+    },
+    "analogy": {
+      "title": "Odometer, fuel gauge, and a speed-band tally",
+      "story": "The odometer only increases, the fuel gauge rises and falls, and a tally of 'how many minutes in each speed band' describes the whole trip.",
+      "mapping": [
+        [
+          "Odometer",
+          "Counter"
+        ],
+        [
+          "Fuel gauge",
+          "Gauge"
+        ],
+        [
+          "Speed-band tally",
+          "Histogram"
+        ]
+      ],
+      "breaks": "Odometers don't reset on restart; counters do, and rate() handles it."
+    },
+    "mindmap": {
+      "center": "Metric Types",
+      "branches": [
+        {
+          "label": "Counter",
+          "children": [
+            "Monotonic",
+            "rate()",
+            "Resets"
+          ]
+        },
+        {
+          "label": "Gauge",
+          "children": [
+            "Up/down",
+            "Current value"
+          ]
+        },
+        {
+          "label": "Histogram",
+          "children": [
+            "Buckets",
+            "Aggregatable quantiles",
+            "_sum/_count"
+          ]
+        },
+        {
+          "label": "Summary",
+          "children": [
+            "Client quantiles",
+            "Not aggregatable"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Instrumenting all three",
+      "scenario": "Python prometheus_client.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Rate, saturation and latency distribution all captured."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from prometheus_client import Counter, Gauge, Histogram\nREQS = Counter(\"http_requests_total\", \"Requests\", [\"route\", \"status\"])\nINFLIGHT = Gauge(\"http_inflight_requests\", \"In-flight\")\nLAT = Histogram(\"http_request_duration_seconds\", \"Latency\", [\"route\"],\n                buckets=[.025, .05, .1, .25, .5, 1, 2.5])\n\n@INFLIGHT.track_inprogress()\ndef handle(route):\n    with LAT.labels(route).time():\n        ...\n    REQS.labels(route, \"200\").inc()"
+        }
+      ],
+      "outcome": "right type for each signal."
+    },
+    "summary": {
+      "points": [
+        "Counter, gauge, histogram, summary.",
+        "Rate counters.",
+        "Histograms aggregate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are histograms preferred over summaries in Prometheus?",
+        "a": "Histogram buckets can be summed across instances to compute fleet-wide quantiles; summary quantiles can't be aggregated."
+      }
+    ]
+  },
+  "metric-types-measuring-distributions-histograms-summaries": {
+    "core": "Averages hide pain: a 50 ms mean can hide 2% of requests taking 5 s. Distributions need percentiles (p50, p95, p99). Histograms store cumulative bucket counts, and histogram_quantile() interpolates within the bucket where the quantile falls, so accuracy depends on bucket boundaries placed around your SLO thresholds. Native or exponential histograms adapt bucket resolution automatically.",
+    "first_principles": {
+      "problem": "Average latency looks healthy at 80 ms while 1 in 50 users waits 4 seconds.",
+      "truths": [
+        "Averages hide tails.",
+        "Quantiles describe user experience.",
+        "Bucket placement sets accuracy."
+      ],
+      "derivation": [
+        "Measure **p50/p95/p99**, not mean.",
+        "Put **bucket edges near SLO thresholds**.",
+        "Use **histogram_quantile** over rates.",
+        "Consider **native histograms**.",
+        "Track **_count and _sum** for averages."
+      ]
+    },
+    "analogy": {
+      "title": "Exam results by grade band",
+      "story": "Knowing 'average score 70' is less useful than how many students failed; bands show the spread.",
+      "mapping": [
+        [
+          "Grade bands",
+          "Buckets"
+        ],
+        [
+          "Fail count",
+          "Tail requests"
+        ],
+        [
+          "Average",
+          "Mean latency"
+        ]
+      ],
+      "breaks": "Grade bands are fixed; histogram buckets must be chosen thoughtfully."
+    },
+    "mindmap": {
+      "center": "Distributions",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Averages hide tails"
+          ]
+        },
+        {
+          "label": "Percentiles",
+          "children": [
+            "p50",
+            "p95",
+            "p99",
+            "p99.9"
+          ]
+        },
+        {
+          "label": "Histograms",
+          "children": [
+            "Cumulative buckets",
+            "le label",
+            "Interpolation"
+          ]
+        },
+        {
+          "label": "Accuracy",
+          "children": [
+            "Bucket placement",
+            "Native histograms"
+          ]
+        },
+        {
+          "label": "Pitfall",
+          "children": [
+            "Averaging percentiles"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fleet p99",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows tail latency per route across all pods."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "histogram_quantile(0.99,\n  sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))\n# fraction under 300 ms SLO threshold:\nsum(rate(http_request_duration_seconds_bucket{le=\"0.25\"}[5m])) / sum(rate(http_request_duration_seconds_count[5m]))"
+        }
+      ],
+      "outcome": "tail-aware latency monitoring."
+    },
+    "summary": {
+      "points": [
+        "Percentiles over means.",
+        "Buckets near SLOs.",
+        "Aggregate then quantile."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you average p99 values from several instances?",
+        "a": "Percentiles aren't additive; you must aggregate the underlying bucket counts and then compute the quantile."
+      }
+    ]
+  },
+  "the-power-of-labels": {
+    "core": "Labels (key=value pairs) turn one metric into many series: http_requests_total{service, route, status, region}. They let you slice and aggregate: errors by route, latency by region, saturation by pod. Each unique label combination is a separate stored time series, so labels must have bounded values. Use route templates (/users/:id), not raw URLs, and status classes, not user IDs.",
+    "first_principles": {
+      "problem": "A team can't tell which endpoint is failing because all requests are counted in one unlabelled metric.",
+      "truths": [
+        "Dimensions enable slicing.",
+        "Each combination is a series.",
+        "Unbounded values explode storage."
+      ],
+      "derivation": [
+        "Add labels for **dimensions you query by**.",
+        "Keep values **bounded** (route templates, status).",
+        "Use **consistent names** across services.",
+        "Aggregate with **sum by (...)**.",
+        "Avoid **IDs, emails, raw URLs**."
+      ]
+    },
+    "analogy": {
+      "title": "Tags on library books",
+      "story": "Tagging by genre and language lets you find all French mysteries; tagging by reader's name would create a tag per person.",
+      "mapping": [
+        [
+          "Genre/language tags",
+          "Bounded labels"
+        ],
+        [
+          "Reader name tags",
+          "Unbounded labels"
+        ],
+        [
+          "Catalogue size",
+          "Series count"
+        ]
+      ],
+      "breaks": "Extra tags cost libraries little; each label value costs memory in a TSDB."
+    },
+    "mindmap": {
+      "center": "Labels",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Slice",
+            "Aggregate",
+            "Filter"
+          ]
+        },
+        {
+          "label": "Good",
+          "children": [
+            "service",
+            "route template",
+            "status class",
+            "region"
+          ]
+        },
+        {
+          "label": "Bad",
+          "children": [
+            "user_id",
+            "request_id",
+            "raw URL",
+            "timestamp"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "sum by",
+            "without",
+            "regex matchers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Slice errors",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failing endpoint identified in seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "sum by (route) (rate(http_requests_total{status=~\"5..\"}[5m]))\n# top 3 failing routes\ntopk(3, sum by (route) (rate(http_requests_total{status=~\"5..\"}[5m])))"
+        }
+      ],
+      "outcome": "dimensional metrics used well."
+    },
+    "summary": {
+      "points": [
+        "Labels add dimensions.",
+        "Each combo is a series.",
+        "Keep values bounded."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use route templates like /users/:id instead of raw paths as label values?",
+        "a": "Raw paths contain unbounded IDs, creating a new time series per user and exploding cardinality."
+      }
+    ]
+  },
+  "the-danger-of-high-cardinality": {
+    "core": "Cardinality is the number of unique series: the product of distinct label values. Ten routes × five statuses × 100 pods is 5,000 series. Add user_id with a million values and you get 5 billion. Each series costs memory in the TSDB head block and index, so high cardinality causes out-of-memory crashes, slow queries and huge bills. Watch series counts and enforce limits.",
+    "first_principles": {
+      "problem": "Adding a customer_id label to one metric crashes the Prometheus server overnight.",
+      "truths": [
+        "Series count multiplies across labels.",
+        "Each series costs memory.",
+        "One bad label can dominate."
+      ],
+      "derivation": [
+        "**Estimate** cardinality before adding labels.",
+        "**Monitor** series counts (prometheus_tsdb_head_series).",
+        "Set **sample/label limits** per scrape.",
+        "Use **logs/traces** for high-cardinality detail.",
+        "Drop or **aggregate** offending labels."
+      ]
+    },
+    "analogy": {
+      "title": "A filing cabinet with a drawer per combination",
+      "story": "Adding 'customer' as a sorting dimension turns 50 drawers into 50 million.",
+      "mapping": [
+        [
+          "Drawers",
+          "Series"
+        ],
+        [
+          "Sorting dimension",
+          "Label"
+        ],
+        [
+          "Cabinet size",
+          "TSDB memory"
+        ]
+      ],
+      "breaks": "Cabinets fill slowly; cardinality spikes in one deploy."
+    },
+    "mindmap": {
+      "center": "High Cardinality",
+      "branches": [
+        {
+          "label": "Math",
+          "children": [
+            "Product of label values"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Memory",
+            "Index size",
+            "Query time",
+            "Vendor bills"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "IDs",
+            "URLs",
+            "Pod churn",
+            "Histogram buckets × labels"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "sample_limit",
+            "label_limit",
+            "Relabel drops",
+            "Review in CI"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find heavy metrics",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Culprit metric and label found."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "topk(10, count by (__name__) ({__name__=~\".+\"}))\n# series per label value for a metric\ncount by (customer_id) (api_calls_total)"
+        }
+      ],
+      "outcome": "cardinality kept in check."
+    },
+    "summary": {
+      "points": [
+        "Series multiply.",
+        "Memory and cost.",
+        "Limit and monitor."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many series does a metric with labels route (20), status (5) and pod (50) produce?",
+        "a": "Up to 20 × 5 × 50 = 5,000 series."
+      }
+    ]
+  },
+  "collecting-metrics-push-vs-pull": {
+    "core": "Pull (Prometheus): targets expose /metrics and the server scrapes them on an interval using service discovery. You get built-in up/down detection, control over load, and easy local debugging. Push (StatsD, OTLP, Pushgateway): apps send metrics to a collector, which suits short-lived jobs, serverless and clients behind NAT. Modern stacks mix both, often via the OpenTelemetry Collector.",
+    "first_principles": {
+      "problem": "A nightly batch job finishes before Prometheus scrapes it, so its metrics never appear.",
+      "truths": [
+        "Pulling needs reachable, long-lived targets.",
+        "Pushing suits ephemeral sources.",
+        "Scrape failures signal health."
+      ],
+      "derivation": [
+        "**Pull** for long-running services.",
+        "**Push** for batch/serverless/edge.",
+        "Use **Pushgateway** sparingly for batch.",
+        "Use **OTel Collector** to bridge.",
+        "Alert on **up == 0**."
+      ]
+    },
+    "analogy": {
+      "title": "A meter reader vs mailing in readings",
+      "story": "The utility visits each house to read the meter (pull), but holiday cabins mail their reading in (push).",
+      "mapping": [
+        [
+          "Meter reader",
+          "Prometheus scrape"
+        ],
+        [
+          "Mailed reading",
+          "Push"
+        ],
+        [
+          "Missed visit",
+          "up == 0"
+        ]
+      ],
+      "breaks": "Mailed readings can be late; pushed metrics lack scrape-based health signals."
+    },
+    "mindmap": {
+      "center": "Push vs Pull",
+      "branches": [
+        {
+          "label": "Pull",
+          "children": [
+            "Prometheus",
+            "Service discovery",
+            "up metric",
+            "Server controls rate"
+          ]
+        },
+        {
+          "label": "Push",
+          "children": [
+            "StatsD",
+            "OTLP",
+            "Pushgateway",
+            "Remote write"
+          ]
+        },
+        {
+          "label": "Fits",
+          "children": [
+            "Pull: services",
+            "Push: batch/serverless"
+          ]
+        },
+        {
+          "label": "Bridges",
+          "children": [
+            "OTel Collector",
+            "Agent mode"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Batch job push",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Alert if last success older than 26 h."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from prometheus_client import CollectorRegistry, Gauge, push_to_gateway\nreg = CollectorRegistry()\nlast = Gauge(\"job_last_success_unixtime\", \"Last success\", registry=reg)\nlast.set_to_current_time()\npush_to_gateway(\"pushgateway:9091\", job=\"nightly_export\", registry=reg)"
+        }
+      ],
+      "outcome": "right collection model per workload."
+    },
+    "summary": {
+      "points": [
+        "Pull for services.",
+        "Push for ephemeral jobs.",
+        "Mix via collectors."
+      ]
+    },
+    "check": [
+      {
+        "q": "What useful signal do you get for free with pull-based collection?",
+        "a": "The up metric, telling you when a target can't be scraped (down or unreachable)."
+      }
+    ]
+  },
+  "exporters-the-universal-adapters": {
+    "core": "Many systems (Linux hosts, MySQL, Redis, Nginx, cloud APIs, hardware) don't speak Prometheus natively. Exporters are small processes that query them (procfs, stats endpoints, SQL, SNMP) and expose /metrics. node_exporter, blackbox_exporter (probes HTTP, TCP, ICMP and DNS from outside), mysqld_exporter, cloudwatch_exporter and the OTel Collector receivers are the standard toolkit.",
+    "first_principles": {
+      "problem": "The team needs database, host and external endpoint metrics, but none of those systems expose Prometheus format.",
+      "truths": [
+        "Systems expose stats in their own formats.",
+        "Translation can be decoupled.",
+        "Black-box probes measure user view."
+      ],
+      "derivation": [
+        "Run **node_exporter** on hosts.",
+        "Use **service exporters** (mysqld, redis...).",
+        "Use **blackbox_exporter** for endpoint probes.",
+        "Prefer **native instrumentation** where possible.",
+        "Secure exporters (**auth/network**)."
+      ]
+    },
+    "analogy": {
+      "title": "Interpreters at an international meeting",
+      "story": "Each delegate speaks their own language; interpreters translate into the common language everyone records.",
+      "mapping": [
+        [
+          "Delegates",
+          "Systems"
+        ],
+        [
+          "Interpreters",
+          "Exporters"
+        ],
+        [
+          "Common language",
+          "Prometheus format"
+        ]
+      ],
+      "breaks": "Interpreters understand nuance; exporters only expose what they implement."
+    },
+    "mindmap": {
+      "center": "Exporters",
+      "branches": [
+        {
+          "label": "Host",
+          "children": [
+            "node_exporter",
+            "windows_exporter"
+          ]
+        },
+        {
+          "label": "Services",
+          "children": [
+            "mysqld",
+            "postgres",
+            "redis",
+            "kafka"
+          ]
+        },
+        {
+          "label": "Probes",
+          "children": [
+            "blackbox_exporter"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "cloudwatch_exporter",
+            "YACE"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Native instrumentation",
+            "OTel receivers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Blackbox probe",
+      "scenario": "Prometheus config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "probe_success and probe_duration_seconds for the site."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "scrape_configs:\n  - job_name: blackbox-https\n    metrics_path: /probe\n    params: { module: [http_2xx] }\n    static_configs: [{ targets: [\"https://shop.example.com/health\"] }]\n    relabel_configs:\n      - { source_labels: [__address__], target_label: __param_target }\n      - { source_labels: [__param_target], target_label: instance }\n      - { target_label: __address__, replacement: blackbox:9115 }"
+        }
+      ],
+      "outcome": "broad coverage via adapters."
+    },
+    "summary": {
+      "points": [
+        "Exporters translate.",
+        "Host, service, probe exporters.",
+        "Prefer native where possible."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does blackbox_exporter measure that node_exporter doesn't?",
+        "a": "Externally observed availability and latency of endpoints (HTTP, TCP, DNS, ICMP), the user's view."
+      }
+    ]
+  }
+}

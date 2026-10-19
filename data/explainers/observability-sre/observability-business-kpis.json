@@ -1,0 +1,523 @@
+{
+  "introduction-the-all-systems-green-fallacy": {
+    "core": "Dashboards can be all green (CPU fine, error rate low, latency OK) while the business is failing: checkouts dropped 40% because a payment provider silently declines cards, or a marketing link points to a 404. Technical health is necessary but not sufficient. Business observability monitors outcomes such as orders, sign-ups and revenue per minute alongside system signals.",
+    "first_principles": {
+      "problem": "An e-commerce site's orders fall by half for three hours while every technical alert stays quiet.",
+      "truths": [
+        "Systems can 'work' while outcomes fail.",
+        "Business outcomes are measurable in near real time.",
+        "Users don't care about CPU."
+      ],
+      "derivation": [
+        "Instrument **business events** (orders, sign-ups).",
+        "Track **rates per minute**.",
+        "Alert on **deviation from expected**.",
+        "Show **business + tech** together.",
+        "Assign **owners** for KPI alerts."
+      ]
+    },
+    "analogy": {
+      "title": "A shop with working tills but no customers",
+      "story": "The tills, lights and doors all function, yet nobody's buying because the sign outside says 'closed'.",
+      "mapping": [
+        [
+          "Working tills",
+          "Green system metrics"
+        ],
+        [
+          "No customers",
+          "Dropping orders"
+        ],
+        [
+          "'Closed' sign",
+          "Silent business failure"
+        ]
+      ],
+      "breaks": "Shopkeepers see empty floors; services need explicit KPI metrics."
+    },
+    "mindmap": {
+      "center": "Green Fallacy",
+      "branches": [
+        {
+          "label": "Gap",
+          "children": [
+            "Technical health ≠ business health"
+          ]
+        },
+        {
+          "label": "Silent failures",
+          "children": [
+            "Payment declines",
+            "Broken links",
+            "Bad pricing",
+            "Tracking loss"
+          ]
+        },
+        {
+          "label": "Fix",
+          "children": [
+            "Business metrics",
+            "Anomaly alerts",
+            "Shared dashboards"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Business counter",
+      "scenario": "Instrumentation.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Orders per minute visible beside error rates."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "ORDERS = Counter(\"orders_completed_total\", \"Completed orders\", [\"country\", \"payment_method\"])\nREVENUE = Counter(\"order_revenue_cents_total\", \"Revenue\", [\"country\", \"currency\"])\ndef on_order_completed(order):\n    ORDERS.labels(order.country, order.payment_method).inc()\n    REVENUE.labels(order.country, order.currency).inc(order.total_cents)"
+        }
+      ],
+      "outcome": "outcomes monitored, not just systems."
+    },
+    "summary": {
+      "points": [
+        "Green ≠ healthy business.",
+        "Instrument outcomes.",
+        "Alert on deviations."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can technical metrics be green during a business outage?",
+        "a": "Systems may respond successfully while producing bad outcomes (declined payments, broken flows), which only business metrics reveal."
+      }
+    ]
+  },
+  "mapping-technical-metrics-to-business-kpis": {
+    "core": "Connect each business KPI to the user journey and services behind it: checkout conversion depends on cart, pricing, payment and fraud services, and their latency and errors. Mapping lets you translate technical degradation into business impact ('p99 +500 ms on payment correlates with −3% conversion') and prioritise work by business value. Use journey funnels and shared dimensions (country, platform) on both sides.",
+    "first_principles": {
+      "problem": "Engineering can't explain why a 300 ms latency regression matters, so the fix is deprioritised.",
+      "truths": [
+        "KPIs flow from user journeys.",
+        "Journeys depend on services.",
+        "Shared dimensions enable correlation."
+      ],
+      "derivation": [
+        "Map **KPI → journey → services**.",
+        "Instrument **funnel steps**.",
+        "Use **shared labels** (country, platform).",
+        "Quantify **correlation** (latency vs conversion).",
+        "Prioritise by **business impact**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory's output traced to each machine",
+      "story": "If widgets per hour drop, you know which machines on the line could be responsible.",
+      "mapping": [
+        [
+          "Widgets per hour",
+          "KPI"
+        ],
+        [
+          "Production line",
+          "User journey"
+        ],
+        [
+          "Machines",
+          "Services"
+        ]
+      ],
+      "breaks": "Factory lines are linear; user journeys branch."
+    },
+    "mindmap": {
+      "center": "KPI Mapping",
+      "branches": [
+        {
+          "label": "Chain",
+          "children": [
+            "KPI",
+            "Journey",
+            "Funnel steps",
+            "Services",
+            "SLIs"
+          ]
+        },
+        {
+          "label": "Dimensions",
+          "children": [
+            "Country",
+            "Platform",
+            "App version"
+          ]
+        },
+        {
+          "label": "Analysis",
+          "children": [
+            "Correlation",
+            "Experiments"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Prioritisation",
+            "Impact statements"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Checkout funnel",
+      "scenario": "Mapping.",
+      "flow": [
+        "View cart → cart-svc (p95 120 ms)",
+        "Enter payment → pricing + payments-svc",
+        "Fraud check → fraud-svc (p95 800 ms)",
+        "Confirm → orders-svc; conversion 3.1%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fraud latency identified as conversion lever."
+        }
+      ],
+      "code": [],
+      "outcome": "technical work tied to business value."
+    },
+    "summary": {
+      "points": [
+        "KPI to services.",
+        "Funnels and dimensions.",
+        "Quantify impact."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use the same dimensions (e.g. country, platform) for business and technical metrics?",
+        "a": "So you can correlate KPI changes with technical signals for the same segment of users."
+      }
+    ]
+  },
+  "revenue-at-risk-quantifying-downtime": {
+    "core": "Revenue at risk converts incidents into money. Expected revenue per minute (from historical baselines for that time and day) multiplied by the fraction of affected traffic and the duration gives approximate lost or at-risk revenue. It turns SLO and incident discussions into business language, justifies reliability investment, and helps decide incident severity in real time.",
+    "first_principles": {
+      "problem": "Leadership asks 'how bad was the outage?' and engineering can only answer in error percentages.",
+      "truths": [
+        "Revenue has predictable patterns.",
+        "Impact scales with affected share and time.",
+        "Money aligns priorities."
+      ],
+      "derivation": [
+        "Baseline **revenue/minute** by time of week.",
+        "Measure **affected traffic %**.",
+        "Multiply by **duration**.",
+        "Subtract **recovered** (retries later).",
+        "Report in **postmortems** and severity."
+      ]
+    },
+    "analogy": {
+      "title": "A shop calculating losses from a closed hour",
+      "story": "If Saturdays at noon usually bring $5,000 per hour, a one-hour closure risks about $5,000.",
+      "mapping": [
+        [
+          "Typical Saturday takings",
+          "Baseline revenue"
+        ],
+        [
+          "Closure",
+          "Outage"
+        ],
+        [
+          "Customers returning later",
+          "Recovered revenue"
+        ]
+      ],
+      "breaks": "Shops lose walk-ins; online users often retry later."
+    },
+    "mindmap": {
+      "center": "Revenue at Risk",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Baseline revenue/min",
+            "Affected %",
+            "Duration"
+          ]
+        },
+        {
+          "label": "Adjustments",
+          "children": [
+            "Recovered later",
+            "Churn effects"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Severity",
+            "Postmortems",
+            "Investment cases"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "Estimates",
+            "Seasonality"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Calculation",
+      "scenario": "Numbers.",
+      "flow": [
+        "Baseline Tue 14:00: $1,200/min",
+        "Payment errors affected 30% for 45 min",
+        "At risk = 1,200 × 0.3 × 45 = $16,200",
+        "~40% recovered via retries → ~$9,700 lost"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clear business impact statement."
+        }
+      ],
+      "code": [],
+      "outcome": "incidents expressed in money."
+    },
+    "summary": {
+      "points": [
+        "Baseline × affected × time.",
+        "Adjust for recovery.",
+        "Speak business language."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use a time-of-week baseline instead of a daily average for revenue at risk?",
+        "a": "Traffic and revenue vary strongly by hour and weekday, so a matching baseline gives a far more accurate estimate."
+      }
+    ]
+  },
+  "anomaly-detection-handling-seasonality": {
+    "core": "Business metrics have strong seasonality (daily, weekly, holidays), so static thresholds fail: 100 orders per minute is great at 3 a.m. and terrible at noon. Anomaly detection compares against expected values: same time last week (offset 1w), rolling seasonal baselines, or models like Holt-Winters and Prophet, with alerts when the deviation (ratio or z-score) persists. Account for known events such as sales and holidays.",
+    "first_principles": {
+      "problem": "A static 'orders < 200/min' alert fires every night and misses a 40% drop during the lunch peak.",
+      "truths": [
+        "Normal varies by time.",
+        "Comparison to similar periods works.",
+        "Persistence filters noise."
+      ],
+      "derivation": [
+        "Compare to **same time last week** (or several weeks).",
+        "Use **ratio or z-score** deviation.",
+        "Require **persistence** (for: 15m).",
+        "Annotate **known events**.",
+        "Use **models** for complex seasonality."
+      ]
+    },
+    "analogy": {
+      "title": "Comparing this Monday's footfall to last Monday's",
+      "story": "Low on Sunday night is normal; low on Monday lunchtime is alarming.",
+      "mapping": [
+        [
+          "Last Monday",
+          "offset 1w baseline"
+        ],
+        [
+          "Footfall",
+          "Orders/min"
+        ],
+        [
+          "Bank holiday",
+          "Known event"
+        ]
+      ],
+      "breaks": "Shops know holidays; models must be told."
+    },
+    "mindmap": {
+      "center": "Seasonal Anomaly Detection",
+      "branches": [
+        {
+          "label": "Seasonality",
+          "children": [
+            "Daily",
+            "Weekly",
+            "Yearly",
+            "Events"
+          ]
+        },
+        {
+          "label": "Baselines",
+          "children": [
+            "offset 1w",
+            "Multi-week median",
+            "Holt-Winters",
+            "Prophet"
+          ]
+        },
+        {
+          "label": "Scoring",
+          "children": [
+            "Ratio",
+            "z-score",
+            "Bands"
+          ]
+        },
+        {
+          "label": "Alerting",
+          "children": [
+            "Persistence",
+            "Severity tiers"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "Event annotations"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Week-over-week ratio",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Catches lunch-peak drops, quiet at night."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "sum(rate(orders_completed_total[10m]))\n/\n(\n  (sum(rate(orders_completed_total[10m] offset 1w)) +\n   sum(rate(orders_completed_total[10m] offset 2w)) +\n   sum(rate(orders_completed_total[10m] offset 3w))) / 3\n) < 0.7\n# alert if below 70% of 3-week seasonal baseline for 15m"
+        }
+      ],
+      "outcome": "seasonality-aware alerting."
+    },
+    "summary": {
+      "points": [
+        "Static thresholds fail.",
+        "Compare to similar periods.",
+        "Persist and annotate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why average several weeks of offset data for a baseline?",
+        "a": "A single prior week might itself contain an anomaly or event; averaging several weeks gives a more robust expected value."
+      }
+    ]
+  },
+  "the-business-observability-dashboard": {
+    "core": "A business observability dashboard shows outcomes first: KPIs (orders per minute, conversion, revenue, sign-ups) with seasonal baselines, then journey funnels, then supporting SLIs (latency and errors of key services), with deploy and incident annotations and breakdowns by country, platform and payment method. It's a shared view for product, business and engineering during incidents and launches.",
+    "first_principles": {
+      "problem": "During a launch, product, marketing and engineering each watch different dashboards and miss the connection between a slow API and falling conversions.",
+      "truths": [
+        "Shared context speeds decisions.",
+        "Outcomes should lead.",
+        "Breakdowns localise problems."
+      ],
+      "derivation": [
+        "**Top row**: KPIs vs baseline.",
+        "**Middle**: funnel conversion per step.",
+        "**Bottom**: service SLIs.",
+        "**Annotations**: deploys, flags, campaigns.",
+        "**Variables**: country, platform."
+      ]
+    },
+    "analogy": {
+      "title": "A cockpit primary flight display",
+      "story": "Altitude, speed and heading front and centre, with engine details below for diagnosis.",
+      "mapping": [
+        [
+          "Primary instruments",
+          "KPIs"
+        ],
+        [
+          "Engine panel",
+          "Service SLIs"
+        ],
+        [
+          "Flight plan notes",
+          "Annotations"
+        ]
+      ],
+      "breaks": "Cockpits are standardised; dashboards must be designed per business."
+    },
+    "mindmap": {
+      "center": "Business Dashboard",
+      "branches": [
+        {
+          "label": "Layout",
+          "children": [
+            "KPIs top",
+            "Funnels middle",
+            "SLIs bottom"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "Baselines",
+            "Annotations",
+            "Breakdowns"
+          ]
+        },
+        {
+          "label": "Audience",
+          "children": [
+            "Product",
+            "Business",
+            "Engineering"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Launches",
+            "Incidents",
+            "Reviews"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Panel plan",
+      "scenario": "Layout.",
+      "flow": [
+        "Row 1: orders/min vs 3-week baseline, revenue, conversion",
+        "Row 2: funnel step conversion by platform",
+        "Row 3: checkout/payment p95, error ratio, burn rate",
+        "Overlays: deploys, campaigns, incidents"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Everyone sees cause and effect together."
+        }
+      ],
+      "code": [],
+      "outcome": "shared business-technical view."
+    },
+    "summary": {
+      "points": [
+        "Outcomes first.",
+        "Funnels and SLIs.",
+        "Annotate and segment."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why put business KPIs above technical SLIs on the dashboard?",
+        "a": "Outcomes are what matter; leading with them shows impact first, with technical panels below for diagnosis."
+      }
+    ]
+  }
+}

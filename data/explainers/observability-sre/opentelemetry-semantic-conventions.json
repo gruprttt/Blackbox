@@ -1,0 +1,746 @@
+{
+  "introduction-the-tower-of-babel-problem": {
+    "core": "Without shared names, one service records http.status, another statusCode, a third response_code. Dashboards, alerts and vendor features (service maps, automatic error detection) then can't work across services. OpenTelemetry semantic conventions define standard attribute names, types and meanings for common concepts (HTTP, databases, messaging, cloud, Kubernetes), so telemetry from any service and library means the same thing.",
+    "first_principles": {
+      "problem": "A cross-service error dashboard needs a query that checks five different attribute names for HTTP status.",
+      "truths": [
+        "Shared language enables shared tools.",
+        "Libraries emit telemetry too.",
+        "Vendors build features on known names."
+      ],
+      "derivation": [
+        "Adopt **OTel semantic conventions**.",
+        "Use **instrumentation libraries** that follow them.",
+        "Name **custom attributes** consistently.",
+        "Document **org extensions**.",
+        "Validate in **CI/pipelines**."
+      ]
+    },
+    "analogy": {
+      "title": "The Tower of Babel",
+      "story": "Builders speaking different languages can't cooperate; one shared language lets them build together.",
+      "mapping": [
+        [
+          "Languages",
+          "Attribute naming schemes"
+        ],
+        [
+          "Shared language",
+          "Semantic conventions"
+        ],
+        [
+          "Tower",
+          "Unified observability"
+        ]
+      ],
+      "breaks": "Languages evolve slowly; conventions version and change."
+    },
+    "mindmap": {
+      "center": "Why Conventions",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Inconsistent names",
+            "Broken dashboards",
+            "No vendor features"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Standard names",
+            "Types",
+            "Meanings"
+          ]
+        },
+        {
+          "label": "Domains",
+          "children": [
+            "HTTP",
+            "DB",
+            "Messaging",
+            "RPC",
+            "Cloud",
+            "K8s",
+            "Exceptions"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Portable queries",
+            "Auto features"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before/after",
+      "scenario": "Attributes.",
+      "flow": [
+        "Before: status / statusCode / http_code",
+        "After: http.response.status_code (int)",
+        "Before: dbType / database",
+        "After: db.system.name = \"postgresql\""
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One query across all services."
+        }
+      ],
+      "code": [],
+      "outcome": "shared telemetry language."
+    },
+    "summary": {
+      "points": [
+        "Names must be shared.",
+        "OTel defines them.",
+        "Tools depend on them."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do vendor features like automatic service maps depend on semantic conventions?",
+        "a": "They recognise standard attribute names (e.g. server.address, db.system) to infer relationships and behaviour."
+      }
+    ]
+  },
+  "what-are-semantic-conventions": {
+    "core": "Semantic conventions are versioned specifications in the OpenTelemetry project that define, per domain, span names, attribute names (namespaced like http.request.method or db.operation.name), types, allowed values, requirement levels (required, conditionally required, recommended, opt-in), metric names and units (http.server.request.duration in seconds), and resource attributes. Stability levels (experimental to stable) signal how safe they are to depend on.",
+    "first_principles": {
+      "problem": "Engineers invent attribute names for database calls without knowing a standard exists.",
+      "truths": [
+        "Specs define names, types and units.",
+        "Requirement levels guide effort.",
+        "Stability signals change risk."
+      ],
+      "derivation": [
+        "Read the **domain spec** (HTTP, DB...).",
+        "Follow **requirement levels**.",
+        "Use specified **units** (seconds, bytes).",
+        "Prefer **stable** conventions.",
+        "Track **version** in schema_url."
+      ]
+    },
+    "analogy": {
+      "title": "A building code",
+      "story": "It specifies exactly how wiring and plumbing must be labelled and sized, so any electrician can work on any building.",
+      "mapping": [
+        [
+          "Building code",
+          "Semantic conventions"
+        ],
+        [
+          "Mandatory rules",
+          "Required attributes"
+        ],
+        [
+          "Recommendations",
+          "Recommended attributes"
+        ]
+      ],
+      "breaks": "Building codes are law; conventions are voluntary but tooling relies on them."
+    },
+    "mindmap": {
+      "center": "Semantic Conventions",
+      "branches": [
+        {
+          "label": "Contents",
+          "children": [
+            "Span names",
+            "Attributes",
+            "Metrics",
+            "Units",
+            "Resource attrs",
+            "Events"
+          ]
+        },
+        {
+          "label": "Levels",
+          "children": [
+            "Required",
+            "Conditionally required",
+            "Recommended",
+            "Opt-in"
+          ]
+        },
+        {
+          "label": "Stability",
+          "children": [
+            "Experimental",
+            "Stable"
+          ]
+        },
+        {
+          "label": "Versioning",
+          "children": [
+            "schema_url"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "HTTP server span",
+      "scenario": "Attributes.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every HTTP span looks the same everywhere."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "span name: GET /api/orders/{id}\nhttp.request.method = \"GET\"            (required)\nurl.path = \"/api/orders/42\"             (required)\nhttp.route = \"/api/orders/{id}\"        (conditionally required)\nhttp.response.status_code = 200          (conditionally required)\nserver.address = \"shop.example.com\"     (recommended)\nmetric: http.server.request.duration (unit s, histogram)"
+        }
+      ],
+      "outcome": "convention structure understood."
+    },
+    "summary": {
+      "points": [
+        "Versioned specs.",
+        "Requirement levels.",
+        "Units and stability."
+      ]
+    },
+    "check": [
+      {
+        "q": "What unit do OTel semantic conventions use for HTTP request duration metrics?",
+        "a": "Seconds (http.server.request.duration in s)."
+      }
+    ]
+  },
+  "resource-attributes-defining-the-who": {
+    "core": "Resource attributes describe the entity producing telemetry, and they apply to every span, metric and log from that process: service.name, service.version, service.namespace, deployment.environment.name, plus detected cloud.provider, cloud.region, host.name, k8s.namespace.name, k8s.pod.name and container.id. They're set once (env vars or resource detectors) and let you filter and group all signals consistently by service, version and location.",
+    "first_principles": {
+      "problem": "Traces show 'unknown_service:java' because service.name was never set.",
+      "truths": [
+        "Identity applies to all signals.",
+        "Detectors can find environment info.",
+        "Missing identity breaks grouping."
+      ],
+      "derivation": [
+        "**Always** set service.name.",
+        "Set **service.version** and environment.",
+        "Enable **resource detectors** (k8s, cloud, host).",
+        "Use **k8sattributes** processor in Collector.",
+        "Keep names **stable and lowercase**."
+      ]
+    },
+    "analogy": {
+      "title": "A return address on every envelope",
+      "story": "Every letter from the same office carries the same sender details, so replies and sorting work.",
+      "mapping": [
+        [
+          "Return address",
+          "Resource attributes"
+        ],
+        [
+          "Office",
+          "Service instance"
+        ],
+        [
+          "Letters",
+          "Spans/metrics/logs"
+        ]
+      ],
+      "breaks": "Return addresses are written once; detectors fill some automatically."
+    },
+    "mindmap": {
+      "center": "Resource Attributes",
+      "branches": [
+        {
+          "label": "Service",
+          "children": [
+            "service.name",
+            "service.version",
+            "service.namespace",
+            "service.instance.id"
+          ]
+        },
+        {
+          "label": "Deployment",
+          "children": [
+            "deployment.environment.name"
+          ]
+        },
+        {
+          "label": "Infra",
+          "children": [
+            "cloud.*",
+            "host.*",
+            "k8s.*",
+            "container.*"
+          ]
+        },
+        {
+          "label": "Setting",
+          "children": [
+            "OTEL_SERVICE_NAME",
+            "OTEL_RESOURCE_ATTRIBUTES",
+            "Detectors",
+            "k8sattributes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Set via env",
+      "scenario": "Kubernetes manifest.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All telemetry grouped by service, version and env."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "env:\n  - { name: OTEL_SERVICE_NAME, value: checkout }\n  - name: OTEL_RESOURCE_ATTRIBUTES\n    value: service.namespace=shop,service.version=2.4.0,deployment.environment.name=prod\n  - name: K8S_POD_NAME\n    valueFrom: { fieldRef: { fieldPath: metadata.name } }"
+        }
+      ],
+      "outcome": "clear telemetry identity."
+    },
+    "summary": {
+      "points": [
+        "Who produced it.",
+        "Applies to all signals.",
+        "Set and detect."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if service.name isn't set in OpenTelemetry?",
+        "a": "Telemetry gets a default like unknown_service:<process>, making it hard to group or find."
+      }
+    ]
+  },
+  "span-and-metric-attributes-defining-the-what": {
+    "core": "Span and metric attributes describe the operation: for HTTP, method, route, status and server address; for databases, db.system.name, db.operation.name, db.collection.name and a sanitised db.query.text; for messaging, messaging.system, destination name and operation; for RPC, rpc.system, service and method. Errors use error.type plus exception events. Metric attributes must stay low-cardinality (route templates, not IDs), while span attributes can be richer.",
+    "first_principles": {
+      "problem": "Database spans can't be grouped by table because each team records the query differently.",
+      "truths": [
+        "Operations have domain-specific dimensions.",
+        "Metrics need bounded attributes.",
+        "Spans tolerate detail."
+      ],
+      "derivation": [
+        "Use **domain attributes** per spec.",
+        "Keep **metric attributes bounded**.",
+        "Use **error.type** for failures.",
+        "Sanitise **queries/URLs** (no PII).",
+        "Add **custom attributes** under your namespace."
+      ]
+    },
+    "analogy": {
+      "title": "Labels on a product: category, size, colour",
+      "story": "Standard labels let any store sort and count items the same way.",
+      "mapping": [
+        [
+          "Category",
+          "db.system.name"
+        ],
+        [
+          "Size",
+          "http.route"
+        ],
+        [
+          "Store sorting",
+          "Queries/dashboards"
+        ]
+      ],
+      "breaks": "Products have few labels; telemetry can have many, which risks cardinality."
+    },
+    "mindmap": {
+      "center": "Operation Attributes",
+      "branches": [
+        {
+          "label": "HTTP",
+          "children": [
+            "http.request.method",
+            "http.route",
+            "http.response.status_code"
+          ]
+        },
+        {
+          "label": "DB",
+          "children": [
+            "db.system.name",
+            "db.operation.name",
+            "db.collection.name"
+          ]
+        },
+        {
+          "label": "Messaging",
+          "children": [
+            "messaging.system",
+            "messaging.destination.name",
+            "messaging.operation.type"
+          ]
+        },
+        {
+          "label": "Errors",
+          "children": [
+            "error.type",
+            "exception.*"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Bounded for metrics",
+            "Sanitise",
+            "Custom namespace"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "DB span",
+      "scenario": "Attributes.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Group DB latency by table and operation everywhere."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "span name: SELECT orders\ndb.system.name = \"postgresql\"\ndb.operation.name = \"SELECT\"\ndb.collection.name = \"orders\"\ndb.query.text = \"SELECT * FROM orders WHERE id = $1\"   (parameterised, no values)\nserver.address = \"orders-db.internal\"\nerror.type = \"timeout\"   (only on failure)"
+        }
+      ],
+      "outcome": "consistent operation descriptions."
+    },
+    "summary": {
+      "points": [
+        "Domain attributes.",
+        "Bounded for metrics.",
+        "Sanitise sensitive data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should metric attributes be more restricted than span attributes?",
+        "a": "Each unique metric attribute combination creates a time series, so high-cardinality values explode storage; spans are individual events."
+      }
+    ]
+  },
+  "unified-service-tagging-the-golden-trio": {
+    "core": "Three attributes tie every signal together: service.name (which service), service.version (which release) and deployment.environment.name (prod, staging). Datadog calls them env, service and version unified tagging. Applied consistently to traces, metrics, logs and profiles, they enable filtering any signal by service and environment, comparing versions during deploys, and linking signals seamlessly.",
+    "first_principles": {
+      "problem": "Metrics tag service as 'checkout-api', traces as 'checkout', and logs as 'shop-checkout', so nothing links up.",
+      "truths": [
+        "Linking needs identical values.",
+        "Versions explain changes.",
+        "Environments must never mix."
+      ],
+      "derivation": [
+        "Set **service.name** identically everywhere.",
+        "Set **service.version** from build (git SHA/semver).",
+        "Set **environment** explicitly.",
+        "Inject via **env vars/Helm values** centrally.",
+        "**Validate** in pipeline."
+      ]
+    },
+    "analogy": {
+      "title": "Name, edition and printing of a book",
+      "story": "Every review, sales figure and error report cites the same three facts, so they can be combined.",
+      "mapping": [
+        [
+          "Book title",
+          "service.name"
+        ],
+        [
+          "Edition",
+          "service.version"
+        ],
+        [
+          "Market",
+          "environment"
+        ]
+      ],
+      "breaks": "Books keep editions; services deploy many versions per day."
+    },
+    "mindmap": {
+      "center": "Golden Trio",
+      "branches": [
+        {
+          "label": "Attributes",
+          "children": [
+            "service.name",
+            "service.version",
+            "deployment.environment.name"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Filtering",
+            "Version comparison",
+            "Signal linking"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "Helm values",
+            "CI build metadata",
+            "Env vars"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "Pipeline checks",
+            "Admission policies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Helm-driven tags",
+      "scenario": "values + template.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Identical identity across all signals."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# values.yaml\nservice: { name: checkout, version: \"{{ .Chart.AppVersion }}\" }\nenvironment: prod\n# deployment template env\n- { name: OTEL_SERVICE_NAME, value: \"{{ .Values.service.name }}\" }\n- { name: OTEL_RESOURCE_ATTRIBUTES, value: \"service.version={{ .Values.service.version }},deployment.environment.name={{ .Values.environment }}\" }"
+        }
+      ],
+      "outcome": "linked telemetry by default."
+    },
+    "summary": {
+      "points": [
+        "Three attributes.",
+        "Identical everywhere.",
+        "Set centrally."
+      ]
+    },
+    "check": [
+      {
+        "q": "What are the three 'golden trio' attributes?",
+        "a": "service.name, service.version and deployment.environment.name."
+      }
+    ]
+  },
+  "the-semantic-conventions-package-using-constants-in-code": {
+    "core": "OTel publishes generated constant packages per language (semconv in Go, opentelemetry-semantic-conventions in Python and Java) containing attribute keys and enum values as code constants. Using semconv.HTTPRouteKey instead of the string 'http.route' prevents typos, gives IDE completion, and makes upgrades visible through compiler or lint errors when names change. Pin the semconv version you emit and set schema_url accordingly.",
+    "first_principles": {
+      "problem": "A typo 'http.reponse.status_code' silently breaks an error dashboard for one service.",
+      "truths": [
+        "Strings allow typos.",
+        "Constants are checked by tools.",
+        "Versions change names."
+      ],
+      "derivation": [
+        "Import **semconv constants**.",
+        "Avoid **string literals** for standard keys.",
+        "**Pin** the semconv version.",
+        "Set **schema_url**.",
+        "Generate **org constants** for custom attributes (Weaver)."
+      ]
+    },
+    "analogy": {
+      "title": "Using a dropdown instead of a free-text field",
+      "story": "You can't misspell an option you pick from a list.",
+      "mapping": [
+        [
+          "Dropdown",
+          "Constants"
+        ],
+        [
+          "Free text",
+          "String literals"
+        ],
+        [
+          "Form version",
+          "semconv version"
+        ]
+      ],
+      "breaks": "Dropdowns are UI; constants need imports and upgrades."
+    },
+    "mindmap": {
+      "center": "semconv Packages",
+      "branches": [
+        {
+          "label": "Languages",
+          "children": [
+            "Go semconv",
+            "Python",
+            "Java",
+            "JS",
+            ".NET"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No typos",
+            "IDE completion",
+            "Upgrade visibility"
+          ]
+        },
+        {
+          "label": "Versioning",
+          "children": [
+            "Pinned version",
+            "schema_url"
+          ]
+        },
+        {
+          "label": "Custom",
+          "children": [
+            "OTel Weaver codegen",
+            "Org registry"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Go constants",
+      "scenario": "Code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Typos impossible; version explicit."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "import semconv \"go.opentelemetry.io/otel/semconv/v1.26.0\"\n\nspan.SetAttributes(\n    semconv.HTTPRoute(\"/api/orders/{id}\"),\n    semconv.HTTPResponseStatusCode(200),\n    semconv.DBSystemPostgreSQL,\n)\n// resource with schema URL\nres := resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceName(\"checkout\"))"
+        }
+      ],
+      "outcome": "convention-correct code."
+    },
+    "summary": {
+      "points": [
+        "Constants over strings.",
+        "Pin version.",
+        "Generate custom ones."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does setting schema_url on a resource communicate?",
+        "a": "Which semantic conventions version the telemetry follows, so backends can interpret or translate attribute names."
+      }
+    ]
+  },
+  "conventions-evolve-handling-breaking-changes": {
+    "core": "Semantic conventions change. HTTP was stabilised in 2023 with renames (http.method to http.request.method, http.status_code to http.response.status_code, net.peer.name to server.address), and database conventions followed. Instrumentation libraries offer transition modes (OTEL_SEMCONV_STABILITY_OPT_IN=http/dup emits both old and new) and Collectors can rename attributes via the schema or transform processors. Migrate dashboards and alerts deliberately.",
+    "first_principles": {
+      "problem": "After upgrading instrumentation, all HTTP dashboards go blank because attribute names changed.",
+      "truths": [
+        "Specs evolve.",
+        "Consumers depend on names.",
+        "Dual emission eases migration."
+      ],
+      "derivation": [
+        "Track **semconv release notes**.",
+        "Use **dup mode** during migration.",
+        "Update **dashboards/alerts** to new names.",
+        "**Transform** old names in the Collector.",
+        "Switch to **new-only** after migration."
+      ]
+    },
+    "analogy": {
+      "title": "Street renaming in a city",
+      "story": "For a while signs show both old and new names, until maps and residents catch up.",
+      "mapping": [
+        [
+          "Old/new street signs",
+          "Dual emission"
+        ],
+        [
+          "Maps",
+          "Dashboards"
+        ],
+        [
+          "Renaming notice",
+          "Release notes"
+        ]
+      ],
+      "breaks": "Cities rename rarely; conventions changed several domains in a few years."
+    },
+    "mindmap": {
+      "center": "Convention Changes",
+      "branches": [
+        {
+          "label": "Examples",
+          "children": [
+            "http.method → http.request.method",
+            "http.status_code → http.response.status_code",
+            "net.peer.name → server.address"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "OTEL_SEMCONV_STABILITY_OPT_IN",
+            "dup mode",
+            "Collector transform/schema"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Dual emit",
+            "Update consumers",
+            "Cut over"
+          ]
+        },
+        {
+          "label": "Watch",
+          "children": [
+            "Stability levels"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dual emission + transform",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dashboards migrate without gaps."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "export OTEL_SEMCONV_STABILITY_OPT_IN=http/dup\n# Collector transform for legacy senders:\n# processors:\n#   transform:\n#     trace_statements:\n#       - context: span\n#         statements:\n#           - set(attributes[\"http.request.method\"], attributes[\"http.method\"]) where attributes[\"http.method\"] != nil\n#           - delete_key(attributes, \"http.method\")"
+        }
+      ],
+      "outcome": "smooth convention upgrades."
+    },
+    "summary": {
+      "points": [
+        "Conventions change.",
+        "Dual emit to migrate.",
+        "Normalise in pipeline."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does OTEL_SEMCONV_STABILITY_OPT_IN=http/dup do?",
+        "a": "Makes instrumentation emit both old and new stable HTTP attribute names during migration."
+      }
+    ]
+  }
+}

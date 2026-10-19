@@ -1,0 +1,643 @@
+{
+  "introduction-the-microservice-detective": {
+    "core": "A single user request may cross a gateway, ten services, queues and databases. When it's slow or fails, metrics show something is wrong and logs show fragments, but neither shows the path. Distributed tracing records the request's journey as a tree of timed operations across services, so you can see exactly where time went and where errors originated.",
+    "first_principles": {
+      "problem": "Checkout takes 3 seconds, and five teams each insist their service is fast.",
+      "truths": [
+        "Requests span many services.",
+        "Each service sees only its part.",
+        "Timing relationships reveal bottlenecks."
+      ],
+      "derivation": [
+        "Assign a **trace ID** per request.",
+        "Record **spans** per operation.",
+        "**Propagate** context across calls.",
+        "**Collect** spans centrally.",
+        "**Visualise** as waterfall/tree."
+      ]
+    },
+    "analogy": {
+      "title": "A parcel tracking history",
+      "story": "Every depot scans the parcel with time stamps, so you see exactly where it sat for two days.",
+      "mapping": [
+        [
+          "Tracking number",
+          "Trace ID"
+        ],
+        [
+          "Depot scans",
+          "Spans"
+        ],
+        [
+          "Delay at depot",
+          "Slow span"
+        ]
+      ],
+      "breaks": "Parcels follow one path; requests fan out in parallel."
+    },
+    "mindmap": {
+      "center": "Distributed Tracing",
+      "branches": [
+        {
+          "label": "Need",
+          "children": [
+            "Multi-service requests",
+            "Hidden latency"
+          ]
+        },
+        {
+          "label": "Concepts",
+          "children": [
+            "Trace",
+            "Span",
+            "Context"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Instrument",
+            "Propagate",
+            "Collect",
+            "Visualise"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "OpenTelemetry",
+            "Jaeger",
+            "Tempo",
+            "Zipkin"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Waterfall",
+      "scenario": "Trace view.",
+      "flow": [
+        "checkout 3,050 ms",
+        "├─ cart 40 ms",
+        "├─ pricing 60 ms",
+        "└─ payments 2,900 ms → fraud-check 2,850 ms"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bottleneck is fraud-check, two hops deep."
+        }
+      ],
+      "code": [],
+      "outcome": "end-to-end visibility."
+    },
+    "summary": {
+      "points": [
+        "Requests cross services.",
+        "Traces show the path.",
+        "Find where time goes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What can tracing show that metrics and logs can't easily?",
+        "a": "The causal path and timing of a single request across all services, revealing which hop is slow or failing."
+      }
+    ]
+  },
+  "the-building-blocks-spans-and-traces": {
+    "core": "A span represents one operation: a name, start and end time, status, attributes (http.route, db.system), events, and IDs: trace_id (shared by the whole request), span_id (unique) and parent_span_id (linking to its caller). A trace is the tree of spans sharing a trace_id. Span kinds (SERVER, CLIENT, PRODUCER, CONSUMER, INTERNAL) describe roles, and links connect related traces such as batch consumers.",
+    "first_principles": {
+      "problem": "An engineer instruments code but every service shows a separate one-span trace instead of one connected tree.",
+      "truths": [
+        "Operations nest.",
+        "Parent links build trees.",
+        "Shared IDs tie spans together."
+      ],
+      "derivation": [
+        "Create **spans per meaningful operation**.",
+        "Set **parent** from incoming context.",
+        "Add **attributes** for querying.",
+        "Set **status** on errors.",
+        "Use **span kinds** correctly."
+      ]
+    },
+    "analogy": {
+      "title": "A family tree of tasks",
+      "story": "The main task (root span) has children (sub-tasks), each with grandchildren, all sharing a family name (trace ID).",
+      "mapping": [
+        [
+          "Family name",
+          "trace_id"
+        ],
+        [
+          "Individual",
+          "span_id"
+        ],
+        [
+          "Parent link",
+          "parent_span_id"
+        ]
+      ],
+      "breaks": "Families don't run in parallel; spans often do."
+    },
+    "mindmap": {
+      "center": "Spans & Traces",
+      "branches": [
+        {
+          "label": "Span fields",
+          "children": [
+            "Name",
+            "Start/end",
+            "Status",
+            "Attributes",
+            "Events"
+          ]
+        },
+        {
+          "label": "IDs",
+          "children": [
+            "trace_id",
+            "span_id",
+            "parent_span_id"
+          ]
+        },
+        {
+          "label": "Kinds",
+          "children": [
+            "SERVER",
+            "CLIENT",
+            "PRODUCER",
+            "CONSUMER",
+            "INTERNAL"
+          ]
+        },
+        {
+          "label": "Trace",
+          "children": [
+            "Tree of spans"
+          ]
+        },
+        {
+          "label": "Links",
+          "children": [
+            "Batch",
+            "Fan-in"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Manual span",
+      "scenario": "Python OTel.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Child span under the current request with attributes and errors."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from opentelemetry import trace\ntracer = trace.get_tracer(\"checkout\")\n\nwith tracer.start_as_current_span(\"reserve_inventory\", kind=trace.SpanKind.INTERNAL) as span:\n    span.set_attribute(\"cart.items\", len(items))\n    try:\n        inventory.reserve(items)\n    except Exception as e:\n        span.record_exception(e)\n        span.set_status(trace.Status(trace.StatusCode.ERROR))\n        raise"
+        }
+      ],
+      "outcome": "well-formed spans."
+    },
+    "summary": {
+      "points": [
+        "Span = timed operation.",
+        "IDs build the tree.",
+        "Attributes and status."
+      ]
+    },
+    "check": [
+      {
+        "q": "What links a child span to its parent?",
+        "a": "The parent_span_id field (with the shared trace_id), set from the active or propagated context."
+      }
+    ]
+  },
+  "context-propagation-connecting-the-dots": {
+    "core": "For spans in different services to join one trace, the trace context must travel with each request. The W3C traceparent header (version-traceid-parentid-flags) is injected by the caller's instrumentation and extracted by the callee, which creates child spans from it. Message queues carry it in message headers, and baggage carries extra key/values. Any hop that drops headers breaks the trace.",
+    "first_principles": {
+      "problem": "Traces stop at the API gateway because it doesn't forward the traceparent header to backends.",
+      "truths": [
+        "Services don't share memory.",
+        "Headers can carry context.",
+        "Every hop must forward it."
+      ],
+      "derivation": [
+        "Use **W3C traceparent/tracestate**.",
+        "**Inject** on outbound calls.",
+        "**Extract** on inbound.",
+        "Propagate through **queues** (message headers).",
+        "Ensure **proxies/gateways** forward headers."
+      ]
+    },
+    "analogy": {
+      "title": "A relay baton",
+      "story": "Each runner must hand the baton to the next; drop it and the race record breaks.",
+      "mapping": [
+        [
+          "Baton",
+          "traceparent"
+        ],
+        [
+          "Runners",
+          "Services"
+        ],
+        [
+          "Dropped baton",
+          "Broken trace"
+        ]
+      ],
+      "breaks": "Batons are physical; headers can be stripped silently by middleware."
+    },
+    "mindmap": {
+      "center": "Context Propagation",
+      "branches": [
+        {
+          "label": "Standards",
+          "children": [
+            "W3C traceparent",
+            "tracestate",
+            "Baggage",
+            "B3 (legacy)"
+          ]
+        },
+        {
+          "label": "Mechanics",
+          "children": [
+            "Inject",
+            "Extract",
+            "Propagators"
+          ]
+        },
+        {
+          "label": "Transports",
+          "children": [
+            "HTTP headers",
+            "gRPC metadata",
+            "Kafka headers"
+          ]
+        },
+        {
+          "label": "Breakers",
+          "children": [
+            "Gateways",
+            "Async jobs",
+            "Thread pools"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Header anatomy",
+      "scenario": "HTTP.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Callee continues the same trace as a child."
+        }
+      ],
+      "code": [
+        {
+          "lang": "http",
+          "text": "GET /api/prices HTTP/1.1\ntraceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01\n#             ver|---------- trace-id ----------|-- parent-id --|flags(sampled)\nbaggage: tenant=acme,plan=pro"
+        }
+      ],
+      "outcome": "connected cross-service traces."
+    },
+    "summary": {
+      "points": [
+        "Context travels in headers.",
+        "Inject and extract.",
+        "Every hop must forward."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the last field (flags) in traceparent indicate?",
+        "a": "Trace flags, notably the sampled bit telling downstream services whether this trace is being recorded."
+      }
+    ]
+  },
+  "opentelemetry-otel-the-industry-standard": {
+    "core": "OpenTelemetry is the CNCF standard for generating and exporting telemetry. It provides vendor-neutral APIs and SDKs in many languages, auto-instrumentation for common frameworks, the OTLP wire protocol, semantic conventions for attribute names, and the Collector to receive, process and export to any backend (Jaeger, Tempo, Datadog, Honeycomb). Instrument once and switch vendors without touching code.",
+    "first_principles": {
+      "problem": "Switching from one APM vendor to another would require re-instrumenting 80 services.",
+      "truths": [
+        "Instrumentation is costly to redo.",
+        "Standards decouple producers from backends.",
+        "Auto-instrumentation covers common libraries."
+      ],
+      "derivation": [
+        "Instrument with **OTel APIs/SDKs**.",
+        "Use **auto-instrumentation** first.",
+        "Export via **OTLP**.",
+        "Route through the **Collector**.",
+        "Follow **semantic conventions**."
+      ]
+    },
+    "analogy": {
+      "title": "A universal power socket standard",
+      "story": "Appliances built to the standard work in any building, whichever electricity supplier you use.",
+      "mapping": [
+        [
+          "Appliances",
+          "Instrumented services"
+        ],
+        [
+          "Socket standard",
+          "OTLP/OTel API"
+        ],
+        [
+          "Supplier",
+          "Backend vendor"
+        ]
+      ],
+      "breaks": "Sockets are static; OTel semantic conventions evolve."
+    },
+    "mindmap": {
+      "center": "OpenTelemetry",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "Traces",
+            "Metrics",
+            "Logs",
+            "Profiles"
+          ]
+        },
+        {
+          "label": "Parts",
+          "children": [
+            "API",
+            "SDK",
+            "Auto-instrumentation",
+            "OTLP",
+            "Collector"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Vendor-neutral",
+            "Consistent attributes"
+          ]
+        },
+        {
+          "label": "Backends",
+          "children": [
+            "Jaeger",
+            "Tempo",
+            "Prometheus",
+            "Vendors"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Zero-code Python",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "HTTP, DB and client spans without code changes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "pip install opentelemetry-distro opentelemetry-exporter-otlp\nopentelemetry-bootstrap -a install\nOTEL_SERVICE_NAME=checkout \\\nOTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \\\nopentelemetry-instrument python app.py"
+        }
+      ],
+      "outcome": "portable, standard instrumentation."
+    },
+    "summary": {
+      "points": [
+        "Vendor-neutral standard.",
+        "Auto-instrument first.",
+        "Collector routes anywhere."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is OTLP?",
+        "a": "The OpenTelemetry Protocol, the standard wire format (gRPC/HTTP) for sending traces, metrics and logs to collectors and backends."
+      }
+    ]
+  },
+  "spans-vs-events": {
+    "core": "A span has duration and represents an operation; a span event is a timestamped point within a span ('cache miss', 'retry #2', an exception with stack trace). Use child spans for operations whose duration matters, and events for notable moments inside an operation. That avoids cluttering traces with thousands of tiny spans while still capturing what happened and when.",
+    "first_principles": {
+      "problem": "A trace has 3,000 child spans, one per loop iteration, making it unreadable and expensive.",
+      "truths": [
+        "Operations take time.",
+        "Moments are instantaneous.",
+        "Too many spans add cost and noise."
+      ],
+      "derivation": [
+        "Span for **operations with meaningful duration**.",
+        "**Event** for moments (retry, cache miss).",
+        "**record_exception** as an event.",
+        "Aggregate loops into **one span with counts**.",
+        "Keep spans **meaningful to readers**."
+      ]
+    },
+    "analogy": {
+      "title": "Chapters vs margin notes",
+      "story": "Chapters (spans) structure the story; margin notes (events) mark notable moments without new chapters.",
+      "mapping": [
+        [
+          "Chapters",
+          "Spans"
+        ],
+        [
+          "Margin notes",
+          "Events"
+        ],
+        [
+          "Too many chapters",
+          "Span explosion"
+        ]
+      ],
+      "breaks": "Books have no storage cost; spans do."
+    },
+    "mindmap": {
+      "center": "Spans vs Events",
+      "branches": [
+        {
+          "label": "Span",
+          "children": [
+            "Duration",
+            "Operation",
+            "Children"
+          ]
+        },
+        {
+          "label": "Event",
+          "children": [
+            "Timestamp",
+            "Moment",
+            "Attributes"
+          ]
+        },
+        {
+          "label": "Use events for",
+          "children": [
+            "Retries",
+            "Cache misses",
+            "Exceptions",
+            "State changes"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Span per loop iteration"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Events inside a span",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One span shows retries as events, not three spans."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "with tracer.start_as_current_span(\"fetch_prices\") as span:\n    for attempt in range(3):\n        try:\n            return client.get(\"/prices\")\n        except TimeoutError as e:\n            span.add_event(\"retry\", {\"attempt\": attempt + 1, \"reason\": \"timeout\"})\n    span.set_attribute(\"retry.exhausted\", True)"
+        }
+      ],
+      "outcome": "readable, efficient traces."
+    },
+    "summary": {
+      "points": [
+        "Spans have duration.",
+        "Events mark moments.",
+        "Avoid span explosions."
+      ]
+    },
+    "check": [
+      {
+        "q": "When should you create a span rather than an event?",
+        "a": "When the operation's duration matters and it may have its own children; use events for instantaneous moments."
+      }
+    ]
+  },
+  "sampling-strategies-handling-the-flood": {
+    "core": "Recording every trace at high traffic is costly. Head sampling decides at the start (keep 10% by trace ID ratio), which is cheap and consistent but blind to which traces turn out interesting. Tail sampling decides after the trace completes, keeping all errors, slow traces and a sample of the rest, which needs buffering in collectors. Parent-based sampling ensures downstream services follow the root's decision.",
+    "first_principles": {
+      "problem": "At 1% head sampling, the rare error traces the team needs are almost never captured.",
+      "truths": [
+        "Most traces are similar.",
+        "Interesting traces are rare.",
+        "Decisions must be consistent across services."
+      ],
+      "derivation": [
+        "Use **parentbased_traceidratio** for consistency.",
+        "Add **tail sampling** for errors/latency.",
+        "Keep **100% of errors**.",
+        "Record **sampling rate** for extrapolation.",
+        "Use **metrics** for exact rates (not sampled traces)."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing which flights to record in detail",
+      "story": "Record a random 10% from the start, or wait until landing and keep every flight that had turbulence.",
+      "mapping": [
+        [
+          "Pre-flight choice",
+          "Head sampling"
+        ],
+        [
+          "Post-landing choice",
+          "Tail sampling"
+        ],
+        [
+          "Turbulent flights",
+          "Errors/slow traces"
+        ]
+      ],
+      "breaks": "Flight recorders are cheap to buffer; tail sampling needs RAM for every in-flight trace."
+    },
+    "mindmap": {
+      "center": "Trace Sampling",
+      "branches": [
+        {
+          "label": "Head",
+          "children": [
+            "At root",
+            "Ratio",
+            "Cheap",
+            "Blind"
+          ]
+        },
+        {
+          "label": "Tail",
+          "children": [
+            "After completion",
+            "Errors/latency policies",
+            "Needs buffering"
+          ]
+        },
+        {
+          "label": "Consistency",
+          "children": [
+            "Parent-based",
+            "Trace ID hashing"
+          ]
+        },
+        {
+          "label": "Complement",
+          "children": [
+            "Metrics for rates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tail policies",
+      "scenario": "OTel Collector.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All errors and slow traces kept; 5% of the rest."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "processors:\n  tail_sampling:\n    decision_wait: 10s\n    policies:\n      - { name: errors,  type: status_code, status_code: { status_codes: [ERROR] } }\n      - { name: slow,    type: latency,     latency: { threshold_ms: 1000 } }\n      - { name: sample,  type: probabilistic, probabilistic: { sampling_percentage: 5 } }"
+        }
+      ],
+      "outcome": "useful traces at manageable cost."
+    },
+    "summary": {
+      "points": [
+        "Head: cheap, blind.",
+        "Tail: smart, buffered.",
+        "Consistent decisions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does tail sampling need more infrastructure than head sampling?",
+        "a": "All spans of a trace must be buffered in one place until the trace completes before deciding, requiring memory and trace-aware routing."
+      }
+    ]
+  }
+}

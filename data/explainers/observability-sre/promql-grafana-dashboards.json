@@ -1,0 +1,857 @@
+{
+  "introduction-the-language-of-time-series": {
+    "core": "PromQL is a functional query language over labelled time series. Expressions return instant vectors (one value per series at a time), range vectors (a window of samples per series), or scalars. You select series by name and labels, transform range vectors with functions like rate(), aggregate across labels with sum by(), and combine with arithmetic. Grafana renders those queries as dashboards with variables and annotations.",
+    "first_principles": {
+      "problem": "Engineers copy queries from blogs without understanding why some return errors like 'expected range vector'.",
+      "truths": [
+        "Data is series of samples.",
+        "Functions need specific input types.",
+        "Aggregation removes labels."
+      ],
+      "derivation": [
+        "Know **instant vs range vectors**.",
+        "**Select** with matchers.",
+        "**Transform** with functions (rate).",
+        "**Aggregate** with by/without.",
+        "**Combine** with operators."
+      ]
+    },
+    "analogy": {
+      "title": "Spreadsheet formulas over a column of readings",
+      "story": "Pick the rows (selectors), compute changes over a period (functions), then total by category (aggregation).",
+      "mapping": [
+        [
+          "Rows",
+          "Series"
+        ],
+        [
+          "Period",
+          "Range [5m]"
+        ],
+        [
+          "Totals",
+          "sum by"
+        ]
+      ],
+      "breaks": "Spreadsheets have fixed rows; series appear and vanish with pods."
+    },
+    "mindmap": {
+      "center": "PromQL Basics",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Instant vector",
+            "Range vector",
+            "Scalar",
+            "String"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "Select",
+            "Transform",
+            "Aggregate",
+            "Combine"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "rate",
+            "increase",
+            "histogram_quantile",
+            "*_over_time"
+          ]
+        },
+        {
+          "label": "UI",
+          "children": [
+            "Grafana panels"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Type errors",
+      "scenario": "Query.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Understanding types prevents common errors."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "http_requests_total                 # instant vector\nhttp_requests_total[5m]             # range vector\nrate(http_requests_total[5m])       # instant vector (per-second rate)\nsum(http_requests_total[5m])        # ERROR: sum expects instant vector"
+        }
+      ],
+      "outcome": "PromQL mental model."
+    },
+    "summary": {
+      "points": [
+        "Vectors and ranges.",
+        "Select, transform, aggregate.",
+        "Grafana visualises."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between an instant vector and a range vector?",
+        "a": "An instant vector has one sample per series at a point in time; a range vector has all samples per series within a time window."
+      }
+    ]
+  },
+  "basic-selectors-finding-the-needle": {
+    "core": "A selector picks series by metric name and label matchers: = equals, != not equals, =~ regex match and !~ regex not match. For example http_requests_total{service=\"checkout\", status=~\"5..\"}. The metric name is itself the __name__ label. Regexes are fully anchored. Selecting too broadly is slow and expensive, and an empty matcher on a missing label matches series without that label.",
+    "first_principles": {
+      "problem": "A query for errors also matches health-check traffic and staging, inflating the error rate.",
+      "truths": [
+        "Labels identify series.",
+        "Matchers filter precisely.",
+        "Regexes are anchored."
+      ],
+      "derivation": [
+        "Filter by **service/env** first.",
+        "Use **=~** for patterns (status=~\"5..\").",
+        "Exclude with **!=** / **!~**.",
+        "Remember **anchoring** (\"api\" ≠ \"api-v2\").",
+        "Avoid **unbounded** selectors in dashboards."
+      ]
+    },
+    "analogy": {
+      "title": "Filtering a contacts list",
+      "story": "'City = London AND job starts with Eng', not scrolling through everyone.",
+      "mapping": [
+        [
+          "Filters",
+          "Label matchers"
+        ],
+        [
+          "Contacts",
+          "Series"
+        ],
+        [
+          "Starts with",
+          "Regex"
+        ]
+      ],
+      "breaks": "Contacts apps do partial matches; PromQL regexes match the whole value."
+    },
+    "mindmap": {
+      "center": "Selectors",
+      "branches": [
+        {
+          "label": "Matchers",
+          "children": [
+            "=",
+            "!=",
+            "=~",
+            "!~"
+          ]
+        },
+        {
+          "label": "Name",
+          "children": [
+            "__name__"
+          ]
+        },
+        {
+          "label": "Regex",
+          "children": [
+            "Anchored",
+            "RE2"
+          ]
+        },
+        {
+          "label": "Tips",
+          "children": [
+            "Filter env/service",
+            "Exclude health checks"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Too broad",
+            "Missing labels match empty"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Precise selection",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only real production checkout errors."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "http_requests_total{env=\"prod\", service=\"checkout\", status=~\"5..\", route!=\"/healthz\"}\n{__name__=~\"http_.*_total\", job=\"api\"}   # by name pattern"
+        }
+      ],
+      "outcome": "accurate selections."
+    },
+    "summary": {
+      "points": [
+        "Four matcher types.",
+        "Anchored regexes.",
+        "Filter early."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does {service=~\"api\"} match a series with service=\"api-gateway\"?",
+        "a": "No, PromQL regexes are fully anchored; you'd need \"api.*\"."
+      }
+    ]
+  },
+  "rate-vs-increase-the-most-common-confusion": {
+    "core": "rate(counter[5m]) gives the per-second average increase over the window, handling counter resets: use it for graphs and alerts. increase(counter[1h]) gives the total increase over the window (rate × seconds), which reads well as 'requests in the last hour'. irate uses only the last two samples, so it's spiky. The range should be at least 4× the scrape interval, and you take rate before aggregating: sum(rate()), never rate(sum()).",
+    "first_principles": {
+      "problem": "A dashboard shows huge spikes and drops because it applies rate() after sum(), mangling counter resets.",
+      "truths": [
+        "Counters reset on restart.",
+        "Rates need multiple samples.",
+        "Aggregating raw counters hides resets."
+      ],
+      "derivation": [
+        "Use **rate()** for per-second trends.",
+        "Use **increase()** for totals in a window.",
+        "Pick range **≥ 4× scrape interval**.",
+        "Always **sum(rate(...))**.",
+        "Avoid **irate** for alerts."
+      ]
+    },
+    "analogy": {
+      "title": "Speed vs distance travelled",
+      "story": "rate is your average speed over five minutes; increase is how many miles you covered in the hour.",
+      "mapping": [
+        [
+          "Speed",
+          "rate"
+        ],
+        [
+          "Distance",
+          "increase"
+        ],
+        [
+          "Odometer reset",
+          "Counter reset"
+        ]
+      ],
+      "breaks": "Odometers rarely reset; counters reset every deploy."
+    },
+    "mindmap": {
+      "center": "rate vs increase",
+      "branches": [
+        {
+          "label": "rate",
+          "children": [
+            "Per-second",
+            "Graphs/alerts",
+            "Reset-aware"
+          ]
+        },
+        {
+          "label": "increase",
+          "children": [
+            "Total over window",
+            "Extrapolated"
+          ]
+        },
+        {
+          "label": "irate",
+          "children": [
+            "Last two samples",
+            "Spiky"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Range ≥ 4× scrape",
+            "rate then sum"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Right and wrong",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Smooth, correct traffic graphs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "sum by (service) (rate(http_requests_total[5m]))      # ✔ requests/sec per service\nsum by (service) (increase(http_requests_total[1h]))  # ✔ requests in last hour\nrate(sum(http_requests_total)[5m:])                   # ✘ resets broken by sum"
+        }
+      ],
+      "outcome": "counters queried correctly."
+    },
+    "summary": {
+      "points": [
+        "rate = per second.",
+        "increase = total.",
+        "Rate before sum."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you apply rate() before sum() and not after?",
+        "a": "rate() detects counter resets per series; summing first merges series so resets look like large drops, corrupting the result."
+      }
+    ]
+  },
+  "aggregation-summing-up": {
+    "core": "Aggregation operators (sum, avg, max, min, count, topk, quantile) collapse series across labels. 'by (labels)' keeps only those labels; 'without (labels)' drops the listed ones and keeps the rest. Aggregation is how you go from per-pod series to per-service or per-region views. Choose the labels you keep deliberately, because anything dropped can't be split later in that query.",
+    "first_principles": {
+      "problem": "A per-pod latency dashboard has 300 lines and is unreadable.",
+      "truths": [
+        "Per-instance detail overwhelms.",
+        "Users care about service-level views.",
+        "Dropped labels are gone."
+      ],
+      "derivation": [
+        "**sum by (service)** for totals.",
+        "**max by** for worst instance.",
+        "**count** for instance counts.",
+        "**topk** for top offenders.",
+        "**without (pod, instance)** to keep others."
+      ]
+    },
+    "analogy": {
+      "title": "Rolling up sales by region",
+      "story": "From every till receipt to totals per store, then per region.",
+      "mapping": [
+        [
+          "Receipts",
+          "Per-pod series"
+        ],
+        [
+          "Region totals",
+          "sum by (region)"
+        ],
+        [
+          "Best store",
+          "topk"
+        ]
+      ],
+      "breaks": "Sales roll-ups are additive; latency percentiles are not."
+    },
+    "mindmap": {
+      "center": "Aggregation",
+      "branches": [
+        {
+          "label": "Operators",
+          "children": [
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "count",
+            "topk",
+            "bottomk",
+            "quantile"
+          ]
+        },
+        {
+          "label": "Clauses",
+          "children": [
+            "by",
+            "without"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Service views",
+            "Top offenders",
+            "Capacity counts"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Averaging percentiles",
+            "Dropping needed labels"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Common patterns",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Readable, purpose-built views."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "sum by (service) (rate(http_requests_total[5m]))\ntopk(5, sum by (pod) (rate(container_cpu_usage_seconds_total[5m])))\ncount by (service) (up == 1)\nsum without (pod, instance) (rate(http_requests_total[5m]))"
+        }
+      ],
+      "outcome": "right level of detail."
+    },
+    "summary": {
+      "points": [
+        "by vs without.",
+        "Pick the operator.",
+        "Don't average percentiles."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between 'sum by (service)' and 'sum without (pod)'?",
+        "a": "by keeps only service; without drops only pod and keeps all other labels."
+      }
+    ]
+  },
+  "arithmetic-and-multi-metric-queries": {
+    "core": "Binary operators (+ − * / and comparisons) between vectors match series with identical label sets. When label sets differ you control matching: on(labels) or ignoring(labels) choose the join keys, and group_left or group_right allow many-to-one joins, for example enriching series with labels from an info metric like kube_pod_info. This is how you compute ratios (error rate), utilisation (used ÷ limit) and joins across metrics.",
+    "first_principles": {
+      "problem": "An error-rate query returns nothing because the numerator and denominator have different label sets.",
+      "truths": [
+        "Operators match on labels.",
+        "Different label sets don't match.",
+        "Info metrics carry metadata."
+      ],
+      "derivation": [
+        "**Aggregate both sides** to the same labels.",
+        "Use **on()/ignoring()** to choose keys.",
+        "Use **group_left** for many-to-one.",
+        "Join **info metrics** for metadata.",
+        "Filter with **comparison operators**."
+      ]
+    },
+    "analogy": {
+      "title": "A spreadsheet VLOOKUP",
+      "story": "Match rows by a key column to combine figures from two tables.",
+      "mapping": [
+        [
+          "Key column",
+          "on(labels)"
+        ],
+        [
+          "Two tables",
+          "Two metrics"
+        ],
+        [
+          "Lookup sheet",
+          "Info metric"
+        ]
+      ],
+      "breaks": "VLOOKUP finds one match; PromQL errors on unexpected many-to-many matches."
+    },
+    "mindmap": {
+      "center": "Vector Arithmetic",
+      "branches": [
+        {
+          "label": "Matching",
+          "children": [
+            "Identical labels",
+            "on()",
+            "ignoring()"
+          ]
+        },
+        {
+          "label": "Cardinality",
+          "children": [
+            "one-to-one",
+            "group_left",
+            "group_right"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Ratios",
+            "Utilisation",
+            "Metadata joins"
+          ]
+        },
+        {
+          "label": "Comparisons",
+          "children": [
+            "Filter",
+            "bool modifier"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ratios and joins",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Correct ratios and joined metadata."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "# error ratio: both sides aggregated by service\nsum by (service) (rate(http_requests_total{status=~\"5..\"}[5m]))\n/ sum by (service) (rate(http_requests_total[5m]))\n\n# memory use vs limit, enriched with node label\nsum by (pod, namespace) (container_memory_working_set_bytes)\n/ on (pod, namespace) group_left(node)\nsum by (pod, namespace, node) (kube_pod_container_resource_limits{resource=\"memory\"})"
+        }
+      ],
+      "outcome": "multi-metric analysis."
+    },
+    "summary": {
+      "points": [
+        "Labels must match.",
+        "on/ignoring/group_left.",
+        "Join info metrics."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why aggregate both sides by the same labels before dividing?",
+        "a": "Binary operators only match series with identical label sets; mismatched labels produce empty results."
+      }
+    ]
+  },
+  "histograms-and-quantiles-the-hard-math": {
+    "core": "histogram_quantile(φ, ...) estimates quantiles from cumulative bucket counters. Take rate() of the _bucket series, sum by le (plus any grouping labels; le must be kept), then apply the function, which finds the bucket containing the φ-quantile and interpolates linearly within it. Accuracy depends on bucket edges, results are capped at the highest finite bucket, and averaging quantiles is mathematically wrong.",
+    "first_principles": {
+      "problem": "A p99 query shows exactly 10 s constantly because all slow requests fall in the +Inf bucket above 10 s.",
+      "truths": [
+        "Buckets are cumulative.",
+        "Interpolation assumes even spread within a bucket.",
+        "le must survive aggregation."
+      ],
+      "derivation": [
+        "**rate()** the _bucket counters.",
+        "**sum by (le, …)**.",
+        "Apply **histogram_quantile**.",
+        "Choose **buckets around SLO thresholds**.",
+        "Use **native histograms** for better precision."
+      ]
+    },
+    "analogy": {
+      "title": "Estimating the median height from grouped data",
+      "story": "If you know how many people fall in each 10 cm band, you can estimate the median within its band.",
+      "mapping": [
+        [
+          "Height bands",
+          "Buckets"
+        ],
+        [
+          "Median estimate",
+          "Quantile"
+        ],
+        [
+          "Even spread assumption",
+          "Linear interpolation"
+        ]
+      ],
+      "breaks": "Height data rarely clusters at one edge; latency often does."
+    },
+    "mindmap": {
+      "center": "Histogram Quantiles",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "_bucket counters",
+            "le label"
+          ]
+        },
+        {
+          "label": "Steps",
+          "children": [
+            "rate",
+            "sum by le",
+            "histogram_quantile"
+          ]
+        },
+        {
+          "label": "Accuracy",
+          "children": [
+            "Bucket edges",
+            "Interpolation",
+            "+Inf cap"
+          ]
+        },
+        {
+          "label": "Don'ts",
+          "children": [
+            "Drop le",
+            "Average quantiles"
+          ]
+        },
+        {
+          "label": "Better",
+          "children": [
+            "Native histograms"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "p95 by route",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Per-route tail latency across all pods."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "histogram_quantile(0.95,\n  sum by (le, route) (rate(http_request_duration_seconds_bucket{service=\"checkout\"}[5m])))\n# Apdex-style: satisfied (<0.3s) ratio\nsum(rate(http_request_duration_seconds_bucket{le=\"0.3\"}[5m])) / sum(rate(http_request_duration_seconds_count[5m]))"
+        }
+      ],
+      "outcome": "correct quantile math."
+    },
+    "summary": {
+      "points": [
+        "rate, sum by le, quantile.",
+        "Buckets decide accuracy.",
+        "Never average quantiles."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must the le label be kept when summing histogram buckets?",
+        "a": "histogram_quantile needs the bucket boundaries (le) to locate and interpolate the quantile."
+      }
+    ]
+  },
+  "grafana-variables-build-once-use-everywhere": {
+    "core": "Grafana dashboard variables turn hardcoded values into dropdowns: a query variable like label_values(up, cluster), then namespace dependent on cluster, then service. Panels reference $cluster and $service, so one dashboard serves every service and environment. Multi-value and 'All' options need regex matchers (=~\"$service\"), and chained variables keep dropdowns relevant.",
+    "first_principles": {
+      "problem": "A team maintains 60 nearly identical dashboards, one per service, all slightly out of date.",
+      "truths": [
+        "Dashboards differ mostly by filter values.",
+        "Labels enumerate possible values.",
+        "Templates reduce maintenance."
+      ],
+      "derivation": [
+        "Create **query variables** (label_values).",
+        "**Chain** variables (cluster → namespace → service).",
+        "Use **=~\"$var\"** for multi-value.",
+        "Add **interval** variables ($__rate_interval).",
+        "Store dashboards as **code** (JSON/Jsonnet/Terraform)."
+      ]
+    },
+    "analogy": {
+      "title": "A form letter with mail-merge fields",
+      "story": "One template, personalised per recipient by filling in fields.",
+      "mapping": [
+        [
+          "Template",
+          "Dashboard"
+        ],
+        [
+          "Merge fields",
+          "Variables"
+        ],
+        [
+          "Recipient",
+          "Selected service"
+        ]
+      ],
+      "breaks": "Mail merge is offline; variables re-query live data."
+    },
+    "mindmap": {
+      "center": "Grafana Variables",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Query",
+            "Custom",
+            "Interval",
+            "Datasource",
+            "Constant"
+          ]
+        },
+        {
+          "label": "Chaining",
+          "children": [
+            "cluster → namespace → service"
+          ]
+        },
+        {
+          "label": "Syntax",
+          "children": [
+            "$var",
+            "=~\"$var\"",
+            "${var:pipe}"
+          ]
+        },
+        {
+          "label": "Built-ins",
+          "children": [
+            "$__rate_interval",
+            "$__range"
+          ]
+        },
+        {
+          "label": "As code",
+          "children": [
+            "Grafonnet",
+            "Terraform",
+            "JSON"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Templated panel",
+      "scenario": "Variable + query.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One dashboard for every service and cluster."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "Variable service: label_values(http_requests_total{cluster=\"$cluster\"}, service)  (multi, include All)\n\nPanel query:\nsum by (service) (rate(http_requests_total{cluster=\"$cluster\", service=~\"$service\", status=~\"5..\"}[$__rate_interval]))\n/ sum by (service) (rate(http_requests_total{cluster=\"$cluster\", service=~\"$service\"}[$__rate_interval]))"
+        }
+      ],
+      "outcome": "reusable dashboards."
+    },
+    "summary": {
+      "points": [
+        "Variables from labels.",
+        "Chain them.",
+        "Regex for multi-value."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use =~ instead of = with a multi-value Grafana variable?",
+        "a": "Multiple selections are rendered as a regex alternation (a|b), which requires the regex matcher."
+      }
+    ]
+  },
+  "grafana-annotations-correlating-events-with-metrics": {
+    "core": "Annotations overlay events (deploys, feature-flag flips, incidents, config changes) as vertical markers on time-series panels. They come from the Grafana API (posted by CI/CD), from queries (Prometheus changes() on version labels, Loki log events), or manual notes. Seeing 'latency jumped right at deploy v2.3.1' turns hours of guessing into seconds.",
+    "first_principles": {
+      "problem": "Latency jumped at 14:05, and the team spends an hour discovering a deploy happened at 14:04.",
+      "truths": [
+        "Most incidents follow changes.",
+        "Visual correlation is fast.",
+        "Change events can be recorded automatically."
+      ],
+      "derivation": [
+        "**Post deploy annotations** from CI.",
+        "Add **query-based** annotations (version changes).",
+        "Annotate **feature flags/config** changes.",
+        "**Tag** annotations (service, env).",
+        "Show them on **key dashboards**."
+      ]
+    },
+    "analogy": {
+      "title": "Sticky notes on a timeline",
+      "story": "'New chef started here' explains why reviews changed that week.",
+      "mapping": [
+        [
+          "Sticky note",
+          "Annotation"
+        ],
+        [
+          "Timeline",
+          "Time-series graph"
+        ],
+        [
+          "New chef",
+          "Deploy"
+        ]
+      ],
+      "breaks": "Sticky notes are written later; annotations should be automatic."
+    },
+    "mindmap": {
+      "center": "Annotations",
+      "branches": [
+        {
+          "label": "Sources",
+          "children": [
+            "API from CI/CD",
+            "Prometheus queries",
+            "Loki events",
+            "Manual"
+          ]
+        },
+        {
+          "label": "Events",
+          "children": [
+            "Deploys",
+            "Flags",
+            "Config",
+            "Incidents"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Tags",
+            "Regions",
+            "Per-dashboard"
+          ]
+        },
+        {
+          "label": "Payoff",
+          "children": [
+            "Change correlation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "CI posts annotation",
+      "scenario": "curl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every deploy appears as a marker on graphs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -s -X POST https://grafana.acme.com/api/annotations \\\n  -H \"Authorization: Bearer $GRAFANA_TOKEN\" -H 'Content-Type: application/json' \\\n  -d \"{\\\"tags\\\":[\\\"deploy\\\",\\\"checkout\\\",\\\"prod\\\"],\\\"text\\\":\\\"checkout $VERSION by $GITHUB_ACTOR\\\"}\""
+        }
+      ],
+      "outcome": "instant change correlation."
+    },
+    "summary": {
+      "points": [
+        "Mark events on graphs.",
+        "Automate from CI.",
+        "Tag and filter."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are deploy annotations so valuable during incidents?",
+        "a": "Most incidents follow changes, and seeing a deploy marker aligned with a metric shift points straight to the likely cause."
+      }
+    ]
+  }
+}

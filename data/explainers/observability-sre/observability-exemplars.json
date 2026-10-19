@@ -1,0 +1,616 @@
+{
+  "introduction-the-needle-in-the-haystack-problem": {
+    "core": "A latency histogram shows p99 jumped to 2 s, but which requests were slow? Metrics are aggregates with no request identity, and searching millions of traces for the right one is slow. Exemplars bridge the gap: they attach a sample trace ID to specific metric values, so you can click a dot on the latency graph and open a real trace that produced that value.",
+    "first_principles": {
+      "problem": "Engineers see a p99 spike and spend 30 minutes searching the trace store for an example slow request.",
+      "truths": [
+        "Aggregates lose identity.",
+        "A few examples explain much.",
+        "IDs can travel with samples."
+      ],
+      "derivation": [
+        "Record **trace_id with observations**.",
+        "Store **a few exemplars per series**.",
+        "**Display** them on graphs.",
+        "**Click through** to traces.",
+        "Ensure **sampled traces** are kept."
+      ]
+    },
+    "analogy": {
+      "title": "A survey statistic with a quoted respondent",
+      "story": "'30% unhappy' plus a link to an actual unhappy customer's comment.",
+      "mapping": [
+        [
+          "Statistic",
+          "Metric"
+        ],
+        [
+          "Quoted respondent",
+          "Exemplar trace"
+        ],
+        [
+          "Link",
+          "trace_id"
+        ]
+      ],
+      "breaks": "Survey quotes are curated; exemplars are picked automatically."
+    },
+    "mindmap": {
+      "center": "Exemplars",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Aggregates lack identity"
+          ]
+        },
+        {
+          "label": "Idea",
+          "children": [
+            "Trace ID on metric samples"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Graph",
+            "Click",
+            "Trace"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "OpenMetrics",
+            "Trace retention",
+            "UI support"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spike to trace",
+      "scenario": "Flow.",
+      "flow": [
+        "p99 latency panel shows spike at 14:05",
+        "Exemplar dots plotted on spike",
+        "Click → trace 4bf92f...",
+        "Slow span: fraud-check 1.9 s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Seconds from graph to cause."
+        }
+      ],
+      "code": [],
+      "outcome": "metric-to-trace jump."
+    },
+    "summary": {
+      "points": [
+        "Metrics lack identity.",
+        "Exemplars add trace IDs.",
+        "Click through."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an exemplar add to a metric sample?",
+        "a": "A reference (usually a trace ID) to a specific request that contributed to that value."
+      }
+    ]
+  },
+  "what-is-an-exemplar": {
+    "core": "An exemplar is a small record attached to a metric observation: the value (for example 1.92 s), a timestamp, and labels such as trace_id and span_id. For histograms, each bucket can carry its most recent exemplar. The metrics backend stores a limited number per series, so exemplars are a sample, not a complete index, but enough to give a real example for any part of the distribution.",
+    "first_principles": {
+      "problem": "An engineer assumes exemplars index every request and is confused when only a few appear.",
+      "truths": [
+        "Exemplars are samples.",
+        "Each bucket can hold one.",
+        "Storage is bounded."
+      ],
+      "derivation": [
+        "Exemplar = **value + timestamp + trace labels**.",
+        "Attached **per histogram bucket**.",
+        "Backend keeps **limited circular buffer**.",
+        "Represent **different latency ranges**.",
+        "Use as **entry points**, not full search."
+      ]
+    },
+    "analogy": {
+      "title": "A sample product in each display case",
+      "story": "Each shelf (bucket) shows one example item; the warehouse (trace store) holds everything.",
+      "mapping": [
+        [
+          "Display case",
+          "Bucket"
+        ],
+        [
+          "Example item",
+          "Exemplar"
+        ],
+        [
+          "Warehouse",
+          "Trace backend"
+        ]
+      ],
+      "breaks": "Display items are fixed; exemplars update constantly."
+    },
+    "mindmap": {
+      "center": "Exemplar Anatomy",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "Value",
+            "Timestamp",
+            "trace_id",
+            "span_id"
+          ]
+        },
+        {
+          "label": "Attachment",
+          "children": [
+            "Histogram buckets",
+            "Counters"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Limited per series",
+            "exemplar-storage feature"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Entry points to traces"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Exposition",
+      "scenario": "OpenMetrics.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bucket le=2.5 carries an example 1.92 s request."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "http_request_duration_seconds_bucket{route=\"/checkout\",le=\"2.5\"} 1834 # {trace_id=\"4bf92f3577b34da6a3ce929d0e0e4736\",span_id=\"00f067aa0ba902b7\"} 1.92 1729342000.123"
+        }
+      ],
+      "outcome": "exemplar structure clear."
+    },
+    "summary": {
+      "points": [
+        "Value + time + trace ID.",
+        "Per bucket.",
+        "Sampled, bounded."
+      ]
+    },
+    "check": [
+      {
+        "q": "Are exemplars a complete index of all requests?",
+        "a": "No, they're a bounded sample, typically the latest example per bucket, used as entry points into traces."
+      }
+    ]
+  },
+  "the-openmetrics-standard": {
+    "core": "Exemplars require the OpenMetrics exposition format (application/openmetrics-text), which extends Prometheus text format with exemplar syntax after a #, along with stricter typing, _created timestamps and a mandatory EOF. Prometheus must scrape with OpenMetrics negotiation and run with --enable-feature=exemplar-storage, and OTLP carries exemplars natively for push pipelines. Remote-write backends such as Mimir need exemplar ingestion enabled too.",
+    "first_principles": {
+      "problem": "Exemplars are instrumented in code but never appear, because Prometheus scrapes the classic text format.",
+      "truths": [
+        "Formats define what's transmitted.",
+        "Features must be enabled end-to-end.",
+        "OTLP supports exemplars natively."
+      ],
+      "derivation": [
+        "Expose **OpenMetrics** format.",
+        "Enable **exemplar-storage** in Prometheus.",
+        "Enable exemplars in **remote write** and backend.",
+        "Or send via **OTLP**.",
+        "Verify with **query_exemplars** API."
+      ]
+    },
+    "analogy": {
+      "title": "A postal form with an optional attachment box",
+      "story": "If the post office uses the old form without the box, attachments are discarded.",
+      "mapping": [
+        [
+          "New form",
+          "OpenMetrics"
+        ],
+        [
+          "Attachment box",
+          "Exemplar syntax"
+        ],
+        [
+          "Old form",
+          "Classic text format"
+        ]
+      ],
+      "breaks": "Forms are visible; content negotiation failures are silent."
+    },
+    "mindmap": {
+      "center": "OpenMetrics",
+      "branches": [
+        {
+          "label": "Format",
+          "children": [
+            "application/openmetrics-text",
+            "# exemplar syntax",
+            "EOF"
+          ]
+        },
+        {
+          "label": "Prometheus",
+          "children": [
+            "Content negotiation",
+            "--enable-feature=exemplar-storage"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "remote_write send_exemplars",
+            "Mimir/Tempo"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "OTLP exemplars"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "/api/v1/query_exemplars"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable end-to-end",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exemplars stored and queryable."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "prometheus --enable-feature=exemplar-storage --storage.exemplars.exemplars-limit=100000\n# prometheus.yml remote_write: [{ url: ..., send_exemplars: true }]\ncurl -s 'localhost:9090/api/v1/query_exemplars?query=http_request_duration_seconds_bucket&start=now-1h&end=now' | jq '.data[0].exemplars[0]'"
+        }
+      ],
+      "outcome": "exemplars flowing."
+    },
+    "summary": {
+      "points": [
+        "Need OpenMetrics or OTLP.",
+        "Enable storage.",
+        "Enable in remote write."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might instrumented exemplars not show up in Prometheus?",
+        "a": "It's scraping the classic text format or exemplar-storage isn't enabled, so exemplars are dropped."
+      }
+    ]
+  },
+  "the-instrumentation-layer-connecting-traces-to-metrics": {
+    "core": "To create exemplars, the code recording a metric must know the current trace context. With OpenTelemetry SDKs, histogram and counter recordings inside an active span attach exemplars automatically when exemplar filters allow it (by default, sampled traces only). With prometheus_client you pass exemplar={'trace_id': ...}. Only attach exemplars from sampled traces; otherwise the link leads to a trace that was never stored.",
+    "first_principles": {
+      "problem": "Exemplars link to trace IDs that return 'trace not found' because those traces weren't sampled.",
+      "truths": [
+        "Metrics and spans must share context.",
+        "Unsampled traces don't exist in storage.",
+        "SDKs can attach automatically."
+      ],
+      "derivation": [
+        "Record metrics **inside active spans**.",
+        "Use **OTel exemplar filter: trace_based**.",
+        "Or pass **exemplar labels** manually.",
+        "Only for **sampled** traces.",
+        "Align **sampling** with exemplar usefulness."
+      ]
+    },
+    "analogy": {
+      "title": "Citing a reference only if it's in the library",
+      "story": "A footnote is useless if it points to a book the library never kept.",
+      "mapping": [
+        [
+          "Footnote",
+          "Exemplar"
+        ],
+        [
+          "Library",
+          "Trace store"
+        ],
+        [
+          "Unkept book",
+          "Unsampled trace"
+        ]
+      ],
+      "breaks": "Libraries rarely discard books; samplers discard most traces."
+    },
+    "mindmap": {
+      "center": "Instrumentation",
+      "branches": [
+        {
+          "label": "OTel",
+          "children": [
+            "Automatic in active span",
+            "ExemplarFilter trace_based"
+          ]
+        },
+        {
+          "label": "Prometheus clients",
+          "children": [
+            "exemplar= param"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Sampled traces only"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "Same request scope"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Manual exemplar",
+      "scenario": "Python prometheus_client.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Exemplars only point to stored traces."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from opentelemetry import trace\nctx = trace.get_current_span().get_span_context()\nexemplar = {\"trace_id\": format(ctx.trace_id, \"032x\")} if ctx.trace_flags.sampled else None\nLATENCY.labels(route=\"/checkout\").observe(duration, exemplar=exemplar)"
+        }
+      ],
+      "outcome": "trustworthy metric-to-trace links."
+    },
+    "summary": {
+      "points": [
+        "Record in span context.",
+        "Automatic in OTel.",
+        "Sampled traces only."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should exemplars only be attached for sampled traces?",
+        "a": "Unsampled traces aren't stored, so the exemplar's link would lead to a missing trace."
+      }
+    ]
+  },
+  "the-user-experience-in-grafana": {
+    "core": "In Grafana, enable 'Exemplars' on a Prometheus query and the time series panel overlays dots at exemplar values. Hovering shows the trace ID and labels, and clicking opens the trace in Tempo or Jaeger via the datasource's exemplar link configuration (internal link with a trace_id label mapping). Dots on a latency spike lead straight to representative slow requests.",
+    "first_principles": {
+      "problem": "Exemplars exist in Prometheus, but the dashboard shows nothing clickable.",
+      "truths": [
+        "Display must be enabled per query.",
+        "Links need datasource config.",
+        "Visual overlays aid discovery."
+      ],
+      "derivation": [
+        "Toggle **Exemplars** on the query.",
+        "Configure **exemplar trace ID destination** in Prometheus datasource.",
+        "Map **label name** (trace_id).",
+        "Link to **Tempo/Jaeger** datasource.",
+        "Use on **latency panels**."
+      ]
+    },
+    "analogy": {
+      "title": "Pins on a map that open photos",
+      "story": "Each pin marks where something happened; tap it to see the picture.",
+      "mapping": [
+        [
+          "Pins",
+          "Exemplar dots"
+        ],
+        [
+          "Photos",
+          "Traces"
+        ],
+        [
+          "Map",
+          "Time series panel"
+        ]
+      ],
+      "breaks": "Map pins are permanent; exemplars age out."
+    },
+    "mindmap": {
+      "center": "Grafana Exemplars",
+      "branches": [
+        {
+          "label": "Panel",
+          "children": [
+            "Exemplars toggle",
+            "Dots overlay"
+          ]
+        },
+        {
+          "label": "Datasource",
+          "children": [
+            "exemplarTraceIdDestinations",
+            "Label mapping"
+          ]
+        },
+        {
+          "label": "Targets",
+          "children": [
+            "Tempo",
+            "Jaeger",
+            "URL"
+          ]
+        },
+        {
+          "label": "Workflow",
+          "children": [
+            "Hover",
+            "Click",
+            "Trace view"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Datasource provisioning",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Click a dot → Tempo trace opens."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "datasources:\n  - name: Prometheus\n    type: prometheus\n    url: http://prometheus:9090\n    jsonData:\n      exemplarTraceIdDestinations:\n        - name: trace_id\n          datasourceUid: tempo"
+        }
+      ],
+      "outcome": "one-click metric-to-trace."
+    },
+    "summary": {
+      "points": [
+        "Enable on query.",
+        "Configure trace link.",
+        "Click dots."
+      ]
+    },
+    "check": [
+      {
+        "q": "What Grafana setting makes exemplar dots clickable to a trace?",
+        "a": "The Prometheus datasource's exemplar trace ID destinations, mapping the trace_id label to a tracing datasource."
+      }
+    ]
+  },
+  "exemplars-in-the-broader-observability-picture": {
+    "core": "Exemplars are one link in a connected observability graph: metrics go to traces via exemplars, traces to logs via trace_id, traces to profiles via span profiles, and logs to metrics via derived metrics. Consistent context (trace IDs, service names, resource attributes) is what makes those jumps possible. The goal is a seamless investigation path from 'something's wrong' to 'this line of code'.",
+    "first_principles": {
+      "problem": "A team has metrics, logs, traces and profiles in separate tools with no links between them.",
+      "truths": [
+        "Each signal answers one question.",
+        "Shared identifiers link signals.",
+        "Fast pivots reduce MTTR."
+      ],
+      "derivation": [
+        "**Metrics → traces** (exemplars).",
+        "**Traces → logs** (trace_id).",
+        "**Traces → profiles** (span profiles).",
+        "**Logs → metrics** (derived).",
+        "Standardise **context** (OTel semconv)."
+      ]
+    },
+    "analogy": {
+      "title": "Hyperlinked encyclopedia articles",
+      "story": "Each article links to related ones, so you can follow a topic from overview to detail.",
+      "mapping": [
+        [
+          "Articles",
+          "Signals"
+        ],
+        [
+          "Hyperlinks",
+          "Shared IDs"
+        ],
+        [
+          "Following links",
+          "Investigation"
+        ]
+      ],
+      "breaks": "Encyclopedias are curated; links depend on instrumentation consistency."
+    },
+    "mindmap": {
+      "center": "Connected Signals",
+      "branches": [
+        {
+          "label": "Links",
+          "children": [
+            "Exemplars",
+            "trace_id in logs",
+            "Span profiles",
+            "Derived metrics"
+          ]
+        },
+        {
+          "label": "Glue",
+          "children": [
+            "Trace context",
+            "Resource attributes",
+            "Semantic conventions"
+          ]
+        },
+        {
+          "label": "Outcome",
+          "children": [
+            "Faster MTTR"
+          ]
+        },
+        {
+          "label": "Stacks",
+          "children": [
+            "Grafana LGTM",
+            "Vendors"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Investigation path",
+      "scenario": "Flow.",
+      "flow": [
+        "Burn-rate alert (metrics)",
+        "Exemplar → slow trace",
+        "Trace → logs: 'retrying fraud API'",
+        "Span profile → TLS handshake CPU"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Alert to root cause without manual searching."
+        }
+      ],
+      "code": [],
+      "outcome": "unified investigation."
+    },
+    "summary": {
+      "points": [
+        "Exemplars link metrics to traces.",
+        "IDs link everything.",
+        "Fast pivots."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes it possible to pivot between metrics, traces, logs and profiles?",
+        "a": "Shared context such as trace IDs and consistent resource attributes (service, version) present in every signal."
+      }
+    ]
+  }
+}

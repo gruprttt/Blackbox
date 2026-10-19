@@ -1,0 +1,755 @@
+{
+  "introduction-why-grep-isnt-enough-anymore": {
+    "core": "On one server, grep through /var/log works. With hundreds of short-lived containers across nodes, logs are scattered, vanish when pods die, use different formats, and arrive at gigabytes per minute. Modern logging centralises logs, structures them as JSON, enriches them with context (service, trace ID), indexes or labels them for fast queries, and controls volume and cost.",
+    "first_principles": {
+      "problem": "During an incident, engineers SSH into 40 pods to grep logs, and the crashed pod's logs are already gone.",
+      "truths": [
+        "Containers are ephemeral.",
+        "Logs are distributed.",
+        "Volume grows with scale."
+      ],
+      "derivation": [
+        "**Ship** logs off hosts immediately.",
+        "**Centralise** in one backend.",
+        "**Structure** as JSON.",
+        "**Enrich** with context.",
+        "**Control** volume (levels, sampling, retention)."
+      ]
+    },
+    "analogy": {
+      "title": "Diaries in every room vs a central record office",
+      "story": "Searching each room's diary is hopeless when rooms are demolished daily; copies sent to a central office survive.",
+      "mapping": [
+        [
+          "Room diaries",
+          "Container logs"
+        ],
+        [
+          "Central office",
+          "Log backend"
+        ],
+        [
+          "Demolition",
+          "Pod deletion"
+        ]
+      ],
+      "breaks": "Diaries are small; logs can cost more than the services producing them."
+    },
+    "mindmap": {
+      "center": "Modern Logging",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "Ephemeral",
+            "Distributed",
+            "Unstructured",
+            "Volume"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Collect",
+            "Ship",
+            "Store",
+            "Query"
+          ]
+        },
+        {
+          "label": "Practices",
+          "children": [
+            "Structured",
+            "Context",
+            "Levels",
+            "Sampling"
+          ]
+        },
+        {
+          "label": "Backends",
+          "children": [
+            "Elasticsearch",
+            "Loki",
+            "Cloud logging"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Central query",
+      "scenario": "LogQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All pods' logs searched at once, including dead ones."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "{namespace=\"shop\", app=\"checkout\"} |= \"payment failed\" | json | line_format \"{{.order_id}} {{.error}}\""
+        }
+      ],
+      "outcome": "why central logging is essential."
+    },
+    "summary": {
+      "points": [
+        "Ship off hosts.",
+        "Centralise and structure.",
+        "Control volume."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do container environments make local grep inadequate?",
+        "a": "Logs are spread across many ephemeral pods and disappear when pods are deleted."
+      }
+    ]
+  },
+  "structured-vs-unstructured-logging": {
+    "core": "Unstructured logs are free text ('User 42 failed payment of $50') that humans can read but machines must regex-parse fragilely. Structured logs are key/value records, usually JSON: {\"level\":\"error\",\"user_id\":42,\"amount\":50,\"msg\":\"payment failed\"}. They can be filtered, aggregated and joined by field without parsing, and they survive message wording changes.",
+    "first_principles": {
+      "problem": "A regex parsing payment errors breaks when a developer rewords the log message.",
+      "truths": [
+        "Machines need fields.",
+        "Wording changes break parsers.",
+        "Fields enable aggregation."
+      ],
+      "derivation": [
+        "Log as **JSON key/values**.",
+        "Keep **message short and constant**.",
+        "Put variables in **fields**.",
+        "Use a **logging library** (zap, structlog, logback JSON).",
+        "Standardise **field names**."
+      ]
+    },
+    "analogy": {
+      "title": "A form vs a handwritten letter",
+      "story": "A form has labelled boxes anyone can tally; letters must be read one by one.",
+      "mapping": [
+        [
+          "Form boxes",
+          "Fields"
+        ],
+        [
+          "Letter text",
+          "Free-text message"
+        ],
+        [
+          "Tallying",
+          "Aggregating"
+        ]
+      ],
+      "breaks": "Forms limit expression; structured logs can still carry a message field."
+    },
+    "mindmap": {
+      "center": "Structured Logging",
+      "branches": [
+        {
+          "label": "Unstructured",
+          "children": [
+            "Free text",
+            "Regex parsing",
+            "Fragile"
+          ]
+        },
+        {
+          "label": "Structured",
+          "children": [
+            "JSON",
+            "Fields",
+            "Queryable"
+          ]
+        },
+        {
+          "label": "Libraries",
+          "children": [
+            "zap",
+            "slog",
+            "structlog",
+            "logback-json"
+          ]
+        },
+        {
+          "label": "Practice",
+          "children": [
+            "Constant messages",
+            "Standard fields"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same event, two styles",
+      "scenario": "Code.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Count failures by error type with one query."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "# unstructured\nlog.error(f\"User {uid} failed payment of ${amt}: {err}\")\n# structured (structlog)\nlog.error(\"payment_failed\", user_id=uid, amount=amt, currency=\"USD\", error=str(err))\n# → {\"event\":\"payment_failed\",\"user_id\":42,\"amount\":50,\"currency\":\"USD\",\"error\":\"card_declined\",\"level\":\"error\"}"
+        }
+      ],
+      "outcome": "machine-friendly logs."
+    },
+    "summary": {
+      "points": [
+        "Fields, not prose.",
+        "Constant event names.",
+        "Libraries enforce structure."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why keep the log message constant and put variables in fields?",
+        "a": "So events can be grouped and counted reliably, and queries don't break when values or wording change."
+      }
+    ]
+  },
+  "log-levels-signal-vs-noise": {
+    "core": "Levels classify importance. DEBUG is developer detail, usually off in production. INFO marks normal significant events (startup, request summary). WARN is unexpected but handled. ERROR means an operation failed and needs attention. FATAL means the process can't continue. Misused levels, such as everything at ERROR or stack traces for expected 404s, create noise that hides real problems and inflates cost.",
+    "first_principles": {
+      "problem": "The ERROR log stream has 50,000 entries per hour, mostly expected client 404s, so real failures go unnoticed.",
+      "truths": [
+        "Not all events matter equally.",
+        "Noise hides signal.",
+        "Volume costs money."
+      ],
+      "derivation": [
+        "Define **level semantics** team-wide.",
+        "**ERROR** only for actionable failures.",
+        "Default production to **INFO**.",
+        "Enable **DEBUG dynamically** per service.",
+        "Review **top log sources** regularly."
+      ]
+    },
+    "analogy": {
+      "title": "Hospital alarm tones",
+      "story": "Gentle chimes for routine updates, loud alarms only for emergencies; if everything is loud, nurses stop responding.",
+      "mapping": [
+        [
+          "Chimes",
+          "INFO"
+        ],
+        [
+          "Loud alarms",
+          "ERROR"
+        ],
+        [
+          "Alarm fatigue",
+          "Log noise"
+        ]
+      ],
+      "breaks": "Alarms are designed centrally; log levels are chosen by each developer."
+    },
+    "mindmap": {
+      "center": "Log Levels",
+      "branches": [
+        {
+          "label": "Levels",
+          "children": [
+            "DEBUG",
+            "INFO",
+            "WARN",
+            "ERROR",
+            "FATAL"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "ERROR = actionable",
+            "No stack traces for expected",
+            "INFO default"
+          ]
+        },
+        {
+          "label": "Dynamic",
+          "children": [
+            "Runtime level change",
+            "Per-module levels"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Noise",
+            "Storage",
+            "Ingest fees"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Dynamic level",
+      "scenario": "Spring Boot actuator.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Temporary detail without redeploy or permanent noise."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -X POST localhost:8080/actuator/loggers/com.acme.payments \\\n  -H 'Content-Type: application/json' -d '{\"configuredLevel\":\"DEBUG\"}'\n# revert after debugging\ncurl -X POST localhost:8080/actuator/loggers/com.acme.payments -d '{\"configuredLevel\":null}' -H 'Content-Type: application/json'"
+        }
+      ],
+      "outcome": "meaningful levels."
+    },
+    "summary": {
+      "points": [
+        "Levels mean something.",
+        "ERROR is actionable.",
+        "DEBUG on demand."
+      ]
+    },
+    "check": [
+      {
+        "q": "Should an expected 404 from a client request be logged at ERROR?",
+        "a": "No; it's normal behaviour, so INFO (or not at all) — ERROR should signal actionable server-side failures."
+      }
+    ]
+  },
+  "context-injection-connecting-the-dots": {
+    "core": "A log line alone ('payment failed') is nearly useless. Context injection automatically adds fields to every log record: service, version, environment, pod, and request-scoped values such as trace_id, span_id, user_id and tenant. With a trace_id in every line, you can jump from a log to the full distributed trace and see all logs for one request across services.",
+    "first_principles": {
+      "problem": "An error log says 'timeout calling inventory', but nobody can find which request or user it belongs to.",
+      "truths": [
+        "Context lives in request scope.",
+        "Libraries can inject it automatically.",
+        "Shared IDs join signals."
+      ],
+      "derivation": [
+        "Add **static context** (service, version, env) at startup.",
+        "Add **request context** via MDC/contextvars.",
+        "Inject **trace_id/span_id** from OpenTelemetry.",
+        "Propagate **tenant/user** safely.",
+        "Link logs to **traces in UI**."
+      ]
+    },
+    "analogy": {
+      "title": "Tagging every photo with date, place and event",
+      "story": "A random photo is meaningless; tags let you find every picture from the same wedding.",
+      "mapping": [
+        [
+          "Photo",
+          "Log line"
+        ],
+        [
+          "Event tag",
+          "trace_id"
+        ],
+        [
+          "Album",
+          "Trace view"
+        ]
+      ],
+      "breaks": "Photo tags are added once; context must flow through async code too."
+    },
+    "mindmap": {
+      "center": "Context Injection",
+      "branches": [
+        {
+          "label": "Static",
+          "children": [
+            "service",
+            "version",
+            "env",
+            "host/pod"
+          ]
+        },
+        {
+          "label": "Request",
+          "children": [
+            "trace_id",
+            "span_id",
+            "user_id",
+            "tenant"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "MDC",
+            "contextvars",
+            "OTel log bridge"
+          ]
+        },
+        {
+          "label": "Payoff",
+          "children": [
+            "Log ↔ trace links",
+            "Per-request views"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inject trace IDs",
+      "scenario": "Python + OTel.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Click trace_id in Grafana to open the full trace."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from opentelemetry.instrumentation.logging import LoggingInstrumentor\nLoggingInstrumentor().instrument(set_logging_format=True)\nlog.error(\"inventory_timeout\", extra={\"sku\": sku})\n# → ... trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f067aa0ba902b7 ... inventory_timeout"
+        }
+      ],
+      "outcome": "logs joined to requests."
+    },
+    "summary": {
+      "points": [
+        "Inject static and request context.",
+        "trace_id everywhere.",
+        "Join logs and traces."
+      ]
+    },
+    "check": [
+      {
+        "q": "What single field most improves cross-service log correlation?",
+        "a": "trace_id, propagated with the request and injected into every log line."
+      }
+    ]
+  },
+  "log-shipping-getting-logs-from-containers-to-the-backend": {
+    "core": "Containers write to stdout and stderr, and the runtime stores them as files on the node (/var/log/containers). A node-level agent running as a DaemonSet (Fluent Bit, Vector, the OTel Collector, Promtail or Alloy) tails those files, parses and enriches them with Kubernetes metadata, buffers and retries, and ships to the backend. Avoid writing log files inside containers and avoid per-pod sidecars unless necessary.",
+    "first_principles": {
+      "problem": "Apps write logs to files inside containers, so they're lost on restart and invisible to the shipping agent.",
+      "truths": [
+        "stdout is captured by the runtime.",
+        "Node agents see all pods.",
+        "Backends can be unavailable."
+      ],
+      "derivation": [
+        "Log to **stdout/stderr**.",
+        "Run a **DaemonSet agent**.",
+        "**Enrich** with pod/namespace/labels.",
+        "**Buffer** to disk and **retry**.",
+        "Watch **agent backpressure and drops**."
+      ]
+    },
+    "analogy": {
+      "title": "Postboxes on every street collected by a van",
+      "story": "Residents drop letters (stdout) in the street box; one van per street (node agent) collects and delivers them.",
+      "mapping": [
+        [
+          "Street postbox",
+          "Node log files"
+        ],
+        [
+          "Van",
+          "DaemonSet agent"
+        ],
+        [
+          "Sorting office",
+          "Backend"
+        ]
+      ],
+      "breaks": "Postboxes don't overflow quickly; node disks fill if agents fall behind."
+    },
+    "mindmap": {
+      "center": "Log Shipping",
+      "branches": [
+        {
+          "label": "Source",
+          "children": [
+            "stdout/stderr",
+            "/var/log/containers"
+          ]
+        },
+        {
+          "label": "Agents",
+          "children": [
+            "Fluent Bit",
+            "Vector",
+            "OTel Collector",
+            "Alloy/Promtail"
+          ]
+        },
+        {
+          "label": "Processing",
+          "children": [
+            "Parse",
+            "K8s metadata",
+            "Filter"
+          ]
+        },
+        {
+          "label": "Reliability",
+          "children": [
+            "Disk buffers",
+            "Retries",
+            "Backpressure"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Files in containers",
+            "Unneeded sidecars"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fluent Bit pipeline",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All pod logs enriched and shipped reliably."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[INPUT]\n    Name   tail\n    Path   /var/log/containers/*.log\n    Parser cri\n    storage.type filesystem\n[FILTER]\n    Name   kubernetes\n    Match  kube.*\n    Merge_Log On\n[OUTPUT]\n    Name   loki\n    Match  *\n    Host   loki.observability\n    Labels job=fluentbit, namespace=$kubernetes['namespace_name'], app=$kubernetes['labels']['app']"
+        }
+      ],
+      "outcome": "reliable log delivery."
+    },
+    "summary": {
+      "points": [
+        "stdout + node agent.",
+        "Enrich with metadata.",
+        "Buffer and retry."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should containers log to stdout rather than files?",
+        "a": "The runtime captures stdout to node files that agents can collect, and it survives container restarts; files inside containers are lost."
+      }
+    ]
+  },
+  "the-aggregation-challenge-elk-vs-loki": {
+    "core": "Elasticsearch (in ELK or OpenSearch) builds a full-text inverted index on every field, so arbitrary searches are fast but indexing is CPU-, RAM- and storage-heavy and expensive at scale. Grafana Loki indexes only a few labels (namespace, app, level) and stores compressed log chunks in object storage, then greps within matching streams at query time: far cheaper, but slower for needle-in-haystack searches across everything. Choose by query patterns and budget.",
+    "first_principles": {
+      "problem": "An Elasticsearch cluster indexing 5 TB/day costs more than the services it monitors.",
+      "truths": [
+        "Indexing everything is expensive.",
+        "Most queries filter by service first.",
+        "Object storage is cheap."
+      ],
+      "derivation": [
+        "**ELK** for full-text, ad-hoc analytics.",
+        "**Loki** for label-scoped, cost-efficient logs.",
+        "Keep Loki **labels low-cardinality**.",
+        "Use **structured metadata/fields** for details.",
+        "Tier **retention** by value."
+      ]
+    },
+    "analogy": {
+      "title": "A fully indexed encyclopedia vs labelled boxes of notes",
+      "story": "The encyclopedia finds any word instantly but cost a fortune to compile; boxes labelled by topic are cheap, and you skim the right box when needed.",
+      "mapping": [
+        [
+          "Encyclopedia index",
+          "Elasticsearch inverted index"
+        ],
+        [
+          "Labelled boxes",
+          "Loki streams"
+        ],
+        [
+          "Skimming",
+          "Query-time grep"
+        ]
+      ],
+      "breaks": "Skimming a box is slow by hand; Loki parallelises it across queriers."
+    },
+    "mindmap": {
+      "center": "ELK vs Loki",
+      "branches": [
+        {
+          "label": "Elasticsearch",
+          "children": [
+            "Full-text index",
+            "Fast arbitrary search",
+            "Expensive",
+            "Complex ops"
+          ]
+        },
+        {
+          "label": "Loki",
+          "children": [
+            "Label index only",
+            "Object storage chunks",
+            "Cheap",
+            "Query-time filtering"
+          ]
+        },
+        {
+          "label": "Choose by",
+          "children": [
+            "Query patterns",
+            "Volume",
+            "Budget"
+          ]
+        },
+        {
+          "label": "Loki rules",
+          "children": [
+            "Few low-cardinality labels"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same query",
+      "scenario": "KQL vs LogQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Both work; Loki much cheaper at volume."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# Elasticsearch / Kibana KQL\nservice:checkout and level:error and message:\"card declined\"\n\n# Loki LogQL\n{app=\"checkout\", level=\"error\"} |= \"card declined\" | json | line_format \"{{.order_id}}\""
+        }
+      ],
+      "outcome": "informed backend choice."
+    },
+    "summary": {
+      "points": [
+        "Index all vs index labels.",
+        "Cost vs search speed.",
+        "Low-cardinality labels in Loki."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should Loki labels stay low-cardinality?",
+        "a": "Each unique label set creates a stream; too many streams bloat the index and degrade performance."
+      }
+    ]
+  },
+  "log-sampling-handling-the-flood": {
+    "core": "At high volume, keeping every log line is costly and mostly redundant: a million identical 'request ok' lines add little. Sampling keeps a fraction of low-value logs (1% of successful request logs), all errors and warnings, and everything for sampled traces. Rate-limiting identical messages (deduplication) prevents log storms. Sample by consistent keys such as trace_id so you keep whole stories, not fragments.",
+    "first_principles": {
+      "problem": "A retry storm generates 20 million identical error lines in an hour, costing $8,000 in ingest.",
+      "truths": [
+        "Most logs are repetitive.",
+        "Errors are rare and valuable.",
+        "Fragments lose context."
+      ],
+      "derivation": [
+        "Keep **100% of errors/warns**.",
+        "**Sample** routine info logs.",
+        "Sample by **trace_id** for coherence.",
+        "**Rate-limit/dedupe** repeated messages.",
+        "Record **sample rate** for estimation."
+      ]
+    },
+    "analogy": {
+      "title": "Quality control on a production line",
+      "story": "Inspect a sample of normal items but every item flagged as defective.",
+      "mapping": [
+        [
+          "Sample inspection",
+          "Info sampling"
+        ],
+        [
+          "Defective items",
+          "Errors"
+        ],
+        [
+          "Batch tag",
+          "trace_id"
+        ]
+      ],
+      "breaks": "Factories can re-inspect; dropped logs are gone forever."
+    },
+    "mindmap": {
+      "center": "Log Sampling",
+      "branches": [
+        {
+          "label": "Keep all",
+          "children": [
+            "Errors",
+            "Warnings",
+            "Audit logs"
+          ]
+        },
+        {
+          "label": "Sample",
+          "children": [
+            "Routine success logs",
+            "Debug"
+          ]
+        },
+        {
+          "label": "Methods",
+          "children": [
+            "Probabilistic",
+            "Trace-consistent",
+            "Rate limit",
+            "Dedup"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "App",
+            "Agent",
+            "Pipeline"
+          ]
+        },
+        {
+          "label": "Record",
+          "children": [
+            "sample_rate field"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pipeline sampling",
+      "scenario": "Vector.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ingest drops ~90% while errors stay complete."
+        }
+      ],
+      "code": [
+        {
+          "lang": "toml",
+          "text": "[transforms.sample_info]\ntype = \"sample\"\ninputs = [\"k8s_logs\"]\nrate = 100                       # keep 1 in 100\nkey_field = \"trace_id\"           # consistent per trace\nexclude = '.level == \"error\" || .level == \"warn\"'\n\n[transforms.dedupe]\ntype = \"dedupe\"\ninputs = [\"sample_info\"]\nfields.match = [\"message\", \"service\"]"
+        }
+      ],
+      "outcome": "affordable, useful logs."
+    },
+    "summary": {
+      "points": [
+        "Keep errors.",
+        "Sample routine logs.",
+        "Sample consistently."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why sample logs by trace_id instead of randomly per line?",
+        "a": "So all logs for a sampled request are kept together, preserving the full story across services."
+      }
+    ]
+  }
+}

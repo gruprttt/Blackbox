@@ -1,0 +1,648 @@
+{
+  "introduction-why-we-inject-failure": {
+    "core": "Distributed systems fail in ways nobody designed for: a dependency gets slow rather than down, a zone loses network, retries amplify load. Waiting for those failures to happen at 3 a.m. means learning under pressure. Chaos engineering deliberately injects controlled failures to find weaknesses, verify that resilience mechanisms actually work, and build team confidence before real incidents.",
+    "first_principles": {
+      "problem": "A failover mechanism that was 'tested' at design time fails during the first real regional outage.",
+      "truths": [
+        "Untested resilience is assumed, not proven.",
+        "Complex systems have emergent failure modes.",
+        "Controlled practice beats surprise."
+      ],
+      "derivation": [
+        "Form **hypotheses** about resilience.",
+        "**Inject** realistic failures.",
+        "**Limit blast radius**.",
+        "**Observe** and learn.",
+        "**Fix** and repeat."
+      ]
+    },
+    "analogy": {
+      "title": "Fire drills",
+      "story": "You practise evacuating before a real fire to find blocked exits while it's safe.",
+      "mapping": [
+        [
+          "Fire drill",
+          "Chaos experiment"
+        ],
+        [
+          "Blocked exit",
+          "Hidden weakness"
+        ],
+        [
+          "Real fire",
+          "Production incident"
+        ]
+      ],
+      "breaks": "Fire drills don't risk burning the building; chaos experiments must control blast radius."
+    },
+    "mindmap": {
+      "center": "Chaos Engineering",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Unknown failure modes",
+            "Unverified resilience",
+            "Team practice"
+          ]
+        },
+        {
+          "label": "Method",
+          "children": [
+            "Hypothesis",
+            "Inject",
+            "Observe",
+            "Learn"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Blast radius",
+            "Abort conditions"
+          ]
+        },
+        {
+          "label": "Culture",
+          "children": [
+            "Blameless",
+            "Continuous"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "First experiment",
+      "scenario": "Flow.",
+      "flow": [
+        "Hypothesis: losing one cache node keeps p99 < 300 ms",
+        "Kill one Redis replica in staging",
+        "p99 jumps to 2 s: client didn't retry other replicas",
+        "Fix client config; re-run passes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Weakness found safely."
+        }
+      ],
+      "code": [],
+      "outcome": "resilience proven, not assumed."
+    },
+    "summary": {
+      "points": [
+        "Failures will happen.",
+        "Practise deliberately.",
+        "Learn safely."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the core purpose of chaos engineering?",
+        "a": "To proactively discover weaknesses and verify resilience by injecting controlled failures, before real incidents expose them."
+      }
+    ]
+  },
+  "the-scientific-method-of-chaos": {
+    "core": "Chaos is experimentation, not random breakage. Define steady state as a measurable normal (SLIs); hypothesise that it holds under a specific fault; introduce the fault realistically in a controlled scope; compare against a control group or baseline; and accept or refute the hypothesis. Start small (staging, one instance), automate abort conditions, and expand scope as confidence grows, eventually running in production.",
+    "first_principles": {
+      "problem": "An engineer randomly kills pods 'to see what happens' and causes an outage without learning anything specific.",
+      "truths": [
+        "Experiments need measurable outcomes.",
+        "Controls separate signal from noise.",
+        "Scope controls risk."
+      ],
+      "derivation": [
+        "Define **steady state** via SLIs.",
+        "State **hypothesis** precisely.",
+        "Inject **one variable** at a time.",
+        "Compare **control vs experiment**.",
+        "Set **abort conditions**; expand gradually."
+      ]
+    },
+    "analogy": {
+      "title": "A clinical trial",
+      "story": "A clear hypothesis, controlled dosage, a control group, monitoring, and stopping rules if harm appears.",
+      "mapping": [
+        [
+          "Dosage",
+          "Fault magnitude"
+        ],
+        [
+          "Control group",
+          "Unaffected traffic"
+        ],
+        [
+          "Stopping rules",
+          "Abort conditions"
+        ]
+      ],
+      "breaks": "Trials take months; chaos experiments take minutes but still need rigour."
+    },
+    "mindmap": {
+      "center": "Scientific Method",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "Steady state",
+            "Hypothesis",
+            "Inject",
+            "Observe",
+            "Conclude"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Baseline",
+            "Control group",
+            "Canary"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Small scope",
+            "Abort on SLO burn",
+            "Business hours"
+          ]
+        },
+        {
+          "label": "Progression",
+          "children": [
+            "Staging",
+            "Prod subset",
+            "Prod wide",
+            "Automated"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Experiment card",
+      "scenario": "Template.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clear, safe, learnable experiment."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "name: payments-db-failover\nsteady_state: checkout success ≥ 99.5%, p99 < 800 ms\nhypothesis: promoting replica keeps success ≥ 99% with < 30 s disruption\nfault: force RDS failover (primary reboot with failover)\nscope: prod, 10:00–11:00 Tue, on-call present\nabort: success < 98% for 2 min OR p99 > 3 s\nresult: TBD"
+        }
+      ],
+      "outcome": "rigorous chaos."
+    },
+    "summary": {
+      "points": [
+        "Hypothesis-driven.",
+        "Measure steady state.",
+        "Control and abort."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between chaos engineering and randomly breaking things?",
+        "a": "Chaos engineering uses explicit hypotheses, measured steady state, controlled scope and abort conditions to learn something specific."
+      }
+    ]
+  },
+  "step-1-the-steady-state-hypothesis": {
+    "core": "Steady state is the system's normal, observable behaviour, ideally user-facing business and SLI metrics (orders per minute, success rate, p99) rather than CPU. The hypothesis states that this steady state will continue despite a specific fault: 'If one AZ loses network, checkout success stays ≥ 99% and p99 < 1 s.' Without a measurable steady state you can't tell whether an experiment succeeded or harmed users.",
+    "first_principles": {
+      "problem": "A chaos test is declared 'fine' because pods restarted, while checkout errors quietly doubled.",
+      "truths": [
+        "Normal must be measurable.",
+        "User metrics reflect impact.",
+        "Hypotheses must be falsifiable."
+      ],
+      "derivation": [
+        "Pick **user-facing SLIs**.",
+        "Measure **baseline ranges**.",
+        "State **fault + expected outcome**.",
+        "Make it **falsifiable** with thresholds.",
+        "Watch dashboards **live** during the test."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor's baseline vitals before a stress test",
+      "story": "You need normal heart rate and blood pressure to judge whether the treadmill test revealed a problem.",
+      "mapping": [
+        [
+          "Baseline vitals",
+          "Steady state"
+        ],
+        [
+          "Treadmill",
+          "Fault injection"
+        ],
+        [
+          "Abnormal response",
+          "Refuted hypothesis"
+        ]
+      ],
+      "breaks": "Vitals vary per patient; steady state also varies by time of day."
+    },
+    "mindmap": {
+      "center": "Steady State",
+      "branches": [
+        {
+          "label": "Metrics",
+          "children": [
+            "Success rate",
+            "p99",
+            "Orders/min",
+            "Queue lag"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "CPU-only",
+            "Pod restarts as success"
+          ]
+        },
+        {
+          "label": "Hypothesis",
+          "children": [
+            "Fault",
+            "Expected outcome",
+            "Thresholds"
+          ]
+        },
+        {
+          "label": "Baseline",
+          "children": [
+            "Time-of-day ranges",
+            "Control group"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Steady-state probe",
+      "scenario": "Chaos Toolkit.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Experiment verified against a user-facing SLI."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "\"steady-state-hypothesis\": {\n  \"title\": \"Checkout healthy\",\n  \"probes\": [{\n    \"type\": \"probe\", \"name\": \"success-ratio\", \"tolerance\": { \"type\": \"range\", \"range\": [0.99, 1.0], \"target\": \"value\" },\n    \"provider\": { \"type\": \"python\", \"module\": \"chaosprometheus.probes\", \"func\": \"query\",\n      \"arguments\": { \"query\": \"sum(rate(http_requests_total{service='checkout',code!~'5..'}[1m]))/sum(rate(http_requests_total{service='checkout'}[1m]))\" } }\n  }]\n}"
+        }
+      ],
+      "outcome": "measurable experiment success criteria."
+    },
+    "summary": {
+      "points": [
+        "Define normal.",
+        "User-facing metrics.",
+        "Falsifiable hypothesis."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should steady state use user-facing metrics rather than infrastructure metrics?",
+        "a": "Infrastructure can look fine while users suffer; user-facing SLIs show the real impact of the fault."
+      }
+    ]
+  },
+  "step-2-fault-injection-the-attacks": {
+    "core": "Inject faults that resemble real failures. Resource faults: CPU, memory and disk exhaustion. State faults: kill processes, pods, nodes or a whole AZ. Network faults: latency, loss, partitions, DNS failure, blackholed dependencies. Application faults: errors or delays in specific calls (service mesh fault injection). Time faults: clock skew. Latency faults are often more revealing than outright failures, because slow is harder to handle than down.",
+    "first_principles": {
+      "problem": "A team only ever tests pod kills, which Kubernetes handles easily, and misses that a slow dependency exhausts thread pools.",
+      "truths": [
+        "Real failures are diverse.",
+        "Slowness cascades more than crashes.",
+        "Targeted faults isolate causes."
+      ],
+      "derivation": [
+        "Test **resource** exhaustion.",
+        "Test **state** loss (pod/node/AZ).",
+        "Test **network** latency/loss/partition.",
+        "Test **dependency** slowness and errors.",
+        "Test **DNS and time**."
+      ]
+    },
+    "analogy": {
+      "title": "A flight simulator's failure menu",
+      "story": "Pilots train for engine loss, but also instrument failure, bad weather and slow responses.",
+      "mapping": [
+        [
+          "Engine loss",
+          "Node kill"
+        ],
+        [
+          "Bad weather",
+          "Network latency"
+        ],
+        [
+          "Faulty instrument",
+          "Dependency errors"
+        ]
+      ],
+      "breaks": "Simulators are fully isolated; production chaos affects real users if uncontrolled."
+    },
+    "mindmap": {
+      "center": "Fault Types",
+      "branches": [
+        {
+          "label": "Resource",
+          "children": [
+            "CPU",
+            "Memory",
+            "Disk",
+            "File descriptors"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "Process",
+            "Pod",
+            "Node",
+            "AZ/region"
+          ]
+        },
+        {
+          "label": "Network",
+          "children": [
+            "Latency",
+            "Loss",
+            "Partition",
+            "DNS"
+          ]
+        },
+        {
+          "label": "Application",
+          "children": [
+            "Error injection",
+            "Delay injection"
+          ]
+        },
+        {
+          "label": "Time",
+          "children": [
+            "Clock skew"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Latency injection",
+      "scenario": "Istio.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reveals whether checkout times out gracefully when fraud is slow."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: networking.istio.io/v1\nkind: VirtualService\nmetadata: { name: fraud-chaos }\nspec:\n  hosts: [fraud]\n  http:\n    - match: [{ headers: { x-chaos: { exact: \"on\" } } }]\n      fault: { delay: { percentage: { value: 50 }, fixedDelay: 3s } }\n      route: [{ destination: { host: fraud } }]\n    - route: [{ destination: { host: fraud } }]"
+        }
+      ],
+      "outcome": "realistic, diverse faults."
+    },
+    "summary": {
+      "points": [
+        "Many fault types.",
+        "Latency is revealing.",
+        "Target precisely."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is injecting latency often more valuable than killing services?",
+        "a": "Slow dependencies tie up threads and connections and trigger retries, causing cascading failures that clean crashes don't."
+      }
+    ]
+  },
+  "tools-of-the-trade": {
+    "core": "Chaos tools range from Kubernetes-native platforms (Chaos Mesh, LitmusChaos) with CRDs for pod, network, IO and time faults, through managed cloud services (AWS Fault Injection Service, Azure Chaos Studio) that inject at cloud-API level such as stopping instances, failing AZ networking or throttling APIs, to commercial platforms (Gremlin) and code-level frameworks (Toxiproxy, Chaos Toolkit). Good tools offer scoping, scheduling, abort conditions and audit logs.",
+    "first_principles": {
+      "problem": "A team writes ad-hoc scripts to kill pods, with no safety controls or record of what was run.",
+      "truths": [
+        "Tools standardise faults.",
+        "Safety controls reduce risk.",
+        "Audit trails build trust."
+      ],
+      "derivation": [
+        "**Chaos Mesh/Litmus** for Kubernetes.",
+        "**AWS FIS / Azure Chaos Studio** for cloud.",
+        "**Toxiproxy** for dependency faults in tests.",
+        "Require **stop conditions** (alarms).",
+        "Run as **scheduled experiments** in CI/CD."
+      ]
+    },
+    "analogy": {
+      "title": "A professional stunt team vs amateurs",
+      "story": "Pros use rigs, safety lines and rehearsed plans; amateurs just jump.",
+      "mapping": [
+        [
+          "Rigs and safety lines",
+          "Scoping and stop conditions"
+        ],
+        [
+          "Rehearsed plan",
+          "Experiment definition"
+        ],
+        [
+          "Stunt log",
+          "Audit trail"
+        ]
+      ],
+      "breaks": "Stunts are one-off; chaos should be continuous."
+    },
+    "mindmap": {
+      "center": "Chaos Tools",
+      "branches": [
+        {
+          "label": "Kubernetes",
+          "children": [
+            "Chaos Mesh",
+            "LitmusChaos"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "AWS FIS",
+            "Azure Chaos Studio"
+          ]
+        },
+        {
+          "label": "Commercial",
+          "children": [
+            "Gremlin",
+            "Steadybit"
+          ]
+        },
+        {
+          "label": "Code/test",
+          "children": [
+            "Toxiproxy",
+            "Chaos Toolkit"
+          ]
+        },
+        {
+          "label": "Must-haves",
+          "children": [
+            "Scope",
+            "Stop conditions",
+            "Scheduling",
+            "Audit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Chaos Mesh network fault",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "30% of payments pods get 400 ms latency for 5 minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: chaos-mesh.org/v1alpha1\nkind: NetworkChaos\nmetadata: { name: payments-latency, namespace: chaos }\nspec:\n  action: delay\n  mode: fixed-percent\n  value: \"30\"\n  selector: { namespaces: [shop], labelSelectors: { app: payments } }\n  delay: { latency: \"400ms\", jitter: \"100ms\" }\n  duration: \"5m\""
+        }
+      ],
+      "outcome": "safe, repeatable experiments."
+    },
+    "summary": {
+      "points": [
+        "Platform tools.",
+        "Cloud-level faults.",
+        "Stop conditions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What safety feature should every chaos tool used in production support?",
+        "a": "Stop/abort conditions tied to health metrics or alarms that automatically halt the experiment."
+      }
+    ]
+  },
+  "gamedays-learning-together": {
+    "core": "A GameDay is a scheduled, facilitated exercise where teams run chaos scenarios together, such as a region failure, dependency outage or data corruption. They practise detection, response, communication and runbooks in real time, then hold a blameless review. GameDays test people and processes as much as systems: did alerts fire, did the right people get paged, did runbooks work, did status updates go out?",
+    "first_principles": {
+      "problem": "The team's disaster recovery runbook was written two years ago and nobody has ever followed it.",
+      "truths": [
+        "Processes decay unused.",
+        "Incidents involve people and tools.",
+        "Practice under low stakes builds skill."
+      ],
+      "derivation": [
+        "**Plan** scenario, scope and roles.",
+        "Assign **facilitator and observers**.",
+        "**Run** with real alerts and tools.",
+        "Track **timeline and gaps**.",
+        "**Review** blamelessly; file actions."
+      ]
+    },
+    "analogy": {
+      "title": "A fire brigade training exercise",
+      "story": "Crews practise together with real equipment so the real call goes smoothly.",
+      "mapping": [
+        [
+          "Training exercise",
+          "GameDay"
+        ],
+        [
+          "Equipment",
+          "Tools/runbooks"
+        ],
+        [
+          "Debrief",
+          "Blameless review"
+        ]
+      ],
+      "breaks": "Fire drills are routine; GameDays need fresh scenarios to stay useful."
+    },
+    "mindmap": {
+      "center": "GameDays",
+      "branches": [
+        {
+          "label": "Plan",
+          "children": [
+            "Scenario",
+            "Scope",
+            "Roles",
+            "Abort plan"
+          ]
+        },
+        {
+          "label": "Run",
+          "children": [
+            "Inject",
+            "Detect",
+            "Respond",
+            "Communicate"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "Timeline",
+            "Alert quality",
+            "Runbook gaps"
+          ]
+        },
+        {
+          "label": "After",
+          "children": [
+            "Blameless review",
+            "Action items",
+            "Next scenario"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Region evacuation",
+      "scenario": "Agenda.",
+      "flow": [
+        "10:00 brief: scenario 'us-east-1 unavailable'",
+        "10:15 inject: block traffic to region",
+        "Measure: time to detect, decide, fail over",
+        "11:30 review: DNS TTL too long, runbook step missing"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Concrete fixes before a real outage."
+        }
+      ],
+      "code": [],
+      "outcome": "practised people and processes."
+    },
+    "summary": {
+      "points": [
+        "Practise together.",
+        "Test humans and tools.",
+        "Review and improve."
+      ]
+    },
+    "check": [
+      {
+        "q": "Besides system resilience, what do GameDays test?",
+        "a": "Detection, alerting, paging, runbooks, decision-making and communication: the human and process side of incidents."
+      }
+    ]
+  }
+}

@@ -1,0 +1,634 @@
+{
+  "introduction-how-reliable-is-reliable-enough": {
+    "core": "100% reliability is impossible and not worth pursuing: each extra nine costs roughly ten times more, and users can't tell 99.99% from 100% because their own networks fail more often. SRE picks a target that keeps users happy, measures against it, and treats the gap below 100% as a budget to spend on shipping features and taking risks.",
+    "first_principles": {
+      "problem": "A team chases zero incidents, freezes releases, and still can't explain to leadership whether the service is 'reliable enough'.",
+      "truths": [
+        "Perfection costs exponentially more.",
+        "Users have finite sensitivity.",
+        "Reliability competes with velocity."
+      ],
+      "derivation": [
+        "Measure **what users experience** (SLI).",
+        "Set a **target** (SLO).",
+        "Promise externally less (**SLA**).",
+        "Spend the **error budget**.",
+        "Use the budget to **balance speed and stability**."
+      ]
+    },
+    "analogy": {
+      "title": "A household budget for risk",
+      "story": "You don't refuse to spend money; you decide how much you can afford and track it.",
+      "mapping": [
+        [
+          "Income",
+          "Allowed unreliability"
+        ],
+        [
+          "Spending",
+          "Incidents and risky releases"
+        ],
+        [
+          "Overspend",
+          "Budget exhausted → slow down"
+        ]
+      ],
+      "breaks": "Money can be borrowed; error budgets can't be paid back early."
+    },
+    "mindmap": {
+      "center": "Reliability Targets",
+      "branches": [
+        {
+          "label": "Ideas",
+          "children": [
+            "100% is wrong target",
+            "Nines cost exponentially"
+          ]
+        },
+        {
+          "label": "Terms",
+          "children": [
+            "SLI",
+            "SLO",
+            "SLA",
+            "Error budget"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Release decisions",
+            "Prioritisation",
+            "Alerting"
+          ]
+        },
+        {
+          "label": "Culture",
+          "children": [
+            "Shared ownership",
+            "Data over opinion"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Nines in minutes",
+      "scenario": "Downtime per 30 days.",
+      "flow": [
+        "99% → 7.2 hours",
+        "99.9% → 43 minutes",
+        "99.95% → 21.6 minutes",
+        "99.99% → 4.3 minutes"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Makes the cost of each nine concrete."
+        }
+      ],
+      "code": [],
+      "outcome": "a rational reliability target."
+    },
+    "summary": {
+      "points": [
+        "100% is wrong.",
+        "Pick a user-driven target.",
+        "Budget the rest."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is 100% the wrong reliability target?",
+        "a": "It's unachievable and exponentially costly, and users can't perceive the difference beyond a point, so it blocks all change for no benefit."
+      }
+    ]
+  },
+  "sli-service-level-indicator-the-measurement": {
+    "core": "An SLI is a ratio of good events to valid events, measured as close to the user as possible: the share of requests that succeeded, the share faster than 300 ms, the share of records fresh within 10 minutes. Good SLIs map to user happiness, are precisely defined (what counts as good, which requests are excluded), and come from load balancer logs, server metrics, client telemetry or synthetic probes.",
+    "first_principles": {
+      "problem": "A dashboard shows CPU and memory but nobody can say what fraction of user checkouts actually succeeded.",
+      "truths": [
+        "Users care about outcomes.",
+        "Ratios normalise for traffic.",
+        "Measurement point changes what you see."
+      ],
+      "derivation": [
+        "Define **good / valid events**.",
+        "Pick types: **availability, latency, freshness, correctness**.",
+        "Measure **near the user** (LB, client).",
+        "Exclude **invalid** traffic (health checks, 4xx abuse).",
+        "Express as **percentage over a window**."
+      ]
+    },
+    "analogy": {
+      "title": "A restaurant's 'meals served on time and correct' ratio",
+      "story": "Kitchen temperature doesn't matter to diners; the share of meals right and on time does.",
+      "mapping": [
+        [
+          "Meals right & on time",
+          "Good events"
+        ],
+        [
+          "All meals ordered",
+          "Valid events"
+        ],
+        [
+          "Kitchen temperature",
+          "CPU metric"
+        ]
+      ],
+      "breaks": "Diners complain; most users silently leave."
+    },
+    "mindmap": {
+      "center": "SLIs",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "good / valid"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "Availability",
+            "Latency",
+            "Freshness",
+            "Correctness",
+            "Throughput"
+          ]
+        },
+        {
+          "label": "Sources",
+          "children": [
+            "LB logs",
+            "Server metrics",
+            "RUM",
+            "Synthetics"
+          ]
+        },
+        {
+          "label": "Precision",
+          "children": [
+            "What is good",
+            "What is excluded",
+            "Window"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two SLIs",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Two user-centric numbers per service."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "# availability: non-5xx share\nsum(rate(http_requests_total{service=\"checkout\",code!~\"5..\"}[30d]))\n/ sum(rate(http_requests_total{service=\"checkout\"}[30d]))\n# latency: share under 300 ms\nsum(rate(http_request_duration_seconds_bucket{service=\"checkout\",le=\"0.3\"}[30d]))\n/ sum(rate(http_request_duration_seconds_count{service=\"checkout\"}[30d]))"
+        }
+      ],
+      "outcome": "measured user experience."
+    },
+    "summary": {
+      "points": [
+        "Good over valid.",
+        "Close to the user.",
+        "Precisely defined."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why express SLIs as ratios rather than raw error counts?",
+        "a": "Ratios normalise for traffic volume, so the indicator is comparable across busy and quiet periods."
+      }
+    ]
+  },
+  "slo-service-level-objective-the-goal": {
+    "core": "An SLO is a target value for an SLI over a time window: 99.9% of checkout requests succeed over a rolling 28 days, or 95% complete under 300 ms. Set it from user needs and historical performance, not aspiration. It must be achievable but meaningful, and reviewed regularly. SLOs are internal engineering goals, stricter than any external SLA.",
+    "first_principles": {
+      "problem": "A team sets 99.999% because it 'sounds good', then misses it every month and everyone ignores it.",
+      "truths": [
+        "Targets must be achievable to matter.",
+        "Windows smooth noise.",
+        "Users tolerate some failure."
+      ],
+      "derivation": [
+        "Start from **current performance**.",
+        "Ask what **users notice**.",
+        "Choose **rolling window** (28/30 days).",
+        "Set per **user journey**.",
+        "**Review** quarterly."
+      ]
+    },
+    "analogy": {
+      "title": "A train punctuality target",
+      "story": "'95% of trains within 5 minutes' is realistic and measurable; 'every train exactly on time' is ignored.",
+      "mapping": [
+        [
+          "Within 5 minutes",
+          "Latency threshold"
+        ],
+        [
+          "95%",
+          "Target"
+        ],
+        [
+          "Monthly report",
+          "Window"
+        ]
+      ],
+      "breaks": "Train targets are public; SLOs are internal and can be tuned."
+    },
+    "mindmap": {
+      "center": "SLOs",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "SLI",
+            "Target",
+            "Window"
+          ]
+        },
+        {
+          "label": "Set from",
+          "children": [
+            "History",
+            "User research",
+            "Dependencies' SLOs"
+          ]
+        },
+        {
+          "label": "Windows",
+          "children": [
+            "Rolling",
+            "Calendar"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "User journeys",
+            "Tiers"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Review",
+            "Adjust"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SLO spec",
+      "scenario": "OpenSLO-style YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A clear, reviewable reliability goal."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: openslo/v1\nkind: SLO\nmetadata: { name: checkout-availability }\nspec:\n  service: checkout\n  timeWindow: [{ duration: 28d, isRolling: true }]\n  budgetingMethod: Occurrences\n  objectives: [{ displayName: success, target: 0.999 }]\n  indicatorRef: checkout-non-5xx-ratio"
+        }
+      ],
+      "outcome": "realistic objectives."
+    },
+    "summary": {
+      "points": [
+        "SLI + target + window.",
+        "Grounded in reality.",
+        "Reviewed regularly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should an SLO usually be stricter than the external SLA?",
+        "a": "So you get early warning and room to react before breaching the contractual promise."
+      }
+    ]
+  },
+  "sla-service-level-agreement-the-contract": {
+    "core": "An SLA is a business contract with customers: if availability falls below X% in a billing period, the provider owes service credits or refunds. It is written by legal and business teams, is usually looser than the internal SLO, defines measurement and exclusions precisely, and has financial consequences. Engineering manages to the SLO so the SLA is never breached.",
+    "first_principles": {
+      "problem": "Sales promises 99.99% in a contract while the service's internal SLO is 99.9%.",
+      "truths": [
+        "Contracts carry penalties.",
+        "Measurement disputes are costly.",
+        "Internal margin protects promises."
+      ],
+      "derivation": [
+        "Set **SLA below SLO** (e.g. 99.5% vs 99.9%).",
+        "Define **measurement method** and exclusions.",
+        "Specify **credits** per breach tier.",
+        "Align with **dependencies' SLAs**.",
+        "Involve **engineering** before signing."
+      ]
+    },
+    "analogy": {
+      "title": "A warranty vs the factory's quality target",
+      "story": "The factory aims for 99.9% defect-free; the warranty only promises replacement if something fails in a year.",
+      "mapping": [
+        [
+          "Factory target",
+          "SLO"
+        ],
+        [
+          "Warranty",
+          "SLA"
+        ],
+        [
+          "Replacement",
+          "Service credit"
+        ]
+      ],
+      "breaks": "Warranties are per product; SLAs aggregate across a billing period."
+    },
+    "mindmap": {
+      "center": "SLAs",
+      "branches": [
+        {
+          "label": "Nature",
+          "children": [
+            "Contract",
+            "Financial penalties"
+          ]
+        },
+        {
+          "label": "Relation",
+          "children": [
+            "Looser than SLO"
+          ]
+        },
+        {
+          "label": "Contents",
+          "children": [
+            "Metric definition",
+            "Exclusions",
+            "Credits",
+            "Claims process"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Overpromising",
+            "Dependency gaps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tiered credits",
+      "scenario": "Table.",
+      "flow": [
+        "Monthly uptime ≥ 99.5%: no credit",
+        "99.0–99.5%: 10% credit",
+        "95.0–99.0%: 25% credit",
+        "< 95%: 100% credit"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clear consequences; SLO 99.9% leaves margin."
+        }
+      ],
+      "code": [],
+      "outcome": "safe external promises."
+    },
+    "summary": {
+      "points": [
+        "SLA is a contract.",
+        "Looser than SLO.",
+        "Precise definitions."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can your SLA be stronger than your cloud provider's SLA for a dependency you can't avoid?",
+        "a": "Only with redundancy across providers or regions; otherwise you're promising more than your dependency guarantees."
+      }
+    ]
+  },
+  "the-error-budget-the-currency-of-risk": {
+    "core": "The error budget is 1 − SLO. A 99.9% SLO over 28 days allows 0.1% of requests to fail, about 40 minutes of full downtime. While budget remains, teams ship fast and experiment; when it's exhausted, policy shifts effort to reliability (release freeze, postmortem actions) until it recovers. It turns reliability-versus-velocity arguments into an objective, pre-agreed decision rule.",
+    "first_principles": {
+      "problem": "Product and SRE argue every week about whether a risky release should ship.",
+      "truths": [
+        "Some failure is acceptable by design.",
+        "Spending should be visible.",
+        "Pre-agreed rules end arguments."
+      ],
+      "derivation": [
+        "Compute **budget = 1 − SLO**.",
+        "Track **remaining budget** live.",
+        "Write an **error budget policy**.",
+        "**Freeze/slow** releases when exhausted.",
+        "Spend budget **deliberately** (chaos tests, migrations)."
+      ]
+    },
+    "analogy": {
+      "title": "A monthly mobile data allowance",
+      "story": "Stream freely while you have data left; once it's gone, you're careful until it resets.",
+      "mapping": [
+        [
+          "Data allowance",
+          "Error budget"
+        ],
+        [
+          "Streaming",
+          "Risky releases"
+        ],
+        [
+          "Reset",
+          "Rolling window recovery"
+        ]
+      ],
+      "breaks": "Data allowances reset on a date; rolling budgets recover gradually."
+    },
+    "mindmap": {
+      "center": "Error Budget",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "1 − SLO"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Release gating",
+            "Priority setting",
+            "Planned risk"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Thresholds",
+            "Freeze rules",
+            "Exceptions"
+          ]
+        },
+        {
+          "label": "Tracking",
+          "children": [
+            "Remaining %",
+            "Burn rate"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Budget math",
+      "scenario": "Numbers.",
+      "flow": [
+        "SLO 99.9%, 10M requests / 28d",
+        "Budget = 10,000 failed requests",
+        "Incident burns 6,000 (60%)",
+        "Policy: ship only fixes until < 50% burned"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Objective decision on releases."
+        }
+      ],
+      "code": [],
+      "outcome": "risk managed as currency."
+    },
+    "summary": {
+      "points": [
+        "Budget = 1 − SLO.",
+        "Spend while available.",
+        "Policy when exhausted."
+      ]
+    },
+    "check": [
+      {
+        "q": "What should happen when a service exhausts its error budget?",
+        "a": "Per the agreed policy, prioritise reliability work and slow or freeze risky changes until the budget recovers."
+      }
+    ]
+  },
+  "burn-rates-and-multi-window-alerting": {
+    "core": "Burn rate is how fast you're consuming budget relative to plan: a burn rate of 1 uses exactly the whole budget over the window, and 14.4 would exhaust a 30-day budget in about 2 days. Multi-window, multi-burn-rate alerts page on a fast burn (14.4× over 1 h confirmed by 5 m) and ticket on a slow burn (6× over 6 h, or 1× over 3 days), catching both outages and slow degradation with few false alarms.",
+    "first_principles": {
+      "problem": "A static 'error rate > 1%' alert either pages for short blips or misses slow budget erosion.",
+      "truths": [
+        "Budget consumption speed predicts impact.",
+        "Short windows are noisy, long ones slow.",
+        "Combining windows balances both."
+      ],
+      "derivation": [
+        "Compute **burn rate = error ratio / (1 − SLO)**.",
+        "**Page**: 14.4× over 1h AND 5m.",
+        "**Page**: 6× over 6h AND 30m.",
+        "**Ticket**: 1× over 3d AND 6h.",
+        "Use **recording rules** for efficiency."
+      ]
+    },
+    "analogy": {
+      "title": "A fuel gauge with a range estimate",
+      "story": "'At this rate you'll run out in 50 miles' is more useful than 'fuel is below half'.",
+      "mapping": [
+        [
+          "Fuel",
+          "Error budget"
+        ],
+        [
+          "Consumption rate",
+          "Burn rate"
+        ],
+        [
+          "Range warning",
+          "Burn-rate alert"
+        ]
+      ],
+      "breaks": "Fuel use is steady; error bursts are spiky, hence two windows."
+    },
+    "mindmap": {
+      "center": "Burn-Rate Alerting",
+      "branches": [
+        {
+          "label": "Burn rate",
+          "children": [
+            "Error ratio ÷ budget ratio"
+          ]
+        },
+        {
+          "label": "Fast burn",
+          "children": [
+            "14.4× 1h/5m",
+            "Page"
+          ]
+        },
+        {
+          "label": "Medium",
+          "children": [
+            "6× 6h/30m",
+            "Page"
+          ]
+        },
+        {
+          "label": "Slow",
+          "children": [
+            "1× 3d/6h",
+            "Ticket"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Precision",
+            "Recall",
+            "Fast reset"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fast-burn rule",
+      "scenario": "PromQL (SLO 99.9%).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Pages within minutes of a real outage, resets quickly after recovery."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- alert: CheckoutErrorBudgetFastBurn\n  expr: |\n    (job:slo_errors:ratio_rate1h{service=\"checkout\"} > 14.4 * 0.001)\n    and\n    (job:slo_errors:ratio_rate5m{service=\"checkout\"} > 14.4 * 0.001)\n  labels: { severity: page }\n  annotations: { summary: \"Checkout burning 2% of monthly budget per hour\" }"
+        }
+      ],
+      "outcome": "SLO-driven, low-noise alerts."
+    },
+    "summary": {
+      "points": [
+        "Burn rate predicts exhaustion.",
+        "Two windows per alert.",
+        "Page fast, ticket slow."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why combine a long and a short window in a burn-rate alert?",
+        "a": "The long window ensures significant budget was consumed; the short window confirms it's still happening, so the alert stops quickly after recovery."
+      }
+    ]
+  }
+}

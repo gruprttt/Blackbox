@@ -1,0 +1,414 @@
+{
+  "introduction-the-multiplication-problem": {
+    "core": "Series count is the product of each label's distinct values: 50 routes × 5 status codes × 4 methods × 200 pods is already 200,000 series for one metric, and histogram buckets multiply it again by ~12. Add one unbounded label (user_id, request path, session) and it becomes millions. Memory, query latency and SaaS bills scale with series, so one change can take down monitoring or blow the budget.",
+    "first_principles": {
+      "problem": "A deploy adds a 'path' label with raw URLs, and active series jump from 2 million to 40 million overnight.",
+      "truths": [
+        "Labels multiply.",
+        "Histograms multiply further.",
+        "Pod churn creates new series constantly."
+      ],
+      "derivation": [
+        "**Estimate** product before adding labels.",
+        "Count **histogram buckets** as a multiplier.",
+        "Account for **pod churn** (new series per pod).",
+        "Avoid **unbounded** values.",
+        "**Budget** series per team."
+      ]
+    },
+    "analogy": {
+      "title": "A menu with every combination listed",
+      "story": "Listing every combination of 50 dishes, 5 sizes and 200 table numbers produces an absurdly long menu.",
+      "mapping": [
+        [
+          "Menu lines",
+          "Series"
+        ],
+        [
+          "Options",
+          "Label values"
+        ],
+        [
+          "Table numbers",
+          "Pod/instance labels"
+        ]
+      ],
+      "breaks": "Menus are printed once; series are created continuously with churn."
+    },
+    "mindmap": {
+      "center": "Cardinality Math",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "Product of label values"
+          ]
+        },
+        {
+          "label": "Multipliers",
+          "children": [
+            "Histogram buckets",
+            "Pod churn",
+            "Unbounded labels"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Memory",
+            "Query time",
+            "Bills"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Estimation",
+            "Budgets",
+            "Limits"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Multiplication",
+      "scenario": "Numbers.",
+      "flow": [
+        "routes 50 × status 5 × method 4 = 1,000",
+        "× pods 200 = 200,000",
+        "× histogram buckets 12 = 2.4M series",
+        "+ user_id (100k) → 240 billion (impossible)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows why one label can destroy a TSDB."
+        }
+      ],
+      "code": [],
+      "outcome": "cardinality math internalised."
+    },
+    "summary": {
+      "points": [
+        "Labels multiply.",
+        "Buckets and churn too.",
+        "One bad label explodes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do histograms amplify cardinality problems?",
+        "a": "Each bucket is a separate series, so every label combination is multiplied by the number of buckets."
+      }
+    ]
+  },
+  "detecting-the-culprit": {
+    "core": "Find cardinality culprits with TSDB status (Prometheus /tsdb-status lists top metrics, labels and label-value pairs by series count), queries like topk(10, count by (__name__)({__name__=~\".+\"})), per-label counts on a suspicious metric, ingestion-rate and head-series growth graphs correlated with deploys, and vendor usage dashboards. Then trace the metric to its owning service and code.",
+    "first_principles": {
+      "problem": "Prometheus memory doubles and nobody knows which of 3,000 metrics is responsible.",
+      "truths": [
+        "TSDBs track series stats.",
+        "A few metrics dominate.",
+        "Growth correlates with changes."
+      ],
+      "derivation": [
+        "Check **/api/v1/status/tsdb**.",
+        "Query **top metrics by series**.",
+        "Count **series per label** on the suspect.",
+        "Correlate **growth with deploys**.",
+        "Find **owner** via job/service labels."
+      ]
+    },
+    "analogy": {
+      "title": "Finding which room is flooding",
+      "story": "Check the water meter per room instead of searching the whole house.",
+      "mapping": [
+        [
+          "Water meter",
+          "TSDB status"
+        ],
+        [
+          "Flooding room",
+          "Exploding metric"
+        ],
+        [
+          "Leaking tap",
+          "Unbounded label"
+        ]
+      ],
+      "breaks": "Floods are visible; series growth is only seen in stats."
+    },
+    "mindmap": {
+      "center": "Finding Culprits",
+      "branches": [
+        {
+          "label": "Tools",
+          "children": [
+            "/tsdb-status",
+            "Grafana cardinality dashboards",
+            "mimirtool",
+            "Vendor usage"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "count by (__name__)",
+            "count by (label)"
+          ]
+        },
+        {
+          "label": "Correlation",
+          "children": [
+            "Deploy annotations",
+            "prometheus_tsdb_head_series"
+          ]
+        },
+        {
+          "label": "Next",
+          "children": [
+            "Owner",
+            "Code path"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Drill down",
+      "scenario": "Queries.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Culprit: raw path label on latency histogram."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -s localhost:9090/api/v1/status/tsdb | jq '.data.seriesCountByMetricName[:5]'\n# [{\"name\":\"http_request_duration_seconds_bucket\",\"value\":18400000}, ...]\n# then:\n# count by (path) (http_request_duration_seconds_count)   → 1.5M distinct paths"
+        }
+      ],
+      "outcome": "exploding metric located."
+    },
+    "summary": {
+      "points": [
+        "Use TSDB stats.",
+        "Drill into labels.",
+        "Correlate with changes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which Prometheus endpoint lists the metrics with the most series?",
+        "a": "/api/v1/status/tsdb (TSDB status), including seriesCountByMetricName and label statistics."
+      }
+    ]
+  },
+  "mitigation-strategy-1-remove-the-label": {
+    "core": "The quickest fix is to stop producing the bad label. In code, replace raw values with bounded ones (route template instead of path, status class instead of code, bucketed tenant tier instead of tenant ID). In the scrape, use metric_relabel_configs with labeldrop or a replace to normalise values before ingestion. Move per-entity detail to logs or traces, where high cardinality is cheap.",
+    "first_principles": {
+      "problem": "A metric's user_id label must be removed immediately to stop Prometheus from OOM-crashing.",
+      "truths": [
+        "Labels can be dropped at scrape time.",
+        "Code fixes are permanent.",
+        "High-cardinality detail belongs in events."
+      ],
+      "derivation": [
+        "**Hotfix**: labeldrop in metric_relabel_configs.",
+        "**Normalise** values with regex replace.",
+        "**Fix code** to use templates/classes.",
+        "Put IDs in **logs/trace attributes**.",
+        "Add **CI checks** for label sets."
+      ]
+    },
+    "analogy": {
+      "title": "Removing a column from a spreadsheet",
+      "story": "If 'customer name' creates a million rows, drop it from the summary sheet and keep it in the detailed records.",
+      "mapping": [
+        [
+          "Summary sheet",
+          "Metrics"
+        ],
+        [
+          "Detailed records",
+          "Logs/traces"
+        ],
+        [
+          "Dropped column",
+          "Removed label"
+        ]
+      ],
+      "breaks": "Spreadsheets recalc instantly; existing series remain until retention expires."
+    },
+    "mindmap": {
+      "center": "Remove the Label",
+      "branches": [
+        {
+          "label": "Hotfix",
+          "children": [
+            "metric_relabel_configs",
+            "labeldrop",
+            "replace regex"
+          ]
+        },
+        {
+          "label": "Permanent",
+          "children": [
+            "Route templates",
+            "Status classes",
+            "Tiers"
+          ]
+        },
+        {
+          "label": "Relocate",
+          "children": [
+            "Logs",
+            "Trace attributes",
+            "Exemplars"
+          ]
+        },
+        {
+          "label": "Prevent",
+          "children": [
+            "Lint metrics in CI",
+            "Review"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scrape-time fix",
+      "scenario": "Prometheus config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Series count drops immediately for new samples."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "metric_relabel_configs:\n  - action: labeldrop\n    regex: user_id\n  - source_labels: [path]\n    regex: '/api/orders/[0-9]+'\n    target_label: path\n    replacement: '/api/orders/:id'"
+        }
+      ],
+      "outcome": "explosion stopped."
+    },
+    "summary": {
+      "points": [
+        "Drop or normalise.",
+        "Fix the code.",
+        "Move detail to events."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why put user IDs in trace attributes rather than metric labels?",
+        "a": "Traces and logs store per-event data cheaply, while each metric label value creates a new long-lived series."
+      }
+    ]
+  },
+  "mitigation-strategy-2-aggregate-before-storage": {
+    "core": "Sometimes the dimension is useful for computation but not for storage. Aggregate before storage: Prometheus recording rules pre-compute sum by (service, route) so dashboards query cheap series, and pipeline aggregation (Grafana Adaptive Metrics, Mimir or Thanos aggregation, OTel or Vector metric aggregation, streaming aggregation in vmagent) drops pod or instance labels before remote write. Keep raw high-resolution data briefly locally if needed.",
+    "first_principles": {
+      "problem": "Per-pod series are needed only to compute per-service totals, yet all 3 million are stored long-term in the vendor.",
+      "truths": [
+        "Most queries use aggregated views.",
+        "Aggregation reduces series.",
+        "Raw data can be kept short-term."
+      ],
+      "derivation": [
+        "Write **recording rules** for common aggregates.",
+        "**Stream-aggregate** before remote write.",
+        "Drop **pod/instance** labels for long-term.",
+        "Keep **raw locally** with short retention.",
+        "Point dashboards at **aggregated series**."
+      ]
+    },
+    "analogy": {
+      "title": "Summarising receipts before filing",
+      "story": "Keep daily totals per store in the archive; shred individual receipts after a week.",
+      "mapping": [
+        [
+          "Receipts",
+          "Per-pod series"
+        ],
+        [
+          "Daily totals",
+          "Aggregated series"
+        ],
+        [
+          "Shredding",
+          "Short local retention"
+        ]
+      ],
+      "breaks": "Shredded receipts can't be re-summed differently; choose aggregation labels carefully."
+    },
+    "mindmap": {
+      "center": "Aggregate Before Storage",
+      "branches": [
+        {
+          "label": "Recording rules",
+          "children": [
+            "Pre-computed sums",
+            "Fast dashboards"
+          ]
+        },
+        {
+          "label": "Streaming aggregation",
+          "children": [
+            "vmagent",
+            "OTel",
+            "Adaptive Metrics"
+          ]
+        },
+        {
+          "label": "Tiering",
+          "children": [
+            "Raw short-term local",
+            "Aggregated long-term remote"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Lost dimensions",
+            "Wrong aggregates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Recording rule + streaming agg",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Long-term series cut ~100×; dashboards faster."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "groups:\n  - name: service_aggregates\n    rules:\n      - record: service_route:http_requests:rate5m\n        expr: sum by (service, route, status) (rate(http_requests_total[5m]))\n# vmagent stream aggregation before remote write\n# - match: 'http_requests_total'\n#   interval: 1m\n#   without: [pod, instance]\n#   outputs: [total]"
+        }
+      ],
+      "outcome": "useful dimensions, affordable storage."
+    },
+    "summary": {
+      "points": [
+        "Aggregate early.",
+        "Recording rules.",
+        "Tier raw vs aggregated."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do Prometheus recording rules do for cardinality and performance?",
+        "a": "They pre-compute aggregated series on a schedule, so dashboards and long-term storage use far fewer, cheaper series."
+      }
+    ]
+  }
+}

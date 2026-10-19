@@ -1,0 +1,744 @@
+{
+  "introduction-the-economics-of-tracing": {
+    "core": "Tracing every request is expensive. A service at 50,000 requests per second with 20 spans each produces a million spans per second, which means terabytes per day to ship, store and index. Most of those traces are near-identical successes. Sampling keeps a representative or interesting subset, trading completeness for cost while preserving enough data to debug and analyse.",
+    "first_principles": {
+      "problem": "A tracing vendor bill grows to $200k per month after instrumenting every service at 100%.",
+      "truths": [
+        "Volume scales with traffic × spans.",
+        "Most traces are redundant.",
+        "Rare traces are the valuable ones."
+      ],
+      "derivation": [
+        "**Estimate** span volume and cost.",
+        "Decide **what must be kept** (errors, slow).",
+        "Choose **head, tail or hybrid** sampling.",
+        "Keep **trace coherency**.",
+        "Use **metrics** for exact counts."
+      ]
+    },
+    "analogy": {
+      "title": "A security camera recording every second",
+      "story": "You keep everything around incidents and a sample of quiet periods, not 24/7 high-res footage forever.",
+      "mapping": [
+        [
+          "Footage",
+          "Traces"
+        ],
+        [
+          "Incidents",
+          "Errors/slow traces"
+        ],
+        [
+          "Storage bill",
+          "Vendor cost"
+        ]
+      ],
+      "breaks": "Cameras can rewind; dropped spans are gone."
+    },
+    "mindmap": {
+      "center": "Tracing Economics",
+      "branches": [
+        {
+          "label": "Volume",
+          "children": [
+            "RPS × spans/trace"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Network",
+            "Storage",
+            "Indexing",
+            "Vendor fees"
+          ]
+        },
+        {
+          "label": "Value",
+          "children": [
+            "Errors",
+            "Slow",
+            "Rare paths"
+          ]
+        },
+        {
+          "label": "Approaches",
+          "children": [
+            "Head",
+            "Tail",
+            "Hybrid"
+          ]
+        },
+        {
+          "label": "Complements",
+          "children": [
+            "Metrics",
+            "Exemplars"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Volume math",
+      "scenario": "Numbers.",
+      "flow": [
+        "50k RPS × 20 spans = 1M spans/s",
+        "~1 KB/span → ~86 TB/day",
+        "10% head sample → 8.6 TB/day",
+        "Tail-keep errors + 1% → <1 TB/day"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Order-of-magnitude savings."
+        }
+      ],
+      "code": [],
+      "outcome": "why sampling is necessary."
+    },
+    "summary": {
+      "points": [
+        "Volume explodes.",
+        "Most traces are boring.",
+        "Sample smartly."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can you sample traces but should not rely on sampled traces for exact request counts?",
+        "a": "Sampling drops data, so counts are estimates; metrics capture every event cheaply for exact rates."
+      }
+    ]
+  },
+  "head-based-sampling-the-coin-flip": {
+    "core": "Head-based sampling decides at the root span whether to record a trace, typically by hashing the trace ID against a ratio (TraceIdRatioBased 0.1 keeps 10%). The decision travels in the traceparent sampled flag, and parent-based samplers make downstream services follow it, so traces stay complete. It's cheap and stateless, but blind: it can't know at the start that a request will fail or be slow.",
+    "first_principles": {
+      "problem": "With 1% head sampling, only one in a hundred failing checkouts has a trace to investigate.",
+      "truths": [
+        "Decisions at the start are cheap.",
+        "Hash-based decisions are consistent.",
+        "Outcomes are unknown at the start."
+      ],
+      "derivation": [
+        "Use **ParentBased(TraceIdRatio)**.",
+        "Propagate **sampled flag**.",
+        "Choose **ratio** by budget.",
+        "Consider **per-route ratios** (higher for rare endpoints).",
+        "Add **tail sampling** for errors."
+      ]
+    },
+    "analogy": {
+      "title": "Flipping a coin before a trip to decide whether to film it",
+      "story": "Cheap and fair, but you might not film the trip where something dramatic happens.",
+      "mapping": [
+        [
+          "Coin flip",
+          "Ratio sampler"
+        ],
+        [
+          "Filming",
+          "Recording trace"
+        ],
+        [
+          "Dramatic trip",
+          "Error trace"
+        ]
+      ],
+      "breaks": "Coins are random; trace-ID hashing is deterministic across services."
+    },
+    "mindmap": {
+      "center": "Head Sampling",
+      "branches": [
+        {
+          "label": "How",
+          "children": [
+            "Root decides",
+            "Trace ID hash",
+            "Sampled flag"
+          ]
+        },
+        {
+          "label": "Samplers",
+          "children": [
+            "AlwaysOn",
+            "AlwaysOff",
+            "TraceIdRatio",
+            "ParentBased"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Cheap",
+            "Stateless",
+            "Coherent"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Blind to outcome",
+            "Misses rare errors"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "SDK config",
+      "scenario": "Env vars.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "10% of traces recorded end-to-end."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "OTEL_TRACES_SAMPLER=parentbased_traceidratio\nOTEL_TRACES_SAMPLER_ARG=0.1\n# downstream services with parentbased_* honour upstream decision"
+        }
+      ],
+      "outcome": "cheap, consistent sampling."
+    },
+    "summary": {
+      "points": [
+        "Decide at root.",
+        "Propagate decision.",
+        "Blind to outcome."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use a parent-based sampler in downstream services?",
+        "a": "So they follow the root's decision, keeping traces complete rather than recording random fragments."
+      }
+    ]
+  },
+  "tail-based-sampling-the-time-machine": {
+    "core": "Tail-based sampling waits until a trace is complete (or a decision timeout passes), then decides with full knowledge: keep all traces with errors, all slower than 1 s, all touching a VIP tenant, plus a small random sample of the rest. Applications send 100% of spans to collectors, and the collector buffers and decides. It captures what matters most, at the cost of buffering and routing infrastructure.",
+    "first_principles": {
+      "problem": "Engineers need every failed payment trace, but failures are 0.05% of traffic.",
+      "truths": [
+        "Outcomes are known at the end.",
+        "Interesting traces are rare.",
+        "Deciding late requires holding data."
+      ],
+      "derivation": [
+        "Send **all spans** to collectors.",
+        "Buffer per trace for **decision_wait**.",
+        "Apply **policies** (status, latency, attributes, probabilistic).",
+        "Combine with **and/composite** policies.",
+        "Export **kept traces** only."
+      ]
+    },
+    "analogy": {
+      "title": "Reviewing CCTV at the end of the day",
+      "story": "Keep footage of incidents and a sample of normal hours; delete the rest.",
+      "mapping": [
+        [
+          "Day's footage",
+          "Buffered spans"
+        ],
+        [
+          "Incidents",
+          "Error/slow traces"
+        ],
+        [
+          "End-of-day review",
+          "Decision after trace completes"
+        ]
+      ],
+      "breaks": "CCTV can wait a day; collectors must decide within seconds to bound memory."
+    },
+    "mindmap": {
+      "center": "Tail Sampling",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "100% spans",
+            "Buffer",
+            "Decide",
+            "Export"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "status_code",
+            "latency",
+            "string_attribute",
+            "probabilistic",
+            "rate_limiting",
+            "composite"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Keeps what matters"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Memory",
+            "Routing",
+            "Late spans"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Policies",
+      "scenario": "OTel Collector.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every failed payment kept; 2% of normal traffic."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "processors:\n  tail_sampling:\n    decision_wait: 15s\n    num_traces: 200000\n    policies:\n      - { name: errors, type: status_code, status_code: { status_codes: [ERROR] } }\n      - { name: slow,   type: latency, latency: { threshold_ms: 1000 } }\n      - { name: vip,    type: string_attribute, string_attribute: { key: tenant.tier, values: [enterprise] } }\n      - { name: rest,   type: probabilistic, probabilistic: { sampling_percentage: 2 } }"
+        }
+      ],
+      "outcome": "high-value traces retained."
+    },
+    "summary": {
+      "points": [
+        "Decide after completion.",
+        "Policy-driven.",
+        "Needs buffering."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is decision_wait in tail sampling?",
+        "a": "How long the collector buffers a trace's spans after the first one arrives before making the keep/drop decision."
+      }
+    ]
+  },
+  "trace-coherency-the-golden-rule": {
+    "core": "A sampled trace is only useful if it's complete. If service A keeps its spans but service B drops them, you get a trace with gaps, which can be worse than none. The golden rule: every component must make the same decision for a given trace, via propagated head decisions (parent-based), consistent hashing of the trace ID, or tail sampling on all of a trace's spans in one place.",
+    "first_principles": {
+      "problem": "Each service samples independently at 10%, so only 0.01% of traces are complete across all four services.",
+      "truths": [
+        "Independent random decisions multiply.",
+        "Partial traces mislead.",
+        "Shared keys enable consistency."
+      ],
+      "derivation": [
+        "Use **parent-based** samplers.",
+        "Hash **trace ID** with the same algorithm.",
+        "Route **all spans of a trace** to one tail sampler.",
+        "Avoid **independent per-service** ratios.",
+        "Monitor **orphan span** rates."
+      ]
+    },
+    "analogy": {
+      "title": "A jigsaw where each person keeps random pieces",
+      "story": "If everyone keeps a random 10% of pieces, nobody can ever finish a picture.",
+      "mapping": [
+        [
+          "Puzzle",
+          "Trace"
+        ],
+        [
+          "Pieces",
+          "Spans"
+        ],
+        [
+          "Random keeping",
+          "Independent sampling"
+        ]
+      ],
+      "breaks": "Jigsaws are static; traces arrive from many services at different times."
+    },
+    "mindmap": {
+      "center": "Trace Coherency",
+      "branches": [
+        {
+          "label": "Rule",
+          "children": [
+            "Same decision per trace"
+          ]
+        },
+        {
+          "label": "Mechanisms",
+          "children": [
+            "Parent-based",
+            "Trace ID hashing",
+            "Single tail decision point"
+          ]
+        },
+        {
+          "label": "Anti-pattern",
+          "children": [
+            "Independent ratios"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Gaps",
+            "Orphan spans",
+            "Missing root"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Independent vs coherent",
+      "scenario": "Math.",
+      "flow": [
+        "4 services each 10% independently",
+        "Complete traces = 0.1⁴ = 0.01%",
+        "Parent-based at root 10%",
+        "Complete traces = 10%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "1000× more complete traces."
+        }
+      ],
+      "code": [],
+      "outcome": "complete sampled traces."
+    },
+    "summary": {
+      "points": [
+        "Same decision everywhere.",
+        "Propagate or hash.",
+        "Avoid independent sampling."
+      ]
+    },
+    "check": [
+      {
+        "q": "If four services each independently sample 10% of spans, what fraction of traces are complete?",
+        "a": "0.1⁴ = 0.01%, which is why decisions must be coordinated per trace."
+      }
+    ]
+  },
+  "buffering-challenges-ram-vs-latency": {
+    "core": "Tail sampling holds every span in memory until its trace's decision. Memory ≈ spans per second × decision_wait × average span size. At 200k spans/s, 30 s and 1 KB, that's about 6 GB per collector. A longer wait catches slow traces and late spans but needs more RAM and delays export; a shorter wait saves memory but splits long traces. Late-arriving spans need a decision cache.",
+    "first_principles": {
+      "problem": "Tail-sampling collectors get OOM-killed during traffic peaks because decision_wait was set to 60 s.",
+      "truths": [
+        "Buffers grow with rate × time.",
+        "Some traces take longer than the wait.",
+        "Memory is finite."
+      ],
+      "derivation": [
+        "Compute **memory = rate × wait × size**.",
+        "Set **num_traces** limit.",
+        "Tune **decision_wait** to p99 trace duration.",
+        "Use **decision cache** for late spans.",
+        "Add **memory_limiter** processor."
+      ]
+    },
+    "analogy": {
+      "title": "A waiting room for parcels until the full order arrives",
+      "story": "The longer you wait for stragglers, the bigger the room must be.",
+      "mapping": [
+        [
+          "Waiting room",
+          "Buffer"
+        ],
+        [
+          "Stragglers",
+          "Late spans"
+        ],
+        [
+          "Room size",
+          "RAM"
+        ]
+      ],
+      "breaks": "Waiting rooms overflow visibly; collectors crash."
+    },
+    "mindmap": {
+      "center": "Buffering",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "spans/s × wait × size"
+          ]
+        },
+        {
+          "label": "Knobs",
+          "children": [
+            "decision_wait",
+            "num_traces",
+            "memory_limiter"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Completeness",
+            "RAM",
+            "Export delay"
+          ]
+        },
+        {
+          "label": "Late spans",
+          "children": [
+            "Decision cache",
+            "Drop"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Sizing",
+      "scenario": "Math + config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Stable collectors at peak."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "# 200k spans/s × 15 s × 1 KB ≈ 3 GB per collector → give 6 GB\nprocessors:\n  memory_limiter: { check_interval: 1s, limit_mib: 5000, spike_limit_mib: 800 }\n  tail_sampling:\n    decision_wait: 15s\n    num_traces: 500000\n    decision_cache: { sampled_cache_size: 100000 }"
+        }
+      ],
+      "outcome": "tail sampling sized safely."
+    },
+    "summary": {
+      "points": [
+        "Buffer = rate × wait.",
+        "Tune wait to trace duration.",
+        "Limit memory."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to spans arriving after the decision_wait expires?",
+        "a": "Without a decision cache they may be dropped or mis-sampled; a decision cache applies the earlier decision to late spans."
+      }
+    ]
+  },
+  "the-architecture-challenge-scaling-tail-sampling": {
+    "core": "One collector can't handle all traffic, but tail sampling needs every span of a trace on the same instance. The standard two-tier design: a first tier of load-balancing collectors uses the loadbalancing exporter with trace-ID routing, so all spans of a trace go to the same second-tier collector, which runs tail_sampling. Scaling the second tier changes routing, so use consistent hashing and expect brief incoherence during rebalances.",
+    "first_principles": {
+      "problem": "Adding more tail-sampling collectors behind a round-robin load balancer splits traces across instances.",
+      "truths": [
+        "Decisions need all spans together.",
+        "Round robin scatters spans.",
+        "Routing by trace ID keeps them together."
+      ],
+      "derivation": [
+        "**Tier 1**: loadbalancing exporter by traceID.",
+        "**Tier 2**: tail_sampling processors.",
+        "Use **DNS/k8s resolver** for backends.",
+        "**Consistent hashing** limits reshuffles.",
+        "**Autoscale** carefully (rebalance cost)."
+      ]
+    },
+    "analogy": {
+      "title": "Sorting mail by family name before delivery",
+      "story": "A first sorting office sends all letters for 'Smith' to the same desk so that desk sees the whole family's mail.",
+      "mapping": [
+        [
+          "First sorting office",
+          "Load-balancing collectors"
+        ],
+        [
+          "Family name",
+          "Trace ID"
+        ],
+        [
+          "Desk",
+          "Tail-sampling collector"
+        ]
+      ],
+      "breaks": "Families don't move desks; scaling reassigns trace IDs."
+    },
+    "mindmap": {
+      "center": "Scaling Tail Sampling",
+      "branches": [
+        {
+          "label": "Tier 1",
+          "children": [
+            "loadbalancing exporter",
+            "routing_key: traceID"
+          ]
+        },
+        {
+          "label": "Tier 2",
+          "children": [
+            "tail_sampling",
+            "memory_limiter"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "DNS",
+            "k8s resolver"
+          ]
+        },
+        {
+          "label": "Scaling",
+          "children": [
+            "Consistent hashing",
+            "Rebalance incoherence"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Vendor-managed tail sampling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tier 1 config",
+      "scenario": "OTel Collector.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each trace lands on one sampler instance."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "exporters:\n  loadbalancing:\n    routing_key: traceID\n    protocol: { otlp: { tls: { insecure: true } } }\n    resolver:\n      k8s: { service: otel-sampler.observability, ports: [4317] }\nservice:\n  pipelines:\n    traces: { receivers: [otlp], exporters: [loadbalancing] }"
+        }
+      ],
+      "outcome": "horizontally scaled tail sampling."
+    },
+    "summary": {
+      "points": [
+        "Route by trace ID.",
+        "Two tiers.",
+        "Consistent hashing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you put a normal round-robin load balancer in front of tail-sampling collectors?",
+        "a": "Spans of one trace would spread across instances, so no single collector sees the full trace to decide."
+      }
+    ]
+  },
+  "hybrid-sampling-strategies-combining-head-and-tail": {
+    "core": "Hybrid sampling layers both approaches. Head sampling at the SDK reduces volume early (say 25%), lowering network and collector load; tail sampling then keeps all errors and slow traces among those plus a small baseline. To avoid losing rare errors to the head step, SDKs or collectors can force-keep (always sample) specific routes or error-prone operations, and adjusted counts record effective rates for extrapolation.",
+    "first_principles": {
+      "problem": "Pure tail sampling at 100% ingest overwhelms the collectors, but pure head sampling loses errors.",
+      "truths": [
+        "Early reduction saves the pipeline.",
+        "Late decisions find value.",
+        "Some traffic must always be kept."
+      ],
+      "derivation": [
+        "**Head-sample** moderately at SDK.",
+        "**Tail-sample** errors/slow at collectors.",
+        "**Force-keep** critical routes/tenants.",
+        "Record **sampling probability** (adjusted count).",
+        "Use **metrics** for exact SLIs."
+      ]
+    },
+    "analogy": {
+      "title": "A sieve and then a hand-picker",
+      "story": "A coarse sieve removes most sand cheaply, then a person picks out the interesting stones from what's left.",
+      "mapping": [
+        [
+          "Sieve",
+          "Head sampling"
+        ],
+        [
+          "Hand-picker",
+          "Tail sampling"
+        ],
+        [
+          "Always-kept stones",
+          "Force-keep rules"
+        ]
+      ],
+      "breaks": "Sieves lose some gems; force-keep rules prevent that for known-critical paths."
+    },
+    "mindmap": {
+      "center": "Hybrid Sampling",
+      "branches": [
+        {
+          "label": "Head",
+          "children": [
+            "Volume reduction",
+            "SDK ratio"
+          ]
+        },
+        {
+          "label": "Tail",
+          "children": [
+            "Errors",
+            "Latency",
+            "Baseline"
+          ]
+        },
+        {
+          "label": "Force-keep",
+          "children": [
+            "Critical routes",
+            "VIP tenants",
+            "Debug header"
+          ]
+        },
+        {
+          "label": "Accounting",
+          "children": [
+            "Sampling probability",
+            "Adjusted counts"
+          ]
+        },
+        {
+          "label": "Exact numbers",
+          "children": [
+            "Metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Layered setup",
+      "scenario": "Flow.",
+      "flow": [
+        "SDK: parentbased ratio 0.25 (+ always for /payments)",
+        "Tier 1 routes by traceID",
+        "Tier 2 keeps errors, >1s, 4% rest",
+        "Effective storage ≈ 1–2% of traffic, all errors on /payments"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Manageable load with critical coverage."
+        }
+      ],
+      "code": [],
+      "outcome": "balanced cost and insight."
+    },
+    "summary": {
+      "points": [
+        "Head to reduce.",
+        "Tail to select.",
+        "Force-keep critical paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the risk of head sampling before tail sampling, and how is it mitigated?",
+        "a": "Rare errors may be dropped at the head; mitigate with force-keep rules for critical routes or error-prone operations."
+      }
+    ]
+  }
+}

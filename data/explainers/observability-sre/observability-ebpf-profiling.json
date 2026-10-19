@@ -1,0 +1,853 @@
+{
+  "introduction-the-black-box-problem": {
+    "core": "Many workloads are black boxes for profiling: third-party binaries, legacy services nobody wants to touch, mixed-language fleets, and the kernel itself. SDK-based profilers need code changes, restarts and per-language setup. eBPF profilers run in the kernel and sample stacks of every process on a host from outside, giving fleet-wide, language-agnostic CPU visibility without changing or restarting anything.",
+    "first_principles": {
+      "problem": "A vendor-supplied binary and three legacy services in different languages consume most CPU, but none can be instrumented.",
+      "truths": [
+        "Not all code can be modified.",
+        "The kernel sees every process.",
+        "Uniform coverage needs one mechanism."
+      ],
+      "derivation": [
+        "Sample from **the kernel**.",
+        "Cover **all processes** on a node.",
+        "Need **no code changes**.",
+        "Handle **many languages**.",
+        "Deploy as a **DaemonSet**."
+      ]
+    },
+    "analogy": {
+      "title": "A building-wide thermal camera",
+      "story": "Instead of putting thermometers in every room, one camera sees where heat comes from across the whole building.",
+      "mapping": [
+        [
+          "Thermal camera",
+          "eBPF profiler"
+        ],
+        [
+          "Rooms",
+          "Processes"
+        ],
+        [
+          "Thermometers",
+          "SDK profilers"
+        ]
+      ],
+      "breaks": "Thermal cameras show surfaces; eBPF sees stacks only if symbols are available."
+    },
+    "mindmap": {
+      "center": "Black-Box Problem",
+      "branches": [
+        {
+          "label": "Hard cases",
+          "children": [
+            "Third-party binaries",
+            "Legacy",
+            "Polyglot",
+            "Kernel"
+          ]
+        },
+        {
+          "label": "SDK limits",
+          "children": [
+            "Code changes",
+            "Per-language",
+            "Restarts"
+          ]
+        },
+        {
+          "label": "eBPF",
+          "children": [
+            "Kernel sampling",
+            "All processes",
+            "Zero instrumentation"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Parca Agent",
+            "Pyroscope eBPF",
+            "Grafana Alloy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fleet view",
+      "scenario": "Flow.",
+      "flow": [
+        "Deploy eBPF agent DaemonSet",
+        "Every process sampled at 19 Hz",
+        "Flamegraph by namespace/pod",
+        "Vendor binary shows 30% in gzip"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Visibility without touching code."
+        }
+      ],
+      "code": [],
+      "outcome": "why eBPF profiling matters."
+    },
+    "summary": {
+      "points": [
+        "Some code can't change.",
+        "Kernel sees all.",
+        "One agent per node."
+      ]
+    },
+    "check": [
+      {
+        "q": "What key advantage do eBPF profilers have over SDK profilers?",
+        "a": "They profile every process on a host from the kernel with no code changes, restarts or per-language setup."
+      }
+    ]
+  },
+  "how-ebpf-actually-works-the-kernel-hook": {
+    "core": "eBPF lets verified programs run inside the kernel when events fire. A profiler attaches a program to a perf event, such as a CPU clock timer at 19 or 99 Hz on every core. On each tick the program captures the current kernel and user stack (bpf_get_stackid) and the PID, and increments a count in a BPF map. User space periodically reads the map, unwinds and symbolises the stacks, and ships aggregated profiles.",
+    "first_principles": {
+      "problem": "Engineers worry that running code in the kernel will crash production hosts.",
+      "truths": [
+        "The kernel sees every context switch and tick.",
+        "The verifier proves program safety.",
+        "Maps aggregate efficiently in-kernel."
+      ],
+      "derivation": [
+        "Attach to **perf_event** timers.",
+        "Capture **stacks + PID** per sample.",
+        "Aggregate counts in **BPF maps**.",
+        "User space **reads, symbolises, ships**.",
+        "Verifier ensures **safety**."
+      ]
+    },
+    "analogy": {
+      "title": "A lighthouse keeper taking regular snapshots",
+      "story": "At fixed intervals they note which ships are in the bay; counts show where traffic concentrates.",
+      "mapping": [
+        [
+          "Snapshots",
+          "Timer samples"
+        ],
+        [
+          "Ships",
+          "Stacks"
+        ],
+        [
+          "Logbook",
+          "BPF map"
+        ]
+      ],
+      "breaks": "Lighthouse keepers can miss ships in fog; missing frame pointers break stack unwinding."
+    },
+    "mindmap": {
+      "center": "eBPF Profiling Mechanics",
+      "branches": [
+        {
+          "label": "Hook",
+          "children": [
+            "perf_event CPU clock",
+            "19/99 Hz"
+          ]
+        },
+        {
+          "label": "Capture",
+          "children": [
+            "Kernel stack",
+            "User stack",
+            "PID/TID"
+          ]
+        },
+        {
+          "label": "Aggregate",
+          "children": [
+            "BPF maps",
+            "Counts"
+          ]
+        },
+        {
+          "label": "User space",
+          "children": [
+            "Unwind",
+            "Symbolise",
+            "Export"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Verifier",
+            "Bounded programs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "One-liner profiler",
+      "scenario": "bpftrace.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "System-wide stack sampling in seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "bpftrace -e 'profile:hz:99 /pid > 0/ { @[ustack, comm] = count(); }' -c 'sleep 30' > stacks.txt\n# feed into flamegraph.pl for a quick system-wide flamegraph"
+        }
+      ],
+      "outcome": "kernel sampling understood."
+    },
+    "summary": {
+      "points": [
+        "Timer-triggered programs.",
+        "Maps aggregate.",
+        "Verifier keeps it safe."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do eBPF profilers often sample at odd frequencies like 19 or 99 Hz?",
+        "a": "To avoid lockstep aliasing with periodic application activity that would bias samples at round frequencies."
+      }
+    ]
+  },
+  "zero-instrumentation-no-code-changes-required": {
+    "core": "Zero instrumentation means deploying one privileged agent per node and getting profiles for everything, but stack quality depends on the runtime. Compiled languages need frame pointers or DWARF unwinding plus symbols; JIT and interpreted runtimes (Java, Python, Node, Ruby) need runtime-specific unwinders (perf maps, interpreter-aware unwinding) to show function names instead of interpreter internals. Modern agents increasingly handle these automatically.",
+    "first_principles": {
+      "problem": "An eBPF flamegraph for a Python service shows only _PyEval_EvalFrameDefault, not Python functions.",
+      "truths": [
+        "Kernels see native frames.",
+        "Interpreters hide app frames inside their loop.",
+        "Symbols are needed for names."
+      ],
+      "derivation": [
+        "Build native code with **frame pointers** (or rely on DWARF unwinding).",
+        "Ship **debug symbols** or a symbol server.",
+        "Enable **runtime support** (perf maps for JVM/Node).",
+        "Use agents with **interpreter unwinders** (Python, Ruby).",
+        "Verify **stack quality** per language."
+      ]
+    },
+    "analogy": {
+      "title": "Translating a recording of a foreign-language play",
+      "story": "You hear the actors speaking, but without the script (symbols) you just hear sounds, not lines.",
+      "mapping": [
+        [
+          "Script",
+          "Symbols"
+        ],
+        [
+          "Interpreter's voice",
+          "Interpreter frames"
+        ],
+        [
+          "Actual lines",
+          "App functions"
+        ]
+      ],
+      "breaks": "Plays have one script; each runtime needs its own unwinding approach."
+    },
+    "mindmap": {
+      "center": "Zero Instrumentation",
+      "branches": [
+        {
+          "label": "Native",
+          "children": [
+            "Frame pointers",
+            "DWARF",
+            "Symbols"
+          ]
+        },
+        {
+          "label": "JIT",
+          "children": [
+            "JVM perf-map-agent",
+            "Node --perf-basic-prof"
+          ]
+        },
+        {
+          "label": "Interpreted",
+          "children": [
+            "Python/Ruby unwinders"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "DaemonSet",
+            "Privileged",
+            "Symbol servers"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "Stack quality per language"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Improving stacks",
+      "scenario": "Flags.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Readable function names in eBPF flamegraphs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# Go: frame pointers on by default\n# C/C++/Rust: build with frame pointers\nRUSTFLAGS='-C force-frame-pointers=yes' cargo build --release\n# Node.js\nnode --perf-basic-prof app.js\n# Java: -XX:+PreserveFramePointer (+ perf map agent)"
+        }
+      ],
+      "outcome": "useful zero-instrumentation profiles."
+    },
+    "summary": {
+      "points": [
+        "No code changes.",
+        "Stack quality varies.",
+        "Frame pointers and symbols."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might an eBPF profile of a Java service show unreadable frames?",
+        "a": "JIT-compiled code lacks symbols the kernel can resolve unless the JVM exports perf maps and preserves frame pointers."
+      }
+    ]
+  },
+  "cpu-vs-memory-profiling": {
+    "core": "eBPF excels at CPU profiling: timer sampling of on-CPU stacks is cheap and universal. Off-CPU profiling (time blocked on I/O, locks or sleep) uses scheduler tracepoints. Memory allocation profiling via eBPF uprobes on malloc or new is possible but costly at high allocation rates, and GC'd languages allocate inside their runtimes, so SDK profilers usually give better memory data. A common combination is eBPF for fleet CPU and SDKs for memory where needed.",
+    "first_principles": {
+      "problem": "A service is slow but CPU flamegraphs show little, because it spends most time waiting on locks and I/O.",
+      "truths": [
+        "On-CPU and off-CPU time differ.",
+        "Probing every allocation is expensive.",
+        "Runtimes manage memory internally."
+      ],
+      "derivation": [
+        "Use **on-CPU** profiles for compute hotspots.",
+        "Use **off-CPU** profiles for waiting.",
+        "Use **SDK** profilers for allocation/heap.",
+        "Sample **uprobes** carefully if used.",
+        "Combine **views** for full picture."
+      ]
+    },
+    "analogy": {
+      "title": "Measuring work vs waiting",
+      "story": "Watching people at desks shows working time; you also need to know how long they wait in queues.",
+      "mapping": [
+        [
+          "At desk",
+          "On-CPU"
+        ],
+        [
+          "In queue",
+          "Off-CPU"
+        ],
+        [
+          "Supplies used",
+          "Allocations"
+        ]
+      ],
+      "breaks": "Office queues are visible; off-CPU time needs scheduler tracing."
+    },
+    "mindmap": {
+      "center": "CPU vs Memory",
+      "branches": [
+        {
+          "label": "On-CPU",
+          "children": [
+            "perf timer",
+            "Cheap",
+            "Universal"
+          ]
+        },
+        {
+          "label": "Off-CPU",
+          "children": [
+            "sched_switch",
+            "Locks",
+            "I/O waits"
+          ]
+        },
+        {
+          "label": "Memory",
+          "children": [
+            "uprobes malloc",
+            "Costly",
+            "SDKs better for GC languages"
+          ]
+        },
+        {
+          "label": "Combo",
+          "children": [
+            "eBPF CPU + SDK memory"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Off-CPU sampling",
+      "scenario": "bcc tool.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows lock waits that CPU profiles miss."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "offcputime-bpfcc -df -p $(pgrep -n checkout) 30 > offcpu.stacks\nflamegraph.pl --color=io --title='Off-CPU' < offcpu.stacks > offcpu.svg\n# reveals time blocked in futex (lock contention)"
+        }
+      ],
+      "outcome": "right profile type for the question."
+    },
+    "summary": {
+      "points": [
+        "On-CPU for compute.",
+        "Off-CPU for waiting.",
+        "SDKs for memory."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might a slow service show a small CPU flamegraph?",
+        "a": "It's mostly waiting (off-CPU) on I/O or locks, which on-CPU sampling doesn't capture."
+      }
+    ]
+  },
+  "continuous-profiling-the-security-camera": {
+    "core": "Run eBPF profiling continuously, like a security camera: always recording at low overhead (around 1% CPU), with profiles stored by time and labels. When an incident or regression occurs, you rewind to that exact window and compare it against before. One-off profiling only works if you capture the moment, but intermittent and production-only issues need the history already recorded.",
+    "first_principles": {
+      "problem": "A 5-minute CPU spike happened at 3 a.m. and was gone before anyone could attach a profiler.",
+      "truths": [
+        "Problems are often intermittent.",
+        "History enables comparison.",
+        "Low overhead permits always-on."
+      ],
+      "derivation": [
+        "Profile **all the time**.",
+        "Store with **time + labels**.",
+        "**Rewind** to incident windows.",
+        "**Compare** to baseline periods.",
+        "Set **retention** by value."
+      ]
+    },
+    "analogy": {
+      "title": "Security camera footage",
+      "story": "You don't start recording after the burglary; you rewind the footage.",
+      "mapping": [
+        [
+          "Footage",
+          "Stored profiles"
+        ],
+        [
+          "Burglary",
+          "Incident"
+        ],
+        [
+          "Rewind",
+          "Time-range query"
+        ]
+      ],
+      "breaks": "Footage is huge; profiles are compact aggregates."
+    },
+    "mindmap": {
+      "center": "Always-On Profiling",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Intermittent issues",
+            "Production-only"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "~1% overhead",
+            "Labels",
+            "Retention"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Incident rewind",
+            "Regression diff",
+            "Cost hunts"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Pyroscope",
+            "Parca",
+            "Object storage"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Rewind",
+      "scenario": "Flow.",
+      "flow": [
+        "Alert at 03:12: CPU spike on payments",
+        "Query profiles 03:10–03:17",
+        "Diff vs 02:00–02:07",
+        "New hotspot: TLS renegotiation storm"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Root cause found after the fact."
+        }
+      ],
+      "code": [],
+      "outcome": "history for every incident."
+    },
+    "summary": {
+      "points": [
+        "Always recording.",
+        "Rewind and compare.",
+        "Low overhead."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is always-on profiling better than on-demand for intermittent issues?",
+        "a": "The problem may be gone before anyone can attach a profiler; continuous profiles let you look back at that exact time."
+      }
+    ]
+  },
+  "parca-the-ebpf-specialist": {
+    "core": "Parca, from Polar Signals and open source, is an eBPF-native continuous profiler. Parca Agent runs as a DaemonSet, auto-discovers Kubernetes pods, samples CPU stacks at 19 Hz with DWARF-based unwinding (no frame pointers needed), and labels profiles with pod metadata. The Parca server stores profiles in a columnar format, symbolises with debuginfod, and offers flamegraphs, diffs and pprof export.",
+    "first_principles": {
+      "problem": "A team wants a fully open-source, eBPF-first profiler that handles binaries without frame pointers.",
+      "truths": [
+        "DWARF info can unwind without frame pointers.",
+        "K8s metadata labels profiles.",
+        "Columnar storage suits profiles."
+      ],
+      "derivation": [
+        "Deploy **Parca Agent** DaemonSet.",
+        "Use **DWARF unwinding**.",
+        "Label with **K8s metadata**.",
+        "Symbolise via **debuginfod**.",
+        "Query/diff in **Parca UI**."
+      ]
+    },
+    "analogy": {
+      "title": "A specialist sports photographer",
+      "story": "Focused on one technique (eBPF), with special lenses (DWARF unwinding) to capture shots others can't.",
+      "mapping": [
+        [
+          "Photographer",
+          "Parca Agent"
+        ],
+        [
+          "Special lens",
+          "DWARF unwinding"
+        ],
+        [
+          "Archive",
+          "Parca server"
+        ]
+      ],
+      "breaks": "Photographers choose shots; Parca samples everything."
+    },
+    "mindmap": {
+      "center": "Parca",
+      "branches": [
+        {
+          "label": "Agent",
+          "children": [
+            "eBPF",
+            "DaemonSet",
+            "19 Hz",
+            "DWARF unwinding"
+          ]
+        },
+        {
+          "label": "Server",
+          "children": [
+            "Columnar storage",
+            "debuginfod symbolisation",
+            "pprof API"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "K8s labels",
+            "Diffs",
+            "Icicle graphs"
+          ]
+        },
+        {
+          "label": "Licence",
+          "children": [
+            "Apache 2.0"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Install",
+      "scenario": "Helm.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cluster-wide CPU profiles in minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "helm repo add parca https://parca-dev.github.io/helm-charts\nhelm install parca parca/parca -n parca --create-namespace\nkubectl -n parca port-forward svc/parca 7070\n# query: parca_agent:samples:count:cpu:nanoseconds:delta{namespace=\"shop\"}"
+        }
+      ],
+      "outcome": "open eBPF profiling."
+    },
+    "summary": {
+      "points": [
+        "eBPF-native.",
+        "DWARF unwinding.",
+        "Open source."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does DWARF-based unwinding let Parca do?",
+        "a": "Reconstruct stacks for binaries compiled without frame pointers, using debug/unwind information."
+      }
+    ]
+  },
+  "pyroscope-the-polyglot-profiler": {
+    "core": "Grafana Pyroscope supports both worlds: language SDKs (Go, Java, Python, Ruby, .NET, Node, Rust) for rich CPU, allocation, lock and wall profiles with custom labels, and eBPF collection through Grafana Alloy for zero-instrumentation coverage. It integrates tightly with Grafana (traces-to-profiles, dashboards) and stores profiles in object storage, so teams pick per service.",
+    "first_principles": {
+      "problem": "A polyglot company wants deep memory profiles for key Go and Java services and basic CPU coverage for everything else.",
+      "truths": [
+        "Different services need different depth.",
+        "One backend simplifies operations.",
+        "Integration with tracing adds context."
+      ],
+      "derivation": [
+        "Use **SDKs** for critical services.",
+        "Use **Alloy eBPF** for the rest.",
+        "Add **labels** (version, endpoint).",
+        "Enable **span profiles** with Tempo.",
+        "Store in **object storage**."
+      ]
+    },
+    "analogy": {
+      "title": "A clinic with both GPs and specialists",
+      "story": "Everyone gets a general check-up (eBPF); key patients see specialists (SDKs).",
+      "mapping": [
+        [
+          "GP check-up",
+          "eBPF CPU"
+        ],
+        [
+          "Specialists",
+          "SDK profilers"
+        ],
+        [
+          "Shared records",
+          "Pyroscope backend"
+        ]
+      ],
+      "breaks": "Clinics refer patients; you choose instrumentation per service."
+    },
+    "mindmap": {
+      "center": "Pyroscope",
+      "branches": [
+        {
+          "label": "Collection",
+          "children": [
+            "SDKs",
+            "Alloy eBPF",
+            "pprof push/pull"
+          ]
+        },
+        {
+          "label": "Profiles",
+          "children": [
+            "CPU",
+            "alloc",
+            "inuse",
+            "mutex",
+            "wall"
+          ]
+        },
+        {
+          "label": "Integration",
+          "children": [
+            "Grafana",
+            "Tempo span profiles"
+          ]
+        },
+        {
+          "label": "Storage",
+          "children": [
+            "Object storage"
+          ]
+        },
+        {
+          "label": "Mode",
+          "children": [
+            "Per-service choice"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Alloy eBPF",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All pods CPU-profiled; SDK services add memory."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "discovery.kubernetes \"pods\" { role = \"pod\" }\npyroscope.ebpf \"default\" {\n  targets    = discovery.kubernetes.pods.targets\n  forward_to = [pyroscope.write.backend.receiver]\n}\npyroscope.write \"backend\" {\n  endpoint { url = \"http://pyroscope:4040\" }\n}"
+        }
+      ],
+      "outcome": "flexible polyglot profiling."
+    },
+    "summary": {
+      "points": [
+        "SDKs and eBPF.",
+        "Grafana integration.",
+        "Choose per service."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why combine SDK and eBPF profiling in one platform?",
+        "a": "eBPF gives cheap universal CPU coverage, while SDKs add memory, lock profiles and labels where depth matters."
+      }
+    ]
+  },
+  "the-visualization-reading-flamegraphs": {
+    "core": "Reading eBPF flamegraphs adds a few twists. Kernel frames appear at the bottom (syscalls, network stack, page faults), and wide kernel towers mean heavy syscalls or I/O. Process and container labels let you filter. Unsymbolised frames show as addresses, which points to missing symbols. Use diff views (red grew, blue shrank) between versions, and sandwich views to see all callers and callees of a function.",
+    "first_principles": {
+      "problem": "A flamegraph shows a wide tower of 'tcp_sendmsg' and hex addresses, and the team can't interpret it.",
+      "truths": [
+        "Kernel and user frames appear together.",
+        "Addresses mean missing symbols.",
+        "Diffs reveal changes."
+      ],
+      "derivation": [
+        "Identify **kernel vs user** frames.",
+        "Treat **hex frames** as symbol issues.",
+        "Filter by **pod/container**.",
+        "Use **diff** to compare versions.",
+        "Use **sandwich** view for a function."
+      ]
+    },
+    "analogy": {
+      "title": "Reading a building's floor plan including the basement",
+      "story": "The basement (kernel) holds plumbing that every floor uses; a busy pipe shows up under many rooms.",
+      "mapping": [
+        [
+          "Basement plumbing",
+          "Kernel frames"
+        ],
+        [
+          "Rooms",
+          "App functions"
+        ],
+        [
+          "Unlabelled rooms",
+          "Hex addresses"
+        ]
+      ],
+      "breaks": "Floor plans are fixed; profiles change with load."
+    },
+    "mindmap": {
+      "center": "Reading eBPF Flamegraphs",
+      "branches": [
+        {
+          "label": "Frames",
+          "children": [
+            "Kernel",
+            "User",
+            "Runtime"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Wide syscalls",
+            "Page faults",
+            "Hex = no symbols"
+          ]
+        },
+        {
+          "label": "Views",
+          "children": [
+            "Flamegraph",
+            "Icicle",
+            "Diff",
+            "Sandwich"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "Namespace",
+            "Pod",
+            "Container"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Interpreting",
+      "scenario": "Walkthrough.",
+      "flow": [
+        "Wide tcp_sendmsg under app writeResponse",
+        "Many small writes → syscall overhead",
+        "Fix: buffer writes",
+        "Diff shows kernel tower shrinks (blue)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Syscall overhead cut."
+        }
+      ],
+      "code": [],
+      "outcome": "kernel-aware flamegraph reading."
+    },
+    "summary": {
+      "points": [
+        "Kernel at bottom.",
+        "Hex means symbols.",
+        "Diff and sandwich."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a wide kernel syscall tower under an app function suggest?",
+        "a": "The app is making many or expensive syscalls (e.g., small unbuffered writes), so batching or buffering may help."
+      }
+    ]
+  }
+}

@@ -1,0 +1,659 @@
+{
+  "introduction-the-direct-to-vendor-trap": {
+    "core": "Having every service send telemetry straight to a vendor's endpoint couples you to that vendor's SDKs and formats, gives you no place to filter, sample, redact or enrich before paying ingest fees, and makes switching or multi-routing (security logs to the SIEM, metrics to Prometheus) a re-instrumentation project. A telemetry pipeline in between, made of agents and aggregators, restores control.",
+    "first_principles": {
+      "problem": "A team wants to cut log costs by 50% and send audit logs to the SIEM, but every service ships directly to one vendor.",
+      "truths": [
+        "Direct export couples apps to vendors.",
+        "Processing needs an intermediate layer.",
+        "Data has multiple consumers."
+      ],
+      "derivation": [
+        "Instrument with **open standards** (OTel).",
+        "Send to a **local agent**.",
+        "**Aggregate** centrally.",
+        "**Process** (filter, sample, redact, enrich).",
+        "**Route** to multiple backends."
+      ]
+    },
+    "analogy": {
+      "title": "A building's water treatment plant",
+      "story": "Instead of every tap drawing straight from the river, water goes through a plant that filters it and sends it to the right pipes.",
+      "mapping": [
+        [
+          "River",
+          "Raw telemetry"
+        ],
+        [
+          "Treatment plant",
+          "Pipeline"
+        ],
+        [
+          "Pipes",
+          "Backends"
+        ]
+      ],
+      "breaks": "Water plants are permanent; pipelines are config you can change anytime."
+    },
+    "mindmap": {
+      "center": "Pipeline Rationale",
+      "branches": [
+        {
+          "label": "Trap",
+          "children": [
+            "Vendor lock-in",
+            "No filtering",
+            "Single destination"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Agents",
+            "Aggregators",
+            "Processors",
+            "Exporters"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Cost control",
+            "Redaction",
+            "Multi-routing",
+            "Vendor freedom"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "OTel Collector",
+            "Vector",
+            "Fluent Bit"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before/after",
+      "scenario": "Flow.",
+      "flow": [
+        "Before: 80 services → vendor SDK → vendor",
+        "After: services → OTLP → node agent",
+        "→ aggregator: drop debug, redact PII, sample",
+        "→ vendor + S3 archive + SIEM"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cost and routing controlled centrally."
+        }
+      ],
+      "code": [],
+      "outcome": "control over telemetry."
+    },
+    "summary": {
+      "points": [
+        "Direct-to-vendor locks in.",
+        "Pipelines process and route.",
+        "Standards decouple."
+      ]
+    },
+    "check": [
+      {
+        "q": "What capability does a telemetry pipeline add that direct-to-vendor export lacks?",
+        "a": "A central place to filter, sample, redact, enrich and route data to multiple destinations without changing applications."
+      }
+    ]
+  },
+  "the-architecture-agents-and-aggregators": {
+    "core": "Agents run close to the source (DaemonSet per node or sidecar), collecting logs, metrics and traces with light processing such as Kubernetes metadata and batching, and forwarding them. Aggregators (gateways) are a scalable central tier doing heavy work (tail sampling, routing, redaction, format conversion, buffering against backend outages). Agents keep the edge simple; aggregators centralise policy and credentials.",
+    "first_principles": {
+      "problem": "Every node's agent holds vendor API keys and complex routing logic, making changes risky and slow.",
+      "truths": [
+        "Edge resources are constrained.",
+        "Central tiers scale independently.",
+        "Policy is easier in one place."
+      ],
+      "derivation": [
+        "**Agents**: collect, enrich, batch, forward.",
+        "**Aggregators**: sample, route, redact, buffer.",
+        "Keep **credentials** at aggregators.",
+        "**Autoscale** aggregators on load.",
+        "**Buffer** to disk/queue for outages."
+      ]
+    },
+    "analogy": {
+      "title": "Local post boxes and a regional sorting centre",
+      "story": "Boxes just collect; the sorting centre does the routing and holds mail when roads close.",
+      "mapping": [
+        [
+          "Post boxes",
+          "Agents"
+        ],
+        [
+          "Sorting centre",
+          "Aggregators"
+        ],
+        [
+          "Road closures",
+          "Backend outages"
+        ]
+      ],
+      "breaks": "Post doesn't lose freshness; telemetry buffers must bound age and size."
+    },
+    "mindmap": {
+      "center": "Agents & Aggregators",
+      "branches": [
+        {
+          "label": "Agent",
+          "children": [
+            "DaemonSet",
+            "Sidecar",
+            "Light processing",
+            "Batching"
+          ]
+        },
+        {
+          "label": "Aggregator",
+          "children": [
+            "Gateway tier",
+            "Tail sampling",
+            "Routing",
+            "Redaction",
+            "Buffering"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Central policy",
+            "Scaling",
+            "Fewer credentials"
+          ]
+        },
+        {
+          "label": "Reliability",
+          "children": [
+            "Persistent queues",
+            "Backpressure"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two-tier Collector",
+      "scenario": "Topology.",
+      "flow": [
+        "Node agent (otelcol DaemonSet): receivers + k8sattributes + batch",
+        "→ OTLP to gateway Deployment (HPA)",
+        "Gateway: tail_sampling, transform, routing",
+        "Exporters with persistent queue"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Change routing in one place."
+        }
+      ],
+      "code": [],
+      "outcome": "scalable pipeline topology."
+    },
+    "summary": {
+      "points": [
+        "Agents at edge.",
+        "Aggregators centrally.",
+        "Buffer for outages."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why keep backend credentials in the aggregator tier rather than in every agent?",
+        "a": "It reduces secret sprawl and lets you change destinations or rotate keys in one place."
+      }
+    ]
+  },
+  "the-opentelemetry-collector-the-vendor-agnostic-standard": {
+    "core": "The OpenTelemetry Collector is a vendor-neutral binary that wires components into pipelines per signal: receivers (OTLP, Prometheus scrape, filelog, Kafka), processors (batch, memory_limiter, k8sattributes, attributes, filter, transform, tail_sampling), exporters (OTLP, Prometheus remote write, Loki, vendors) and connectors (spanmetrics, which turns traces into RED metrics). It runs as agent or gateway, and builds can include only the components you need.",
+    "first_principles": {
+      "problem": "A team runs separate agents for logs, metrics and traces, each with different config languages.",
+      "truths": [
+        "Signals share pipeline needs.",
+        "Components can be composed.",
+        "Vendor neutrality preserves choice."
+      ],
+      "derivation": [
+        "Define **receivers → processors → exporters**.",
+        "Always add **memory_limiter + batch**.",
+        "Enrich with **k8sattributes**.",
+        "Use **connectors** (spanmetrics).",
+        "Build **custom distros** (ocb) with needed components."
+      ]
+    },
+    "analogy": {
+      "title": "A modular sound mixing desk",
+      "story": "Inputs (mics) go through effects (EQ, compression) to outputs (speakers, recorder), configured per channel.",
+      "mapping": [
+        [
+          "Inputs",
+          "Receivers"
+        ],
+        [
+          "Effects",
+          "Processors"
+        ],
+        [
+          "Outputs",
+          "Exporters"
+        ],
+        [
+          "Channels",
+          "Pipelines"
+        ]
+      ],
+      "breaks": "Mixing desks are physical; the Collector is YAML and can be hot-reloaded in some setups."
+    },
+    "mindmap": {
+      "center": "OTel Collector",
+      "branches": [
+        {
+          "label": "Receivers",
+          "children": [
+            "otlp",
+            "prometheus",
+            "filelog",
+            "kafka"
+          ]
+        },
+        {
+          "label": "Processors",
+          "children": [
+            "memory_limiter",
+            "batch",
+            "k8sattributes",
+            "filter",
+            "transform",
+            "tail_sampling"
+          ]
+        },
+        {
+          "label": "Exporters",
+          "children": [
+            "otlp",
+            "prometheusremotewrite",
+            "loki",
+            "vendors"
+          ]
+        },
+        {
+          "label": "Connectors",
+          "children": [
+            "spanmetrics",
+            "routing"
+          ]
+        },
+        {
+          "label": "Deploy",
+          "children": [
+            "Agent",
+            "Gateway",
+            "ocb builds"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Minimal pipeline",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Traces stored and RED metrics derived from them."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "receivers:\n  otlp: { protocols: { grpc: {}, http: {} } }\nprocessors:\n  memory_limiter: { check_interval: 1s, limit_percentage: 80 }\n  k8sattributes: {}\n  batch: {}\nconnectors:\n  spanmetrics: {}\nexporters:\n  otlp/tempo: { endpoint: tempo:4317, tls: { insecure: true } }\n  prometheusremotewrite: { endpoint: http://mimir/api/v1/push }\nservice:\n  pipelines:\n    traces:  { receivers: [otlp], processors: [memory_limiter, k8sattributes, batch], exporters: [otlp/tempo, spanmetrics] }\n    metrics: { receivers: [otlp, spanmetrics], processors: [memory_limiter, batch], exporters: [prometheusremotewrite] }"
+        }
+      ],
+      "outcome": "one standard pipeline engine."
+    },
+    "summary": {
+      "points": [
+        "Receivers, processors, exporters.",
+        "Connectors bridge signals.",
+        "Vendor-neutral."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the spanmetrics connector do?",
+        "a": "Generates request rate, error and duration metrics from spans, bridging the traces pipeline into the metrics pipeline."
+      }
+    ]
+  },
+  "strategy-1-cost-control-via-filtering-and-sampling": {
+    "core": "Most telemetry cost is low-value data: debug logs, health-check spans, verbose attributes, unused metrics and high-cardinality labels. The pipeline drops or reduces it before ingest: filter health checks and debug logs, delete large or PII attributes, drop unused metrics, sample routine logs and traces, and aggregate high-cardinality metrics. Measure by bytes or series per source and iterate on the top contributors.",
+    "first_principles": {
+      "problem": "Health-check probes generate 40% of all spans and logs, costing tens of thousands per month.",
+      "truths": [
+        "Value is unevenly distributed.",
+        "Dropping early is cheapest.",
+        "Top contributors dominate cost."
+      ],
+      "derivation": [
+        "**Measure** volume by source/type.",
+        "**Filter** health checks, debug, noise.",
+        "**Strip** unneeded attributes.",
+        "**Sample** routine data.",
+        "**Drop unused** metrics (usage analysis)."
+      ]
+    },
+    "analogy": {
+      "title": "Decluttering before moving house",
+      "story": "Don't pay movers to carry junk; throw it out first.",
+      "mapping": [
+        [
+          "Movers' fee",
+          "Ingest cost"
+        ],
+        [
+          "Junk",
+          "Low-value telemetry"
+        ],
+        [
+          "Sorting",
+          "Pipeline filters"
+        ]
+      ],
+      "breaks": "Junk is obvious; telemetry value needs usage analysis."
+    },
+    "mindmap": {
+      "center": "Cost Control",
+      "branches": [
+        {
+          "label": "Targets",
+          "children": [
+            "Health checks",
+            "Debug logs",
+            "Unused metrics",
+            "Large attributes",
+            "High cardinality"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "filter",
+            "attributes delete",
+            "sampling",
+            "aggregation"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "Measure",
+            "Cut top N",
+            "Repeat"
+          ]
+        },
+        {
+          "label": "Guardrails",
+          "children": [
+            "Keep errors",
+            "Audit logs intact"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Filters",
+      "scenario": "OTel Collector.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "40% volume cut, PII removed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "processors:\n  filter/noise:\n    error_mode: ignore\n    traces:\n      span: ['attributes[\"http.route\"] == \"/healthz\"', 'attributes[\"http.route\"] == \"/readyz\"']\n    logs:\n      log_record: ['severity_number < SEVERITY_NUMBER_INFO']\n  attributes/strip:\n    actions:\n      - { key: http.request.header.cookie, action: delete }\n      - { key: db.statement, action: delete }"
+        }
+      ],
+      "outcome": "lower bills, same insight."
+    },
+    "summary": {
+      "points": [
+        "Measure first.",
+        "Drop noise early.",
+        "Keep high-value data."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why filter health-check telemetry in the pipeline?",
+        "a": "It's high-volume, repetitive and low-value, so dropping it before ingest saves significant cost with no loss of insight."
+      }
+    ]
+  },
+  "strategy-2-intelligent-routing": {
+    "core": "Different data has different consumers and value. Route errors and recent logs to a fast, expensive hot store; all logs to cheap object storage for compliance; security and audit events to the SIEM; and metrics to Prometheus or Mimir, plus selected ones to the vendor. Routing by attributes (team, severity, tenant) also supports chargeback and data residency. The routing connector or Vector's route transform implements it.",
+    "first_principles": {
+      "problem": "Compliance requires one year of logs, but keeping them in the hot search tier costs millions.",
+      "truths": [
+        "Data value varies by type and age.",
+        "Storage tiers differ 10–100× in price.",
+        "Some data must go to specific places."
+      ],
+      "derivation": [
+        "Classify by **type, severity, tenant**.",
+        "**Hot store** for recent/high-value.",
+        "**Archive** everything cheaply (S3 + Parquet).",
+        "**SIEM** for security events.",
+        "**Residency** routing by region."
+      ]
+    },
+    "analogy": {
+      "title": "Sorting mail into urgent, archive and legal",
+      "story": "Urgent letters go on the desk, everything gets filed in the archive, and legal notices go to the lawyer.",
+      "mapping": [
+        [
+          "Desk",
+          "Hot store"
+        ],
+        [
+          "Archive",
+          "Object storage"
+        ],
+        [
+          "Lawyer",
+          "SIEM"
+        ]
+      ],
+      "breaks": "Mail is copied once; pipelines can fan out copies cheaply."
+    },
+    "mindmap": {
+      "center": "Intelligent Routing",
+      "branches": [
+        {
+          "label": "Destinations",
+          "children": [
+            "Hot search",
+            "Object archive",
+            "SIEM",
+            "Metrics TSDB",
+            "Vendor"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "Signal type",
+            "Severity",
+            "Team/tenant",
+            "Region"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "routing connector",
+            "Vector route",
+            "Fluent Bit rewrite_tag"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Cost tiers",
+            "Compliance",
+            "Chargeback"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Vector routing",
+      "scenario": "TOML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Everything archived cheaply; only valuable logs indexed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "toml",
+          "text": "[transforms.split]\ntype = \"route\"\ninputs = [\"parsed_logs\"]\nroute.security = '.event.category == \"authentication\" || .log_type == \"audit\"'\nroute.hot      = '.level == \"error\" || .level == \"warn\"'\n\n[sinks.siem]    \ninputs = [\"split.security\"]\ntype = \"splunk_hec_logs\"\n[sinks.loki]    \ninputs = [\"split.hot\"]\ntype = \"loki\"\n[sinks.archive] \ninputs = [\"parsed_logs\"]\ntype = \"aws_s3\"\nencoding.codec = \"json\""
+        }
+      ],
+      "outcome": "right data, right place, right price."
+    },
+    "summary": {
+      "points": [
+        "Classify data.",
+        "Tier storage.",
+        "Route to consumers."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why archive all logs to object storage but index only some?",
+        "a": "Object storage is very cheap for compliance retention, while indexed hot storage is expensive and only needed for frequently queried data."
+      }
+    ]
+  },
+  "tool-spotlight-vector-vs-fluent-bit": {
+    "core": "Fluent Bit is a tiny C agent (around 1 MB, very low memory), a CNCF graduated standard for Kubernetes log collection with many plugins, ideal as a lightweight node agent. Vector, written in Rust, is fast and memory-safe, with a powerful transformation language (VRL), end-to-end acknowledgements and disk buffers, and runs well as agent or aggregator for logs and metrics. The OTel Collector leads for traces and OTLP-native pipelines. Many stacks mix them.",
+    "first_principles": {
+      "problem": "A team must choose a log agent and aggregator that fits tight node resources and complex transformations.",
+      "truths": [
+        "Edge agents need low footprint.",
+        "Aggregators need rich processing.",
+        "Ecosystems differ by signal."
+      ],
+      "derivation": [
+        "**Fluent Bit** for lean node agents.",
+        "**Vector** for complex transforms/aggregation.",
+        "**OTel Collector** for OTLP/traces.",
+        "Compare **memory/CPU** under your load.",
+        "Check **delivery guarantees** and buffers."
+      ]
+    },
+    "analogy": {
+      "title": "A bicycle courier vs a sorting van",
+      "story": "The bicycle is light and nimble for collection; the van carries more and sorts on the way.",
+      "mapping": [
+        [
+          "Bicycle",
+          "Fluent Bit"
+        ],
+        [
+          "Sorting van",
+          "Vector aggregator"
+        ],
+        [
+          "Parcel network",
+          "OTel Collector"
+        ]
+      ],
+      "breaks": "Vehicles are exclusive; tools interoperate via standard protocols."
+    },
+    "mindmap": {
+      "center": "Vector vs Fluent Bit",
+      "branches": [
+        {
+          "label": "Fluent Bit",
+          "children": [
+            "C",
+            "Tiny footprint",
+            "K8s standard",
+            "Lua filters"
+          ]
+        },
+        {
+          "label": "Vector",
+          "children": [
+            "Rust",
+            "VRL",
+            "Acks",
+            "Disk buffers",
+            "Agent+aggregator"
+          ]
+        },
+        {
+          "label": "OTel Collector",
+          "children": [
+            "OTLP native",
+            "Traces",
+            "Connectors"
+          ]
+        },
+        {
+          "label": "Mix",
+          "children": [
+            "FB agent → Vector aggregator",
+            "OTel everywhere"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "VRL parsing",
+      "scenario": "Vector.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Parsed, normalised, redacted logs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "toml",
+          "text": "[transforms.parse]\ntype = \"remap\"\ninputs = [\"k8s\"]\nsource = '''\n. = merge(., parse_json!(.message))\n.level = downcase(.level ?? \"info\")\ndel(.password)\nif exists(.user.email) { .user.email = redact(.user.email, filters: [\"pattern\"], redactor: \"full\", patterns: [r'.+']) }\n'''"
+        }
+      ],
+      "outcome": "tool chosen by role."
+    },
+    "summary": {
+      "points": [
+        "Fluent Bit: lean agent.",
+        "Vector: powerful transforms.",
+        "OTel: OTLP/traces."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why pick Fluent Bit as a node agent and Vector as an aggregator?",
+        "a": "Fluent Bit's tiny footprint suits every node, while Vector's VRL and buffering suit centralised heavy processing."
+      }
+    ]
+  }
+}

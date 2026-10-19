@@ -1,0 +1,543 @@
+{
+  "introduction-the-grep-dead-end": {
+    "core": "Even structured logs fail if every team names things differently: userId, user_id, uid, customer.id. Queries then have to know every variant, dashboards break, and correlation across services is guesswork. Semantic logging goes further than JSON. Logs are typed events with an agreed schema and meaning (event names, field names, types, units), so they can be queried like a database across the whole organisation.",
+    "first_principles": {
+      "problem": "Finding all failed logins across 30 services needs a query listing seven different field names for 'user'.",
+      "truths": [
+        "Structure without shared meaning is fragmented.",
+        "Shared schemas enable cross-service queries.",
+        "Types and units prevent misreads."
+      ],
+      "derivation": [
+        "Define **event names** (user.login.failed).",
+        "Standardise **field names/types/units**.",
+        "Adopt **OTel semantic conventions**.",
+        "Enforce via **libraries/linting**.",
+        "Query as **data**."
+      ]
+    },
+    "analogy": {
+      "title": "Every department using its own spreadsheet columns",
+      "story": "Combining them is painful until everyone uses the same template.",
+      "mapping": [
+        [
+          "Templates",
+          "Schema"
+        ],
+        [
+          "Column names",
+          "Field names"
+        ],
+        [
+          "Combining sheets",
+          "Cross-service queries"
+        ]
+      ],
+      "breaks": "Spreadsheets can be fixed by hand; logs at scale need automation."
+    },
+    "mindmap": {
+      "center": "Semantic Logging",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Inconsistent fields",
+            "Ambiguous meaning"
+          ]
+        },
+        {
+          "label": "Solution",
+          "children": [
+            "Event schemas",
+            "Shared names",
+            "Types/units"
+          ]
+        },
+        {
+          "label": "Standards",
+          "children": [
+            "OTel semconv",
+            "ECS"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "Libraries",
+            "CI lint",
+            "Pipeline validation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before and after",
+      "scenario": "Fields.",
+      "flow": [
+        "Before: userId / user_id / uid / customerId",
+        "After: user.id (string) everywhere",
+        "Before: duration (ms? s?)",
+        "After: duration_ms (int)"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One query works for every service."
+        }
+      ],
+      "code": [],
+      "outcome": "logs as consistent data."
+    },
+    "summary": {
+      "points": [
+        "JSON isn't enough.",
+        "Shared meaning.",
+        "Enforce schemas."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are structured logs alone not enough for organisation-wide querying?",
+        "a": "Different teams use different field names, types and units, so queries must account for every variant."
+      }
+    ]
+  },
+  "schema-discipline-the-semantic-part": {
+    "core": "Schema discipline means a documented, versioned catalogue of event types (payment.authorized, user.login.failed), each with required and optional fields, types, units and allowed values. Reuse namespaced common fields (service.name, user.id, http.response.status_code, error.type) from OTel semantic conventions or the Elastic Common Schema. Changes follow a versioning policy, and pipelines validate events against the schema.",
+    "first_principles": {
+      "problem": "A team changes a field from int to string, and every dashboard and alert using it silently breaks.",
+      "truths": [
+        "Schemas are contracts.",
+        "Silent changes break consumers.",
+        "Common fields enable reuse."
+      ],
+      "derivation": [
+        "Maintain an **event catalogue**.",
+        "Use **namespaced common fields**.",
+        "Specify **types, units, enums**.",
+        "**Version** schema changes.",
+        "**Validate** in CI and pipeline."
+      ]
+    },
+    "analogy": {
+      "title": "A standard form with defined boxes",
+      "story": "Each box has a label, format and meaning; changing a box needs a new form version.",
+      "mapping": [
+        [
+          "Form",
+          "Event schema"
+        ],
+        [
+          "Box format",
+          "Field type"
+        ],
+        [
+          "Form version",
+          "Schema version"
+        ]
+      ],
+      "breaks": "Paper forms are hard to change; schemas change easily, so discipline matters."
+    },
+    "mindmap": {
+      "center": "Schema Discipline",
+      "branches": [
+        {
+          "label": "Catalogue",
+          "children": [
+            "Event names",
+            "Owners",
+            "Docs"
+          ]
+        },
+        {
+          "label": "Fields",
+          "children": [
+            "Namespaced",
+            "Typed",
+            "Units",
+            "Enums"
+          ]
+        },
+        {
+          "label": "Standards",
+          "children": [
+            "OTel semconv",
+            "ECS"
+          ]
+        },
+        {
+          "label": "Change",
+          "children": [
+            "Versioning",
+            "Deprecation"
+          ]
+        },
+        {
+          "label": "Validation",
+          "children": [
+            "CI",
+            "Pipeline",
+            "Dead-letter"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Event schema",
+      "scenario": "JSON Schema.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Events validated; consumers trust types."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"$id\": \"events/payment.declined/v2\",\n  \"type\": \"object\",\n  \"required\": [\"event.name\", \"service.name\", \"payment.id\", \"payment.amount_minor\", \"payment.currency\", \"error.type\"],\n  \"properties\": {\n    \"event.name\": { \"const\": \"payment.declined\" },\n    \"payment.amount_minor\": { \"type\": \"integer\", \"description\": \"Amount in minor units (cents)\" },\n    \"payment.currency\": { \"type\": \"string\", \"pattern\": \"^[A-Z]{3}$\" },\n    \"error.type\": { \"enum\": [\"card_declined\", \"insufficient_funds\", \"fraud_suspected\"] }\n  }\n}"
+        }
+      ],
+      "outcome": "reliable event contracts."
+    },
+    "summary": {
+      "points": [
+        "Catalogue events.",
+        "Typed, namespaced fields.",
+        "Version and validate."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why include units in field names like amount_minor or duration_ms?",
+        "a": "It removes ambiguity about scale so consumers don't misinterpret values."
+      }
+    ]
+  },
+  "implementing-semantic-logging": {
+    "core": "Make the right thing easy: provide a shared logging library or wrapper per language with typed event helpers (log_payment_declined(payment, reason)) that set event.name and required fields automatically, inject common context (service, version, trace), generate code from the schema catalogue, and add CI linting that flags ad-hoc fields. Migrate gradually, mapping legacy fields in the pipeline.",
+    "first_principles": {
+      "problem": "Teams agree on a schema document, but six months later half the services ignore it.",
+      "truths": [
+        "Documents alone don't change behaviour.",
+        "Typed helpers prevent mistakes.",
+        "Pipelines can normalise legacy data."
+      ],
+      "derivation": [
+        "Ship **shared libraries** with typed helpers.",
+        "**Generate** helpers from schemas.",
+        "**Auto-inject** context.",
+        "**Lint** in CI.",
+        "**Normalise legacy** fields in pipeline."
+      ]
+    },
+    "analogy": {
+      "title": "Pre-printed forms instead of instructions",
+      "story": "Give people the form with boxes already labelled, not a memo describing what to write.",
+      "mapping": [
+        [
+          "Pre-printed form",
+          "Typed helper"
+        ],
+        [
+          "Memo",
+          "Schema document"
+        ],
+        [
+          "Mailroom fixes",
+          "Pipeline normalisation"
+        ]
+      ],
+      "breaks": "Forms can't be skipped; ad-hoc logs still can, hence linting."
+    },
+    "mindmap": {
+      "center": "Implementation",
+      "branches": [
+        {
+          "label": "Libraries",
+          "children": [
+            "Typed helpers",
+            "Context injection"
+          ]
+        },
+        {
+          "label": "Codegen",
+          "children": [
+            "From catalogue"
+          ]
+        },
+        {
+          "label": "Enforcement",
+          "children": [
+            "CI lint",
+            "Review"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "Pipeline mapping",
+            "Deprecation windows"
+          ]
+        },
+        {
+          "label": "Languages",
+          "children": [
+            "Go slog",
+            "Python structlog",
+            "Java logback"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Typed helper",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Correct schema by construction."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "# generated from events/payment.declined/v2\ndef payment_declined(log, *, payment_id: str, amount_minor: int, currency: str, error_type: str):\n    log.warning(\"payment.declined\",\n                **{\"event.name\": \"payment.declined\", \"payment.id\": payment_id,\n                   \"payment.amount_minor\": amount_minor, \"payment.currency\": currency,\n                   \"error.type\": error_type})\n\npayment_declined(log, payment_id=p.id, amount_minor=4999, currency=\"USD\", error_type=\"card_declined\")"
+        }
+      ],
+      "outcome": "adopted, not just documented, semantics."
+    },
+    "summary": {
+      "points": [
+        "Typed helpers.",
+        "Codegen and lint.",
+        "Normalise legacy."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the most effective way to get teams to follow a log schema?",
+        "a": "Provide shared libraries with typed helpers (ideally generated from the schema) so compliance is the easy default, backed by CI linting."
+      }
+    ]
+  },
+  "context-propagation-and-log-correlation": {
+    "core": "Semantic events become powerful when they carry correlation context: trace_id and span_id to link to traces; business keys (order.id, payment.id, tenant.id) to follow an entity across services and asynchronous flows; and baggage for selected keys propagated through calls. Propagate context through HTTP, gRPC, queue message headers and background jobs, so an order's whole lifecycle can be reconstructed.",
+    "first_principles": {
+      "problem": "An order's events in checkout, payments and fulfilment can't be tied together because asynchronous queue consumers lose context.",
+      "truths": [
+        "Entities span services and time.",
+        "Async boundaries drop context by default.",
+        "Business keys complement trace IDs."
+      ],
+      "derivation": [
+        "Include **trace_id/span_id**.",
+        "Include **business keys** (order.id).",
+        "Propagate via **message headers**.",
+        "Restore context in **workers**.",
+        "Use **baggage** sparingly."
+      ]
+    },
+    "analogy": {
+      "title": "A case file number on every document",
+      "story": "Every department stamps the case number, so the full history can be assembled later.",
+      "mapping": [
+        [
+          "Case number",
+          "order.id / trace_id"
+        ],
+        [
+          "Departments",
+          "Services"
+        ],
+        [
+          "Inter-office mail",
+          "Queue headers"
+        ]
+      ],
+      "breaks": "Paper files don't lose stamps; async code loses context unless coded."
+    },
+    "mindmap": {
+      "center": "Log Correlation",
+      "branches": [
+        {
+          "label": "Technical",
+          "children": [
+            "trace_id",
+            "span_id"
+          ]
+        },
+        {
+          "label": "Business",
+          "children": [
+            "order.id",
+            "tenant.id",
+            "user.id"
+          ]
+        },
+        {
+          "label": "Transport",
+          "children": [
+            "HTTP headers",
+            "gRPC metadata",
+            "Kafka headers"
+          ]
+        },
+        {
+          "label": "Async",
+          "children": [
+            "Restore in consumers",
+            "Span links"
+          ]
+        },
+        {
+          "label": "Baggage",
+          "children": [
+            "Few keys",
+            "Privacy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Kafka propagation",
+      "scenario": "Python OTel.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Order lifecycle traceable across async hops."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from opentelemetry.propagate import inject, extract\n# producer\nheaders = {}\ninject(headers)\nproducer.send(\"orders\", value=evt, headers=[(k, v.encode()) for k, v in headers.items()])\n# consumer\nctx = extract({k: v.decode() for k, v in msg.headers})\nwith tracer.start_as_current_span(\"fulfil_order\", context=ctx):\n    log.info(\"order.fulfilment.started\", **{\"order.id\": evt[\"order_id\"]})"
+        }
+      ],
+      "outcome": "end-to-end entity history."
+    },
+    "summary": {
+      "points": [
+        "Trace + business keys.",
+        "Propagate through queues.",
+        "Restore in workers."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why include business keys like order.id in addition to trace_id?",
+        "a": "An entity's lifecycle may span multiple traces (async, retries, days), and business keys tie all its events together."
+      }
+    ]
+  },
+  "the-power-of-querying": {
+    "core": "With consistent semantic events, logs become an analytics dataset. You can count declines by error.type and currency, compute conversion funnels from event sequences, find p95 duration_ms by tenant, or join logins and payment failures by user.id, all across every service with one query. Columnar backends (ClickHouse, BigQuery, Loki structured metadata, Honeycomb-style stores) make such queries fast.",
+    "first_principles": {
+      "problem": "Product asks 'which card error types increased after the release?' and engineering needs a week of ad-hoc parsing.",
+      "truths": [
+        "Consistent fields enable aggregation.",
+        "Columnar stores scan fields fast.",
+        "Questions change over time."
+      ],
+      "derivation": [
+        "Store events in **queryable backends**.",
+        "**Aggregate** by semantic fields.",
+        "Build **funnels** from event sequences.",
+        "**Join** on shared keys.",
+        "Save **queries as dashboards**."
+      ]
+    },
+    "analogy": {
+      "title": "A well-kept database instead of a pile of notes",
+      "story": "Ask any new question with a query instead of re-reading every note.",
+      "mapping": [
+        [
+          "Pile of notes",
+          "Free-form logs"
+        ],
+        [
+          "Database",
+          "Semantic event store"
+        ],
+        [
+          "Query",
+          "Ad-hoc question"
+        ]
+      ],
+      "breaks": "Databases have strict schemas; event stores tolerate evolution with discipline."
+    },
+    "mindmap": {
+      "center": "Querying Semantic Logs",
+      "branches": [
+        {
+          "label": "Backends",
+          "children": [
+            "ClickHouse",
+            "BigQuery",
+            "Loki",
+            "Honeycomb",
+            "Elastic"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "Group by",
+            "Percentiles",
+            "Funnels",
+            "Joins"
+          ]
+        },
+        {
+          "label": "Consumers",
+          "children": [
+            "Engineering",
+            "Product",
+            "Security"
+          ]
+        },
+        {
+          "label": "Outputs",
+          "children": [
+            "Dashboards",
+            "Alerts",
+            "Reports"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decline analysis",
+      "scenario": "SQL (ClickHouse).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Answer in seconds: 'fraud_suspected' tripled in EUR."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT error_type, currency, count() AS declines\nFROM events\nWHERE event_name = 'payment.declined'\n  AND timestamp >= now() - INTERVAL 1 DAY\n  AND service_version = '2.4.0'\nGROUP BY error_type, currency\nORDER BY declines DESC\nLIMIT 10;"
+        }
+      ],
+      "outcome": "logs as an analytical asset."
+    },
+    "summary": {
+      "points": [
+        "Query like data.",
+        "Aggregate and join.",
+        "Answer new questions fast."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes cross-service log queries reliable?",
+        "a": "Consistent event names and typed field names/units shared by all services (semantic schema)."
+      }
+    ]
+  }
+}

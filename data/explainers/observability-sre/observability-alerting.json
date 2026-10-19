@@ -1,0 +1,655 @@
+{
+  "introduction-the-check-engine-light": {
+    "core": "An alert interrupts a human. It should fire only when something needs action now or soon, and carry enough context to act. Too many alerts cause fatigue and ignored pages; too few cause missed outages. Good alerting is a pipeline: rules evaluate signals, Alertmanager groups, dedups, routes and silences them, and humans get a few actionable notifications with runbooks.",
+    "first_principles": {
+      "problem": "On-call engineers receive 300 alerts a week, most self-resolving, and miss the one real outage among them.",
+      "truths": [
+        "Human attention is scarce.",
+        "Not every anomaly needs action.",
+        "Context speeds response."
+      ],
+      "derivation": [
+        "Alert only on **actionable** conditions.",
+        "Prefer **symptoms** over causes.",
+        "**Group and route** intelligently.",
+        "Include **runbooks and dashboards**.",
+        "**Review** alert quality regularly."
+      ]
+    },
+    "analogy": {
+      "title": "A car's check-engine light",
+      "story": "It should light up for real problems with a code a mechanic can read, not flicker for every bump in the road.",
+      "mapping": [
+        [
+          "Check-engine light",
+          "Page"
+        ],
+        [
+          "Error code",
+          "Alert context"
+        ],
+        [
+          "Flickering",
+          "Noisy alerts"
+        ]
+      ],
+      "breaks": "Cars have one light; production has thousands of potential alerts."
+    },
+    "mindmap": {
+      "center": "Alerting",
+      "branches": [
+        {
+          "label": "Goals",
+          "children": [
+            "Actionable",
+            "Timely",
+            "Contextual"
+          ]
+        },
+        {
+          "label": "Pipeline",
+          "children": [
+            "Rules",
+            "Alertmanager",
+            "Routing",
+            "Notification"
+          ]
+        },
+        {
+          "label": "Anti-patterns",
+          "children": [
+            "Noise",
+            "Cause-based floods",
+            "No runbook"
+          ]
+        },
+        {
+          "label": "Practices",
+          "children": [
+            "Symptom-based",
+            "SLO burn rates",
+            "Weekly review"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Alert quality metrics",
+      "scenario": "Review.",
+      "flow": [
+        "Pages per week: 300 → target < 10",
+        "% actionable: 12% → target > 80%",
+        "Mean time to acknowledge",
+        "Alerts with runbooks: 100%"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Measurable alerting health."
+        }
+      ],
+      "code": [],
+      "outcome": "alerts as a precious signal."
+    },
+    "summary": {
+      "points": [
+        "Pages interrupt humans.",
+        "Actionable only.",
+        "Measure alert quality."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the main test of whether an alert should page someone?",
+        "a": "Whether it requires a human to take action now (or soon) to prevent or fix user impact."
+      }
+    ]
+  },
+  "symptom-based-vs-cause-based-alerting": {
+    "core": "Cause-based alerts fire on internal conditions (CPU at 90%, a pod restarted, disk at 80%) that may not affect users at all, and they miss failure modes nobody predicted. Symptom-based alerts fire on what users experience: error rate, latency and availability against SLOs. Page on symptoms; route causes to dashboards or low-urgency tickets that help diagnose why a symptom fired.",
+    "first_principles": {
+      "problem": "CPU alerts page nightly during batch jobs with no user impact, while an outage caused by a bad config produces no alert.",
+      "truths": [
+        "Users feel symptoms, not causes.",
+        "Causes are endless, symptoms few.",
+        "Unknown failures still show symptoms."
+      ],
+      "derivation": [
+        "Page on **error rate, latency, availability**.",
+        "Tie to **SLOs/burn rates**.",
+        "Send cause signals to **tickets/dashboards**.",
+        "Keep some **predictive** alerts (disk filling in 4h).",
+        "Link symptoms to **diagnostic dashboards**."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor treating fever vs every possible germ",
+      "story": "Monitoring temperature catches any infection; testing for each germ separately misses new ones.",
+      "mapping": [
+        [
+          "Fever",
+          "Symptom (errors/latency)"
+        ],
+        [
+          "Germ tests",
+          "Cause-based alerts"
+        ],
+        [
+          "New germ",
+          "Unknown failure mode"
+        ]
+      ],
+      "breaks": "Fever is a single number; services need several SLIs."
+    },
+    "mindmap": {
+      "center": "Symptom vs Cause",
+      "branches": [
+        {
+          "label": "Symptom",
+          "children": [
+            "Errors",
+            "Latency",
+            "Availability",
+            "Correctness"
+          ]
+        },
+        {
+          "label": "Cause",
+          "children": [
+            "CPU",
+            "Memory",
+            "Restarts",
+            "Queue depth"
+          ]
+        },
+        {
+          "label": "Page on",
+          "children": [
+            "Symptoms",
+            "Imminent exhaustion"
+          ]
+        },
+        {
+          "label": "Ticket on",
+          "children": [
+            "Causes",
+            "Capacity trends"
+          ]
+        },
+        {
+          "label": "Benefit",
+          "children": [
+            "Catches unknowns",
+            "Less noise"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Symptom alert",
+      "scenario": "PromQL rule.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Pages only when users are affected, whatever the cause."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "- alert: CheckoutHighErrorRate\n  expr: |\n    sum(rate(http_requests_total{service=\"checkout\",status=~\"5..\"}[5m]))\n    / sum(rate(http_requests_total{service=\"checkout\"}[5m])) > 0.02\n  for: 5m\n  labels: { severity: page }\n  annotations:\n    summary: \"Checkout 5xx > 2% for 5m\"\n    runbook: https://runbooks.acme/checkout-errors"
+        }
+      ],
+      "outcome": "user-centric paging."
+    },
+    "summary": {
+      "points": [
+        "Page on symptoms.",
+        "Causes for diagnosis.",
+        "Catches unknown failures."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a high-CPU alert usually a poor page?",
+        "a": "High CPU often has no user impact; it's a cause that may or may not lead to symptoms, causing noisy, non-actionable pages."
+      }
+    ]
+  },
+  "alert-rules-in-practice-anatomy-of-a-prometheus-alert": {
+    "core": "A Prometheus alerting rule has an expr (a PromQL condition that returns series when the alert should fire), for (how long the condition must hold before firing, which filters blips), labels (severity, team, used for routing), and annotations (summary, description with templated values, runbook and dashboard links). Alerts move from inactive to pending to firing, and Alertmanager receives firing alerts.",
+    "first_principles": {
+      "problem": "An alert fires on every one-second latency spike because it has no 'for' clause.",
+      "truths": [
+        "Conditions can be transient.",
+        "Labels drive routing.",
+        "Annotations give responders context."
+      ],
+      "derivation": [
+        "Write expr returning **only bad series**.",
+        "Add **for:** to require persistence.",
+        "Label **severity and team**.",
+        "Template **values into annotations**.",
+        "Link **runbook + dashboard**."
+      ]
+    },
+    "analogy": {
+      "title": "A smoke detector with a delay and a label",
+      "story": "It sounds only if smoke persists for a few seconds, says which room, and has instructions printed on it.",
+      "mapping": [
+        [
+          "Smoke persists",
+          "for:"
+        ],
+        [
+          "Which room",
+          "Labels"
+        ],
+        [
+          "Printed instructions",
+          "Runbook annotation"
+        ]
+      ],
+      "breaks": "Smoke detectors don't template values; annotations can show the current error rate."
+    },
+    "mindmap": {
+      "center": "Alert Rule Anatomy",
+      "branches": [
+        {
+          "label": "expr",
+          "children": [
+            "PromQL condition"
+          ]
+        },
+        {
+          "label": "for",
+          "children": [
+            "Persistence",
+            "Pending state"
+          ]
+        },
+        {
+          "label": "labels",
+          "children": [
+            "severity",
+            "team",
+            "service"
+          ]
+        },
+        {
+          "label": "annotations",
+          "children": [
+            "summary",
+            "description",
+            "runbook_url",
+            "dashboard"
+          ]
+        },
+        {
+          "label": "States",
+          "children": [
+            "Inactive",
+            "Pending",
+            "Firing"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "promtool test rules"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Full rule + unit test",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Fires only after 10 sustained minutes, with context."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "groups:\n  - name: api\n    rules:\n      - alert: APIHighLatencyP99\n        expr: histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5\n        for: 10m\n        labels: { severity: page, team: payments }\n        annotations:\n          summary: \"{{ $labels.service }} p99 {{ $value | humanizeDuration }}\"\n          runbook_url: https://runbooks.acme/api-latency\n# promtool test rules tests/api_alerts_test.yml"
+        }
+      ],
+      "outcome": "well-formed, tested alerts."
+    },
+    "summary": {
+      "points": [
+        "expr, for, labels, annotations.",
+        "for filters blips.",
+        "Test with promtool."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the 'for' clause do in a Prometheus alert?",
+        "a": "Requires the condition to be continuously true for that duration (pending state) before the alert fires."
+      }
+    ]
+  },
+  "managing-the-flood-grouping-and-deduplication": {
+    "core": "One incident can trigger hundreds of alerts: every pod, every replica, every dependent service. Alertmanager deduplicates identical alerts from HA Prometheus pairs and groups related alerts by labels (group_by: [alertname, cluster, service]) into one notification. group_wait batches initial alerts, group_interval sets how often updates are sent, and repeat_interval re-notifies unresolved ones.",
+    "first_principles": {
+      "problem": "A database failover sends 400 separate pages, one per pod, within two minutes.",
+      "truths": [
+        "Incidents produce correlated alerts.",
+        "Humans need one notification per problem.",
+        "HA monitoring duplicates alerts."
+      ],
+      "derivation": [
+        "**Deduplicate** HA alerts.",
+        "**Group** by service/cluster/alertname.",
+        "Tune **group_wait** (30s) to batch.",
+        "Tune **group_interval** (5m) for updates.",
+        "Set **repeat_interval** (4h) for reminders."
+      ]
+    },
+    "analogy": {
+      "title": "A news editor combining wire reports",
+      "story": "Fifty reports about the same storm become one headline story with updates.",
+      "mapping": [
+        [
+          "Wire reports",
+          "Individual alerts"
+        ],
+        [
+          "Headline story",
+          "Grouped notification"
+        ],
+        [
+          "Updates",
+          "group_interval"
+        ]
+      ],
+      "breaks": "Editors judge relatedness; Alertmanager groups only by labels."
+    },
+    "mindmap": {
+      "center": "Grouping & Dedup",
+      "branches": [
+        {
+          "label": "Dedup",
+          "children": [
+            "HA Prometheus",
+            "Identical label sets"
+          ]
+        },
+        {
+          "label": "Grouping",
+          "children": [
+            "group_by labels"
+          ]
+        },
+        {
+          "label": "Timers",
+          "children": [
+            "group_wait",
+            "group_interval",
+            "repeat_interval"
+          ]
+        },
+        {
+          "label": "Outcome",
+          "children": [
+            "One page per problem"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Over-grouping hides distinct issues"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Route config",
+      "scenario": "Alertmanager.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "400 pod alerts → 1 notification listing affected pods."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "route:\n  receiver: default\n  group_by: [alertname, cluster, service]\n  group_wait: 30s\n  group_interval: 5m\n  repeat_interval: 4h"
+        }
+      ],
+      "outcome": "one page per problem."
+    },
+    "summary": {
+      "points": [
+        "Dedup HA.",
+        "Group by labels.",
+        "Tune timers."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does group_wait control in Alertmanager?",
+        "a": "How long to wait after the first alert of a new group to collect more before sending the initial notification."
+      }
+    ]
+  },
+  "routing-getting-the-alert-to-the-right-person": {
+    "core": "Alertmanager routes are a tree. Each alert walks it matching labels (team, severity, service) to choose a receiver, such as PagerDuty for team-payments pages, Slack for warnings, or email for tickets. Ownership labels must be set consistently in rules or added via relabelling, and continue: true lets one alert notify several receivers. Time-based routes handle business hours.",
+    "first_principles": {
+      "problem": "All alerts go to one shared channel, and nobody knows whose problem each one is.",
+      "truths": [
+        "Ownership must be explicit.",
+        "Severity sets channel and urgency.",
+        "Labels drive routing."
+      ],
+      "derivation": [
+        "Label alerts with **team and severity**.",
+        "Build a **routing tree** by team.",
+        "Map **severity → channel** (page/chat/ticket).",
+        "Use **continue** for multi-notify.",
+        "Add **time intervals** for business hours."
+      ]
+    },
+    "analogy": {
+      "title": "A hospital triage desk",
+      "story": "Patients are directed to the right department and urgency level based on their symptoms and tags.",
+      "mapping": [
+        [
+          "Triage",
+          "Routing tree"
+        ],
+        [
+          "Department",
+          "Team receiver"
+        ],
+        [
+          "Urgency",
+          "Severity"
+        ]
+      ],
+      "breaks": "Triage nurses improvise; routing trees must cover every label combination."
+    },
+    "mindmap": {
+      "center": "Alert Routing",
+      "branches": [
+        {
+          "label": "Tree",
+          "children": [
+            "Matchers",
+            "Nested routes",
+            "Default receiver"
+          ]
+        },
+        {
+          "label": "Labels",
+          "children": [
+            "team",
+            "severity",
+            "service"
+          ]
+        },
+        {
+          "label": "Receivers",
+          "children": [
+            "PagerDuty",
+            "Opsgenie",
+            "Slack",
+            "Email",
+            "Webhooks"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "continue",
+            "time_intervals",
+            "mute_time_intervals"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Routing tree",
+      "scenario": "Alertmanager.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Payments pages go to payments on-call; warnings to their Slack."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "route:\n  receiver: slack-catchall\n  routes:\n    - matchers: [team=\"payments\", severity=\"page\"]\n      receiver: pagerduty-payments\n    - matchers: [team=\"payments\"]\n      receiver: slack-payments\n    - matchers: [severity=\"ticket\"]\n      receiver: jira\nreceivers:\n  - name: pagerduty-payments\n    pagerduty_configs: [{ routing_key: <secret> }]"
+        }
+      ],
+      "outcome": "alerts reach owners."
+    },
+    "summary": {
+      "points": [
+        "Label ownership.",
+        "Route by tree.",
+        "Severity → channel."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to an alert that matches no specific route?",
+        "a": "It goes to the root route's default receiver (often a catch-all channel), which should be monitored for unowned alerts."
+      }
+    ]
+  },
+  "fatigue-management-silences-and-inhibition": {
+    "core": "Silences temporarily mute alerts matching labels, during planned maintenance or a known incident, with a creator, comment and expiry. Inhibition rules suppress dependent alerts while a higher-level alert fires: if a cluster is down, don't also page for every service in it. Combined with regular review of noisy alerts (delete, tune or downgrade), they keep pages meaningful and protect on-call health.",
+    "first_principles": {
+      "problem": "During a planned database upgrade, on-call is paged 50 times for expected errors.",
+      "truths": [
+        "Planned work causes expected alerts.",
+        "Root failures cause cascades.",
+        "Fatigue erodes response."
+      ],
+      "derivation": [
+        "Create **silences** for maintenance with expiry.",
+        "Write **inhibition rules** for cascades.",
+        "**Review** top noisy alerts weekly.",
+        "**Delete or downgrade** non-actionable alerts.",
+        "Track **pages per shift**."
+      ]
+    },
+    "analogy": {
+      "title": "Do-not-disturb mode and a 'power outage' notice",
+      "story": "You mute calls during a planned meeting, and when the building's power is out you don't need separate alarms from every appliance.",
+      "mapping": [
+        [
+          "Do-not-disturb",
+          "Silence"
+        ],
+        [
+          "Power outage notice",
+          "Inhibiting alert"
+        ],
+        [
+          "Appliance alarms",
+          "Dependent alerts"
+        ]
+      ],
+      "breaks": "Do-not-disturb is personal; silences affect the whole team, so they need comments and expiry."
+    },
+    "mindmap": {
+      "center": "Fatigue Management",
+      "branches": [
+        {
+          "label": "Silences",
+          "children": [
+            "Label matchers",
+            "Expiry",
+            "Comment",
+            "amtool"
+          ]
+        },
+        {
+          "label": "Inhibition",
+          "children": [
+            "Source alert",
+            "Target alerts",
+            "Equal labels"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "Weekly review",
+            "Delete noisy",
+            "Downgrade"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "Pages/shift",
+            "Actionable %"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Silence + inhibition",
+      "scenario": "amtool + config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No pages during upgrade; one page if a cluster dies."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "amtool silence add service=orders-db --duration=2h --comment='CHG-1042 PG upgrade' --author=alice\n# alertmanager.yml\n# inhibit_rules:\n#   - source_matchers: [alertname=\"ClusterDown\"]\n#     target_matchers: [severity=~\"page|warning\"]\n#     equal: [cluster]"
+        }
+      ],
+      "outcome": "sustainable on-call."
+    },
+    "summary": {
+      "points": [
+        "Silence planned work.",
+        "Inhibit cascades.",
+        "Prune noisy alerts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between a silence and an inhibition rule?",
+        "a": "A silence is a temporary manual mute by labels; inhibition automatically suppresses target alerts while a source alert is firing."
+      }
+    ]
+  }
+}

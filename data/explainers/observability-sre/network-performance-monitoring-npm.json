@@ -1,0 +1,666 @@
+{
+  "introduction-its-always-the-network": {
+    "core": "'It's the network' is the default accusation in incidents, often wrong and sometimes right. Without network telemetry, teams can't prove either way. Network performance monitoring measures latency, loss, jitter, throughput, retransmits and path changes between endpoints, from both synthetic probes and real traffic, so network problems are found or ruled out with data in minutes.",
+    "first_principles": {
+      "problem": "An app team and the network team argue for hours during an outage because neither has data about the path between services.",
+      "truths": [
+        "The network is shared and invisible.",
+        "Symptoms look alike (timeouts).",
+        "Data settles blame quickly."
+      ],
+      "derivation": [
+        "Measure **latency, loss, jitter, throughput**.",
+        "Use **active probes** for baselines.",
+        "Use **passive capture/flows** for real traffic.",
+        "Track **TCP retransmits** on hosts.",
+        "Correlate with **app metrics**."
+      ]
+    },
+    "analogy": {
+      "title": "Road traffic sensors",
+      "story": "Without sensors, every late delivery is blamed on traffic; with sensors you know whether the road or the driver was slow.",
+      "mapping": [
+        [
+          "Road sensors",
+          "NPM probes/flows"
+        ],
+        [
+          "Late delivery",
+          "Timeout"
+        ],
+        [
+          "Driver",
+          "Application"
+        ]
+      ],
+      "breaks": "Roads are visible; network paths are hidden behind many providers."
+    },
+    "mindmap": {
+      "center": "NPM",
+      "branches": [
+        {
+          "label": "Metrics",
+          "children": [
+            "Latency",
+            "Loss",
+            "Jitter",
+            "Throughput",
+            "Retransmits"
+          ]
+        },
+        {
+          "label": "Methods",
+          "children": [
+            "Active synthetics",
+            "Passive capture",
+            "Flow logs",
+            "eBPF"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Find or rule out network"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ThousandEyes",
+            "Kentik",
+            "smokeping",
+            "Cilium Hubble"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Quick host evidence",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows whether loss or latency exists on the path."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nstat -az TcpRetransSegs TcpOutSegs     # retransmit ratio\nmtr -rwc 100 db.internal                 # loss per hop\nss -ti dst db.internal | grep -o 'rtt:[^ ]*'"
+        }
+      ],
+      "outcome": "data-driven network triage."
+    },
+    "summary": {
+      "points": [
+        "Network is often blamed.",
+        "Measure to prove.",
+        "Active plus passive."
+      ]
+    },
+    "check": [
+      {
+        "q": "What host-level metric quickly hints at network loss?",
+        "a": "TCP retransmission rate (retransmitted segments relative to sent segments)."
+      }
+    ]
+  },
+  "key-npm-metrics-reference": {
+    "core": "Core NPM metrics: latency (RTT, and its p95/p99 not just the average), packet loss percentage (even 1% cripples TCP throughput), jitter (variation in latency, critical for voice and video), throughput versus capacity (utilisation), TCP retransmits and resets, DNS resolution time, TLS handshake time and path changes. Each has typical healthy ranges, and baselines matter more than absolute numbers.",
+    "first_principles": {
+      "problem": "A dashboard shows average latency only, hiding 2% loss that halves throughput.",
+      "truths": [
+        "Different problems show in different metrics.",
+        "Small loss has big TCP impact.",
+        "Baselines define normal."
+      ],
+      "derivation": [
+        "Track **RTT percentiles**.",
+        "Alert on **loss > baseline**.",
+        "Watch **jitter** for real-time apps.",
+        "Track **utilisation** vs capacity.",
+        "Include **DNS/TLS timings**."
+      ]
+    },
+    "analogy": {
+      "title": "Vital signs at a hospital",
+      "story": "Pulse, blood pressure, oxygen and temperature each reveal different problems; one alone isn't enough.",
+      "mapping": [
+        [
+          "Pulse",
+          "Latency"
+        ],
+        [
+          "Oxygen",
+          "Loss"
+        ],
+        [
+          "Irregular heartbeat",
+          "Jitter"
+        ]
+      ],
+      "breaks": "Vitals have universal ranges; network baselines are per path."
+    },
+    "mindmap": {
+      "center": "NPM Metrics",
+      "branches": [
+        {
+          "label": "Latency",
+          "children": [
+            "RTT",
+            "p95/p99"
+          ]
+        },
+        {
+          "label": "Loss",
+          "children": [
+            "%",
+            "TCP impact"
+          ]
+        },
+        {
+          "label": "Jitter",
+          "children": [
+            "Variation",
+            "Voice/video"
+          ]
+        },
+        {
+          "label": "Capacity",
+          "children": [
+            "Throughput",
+            "Utilisation",
+            "Drops"
+          ]
+        },
+        {
+          "label": "TCP",
+          "children": [
+            "Retransmits",
+            "Resets",
+            "Zero windows"
+          ]
+        },
+        {
+          "label": "App path",
+          "children": [
+            "DNS time",
+            "TLS time",
+            "TTFB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Loss vs throughput",
+      "scenario": "Mathis formula.",
+      "flow": [
+        "Throughput ≈ MSS / (RTT × √loss)",
+        "MSS 1460 B, RTT 50 ms, loss 0.01% → ~23 Mbps per flow",
+        "loss 1% → ~2.3 Mbps per flow",
+        "10× throughput drop from 1% loss"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains why small loss matters."
+        }
+      ],
+      "code": [],
+      "outcome": "right metrics, right thresholds."
+    },
+    "summary": {
+      "points": [
+        "Several vital signs.",
+        "Loss is devastating.",
+        "Baselines per path."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does 1% packet loss hurt TCP throughput so much?",
+        "a": "TCP treats loss as congestion and cuts its window, and throughput scales inversely with the square root of loss rate."
+      }
+    ]
+  },
+  "strategy-1-active-monitoring-synthetics": {
+    "core": "Active monitoring sends test traffic on a schedule: ICMP or TCP pings, HTTP checks, DNS queries, traceroutes and throughput tests from agents in many locations (offices, regions, cloud zones, ISPs). It gives continuous baselines even with no user traffic, detects path changes and outages before users report them, and can test third-party paths. It measures the probe's experience, not every real user's.",
+    "first_principles": {
+      "problem": "A regional ISP issue affects users in one country for an hour before anyone notices.",
+      "truths": [
+        "Test traffic is always available.",
+        "Many vantage points reveal localised issues.",
+        "Probes may not match real traffic paths."
+      ],
+      "derivation": [
+        "Deploy **agents in key locations**.",
+        "Probe **critical paths** (users→edge, service→DB, region→region).",
+        "Run **traceroute/path** tests.",
+        "Alert on **deviation from baseline**.",
+        "Include **third-party/SaaS** endpoints."
+      ]
+    },
+    "analogy": {
+      "title": "Mystery shoppers",
+      "story": "Regularly visiting stores in each city reveals problems before customers complain.",
+      "mapping": [
+        [
+          "Mystery shoppers",
+          "Probes"
+        ],
+        [
+          "Cities",
+          "Vantage points"
+        ],
+        [
+          "Complaints",
+          "User reports"
+        ]
+      ],
+      "breaks": "Shoppers act like customers; probes may take different paths than real traffic."
+    },
+    "mindmap": {
+      "center": "Active Monitoring",
+      "branches": [
+        {
+          "label": "Tests",
+          "children": [
+            "ICMP",
+            "TCP connect",
+            "HTTP",
+            "DNS",
+            "Traceroute",
+            "iperf"
+          ]
+        },
+        {
+          "label": "Vantage",
+          "children": [
+            "Offices",
+            "Regions",
+            "ISPs",
+            "Cloud zones"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Always on",
+            "Baselines",
+            "Early detection"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Synthetic",
+            "Path mismatch"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "blackbox_exporter",
+            "ThousandEyes",
+            "smokeping",
+            "RIPE Atlas"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Path test",
+      "scenario": "Command + Prometheus probe.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Regional degradation detected in minutes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "modules:\n  tcp_db:\n    prober: tcp\n    timeout: 3s\n  icmp_path:\n    prober: icmp\n# alert: probe_duration_seconds > 2× 7-day p95 for 10m"
+        }
+      ],
+      "outcome": "proactive network visibility."
+    },
+    "summary": {
+      "points": [
+        "Scheduled test traffic.",
+        "Many vantage points.",
+        "Baselines and alerts."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a key limitation of synthetic network monitoring?",
+        "a": "Probes may take different paths or behave differently than real user traffic, so they can miss issues that only affect real flows."
+      }
+    ]
+  },
+  "strategy-2-passive-monitoring-packet-capture": {
+    "core": "Passive monitoring observes real traffic: flow records (NetFlow, sFlow, IPFIX, VPC Flow Logs) summarise who talked to whom and how much; host and eBPF metrics expose per-connection RTT and retransmits; and full packet capture (tcpdump, mirrored ports, TAPs) gives ground truth for deep analysis. It shows actual user and service behaviour but produces large volumes and raises privacy concerns.",
+    "first_principles": {
+      "problem": "Users report slowness that synthetic probes don't reproduce, because only certain real flows are affected.",
+      "truths": [
+        "Real traffic reveals real problems.",
+        "Summaries scale; full captures don't.",
+        "Packets may contain sensitive data."
+      ],
+      "derivation": [
+        "Collect **flow logs** broadly.",
+        "Use **eBPF** for per-connection TCP stats.",
+        "Use **packet capture** targeted and short.",
+        "**Sample** at high rates.",
+        "Protect **sensitive payloads**."
+      ]
+    },
+    "analogy": {
+      "title": "Traffic cameras vs a sample survey",
+      "story": "Cameras on real roads see actual traffic jams that test drives might miss.",
+      "mapping": [
+        [
+          "Traffic cameras",
+          "Flow logs/eBPF"
+        ],
+        [
+          "Dashcam footage",
+          "Packet capture"
+        ],
+        [
+          "Test drives",
+          "Synthetics"
+        ]
+      ],
+      "breaks": "Cameras don't record conversations; packet captures can."
+    },
+    "mindmap": {
+      "center": "Passive Monitoring",
+      "branches": [
+        {
+          "label": "Flows",
+          "children": [
+            "NetFlow",
+            "sFlow",
+            "IPFIX",
+            "VPC Flow Logs"
+          ]
+        },
+        {
+          "label": "Host",
+          "children": [
+            "eBPF TCP stats",
+            "ss",
+            "Hubble"
+          ]
+        },
+        {
+          "label": "Packets",
+          "children": [
+            "tcpdump",
+            "SPAN/TAP",
+            "Wireshark"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Real traffic"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Volume",
+            "Privacy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Targeted capture",
+      "scenario": "tcpdump.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ground-truth evidence of retransmissions on a real flow."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "tcpdump -ni eth0 -s 128 -w /tmp/db.pcap 'host 10.0.4.12 and port 5432' -G 60 -W 5\n# analyse retransmits\ntshark -r /tmp/db.pcap -Y 'tcp.analysis.retransmission' | wc -l"
+        }
+      ],
+      "outcome": "real-traffic visibility."
+    },
+    "summary": {
+      "points": [
+        "Observe real traffic.",
+        "Flows, eBPF, packets.",
+        "Mind volume and privacy."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why capture only headers (-s 128) when debugging with tcpdump?",
+        "a": "Headers reveal timing and TCP behaviour while limiting file size and avoiding capturing sensitive payloads."
+      }
+    ]
+  },
+  "the-invisible-enemy-micro-bursts": {
+    "core": "A micro-burst is traffic exceeding link or switch-buffer capacity for milliseconds, for example many servers responding at once to a fan-out request (TCP incast). Buffers overflow, packets drop and latency spikes, yet 1-minute or even 10-second utilisation averages show the link at 20%. Micro-bursts cause mysterious tail latency and retransmits in data centres.",
+    "first_principles": {
+      "problem": "p99 latency spikes randomly while every network graph shows links at under 30% utilisation.",
+      "truths": [
+        "Averages hide millisecond peaks.",
+        "Switch buffers are small.",
+        "Fan-out synchronises responses."
+      ],
+      "derivation": [
+        "Suspect bursts when **drops exist at low average**.",
+        "Check **switch buffer/discard counters**.",
+        "Measure at **high resolution**.",
+        "Look for **fan-out/incast** patterns.",
+        "Correlate with **retransmits and p99**."
+      ]
+    },
+    "analogy": {
+      "title": "A doorway at a concert's end",
+      "story": "The venue is half-empty on average, but everyone leaving at once jams the exit for a minute.",
+      "mapping": [
+        [
+          "Exit door",
+          "Switch port"
+        ],
+        [
+          "Crowd leaving",
+          "Burst"
+        ],
+        [
+          "Average attendance",
+          "Average utilisation"
+        ]
+      ],
+      "breaks": "Crowds are visible; micro-bursts last milliseconds."
+    },
+    "mindmap": {
+      "center": "Micro-bursts",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "Incast",
+            "Fan-out",
+            "Synchronised traffic",
+            "Speed mismatch"
+          ]
+        },
+        {
+          "label": "Effect",
+          "children": [
+            "Buffer overflow",
+            "Drops",
+            "Tail latency"
+          ]
+        },
+        {
+          "label": "Hidden by",
+          "children": [
+            "1-min averages",
+            "SNMP polling"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Output discards",
+            "Retransmits",
+            "p99 spikes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "The mismatch",
+      "scenario": "Numbers.",
+      "flow": [
+        "10 Gbps port, 1-min average 2 Gbps (20%)",
+        "Fan-out: 40 servers reply in 2 ms",
+        "Instantaneous 30 Gbps for 2 ms",
+        "Buffer (~12 MB) overflows → drops"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains drops at 'low' utilisation."
+        }
+      ],
+      "code": [],
+      "outcome": "micro-bursts understood."
+    },
+    "summary": {
+      "points": [
+        "Millisecond overloads.",
+        "Averages hide them.",
+        "Incast is common."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can a link show 20% utilisation and still drop packets?",
+        "a": "Utilisation is averaged over seconds or minutes, hiding millisecond bursts that exceed capacity and overflow buffers."
+      }
+    ]
+  },
+  "detecting-micro-bursts": {
+    "core": "To catch micro-bursts, measure at millisecond resolution and look at symptoms. Use switch buffer and queue telemetry (streaming telemetry via gNMI at sub-second rates, vendor buffer monitoring, max-queue-depth counters), interface output discards and pause frames, host-side eBPF or NIC counters for per-millisecond throughput, and correlation with TCP retransmits and p99. Mitigations include deeper-buffer switches, ECN/DCTCP, pacing and staggering fan-out.",
+    "first_principles": {
+      "problem": "Standard SNMP polling every 5 minutes can't show why drops happen.",
+      "truths": [
+        "Resolution must match the phenomenon.",
+        "Switches can report queue peaks.",
+        "Mitigation targets synchronisation or buffers."
+      ],
+      "derivation": [
+        "Enable **streaming telemetry** (gNMI, sub-second).",
+        "Read **buffer peak/discard** counters.",
+        "Capture **ms-level throughput** on hosts.",
+        "Mitigate with **ECN/DCTCP, pacing**.",
+        "**Stagger/jitter** fan-out requests."
+      ]
+    },
+    "analogy": {
+      "title": "High-speed camera at the concert exit",
+      "story": "Normal photos every minute miss the crush; a high-speed camera shows exactly when the doorway jams.",
+      "mapping": [
+        [
+          "High-speed camera",
+          "Streaming telemetry"
+        ],
+        [
+          "Minute photos",
+          "SNMP polling"
+        ],
+        [
+          "Staggered exits",
+          "Jittered fan-out"
+        ]
+      ],
+      "breaks": "Cameras capture everything; telemetry has export limits."
+    },
+    "mindmap": {
+      "center": "Detecting Bursts",
+      "branches": [
+        {
+          "label": "Telemetry",
+          "children": [
+            "gNMI streaming",
+            "Buffer monitoring",
+            "Max queue depth"
+          ]
+        },
+        {
+          "label": "Counters",
+          "children": [
+            "Output discards",
+            "Pause frames",
+            "ECN marks"
+          ]
+        },
+        {
+          "label": "Host",
+          "children": [
+            "eBPF",
+            "NIC stats",
+            "Retransmits"
+          ]
+        },
+        {
+          "label": "Mitigation",
+          "children": [
+            "Deep buffers",
+            "ECN/DCTCP",
+            "Pacing",
+            "Staggered fan-out"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Host ms throughput",
+      "scenario": "bpftrace.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bursts visible; fix by jittering fan-out."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "bpftrace -e 'tracepoint:net:net_dev_xmit /args->len > 0/ { @bytes[nsecs / 1000000] = sum(args->len); } interval:s:1 { print(@bytes); clear(@bytes); }'\n# reveals per-millisecond spikes hidden in per-second averages"
+        }
+      ],
+      "outcome": "hidden congestion made visible."
+    },
+    "summary": {
+      "points": [
+        "Millisecond resolution.",
+        "Buffer counters.",
+        "ECN and staggering."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name two mitigations for TCP incast micro-bursts.",
+        "a": "ECN-based congestion control like DCTCP (or pacing) and staggering or jittering fan-out requests (also deeper-buffer switches)."
+      }
+    ]
+  }
+}
