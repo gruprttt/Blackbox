@@ -1,0 +1,537 @@
+{
+  "introduction-less-is-more": {
+    "core": "WireGuard is a VPN protocol of about 4,000 lines of kernel code, against hundreds of thousands for OpenVPN or IPsec stacks. It has no cipher negotiation, no certificates and no complex state machine: peers are identified by public keys, cryptography is fixed and modern, and configuration is a few lines. The small surface is easier to audit, faster, and harder to misconfigure.",
+    "first_principles": {
+      "problem": "A team's IPsec configuration has 40 parameters, and every outage involves a negotiation mismatch.",
+      "truths": [
+        "Complexity breeds bugs.",
+        "Negotiation adds attack surface.",
+        "Keys can serve as identity."
+      ],
+      "derivation": [
+        "**Fix** the crypto suite.",
+        "Identify peers by **public key**.",
+        "Keep **config minimal**.",
+        "Run **in-kernel** for speed.",
+        "Keep the **codebase auditable**."
+      ]
+    },
+    "analogy": {
+      "title": "A key-and-lock vs a security committee",
+      "story": "Instead of negotiating rules each time, you either have the right key or you don't.",
+      "mapping": [
+        [
+          "Key",
+          "Public key"
+        ],
+        [
+          "Committee",
+          "IKE negotiation"
+        ],
+        [
+          "Lock",
+          "WireGuard interface"
+        ]
+      ],
+      "breaks": "Physical keys can be copied visibly; private keys must be protected digitally."
+    },
+    "mindmap": {
+      "center": "WireGuard Philosophy",
+      "branches": [
+        {
+          "label": "Size",
+          "children": [
+            "~4k LoC"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "No negotiation",
+            "Fixed crypto",
+            "Keys as identity"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Auditable",
+            "Fast",
+            "Simple config"
+          ]
+        },
+        {
+          "label": "Platforms",
+          "children": [
+            "Linux kernel",
+            "wireguard-go",
+            "Windows/macOS/mobile"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Whole config",
+      "scenario": "INI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A complete, secure tunnel in ~10 lines."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = 10.8.0.1/24\nListenPort = 51820\n\n[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nAllowedIPs = 10.8.0.2/32"
+        }
+      ],
+      "outcome": "simplicity as a security feature."
+    },
+    "summary": {
+      "points": [
+        "Tiny codebase.",
+        "No negotiation.",
+        "Keys are identity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is WireGuard's lack of cipher negotiation a security advantage?",
+        "a": "It eliminates downgrade attacks and misconfiguration from mismatched or weak cipher choices."
+      }
+    ]
+  },
+  "the-opinionated-protocol-noise-fixed-cryptography": {
+    "core": "WireGuard's handshake uses the Noise_IK pattern. Curve25519 for key exchange, ChaCha20-Poly1305 for authenticated encryption, BLAKE2s for hashing, SipHash for hashtables, and HKDF for key derivation. A one-round-trip handshake establishes session keys with forward secrecy and identity hiding, and keys rotate every 2 minutes. If an algorithm is ever broken, the protocol version changes; there's nothing to negotiate.",
+    "first_principles": {
+      "problem": "Auditors ask which cipher suites the VPN might negotiate under attack, and the answer for IPsec is a long list.",
+      "truths": [
+        "Fixed primitives remove ambiguity.",
+        "Noise patterns are formally analysed.",
+        "Frequent rekeying limits exposure."
+      ],
+      "derivation": [
+        "Use **Noise_IK** handshake.",
+        "**Curve25519** ECDH.",
+        "**ChaCha20-Poly1305** AEAD.",
+        "**Rekey** every ~2 minutes.",
+        "Optional **PSK** for post-quantum hedge."
+      ]
+    },
+    "analogy": {
+      "title": "A sealed recipe nobody can change",
+      "story": "Every kitchen uses the same proven recipe; if it's ever found flawed, a new edition replaces it entirely.",
+      "mapping": [
+        [
+          "Recipe",
+          "Fixed crypto suite"
+        ],
+        [
+          "New edition",
+          "Protocol version bump"
+        ],
+        [
+          "Kitchens",
+          "Peers"
+        ]
+      ],
+      "breaks": "Recipes don't expire; WireGuard keys rotate every 2 minutes."
+    },
+    "mindmap": {
+      "center": "WireGuard Crypto",
+      "branches": [
+        {
+          "label": "Handshake",
+          "children": [
+            "Noise_IK",
+            "1-RTT"
+          ]
+        },
+        {
+          "label": "Primitives",
+          "children": [
+            "Curve25519",
+            "ChaCha20-Poly1305",
+            "BLAKE2s",
+            "HKDF"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Forward secrecy",
+            "Identity hiding",
+            "Replay protection"
+          ]
+        },
+        {
+          "label": "Rekey",
+          "children": [
+            "~120 s"
+          ]
+        },
+        {
+          "label": "Hedge",
+          "children": [
+            "PresharedKey"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Add a PSK",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Adds symmetric layer against future quantum attacks on Curve25519."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "wg genpsk > peer1.psk\nwg set wg0 peer xTIBA5rbo...= preshared-key ./peer1.psk\nwg show wg0 latest-handshakes"
+        }
+      ],
+      "outcome": "modern fixed cryptography."
+    },
+    "summary": {
+      "points": [
+        "Noise_IK handshake.",
+        "Fixed modern primitives.",
+        "Frequent rekeying."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the optional PresharedKey in WireGuard for?",
+        "a": "An extra symmetric secret mixed into the handshake, hedging against future (e.g. quantum) breaks of Curve25519."
+      }
+    ]
+  },
+  "cryptokey-routing-the-core-innovation": {
+    "core": "Each WireGuard peer has a public key and an AllowedIPs list. Outbound, the destination IP selects the peer whose AllowedIPs contains it (longest match), and the packet is encrypted to that key. Inbound, after decryption, the source IP must fall within the sending peer's AllowedIPs or the packet is dropped. Routing and access control become one table: key ↔ IP ranges.",
+    "first_principles": {
+      "problem": "A spoofed packet claiming to be from another peer's subnet must be rejected.",
+      "truths": [
+        "Keys authenticate peers.",
+        "IP ranges define what each peer may send and receive.",
+        "Combining them prevents spoofing."
+      ],
+      "derivation": [
+        "Map **public key → AllowedIPs**.",
+        "Outbound: **dst IP → peer key**.",
+        "Inbound: **src IP must match** sender's AllowedIPs.",
+        "Use **0.0.0.0/0** for full-tunnel peers.",
+        "Avoid **overlapping** AllowedIPs."
+      ]
+    },
+    "analogy": {
+      "title": "A mail room where each locked mailbox only accepts letters for its residents",
+      "story": "Letters are delivered to the box whose residents match the address, and letters claiming to come from a resident are only accepted with their key.",
+      "mapping": [
+        [
+          "Mailbox",
+          "Peer"
+        ],
+        [
+          "Resident list",
+          "AllowedIPs"
+        ],
+        [
+          "Key",
+          "Public key"
+        ]
+      ],
+      "breaks": "Mailrooms can make exceptions; cryptokey routing never does."
+    },
+    "mindmap": {
+      "center": "Cryptokey Routing",
+      "branches": [
+        {
+          "label": "Table",
+          "children": [
+            "Public key ↔ AllowedIPs"
+          ]
+        },
+        {
+          "label": "Outbound",
+          "children": [
+            "Dst lookup → encrypt to key"
+          ]
+        },
+        {
+          "label": "Inbound",
+          "children": [
+            "Decrypt → verify src in AllowedIPs"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Site subnets",
+            "Full tunnel 0/0"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Overlaps",
+            "Missing routes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Site-to-site peers",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "10.1/16 traffic only to/from office key; spoofing impossible."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[Peer]   # office\nPublicKey = OFFICE_PUB=\nAllowedIPs = 10.1.0.0/16\nEndpoint = office.example.com:51820\n\n[Peer]   # datacenter\nPublicKey = DC_PUB=\nAllowedIPs = 10.2.0.0/16\nEndpoint = dc.example.com:51820"
+        }
+      ],
+      "outcome": "routing and authentication unified."
+    },
+    "summary": {
+      "points": [
+        "Key ↔ IP ranges.",
+        "Outbound selects peer.",
+        "Inbound verifies source."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens if a peer sends a decrypted packet with a source IP outside its AllowedIPs?",
+        "a": "WireGuard drops it, preventing that peer from spoofing other addresses."
+      }
+    ]
+  },
+  "statelessness-and-silence": {
+    "core": "WireGuard is silent by default: it doesn't respond to unauthenticated packets at all, so port scanners see nothing. It's effectively stateless from the user's view: no connection to 'bring up'; handshakes happen on demand when there's traffic and keys expire automatically. Peers roam freely, since the endpoint updates to the latest authenticated source address. PersistentKeepalive keeps NAT mappings alive for peers behind NAT.",
+    "first_principles": {
+      "problem": "A laptop moves from Wi-Fi to 4G, and the VPN must keep working without reconnecting.",
+      "truths": [
+        "Unanswered probes reveal nothing.",
+        "Authenticated packets prove identity wherever they come from.",
+        "NAT mappings time out."
+      ],
+      "derivation": [
+        "**Ignore** unauthenticated packets.",
+        "**Handshake on demand**.",
+        "Update **endpoint** on authenticated packets (roaming).",
+        "Set **PersistentKeepalive = 25** behind NAT.",
+        "Monitor **latest-handshake** age."
+      ]
+    },
+    "analogy": {
+      "title": "A door with no bell that only opens for the right key",
+      "story": "Strangers knocking get no answer; the owner can arrive at any entrance and walk in.",
+      "mapping": [
+        [
+          "No answer",
+          "Silence to scanners"
+        ],
+        [
+          "Any entrance",
+          "Roaming endpoints"
+        ],
+        [
+          "Propping door",
+          "Keepalive"
+        ]
+      ],
+      "breaks": "Doors don't time out; NAT mappings do, hence keepalives."
+    },
+    "mindmap": {
+      "center": "Silence & Statelessness",
+      "branches": [
+        {
+          "label": "Silence",
+          "children": [
+            "No response to unauth",
+            "Stealth"
+          ]
+        },
+        {
+          "label": "On-demand",
+          "children": [
+            "Handshake with traffic",
+            "No connect step"
+          ]
+        },
+        {
+          "label": "Roaming",
+          "children": [
+            "Endpoint follows latest auth packet"
+          ]
+        },
+        {
+          "label": "NAT",
+          "children": [
+            "PersistentKeepalive"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "wg show latest-handshakes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Roaming check",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Seamless roaming without reconnect."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "wg show wg0 endpoints\n# PEER_PUB=  203.0.113.50:41022   (Wi-Fi)\n# ...switch to 4G...\nwg show wg0 endpoints\n# PEER_PUB=  198.51.100.77:60311  (cellular) — updated automatically"
+        }
+      ],
+      "outcome": "stealthy, roaming-friendly VPN."
+    },
+    "summary": {
+      "points": [
+        "Silent to strangers.",
+        "On-demand handshakes.",
+        "Roaming built in."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does WireGuard need PersistentKeepalive behind NAT?",
+        "a": "Without periodic traffic, the NAT mapping expires, and inbound packets from the other peer can't reach the client."
+      }
+    ]
+  },
+  "modern-meshes-tailscale-and-netmaker": {
+    "core": "WireGuard leaves key distribution, peer discovery and NAT traversal to you. Mesh products add a control plane: Tailscale (and the open-source Headscale) or Netmaker distribute keys and peer lists via SSO-authenticated coordination servers, perform NAT traversal (STUN, hole punching, DERP relays), push ACLs and DNS (MagicDNS), and give every device direct encrypted paths to every other, a zero-trust overlay.",
+    "first_principles": {
+      "problem": "Manually managing WireGuard keys and AllowedIPs for 300 devices across homes, offices and clouds is unmanageable.",
+      "truths": [
+        "WireGuard is a data plane only.",
+        "Coordination can be automated.",
+        "Most devices are behind NAT."
+      ],
+      "derivation": [
+        "Use a **coordination server** for keys/peers.",
+        "Authenticate devices via **SSO/IdP**.",
+        "Traverse NAT with **STUN + relays**.",
+        "Enforce **ACLs** centrally.",
+        "Use **subnet routers/exit nodes** for legacy networks."
+      ]
+    },
+    "analogy": {
+      "title": "A switchboard that introduces callers then steps aside",
+      "story": "It tells each phone how to reach the other directly, and only patches the call through itself if a direct line can't be made.",
+      "mapping": [
+        [
+          "Switchboard",
+          "Coordination server"
+        ],
+        [
+          "Direct line",
+          "Peer-to-peer WireGuard"
+        ],
+        [
+          "Patching through",
+          "DERP relay"
+        ]
+      ],
+      "breaks": "Switchboards hear calls; Tailscale relays only see encrypted packets."
+    },
+    "mindmap": {
+      "center": "WireGuard Meshes",
+      "branches": [
+        {
+          "label": "Products",
+          "children": [
+            "Tailscale",
+            "Headscale",
+            "Netmaker",
+            "NetBird"
+          ]
+        },
+        {
+          "label": "Control plane",
+          "children": [
+            "Key distribution",
+            "Peer lists",
+            "SSO",
+            "ACLs"
+          ]
+        },
+        {
+          "label": "NAT traversal",
+          "children": [
+            "STUN",
+            "Hole punching",
+            "DERP relays"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "MagicDNS",
+            "Subnet routers",
+            "Exit nodes"
+          ]
+        },
+        {
+          "label": "Data plane",
+          "children": [
+            "WireGuard"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ACL policy",
+      "scenario": "Tailscale HuJSON.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only SREs reach prod SSH/HTTPS; direct encrypted paths."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"groups\": { \"group:sre\": [\"alice@acme.com\", \"bob@acme.com\"] },\n  \"tagOwners\": { \"tag:prod\": [\"group:sre\"] },\n  \"acls\": [\n    { \"action\": \"accept\", \"src\": [\"group:sre\"], \"dst\": [\"tag:prod:22,443\"] }\n  ]\n}"
+        }
+      ],
+      "outcome": "managed zero-trust mesh."
+    },
+    "summary": {
+      "points": [
+        "WireGuard data plane.",
+        "Coordination control plane.",
+        "NAT traversal + ACLs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is a DERP relay used for in Tailscale?",
+        "a": "Relaying encrypted WireGuard traffic when NAT traversal fails to establish a direct peer-to-peer path."
+      }
+    ]
+  }
+}

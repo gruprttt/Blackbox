@@ -1,0 +1,640 @@
+{
+  "introduction-the-hidden-cloud-tax": {
+    "core": "Cloud providers charge little or nothing for data in, but bill data out to the internet, across regions, across availability zones and through NAT gateways. Those charges are invisible in architecture diagrams but can exceed compute costs for data-heavy systems. Egress cost engineering means knowing which paths cost what, then designing traffic to take the cheapest acceptable one.",
+    "first_principles": {
+      "problem": "A logging pipeline's data transfer bill is three times its compute bill, and nobody knows why.",
+      "truths": [
+        "Ingress is free, egress is not.",
+        "Path determines price.",
+        "Diagrams rarely show bytes."
+      ],
+      "derivation": [
+        "Map **traffic flows** with bytes.",
+        "Price each **path type**.",
+        "Find **top talkers** (Cost Explorer, flow logs).",
+        "Redesign **expensive paths**.",
+        "Monitor **transfer costs** continuously."
+      ]
+    },
+    "analogy": {
+      "title": "Free entry, paid exit car park",
+      "story": "Getting in costs nothing, but every exit has a fee, and some exits cost more than others.",
+      "mapping": [
+        [
+          "Entry",
+          "Ingress"
+        ],
+        [
+          "Exits",
+          "Egress paths"
+        ],
+        [
+          "Fees",
+          "$/GB"
+        ]
+      ],
+      "breaks": "Car parks show fees at exits; cloud fees show up a month later."
+    },
+    "mindmap": {
+      "center": "Egress Costs",
+      "branches": [
+        {
+          "label": "Paths",
+          "children": [
+            "Internet",
+            "Cross-region",
+            "Cross-AZ",
+            "NAT processing",
+            "Endpoints"
+          ]
+        },
+        {
+          "label": "Visibility",
+          "children": [
+            "Cost Explorer",
+            "CUR",
+            "VPC Flow Logs"
+          ]
+        },
+        {
+          "label": "Levers",
+          "children": [
+            "Endpoints",
+            "Zone affinity",
+            "CDN",
+            "Compression"
+          ]
+        },
+        {
+          "label": "Mindset",
+          "children": [
+            "Bytes × path price"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find top talkers",
+      "scenario": "CUR query concept.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reveals NAT bytes and cross-AZ as top costs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "sql",
+          "text": "SELECT line_item_usage_type, SUM(line_item_unblended_cost) AS cost\nFROM cur\nWHERE line_item_usage_type LIKE '%DataTransfer%' OR line_item_usage_type LIKE '%NatGateway-Bytes%'\nGROUP BY 1 ORDER BY cost DESC LIMIT 10;"
+        }
+      ],
+      "outcome": "hidden costs made visible."
+    },
+    "summary": {
+      "points": [
+        "Egress is billed.",
+        "Paths differ in price.",
+        "Measure then redesign."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are egress costs often missed in design reviews?",
+        "a": "Architecture diagrams show components, not byte volumes or the per-GB price of each path between them."
+      }
+    ]
+  },
+  "the-hierarchy-of-cost": {
+    "core": "Rough AWS price tiers for data transfer, from cheapest: same-AZ private IP (free); VPC gateway endpoints for S3/DynamoDB (free); cross-AZ ($0.01/GB each way, $0.02 round trip); interface endpoints and PrivateLink (~$0.01/GB plus hourly); NAT gateway processing ($0.045/GB on top of other charges); cross-region (~$0.02/GB); internet egress (~$0.05–0.09/GB). Design to push traffic up this hierarchy.",
+    "first_principles": {
+      "problem": "Engineers can't estimate whether a design change saves money because they don't know relative path prices.",
+      "truths": [
+        "Paths have very different prices.",
+        "Charges can stack (NAT + internet).",
+        "Free paths exist."
+      ],
+      "derivation": [
+        "Prefer **same-AZ** traffic.",
+        "Use **gateway endpoints** for S3/DynamoDB.",
+        "Use **PrivateLink** instead of NAT for AWS APIs.",
+        "Avoid **cross-region** chatter.",
+        "Use **CDN** for internet egress."
+      ]
+    },
+    "analogy": {
+      "title": "Postage rates",
+      "story": "Hand delivery next door is free, local post is cheap, international express is expensive, and some routes add surcharges.",
+      "mapping": [
+        [
+          "Next door",
+          "Same-AZ"
+        ],
+        [
+          "Local post",
+          "Cross-AZ"
+        ],
+        [
+          "International",
+          "Internet egress"
+        ],
+        [
+          "Surcharge",
+          "NAT processing"
+        ]
+      ],
+      "breaks": "Postage is per item; cloud is per GB and stacks across hops."
+    },
+    "mindmap": {
+      "center": "Cost Hierarchy",
+      "branches": [
+        {
+          "label": "Free",
+          "children": [
+            "Same AZ",
+            "Gateway endpoints",
+            "Ingress"
+          ]
+        },
+        {
+          "label": "Cheap",
+          "children": [
+            "Cross-AZ $0.01/GB/dir",
+            "PrivateLink ~$0.01/GB"
+          ]
+        },
+        {
+          "label": "Moderate",
+          "children": [
+            "Cross-region ~$0.02/GB"
+          ]
+        },
+        {
+          "label": "Expensive",
+          "children": [
+            "NAT $0.045/GB",
+            "Internet $0.05–0.09/GB"
+          ]
+        },
+        {
+          "label": "Stacking",
+          "children": [
+            "NAT + internet",
+            "Cross-AZ + NAT"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same 10 TB, different paths",
+      "scenario": "Monthly cost.",
+      "flow": [
+        "Via gateway endpoint: $0",
+        "Cross-AZ: ~$200",
+        "Via NAT gateway: ~$450",
+        "To internet: ~$900"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Path choice changes cost by orders of magnitude."
+        }
+      ],
+      "code": [],
+      "outcome": "price-aware routing."
+    },
+    "summary": {
+      "points": [
+        "Know the tiers.",
+        "Avoid stacking.",
+        "Climb toward free."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can NAT gateway traffic to S3 be doubly wasteful?",
+        "a": "You pay NAT processing per GB when a free S3 gateway endpoint could carry the same traffic."
+      }
+    ]
+  },
+  "the-nat-gateway-trap": {
+    "core": "Private subnets often route 0.0.0.0/0 through a NAT gateway, so everything outbound, including S3, ECR image pulls, CloudWatch logs and package downloads, is charged $0.045/GB in processing. Container platforms pulling large images and log shippers can push terabytes through NAT. A NAT in another AZ adds cross-AZ charges too. The fixes are endpoints, per-AZ NATs and caching.",
+    "first_principles": {
+      "problem": "An EKS cluster pulling images from ECR racks up $8,000/month in NAT gateway processing.",
+      "truths": [
+        "Default routes send everything to NAT.",
+        "NAT charges per GB processed.",
+        "Many destinations are AWS services."
+      ],
+      "derivation": [
+        "Add **S3 gateway endpoint** (ECR layers live in S3).",
+        "Add **interface endpoints** for ECR API, logs, STS.",
+        "Use **per-AZ NAT** to avoid cross-AZ.",
+        "**Cache** images and packages (pull-through cache).",
+        "Monitor **NAT BytesOut** metrics."
+      ]
+    },
+    "analogy": {
+      "title": "Paying a toll for trips to the shop next door",
+      "story": "All roads out of your street pass a toll booth, even trips to the neighbour's shop that has a free back gate.",
+      "mapping": [
+        [
+          "Toll booth",
+          "NAT gateway"
+        ],
+        [
+          "Back gate",
+          "VPC endpoint"
+        ],
+        [
+          "Neighbour's shop",
+          "AWS service"
+        ]
+      ],
+      "breaks": "Tolls are visible; NAT charges appear only on the bill."
+    },
+    "mindmap": {
+      "center": "NAT Trap",
+      "branches": [
+        {
+          "label": "Culprits",
+          "children": [
+            "ECR pulls",
+            "S3",
+            "CloudWatch Logs",
+            "Package repos",
+            "Cross-AZ NAT"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "S3 gateway endpoint",
+            "Interface endpoints",
+            "Per-AZ NAT",
+            "Pull-through caches"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "BytesOutToDestination",
+            "Flow logs by dst"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ECR without NAT",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Image pulls and logs bypass NAT entirely."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "locals { svcs = [\"ecr.api\", \"ecr.dkr\", \"logs\", \"sts\"] }\nresource \"aws_vpc_endpoint\" \"iface\" {\n  for_each            = toset(local.svcs)\n  vpc_id              = aws_vpc.main.id\n  service_name        = \"com.amazonaws.us-east-1.${each.key}\"\n  vpc_endpoint_type   = \"Interface\"\n  subnet_ids          = aws_subnet.private[*].id\n  private_dns_enabled = true\n}\n# plus S3 gateway endpoint for image layers"
+        }
+      ],
+      "outcome": "NAT costs slashed."
+    },
+    "summary": {
+      "points": [
+        "Default route hides costs.",
+        "AWS traffic through NAT is waste.",
+        "Endpoints and caching."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does an ECR image pull need an S3 gateway endpoint to fully avoid NAT?",
+        "a": "ECR stores image layers in S3, so layer downloads go to S3 even when ECR API endpoints exist."
+      }
+    ]
+  },
+  "solution-1-gateway-endpoints-the-free-lunch": {
+    "core": "Gateway VPC endpoints exist only for S3 and DynamoDB. They're route-table entries that send traffic for those services' prefix lists directly over AWS's network, with no hourly or per-GB charge. Add them to every private route table, and use endpoint policies and bucket policies (aws:SourceVpce) to restrict access, which improves both cost and security.",
+    "first_principles": {
+      "problem": "A data lake reads 200 TB/month from S3 through NAT gateways, costing $9,000 in processing fees.",
+      "truths": [
+        "S3/DynamoDB have free gateway endpoints.",
+        "They work by routing, not ENIs.",
+        "Policies can restrict usage."
+      ],
+      "derivation": [
+        "Create **gateway endpoint** per VPC.",
+        "Associate with **all private route tables**.",
+        "Add **endpoint policy** (allowed buckets).",
+        "Use **aws:SourceVpce** in bucket policies.",
+        "Verify with **flow logs/NAT metrics**."
+      ]
+    },
+    "analogy": {
+      "title": "A free private tunnel to the warehouse",
+      "story": "Instead of driving through the toll gate, a tunnel goes straight to the warehouse at no charge.",
+      "mapping": [
+        [
+          "Tunnel",
+          "Gateway endpoint"
+        ],
+        [
+          "Warehouse",
+          "S3/DynamoDB"
+        ],
+        [
+          "Toll gate",
+          "NAT"
+        ]
+      ],
+      "breaks": "Tunnels are physical; gateway endpoints only work in-region."
+    },
+    "mindmap": {
+      "center": "Gateway Endpoints",
+      "branches": [
+        {
+          "label": "Services",
+          "children": [
+            "S3",
+            "DynamoDB"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Route table prefix list"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Free"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Endpoint policy",
+            "aws:SourceVpce"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Same region",
+            "Not from on-prem"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Lock bucket to VPC endpoint",
+      "scenario": "Bucket policy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Free path and bucket reachable only via the endpoint."
+        }
+      ],
+      "code": [
+        {
+          "lang": "json",
+          "text": "{\n  \"Effect\": \"Deny\",\n  \"Principal\": \"*\",\n  \"Action\": \"s3:*\",\n  \"Resource\": [\"arn:aws:s3:::acme-lake\", \"arn:aws:s3:::acme-lake/*\"],\n  \"Condition\": { \"StringNotEquals\": { \"aws:SourceVpce\": \"vpce-0abc123\" } }\n}"
+        }
+      ],
+      "outcome": "free, secure S3/DynamoDB access."
+    },
+    "summary": {
+      "points": [
+        "Free for S3/DynamoDB.",
+        "Route-table based.",
+        "Add policies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Can on-premises clients use an S3 gateway endpoint over Direct Connect?",
+        "a": "No, gateway endpoints only serve traffic originating in the VPC; on-prem needs an S3 interface endpoint."
+      }
+    ]
+  },
+  "solution-2-interface-endpoints-privatelink": {
+    "core": "Interface endpoints (PrivateLink) place ENIs with private IPs in your subnets for most AWS services and third-party or internal services. With private DNS, the service hostname resolves to those IPs. They cost about $0.01/hour per AZ plus ~$0.01/GB, much cheaper than NAT's $0.045/GB at volume, and keep traffic off the internet. With many services and VPCs, centralise them in a shared VPC.",
+    "first_principles": {
+      "problem": "Thousands of instances call SQS, KMS and Secrets Manager through NAT gateways, costing more than the services themselves.",
+      "truths": [
+        "Endpoint ENIs give private access.",
+        "Per-GB cost is lower than NAT.",
+        "Hourly cost adds up across many endpoints and AZs."
+      ],
+      "derivation": [
+        "Create endpoints for **high-volume services**.",
+        "Enable **private DNS**.",
+        "Restrict with **SGs and endpoint policies**.",
+        "**Centralise** endpoints in a hub VPC for many VPCs.",
+        "Compare **hourly vs per-GB** break-even."
+      ]
+    },
+    "analogy": {
+      "title": "A private service counter inside your office building",
+      "story": "Instead of travelling to the bank, a branch counter opens in your lobby for a small rent.",
+      "mapping": [
+        [
+          "Lobby counter",
+          "Interface endpoint ENI"
+        ],
+        [
+          "Rent",
+          "Hourly fee"
+        ],
+        [
+          "Bank trip",
+          "NAT to internet"
+        ]
+      ],
+      "breaks": "Counters serve one building; centralised endpoints need DNS sharing across VPCs."
+    },
+    "mindmap": {
+      "center": "PrivateLink",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "ENIs in subnets",
+            "Private DNS"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "~$0.01/h/AZ",
+            "~$0.01/GB"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "SGs",
+            "Endpoint policies",
+            "No internet path"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "Central endpoint VPC",
+            "Route 53 resolver rules"
+          ]
+        },
+        {
+          "label": "Also",
+          "children": [
+            "Expose your own services"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Break-even",
+      "scenario": "Math.",
+      "flow": [
+        "Endpoint: 3 AZ × $0.01 × 730 h ≈ $22/mo + $0.01/GB",
+        "NAT: $0.045/GB",
+        "Break-even ≈ 630 GB/month",
+        "SQS at 5 TB/mo: saves ~$170/mo per service"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "High-volume services pay for themselves quickly."
+        }
+      ],
+      "code": [],
+      "outcome": "cheaper private AWS API access."
+    },
+    "summary": {
+      "points": [
+        "ENIs with private DNS.",
+        "Cheaper than NAT at volume.",
+        "Centralise at scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "When might an interface endpoint cost more than using NAT?",
+        "a": "For very low-volume services, where the hourly per-AZ charge exceeds the NAT per-GB savings."
+      }
+    ]
+  },
+  "zone-affinity-keeping-traffic-local": {
+    "core": "Cross-AZ traffic costs $0.01/GB in each direction and adds latency. Chatty microservices spread evenly across AZs send most calls across zones by default. Zone affinity routes requests to same-AZ backends when they're healthy and have capacity: Kubernetes topology-aware routing (trafficDistribution: PreferClose), Envoy/Istio locality load balancing, ALB cross-zone settings, and AZ-aware Kafka consumers (rack awareness).",
+    "first_principles": {
+      "problem": "A microservices mesh generates 400 TB/month of cross-AZ traffic, costing $8,000.",
+      "truths": [
+        "Random balancing crosses AZs ~2/3 of the time (3 AZs).",
+        "Same-AZ is free.",
+        "Affinity must not overload a zone."
+      ],
+      "derivation": [
+        "Enable **topology-aware routing**.",
+        "Use **locality-weighted** LB in meshes.",
+        "Use **rack-aware** Kafka consumers/replicas.",
+        "Keep **balanced capacity per AZ**.",
+        "Fail over **cross-zone** on unhealthy."
+      ]
+    },
+    "analogy": {
+      "title": "Shopping at the store in your own neighbourhood",
+      "story": "Use the local branch when it's open and stocked; cross town only if it's closed.",
+      "mapping": [
+        [
+          "Neighbourhood",
+          "AZ"
+        ],
+        [
+          "Local branch",
+          "Same-AZ backend"
+        ],
+        [
+          "Crossing town",
+          "Cross-AZ call"
+        ]
+      ],
+      "breaks": "Shops don't need balanced customers; skewed AZ capacity overloads pods."
+    },
+    "mindmap": {
+      "center": "Zone Affinity",
+      "branches": [
+        {
+          "label": "Cost",
+          "children": [
+            "$0.01/GB/direction cross-AZ"
+          ]
+        },
+        {
+          "label": "Kubernetes",
+          "children": [
+            "trafficDistribution: PreferClose",
+            "Topology-aware hints"
+          ]
+        },
+        {
+          "label": "Mesh",
+          "children": [
+            "Locality LB",
+            "Failover priorities"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "Kafka rack awareness",
+            "Read replicas per AZ"
+          ]
+        },
+        {
+          "label": "Guardrails",
+          "children": [
+            "Even capacity",
+            "Health-based failover"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Kubernetes service",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Most calls stay in-zone; cross-AZ bill drops sharply."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: v1\nkind: Service\nmetadata: { name: orders }\nspec:\n  selector: { app: orders }\n  ports: [{ port: 80, targetPort: 8080 }]\n  trafficDistribution: PreferClose   # same-zone endpoints when available"
+        }
+      ],
+      "outcome": "cheaper, faster service calls."
+    },
+    "summary": {
+      "points": [
+        "Cross-AZ costs.",
+        "Prefer local.",
+        "Keep capacity balanced."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must zone-affine routing keep capacity balanced across AZs?",
+        "a": "If one zone has fewer backends, keeping its traffic local can overload them while other zones sit idle."
+      }
+    ]
+  }
+}

@@ -1,0 +1,644 @@
+{
+  "introduction-the-empty-server-problem": {
+    "core": "A new physical server arrives with no OS, and no one wants to plug in a USB stick for each of 500 machines. Bare-metal provisioning automates it from power-on: out-of-band management (IPMI/Redfish) controls power and boot order remotely, network boot (PXE/iPXE) loads an installer over the network, and workflow engines (Tinkerbell, MAAS, Ironic) take the machine from blank disk to configured node.",
+    "first_principles": {
+      "problem": "A data centre expansion of 400 servers would take weeks of manual OS installs.",
+      "truths": [
+        "Servers can be controlled out of band.",
+        "Firmware can boot from the network.",
+        "Installs can be scripted end to end."
+      ],
+      "derivation": [
+        "Control power via **BMC (IPMI/Redfish)**.",
+        "Set **network boot** order.",
+        "Serve **DHCP + TFTP/HTTP** boot files.",
+        "Run **automated installer/workflow**.",
+        "Hand off to **config management/Kubernetes**."
+      ]
+    },
+    "analogy": {
+      "title": "A factory line for computers",
+      "story": "Each machine rolls in, gets its brain installed automatically, and leaves ready to work.",
+      "mapping": [
+        [
+          "Factory line",
+          "Provisioning pipeline"
+        ],
+        [
+          "Remote switch",
+          "BMC"
+        ],
+        [
+          "Installer station",
+          "PXE/iPXE"
+        ]
+      ],
+      "breaks": "Factory lines are physical; provisioning failures are often silent firmware quirks."
+    },
+    "mindmap": {
+      "center": "Bare-Metal Provisioning",
+      "branches": [
+        {
+          "label": "Control",
+          "children": [
+            "BMC",
+            "IPMI",
+            "Redfish"
+          ]
+        },
+        {
+          "label": "Boot",
+          "children": [
+            "PXE",
+            "iPXE",
+            "UEFI HTTP boot"
+          ]
+        },
+        {
+          "label": "Delivery",
+          "children": [
+            "DHCP",
+            "TFTP",
+            "HTTP"
+          ]
+        },
+        {
+          "label": "Orchestration",
+          "children": [
+            "Tinkerbell",
+            "MAAS",
+            "Ironic"
+          ]
+        },
+        {
+          "label": "Handoff",
+          "children": [
+            "Ansible",
+            "Kubernetes"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Zero-touch flow",
+      "scenario": "Steps.",
+      "flow": [
+        "Redfish: set one-time PXE boot, power on",
+        "DHCP gives IP + boot file",
+        "iPXE loads installer over HTTP",
+        "Workflow writes image, reboots to disk"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hundreds of servers provisioned in parallel."
+        }
+      ],
+      "code": [],
+      "outcome": "hands-off server installs."
+    },
+    "summary": {
+      "points": [
+        "Out-of-band control.",
+        "Network boot.",
+        "Automated workflows."
+      ]
+    },
+    "check": [
+      {
+        "q": "What component lets you power-cycle a server with no OS?",
+        "a": "The baseboard management controller (BMC), accessed via IPMI or Redfish."
+      }
+    ]
+  },
+  "ipmi-and-redfish-out-of-band-management": {
+    "core": "Every server has a BMC, a small independent computer (iDRAC, iLO, XClarity) with its own network port and power. It controls power, boot device, virtual console and media, sensors and logs even when the OS is dead. IPMI is the old UDP-based protocol with weak security; Redfish is the modern REST/JSON API over HTTPS. BMCs are highly privileged, so isolate them on a management network.",
+    "first_principles": {
+      "problem": "A server hangs at 3 a.m. in a remote data centre and nobody can reach it physically.",
+      "truths": [
+        "The BMC runs independently of the host OS.",
+        "Remote power and console enable recovery.",
+        "BMCs have a history of vulnerabilities."
+      ],
+      "derivation": [
+        "Use **Redfish** over IPMI where possible.",
+        "Put BMCs on an **isolated mgmt VLAN**.",
+        "Change **default credentials**.",
+        "Patch **BMC firmware**.",
+        "Automate with **ipmitool/redfish APIs**."
+      ]
+    },
+    "analogy": {
+      "title": "A remote caretaker living in the basement",
+      "story": "Even if the household is asleep, the caretaker can flip breakers, open doors and report the temperature.",
+      "mapping": [
+        [
+          "Caretaker",
+          "BMC"
+        ],
+        [
+          "Breakers",
+          "Power control"
+        ],
+        [
+          "Front door",
+          "Virtual console"
+        ]
+      ],
+      "breaks": "Caretakers are trusted people; BMCs are frequent attack targets."
+    },
+    "mindmap": {
+      "center": "Out-of-Band Mgmt",
+      "branches": [
+        {
+          "label": "BMC",
+          "children": [
+            "iDRAC",
+            "iLO",
+            "XClarity",
+            "OpenBMC"
+          ]
+        },
+        {
+          "label": "Protocols",
+          "children": [
+            "IPMI (legacy)",
+            "Redfish (REST)"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "Power",
+            "Boot order",
+            "KVM",
+            "Virtual media",
+            "Sensors"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Mgmt VLAN",
+            "Rotate creds",
+            "Firmware patches"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Redfish one-time PXE",
+      "scenario": "curl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Server reboots into network installer remotely."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -sku admin:$PW -X PATCH https://bmc-12/redfish/v1/Systems/1 \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"Boot\":{\"BootSourceOverrideTarget\":\"Pxe\",\"BootSourceOverrideEnabled\":\"Once\"}}'\ncurl -sku admin:$PW -X POST https://bmc-12/redfish/v1/Systems/1/Actions/ComputerSystem.Reset \\\n  -H 'Content-Type: application/json' -d '{\"ResetType\":\"ForceRestart\"}'"
+        }
+      ],
+      "outcome": "remote control of hardware."
+    },
+    "summary": {
+      "points": [
+        "Independent BMC.",
+        "Redfish over IPMI.",
+        "Isolate and patch."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why put BMCs on a separate management network?",
+        "a": "They have full control of the hardware and a history of vulnerabilities, so exposure must be minimised."
+      }
+    ]
+  },
+  "pxe-boot-booting-from-the-network": {
+    "core": "PXE is firmware-level network boot. The NIC broadcasts a DHCP request with PXE options; the DHCP server returns an IP plus next-server and a boot filename; the firmware downloads that small bootloader via TFTP and runs it, and it then fetches the kernel and initrd. BIOS and UEFI need different boot files, and DHCP must hand out the right one based on client architecture.",
+    "first_principles": {
+      "problem": "UEFI servers fail to PXE boot because DHCP hands out a legacy BIOS bootloader.",
+      "truths": [
+        "Firmware has a minimal network stack.",
+        "DHCP can point to boot files.",
+        "Architectures need different binaries."
+      ],
+      "derivation": [
+        "NIC sends **DHCP with PXE options**.",
+        "DHCP returns **next-server + filename**.",
+        "Firmware fetches via **TFTP**.",
+        "Serve **BIOS vs UEFI** files by option 93.",
+        "Chain-load **iPXE** for more features."
+      ]
+    },
+    "analogy": {
+      "title": "A new employee given only a phone number on day one",
+      "story": "They call it, get directions to a desk with a manual, and the manual tells them everything else.",
+      "mapping": [
+        [
+          "Phone number",
+          "DHCP next-server"
+        ],
+        [
+          "Manual",
+          "Bootloader"
+        ],
+        [
+          "Everything else",
+          "Kernel + installer"
+        ]
+      ],
+      "breaks": "Employees can improvise; firmware can't if a file is missing."
+    },
+    "mindmap": {
+      "center": "PXE",
+      "branches": [
+        {
+          "label": "Steps",
+          "children": [
+            "DHCP discover (PXE)",
+            "Offer with next-server/filename",
+            "TFTP download",
+            "Execute bootloader"
+          ]
+        },
+        {
+          "label": "Arch",
+          "children": [
+            "BIOS pxelinux.0",
+            "UEFI grubx64.efi/ipxe.efi",
+            "Option 93"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "TFTP slow",
+            "Small files"
+          ]
+        },
+        {
+          "label": "Upgrade",
+          "children": [
+            "Chain to iPXE"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "dnsmasq PXE",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each firmware type gets the right bootloader."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "dhcp-range=10.10.0.100,10.10.0.200,12h\ndhcp-match=set:efi64,option:client-arch,7\ndhcp-boot=tag:efi64,ipxe.efi\ndhcp-boot=tag:!efi64,undionly.kpxe\nenable-tftp\ntftp-root=/srv/tftp"
+        }
+      ],
+      "outcome": "network boot working."
+    },
+    "summary": {
+      "points": [
+        "DHCP + TFTP.",
+        "Architecture-specific files.",
+        "Chain to iPXE."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a DHCP server know whether to serve a BIOS or UEFI boot file?",
+        "a": "From DHCP option 93 (client system architecture) sent by the PXE client."
+      }
+    ]
+  },
+  "tftp-the-protocol-of-last-resort": {
+    "core": "TFTP is tiny: UDP port 69, no authentication, no directory listing, lock-step 512-byte blocks with an ACK for each. That simplicity is why firmware can implement it in a few kilobytes, and why it's painfully slow for large files and fragile across lossy networks or firewalls (it uses ephemeral ports for data). Use it only to fetch a small bootloader, then switch to HTTP.",
+    "first_principles": {
+      "problem": "Downloading a 300 MB installer image over TFTP takes 20 minutes per server and often times out.",
+      "truths": [
+        "Firmware needs a minimal protocol.",
+        "Lock-step transfers are slow.",
+        "Unauthenticated protocols must stay on trusted networks."
+      ],
+      "derivation": [
+        "Use TFTP **only for bootloaders**.",
+        "Increase **blksize** option if supported.",
+        "Allow **ephemeral ports** in firewalls (or use helpers).",
+        "Keep TFTP on **provisioning VLAN**.",
+        "Switch to **HTTP** via iPXE/UEFI HTTP boot."
+      ]
+    },
+    "analogy": {
+      "title": "Passing notes one sentence at a time",
+      "story": "Each sentence must be acknowledged before the next; fine for a short note, terrible for a book.",
+      "mapping": [
+        [
+          "Sentence",
+          "512-byte block"
+        ],
+        [
+          "Acknowledgement",
+          "ACK"
+        ],
+        [
+          "Book",
+          "Installer image"
+        ]
+      ],
+      "breaks": "Notes can be re-read; lost TFTP packets stall everything until timeout."
+    },
+    "mindmap": {
+      "center": "TFTP",
+      "branches": [
+        {
+          "label": "Design",
+          "children": [
+            "UDP 69",
+            "No auth",
+            "Lock-step",
+            "512-byte blocks"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "blksize",
+            "tsize",
+            "windowsize"
+          ]
+        },
+        {
+          "label": "Pain",
+          "children": [
+            "Slow",
+            "Firewall unfriendly",
+            "Lossy networks"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Bootloaders only"
+          ]
+        },
+        {
+          "label": "Replace",
+          "children": [
+            "HTTP via iPXE"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Throughput math",
+      "scenario": "Numbers.",
+      "flow": [
+        "512 B per round trip at 1 ms RTT ≈ 0.5 MB/s",
+        "300 MB → ~10 min",
+        "HTTP over TCP at 1 Gbps → ~3 s",
+        "Use TFTP for 1 MB iPXE only"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Boot time slashed."
+        }
+      ],
+      "code": [],
+      "outcome": "TFTP kept in its place."
+    },
+    "summary": {
+      "points": [
+        "Minimal and slow.",
+        "Bootloaders only.",
+        "Hand off to HTTP."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is TFTP so slow for large files?",
+        "a": "It sends small blocks in lock-step, waiting for an ACK after each, so throughput is limited to block size per round trip."
+      }
+    ]
+  },
+  "ipxe-the-modern-upgrade": {
+    "core": "iPXE is an open-source network bootloader that firmware can chain-load (or that's flashed onto NICs). It supports HTTP and HTTPS, DNS, VLANs, iSCSI and scripting, so the boot process becomes a programmable script fetched from a server. It can choose an OS per machine (by MAC or serial), pull kernels over fast HTTP, and verify images with signatures.",
+    "first_principles": {
+      "problem": "Different server roles need different OS images, and static PXE menus can't decide automatically.",
+      "truths": [
+        "Boot logic can be dynamic.",
+        "HTTP is faster and more flexible than TFTP.",
+        "Machines can be identified at boot."
+      ],
+      "derivation": [
+        "**Chain-load** iPXE from PXE.",
+        "Fetch a **boot script** over HTTP.",
+        "Template scripts by **MAC/serial/UUID**.",
+        "Boot **kernel + initrd** over HTTP(S).",
+        "Use **code signing** for integrity."
+      ]
+    },
+    "analogy": {
+      "title": "A smart receptionist instead of a fixed sign",
+      "story": "Instead of one sign for everyone, the receptionist checks your badge and sends you to your floor.",
+      "mapping": [
+        [
+          "Badge",
+          "MAC/serial"
+        ],
+        [
+          "Receptionist",
+          "iPXE script server"
+        ],
+        [
+          "Floor",
+          "OS image"
+        ]
+      ],
+      "breaks": "Receptionists don't need HTTPS; iPXE should, for integrity."
+    },
+    "mindmap": {
+      "center": "iPXE",
+      "branches": [
+        {
+          "label": "Features",
+          "children": [
+            "HTTP/HTTPS",
+            "Scripting",
+            "DNS",
+            "VLAN",
+            "iSCSI/SAN boot"
+          ]
+        },
+        {
+          "label": "Flow",
+          "children": [
+            "Chain-load",
+            "Fetch script",
+            "Boot kernel/initrd"
+          ]
+        },
+        {
+          "label": "Dynamic",
+          "children": [
+            "Per MAC",
+            "Per serial",
+            "API-driven"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "HTTPS",
+            "Image signatures"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Boot script",
+      "scenario": "iPXE.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each machine gets its role's installer in seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "#!ipxe\ndhcp\nchain http://boot.lab/api/boot?mac=${net0/mac}&serial=${serial} ||\n# server returns e.g.:\n# kernel http://boot.lab/images/ubuntu24/vmlinuz autoinstall ds=nocloud-net;s=http://boot.lab/ci/${net0/mac}/\n# initrd http://boot.lab/images/ubuntu24/initrd\n# boot"
+        }
+      ],
+      "outcome": "programmable network boot."
+    },
+    "summary": {
+      "points": [
+        "Chain-load from PXE.",
+        "HTTP and scripts.",
+        "Per-machine decisions."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main advantage of chain-loading iPXE?",
+        "a": "It replaces slow, static TFTP/PXE with fast HTTP(S) and scriptable, per-machine boot logic."
+      }
+    ]
+  },
+  "modern-provisioning-tinkerbell": {
+    "core": "Tinkerbell (CNCF) is a microservice-based bare-metal provisioning engine. Boots handles DHCP and iPXE, Hegel serves metadata, HookOS is an in-memory OS that runs workflow actions, and Rufio drives BMCs. Hardware, Template and Workflow are Kubernetes custom resources, so a template's actions (stream image to disk, write cloud-init, kexec) run as containers and provisioning becomes declarative and GitOps-friendly. Cluster API uses it via CAPT.",
+    "first_principles": {
+      "problem": "A team wants bare-metal Kubernetes clusters created as declaratively as cloud clusters.",
+      "truths": [
+        "Provisioning steps can run as containers.",
+        "Kubernetes can model hardware.",
+        "Declarative workflows are repeatable."
+      ],
+      "derivation": [
+        "Register **Hardware** objects (MAC, disks, BMC).",
+        "Define **Templates** of actions.",
+        "Create **Workflows** binding hardware + template.",
+        "Boot into **HookOS** to execute.",
+        "Integrate with **Cluster API (CAPT)**."
+      ]
+    },
+    "analogy": {
+      "title": "A recipe card executed by a robot chef",
+      "story": "You declare the steps; the robot runs each one on whichever counter (machine) is assigned.",
+      "mapping": [
+        [
+          "Recipe",
+          "Template"
+        ],
+        [
+          "Counter",
+          "Hardware"
+        ],
+        [
+          "Robot chef",
+          "HookOS + Tink worker"
+        ]
+      ],
+      "breaks": "Robots don't brick hardware; a bad disk action can."
+    },
+    "mindmap": {
+      "center": "Tinkerbell",
+      "branches": [
+        {
+          "label": "Services",
+          "children": [
+            "Boots (DHCP/iPXE)",
+            "Hegel (metadata)",
+            "Tink server/worker",
+            "Rufio (BMC)"
+          ]
+        },
+        {
+          "label": "CRDs",
+          "children": [
+            "Hardware",
+            "Template",
+            "Workflow"
+          ]
+        },
+        {
+          "label": "Runtime",
+          "children": [
+            "HookOS",
+            "Container actions"
+          ]
+        },
+        {
+          "label": "Integrations",
+          "children": [
+            "Cluster API CAPT",
+            "GitOps"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Template",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Machine streams image and boots into new OS."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: tinkerbell.org/v1alpha1\nkind: Template\nmetadata: { name: ubuntu-2404 }\nspec:\n  data: |\n    version: \"0.1\"\n    name: ubuntu-2404\n    tasks:\n      - name: os-install\n        worker: \"{{.device_1}}\"\n        actions:\n          - name: stream-image\n            image: quay.io/tinkerbell/actions/image2disk:latest\n            environment: { DEST_DISK: /dev/nvme0n1, IMG_URL: \"http://img.lab/ubuntu-2404.raw.gz\", COMPRESSED: true }\n          - name: kexec\n            image: quay.io/tinkerbell/actions/kexec:latest"
+        }
+      ],
+      "outcome": "declarative bare-metal provisioning."
+    },
+    "summary": {
+      "points": [
+        "Kubernetes-native CRDs.",
+        "Container actions.",
+        "Cluster API integration."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is HookOS's role in Tinkerbell?",
+        "a": "It's an in-memory OS that network-boots on the target machine and runs the workflow's container actions to provision the disk."
+      }
+    ]
+  }
+}

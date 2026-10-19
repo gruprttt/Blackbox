@@ -1,0 +1,976 @@
+{
+  "introduction-the-microservices-headache": {
+    "core": "Splitting a monolith into microservices turns function calls into network calls, and each one needs retries, timeouts, load balancing, TLS, auth, metrics and tracing. Implementing that in every service and language leads to inconsistency and duplicated libraries. A service mesh moves these concerns into the infrastructure, usually a proxy beside each service, configured centrally.",
+    "first_principles": {
+      "problem": "Fifty services in four languages each implement retries and TLS differently, and an outage is caused by one service's missing timeout.",
+      "truths": [
+        "Network calls fail.",
+        "Cross-cutting concerns repeat.",
+        "Libraries diverge across languages."
+      ],
+      "derivation": [
+        "Identify **cross-cutting concerns**.",
+        "Move them to a **proxy layer**.",
+        "Configure via a **control plane**.",
+        "Keep services **language-agnostic**.",
+        "Gain **uniform telemetry**."
+      ]
+    },
+    "analogy": {
+      "title": "A building's shared utilities",
+      "story": "Instead of every office installing its own generator and security guard, the building provides power and security to all.",
+      "mapping": [
+        [
+          "Offices",
+          "Services"
+        ],
+        [
+          "Shared utilities",
+          "Mesh data plane"
+        ],
+        [
+          "Building management",
+          "Control plane"
+        ]
+      ],
+      "breaks": "Utilities are invisible; meshes add latency and operational complexity."
+    },
+    "mindmap": {
+      "center": "Why a Mesh",
+      "branches": [
+        {
+          "label": "Concerns",
+          "children": [
+            "Retries",
+            "Timeouts",
+            "mTLS",
+            "Auth",
+            "Metrics",
+            "Tracing",
+            "Traffic shifting"
+          ]
+        },
+        {
+          "label": "Old way",
+          "children": [
+            "Libraries per language"
+          ]
+        },
+        {
+          "label": "Mesh",
+          "children": [
+            "Proxies",
+            "Control plane"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Latency",
+            "Resources",
+            "Complexity"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Istio",
+            "Linkerd",
+            "Cilium"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Library vs mesh",
+      "scenario": "Comparison.",
+      "flow": [
+        "Before: retry logic in Go, Java, Node, Python",
+        "Each with different defaults",
+        "After: one retry policy in mesh config",
+        "Applied to all services uniformly"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Consistent behaviour, less code."
+        }
+      ],
+      "code": [],
+      "outcome": "why meshes exist."
+    },
+    "summary": {
+      "points": [
+        "Network calls need policy.",
+        "Libraries diverge.",
+        "Mesh centralises."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does a service mesh solve that libraries struggle with?",
+        "a": "Consistent cross-cutting network behaviour (mTLS, retries, telemetry) across many services and languages without code changes."
+      }
+    ]
+  },
+  "the-sidecar-proxy-model-istio-envoy": {
+    "core": "In the classic mesh each pod gets an Envoy sidecar injected alongside the app container. iptables rules redirect all inbound and outbound traffic through it, so the app talks plain HTTP to localhost while the sidecar handles mTLS, routing, retries and telemetry. The app needs no changes, but every pod pays for an extra proxy (CPU, memory, latency), and upgrades require restarting pods.",
+    "first_principles": {
+      "problem": "A team wants mTLS and traffic policies without touching application code.",
+      "truths": [
+        "Proxies can intercept transparently.",
+        "Per-pod proxies isolate failures.",
+        "Each proxy costs resources."
+      ],
+      "derivation": [
+        "**Inject** Envoy sidecar into pods.",
+        "**Redirect** traffic with iptables (istio-init/CNI).",
+        "Apply **policy in the proxy**.",
+        "Budget **CPU/memory per sidecar**.",
+        "Plan **sidecar upgrades** via restarts."
+      ]
+    },
+    "analogy": {
+      "title": "A personal assistant for every employee",
+      "story": "Each employee's assistant handles their calls, security checks and logs, so employees just work.",
+      "mapping": [
+        [
+          "Assistant",
+          "Sidecar"
+        ],
+        [
+          "Employee",
+          "App container"
+        ],
+        [
+          "Calls",
+          "Network traffic"
+        ]
+      ],
+      "breaks": "Assistants are cheap per company; sidecars multiply by pod count."
+    },
+    "mindmap": {
+      "center": "Sidecar Model",
+      "branches": [
+        {
+          "label": "Mechanics",
+          "children": [
+            "Injection",
+            "iptables redirect",
+            "Envoy"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Transparent",
+            "Per-pod isolation",
+            "Rich L7"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "CPU/memory per pod",
+            "Latency",
+            "Restarts for upgrades"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Ambient mode",
+            "eBPF meshes",
+            "Proxyless gRPC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable injection",
+      "scenario": "kubectl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every pod now has an Envoy sidecar."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "kubectl label namespace shop istio-injection=enabled\nkubectl rollout restart deploy -n shop\nkubectl get pod -n shop -o jsonpath='{.items[0].spec.containers[*].name}'\n# app istio-proxy"
+        }
+      ],
+      "outcome": "transparent per-pod proxying."
+    },
+    "summary": {
+      "points": [
+        "Sidecar per pod.",
+        "Transparent interception.",
+        "Resource cost."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does the app's traffic reach the sidecar without code changes?",
+        "a": "iptables rules (set up by an init container or CNI) redirect inbound and outbound traffic to the Envoy proxy."
+      }
+    ]
+  },
+  "control-plane-vs-data-plane": {
+    "core": "The data plane is the proxies that touch every request. The control plane (istiod, Linkerd's destination and identity services) watches Kubernetes for services, endpoints and mesh policies, computes per-proxy configuration, issues certificates, and pushes it all to the proxies. If the control plane goes down, proxies keep running on their last configuration but can't pick up changes or new certificates.",
+    "first_principles": {
+      "problem": "After istiod crashes, existing traffic still flows, but new pods can't communicate.",
+      "truths": [
+        "Hot-path work must be local.",
+        "Configuration is computed centrally.",
+        "Decoupling keeps traffic flowing during control-plane outages."
+      ],
+      "derivation": [
+        "**Data plane**: proxies on the request path.",
+        "**Control plane**: config computation + distribution.",
+        "**Certificates** issued by control plane CA.",
+        "Run control plane **HA**.",
+        "Monitor **config push latency**."
+      ]
+    },
+    "analogy": {
+      "title": "Air traffic control vs pilots",
+      "story": "Pilots fly the planes (data plane); controllers issue routes and clearances (control plane). If the tower goes quiet, planes in flight continue, but new departures stall.",
+      "mapping": [
+        [
+          "Pilots",
+          "Proxies"
+        ],
+        [
+          "Tower",
+          "Control plane"
+        ],
+        [
+          "Clearances",
+          "Config + certs"
+        ]
+      ],
+      "breaks": "Pilots can improvise; proxies only know their last config."
+    },
+    "mindmap": {
+      "center": "Planes",
+      "branches": [
+        {
+          "label": "Data plane",
+          "children": [
+            "Envoy/linkerd2-proxy",
+            "Per request",
+            "Local decisions"
+          ]
+        },
+        {
+          "label": "Control plane",
+          "children": [
+            "Service discovery",
+            "Config compute",
+            "CA/certs",
+            "Policy"
+          ]
+        },
+        {
+          "label": "Failure",
+          "children": [
+            "Data plane continues",
+            "No updates/new certs"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "HA control plane",
+            "Push metrics"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check sync",
+      "scenario": "istioctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reveals proxies with outdated config."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "istioctl proxy-status\n# NAME              CDS    LDS    EDS    RDS    ISTIOD\n# cart-7d9..shop    SYNCED SYNCED SYNCED SYNCED istiod-5f..\n# pay-55c..shop     STALE  SYNCED SYNCED SYNCED istiod-5f.."
+        }
+      ],
+      "outcome": "clear split of responsibilities."
+    },
+    "summary": {
+      "points": [
+        "Data plane on hot path.",
+        "Control plane configures.",
+        "Outages degrade, not stop."
+      ]
+    },
+    "check": [
+      {
+        "q": "What happens to mesh traffic if the control plane is unavailable?",
+        "a": "Existing proxies keep forwarding with their last config, but new endpoints, policy changes and certificate rotations stall."
+      }
+    ]
+  },
+  "envoy-internals-the-xds-protocol": {
+    "core": "Envoy is configured dynamically through xDS APIs over gRPC streams. LDS sends listeners (ports and filter chains), RDS routes (host and path to cluster), CDS clusters (upstream groups and policies), EDS endpoints (the actual pod IPs) and SDS secrets (TLS certificates). ADS multiplexes them on one stream for ordered updates. A request flows listener → filter chain → HTTP connection manager → route → cluster → endpoint.",
+    "first_principles": {
+      "problem": "A route points to a cluster that Envoy doesn't yet know about, causing 503s during deploys.",
+      "truths": [
+        "Config has dependent layers.",
+        "Endpoints change constantly.",
+        "Updates must arrive consistently."
+      ],
+      "derivation": [
+        "**LDS** listeners.",
+        "**RDS** routes.",
+        "**CDS** clusters.",
+        "**EDS** endpoints.",
+        "**SDS** secrets; use **ADS** for ordering."
+      ]
+    },
+    "analogy": {
+      "title": "A building directory updated live",
+      "story": "Entrances (listeners) lead to floor guides (routes) to departments (clusters) to desks (endpoints), all updated from head office.",
+      "mapping": [
+        [
+          "Entrances",
+          "Listeners"
+        ],
+        [
+          "Floor guides",
+          "Routes"
+        ],
+        [
+          "Departments",
+          "Clusters"
+        ],
+        [
+          "Desks",
+          "Endpoints"
+        ]
+      ],
+      "breaks": "Directories update overnight; xDS updates in milliseconds."
+    },
+    "mindmap": {
+      "center": "Envoy xDS",
+      "branches": [
+        {
+          "label": "APIs",
+          "children": [
+            "LDS",
+            "RDS",
+            "CDS",
+            "EDS",
+            "SDS"
+          ]
+        },
+        {
+          "label": "Transport",
+          "children": [
+            "gRPC streams",
+            "ADS",
+            "Delta xDS"
+          ]
+        },
+        {
+          "label": "Request path",
+          "children": [
+            "Listener",
+            "Filter chain",
+            "HCM",
+            "Route",
+            "Cluster",
+            "Endpoint"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "/config_dump",
+            "/clusters",
+            "istioctl proxy-config"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect config",
+      "scenario": "istioctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Trace exactly how Envoy will route a request."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "istioctl proxy-config listeners cart-7d9.shop --port 8080\nistioctl proxy-config routes cart-7d9.shop --name 8080 -o json | jq '.[0].virtualHosts[0].routes[0].route'\nistioctl proxy-config endpoints cart-7d9.shop --cluster 'outbound|80||payments.shop.svc.cluster.local'"
+        }
+      ],
+      "outcome": "Envoy config demystified."
+    },
+    "summary": {
+      "points": [
+        "Layered xDS resources.",
+        "Dynamic over gRPC.",
+        "Debug with config dumps."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which xDS API carries the actual pod IPs for a service?",
+        "a": "EDS (Endpoint Discovery Service)."
+      }
+    ]
+  },
+  "identity-spiffe-ids": {
+    "core": "IP addresses are ephemeral in Kubernetes, so they're useless as identity. SPIFFE defines workload identity as a URI such as spiffe://cluster.local/ns/shop/sa/payments, derived from the Kubernetes service account, carried in short-lived X.509 certificates (SVIDs). The mesh CA issues and rotates them automatically, and policies say 'only cart may call payments' rather than referring to IP ranges.",
+    "first_principles": {
+      "problem": "Network policies based on pod IPs break whenever pods reschedule.",
+      "truths": [
+        "IPs change constantly.",
+        "Service accounts are stable.",
+        "Certificates can prove identity."
+      ],
+      "derivation": [
+        "Derive identity from **service account**.",
+        "Encode as **SPIFFE ID**.",
+        "Issue **short-lived SVIDs**.",
+        "**Rotate** automatically (hours).",
+        "Write policy on **identities**, not IPs."
+      ]
+    },
+    "analogy": {
+      "title": "Employee ID badges instead of desk numbers",
+      "story": "People move desks daily; their badge proves who they are wherever they sit.",
+      "mapping": [
+        [
+          "Badge",
+          "SVID certificate"
+        ],
+        [
+          "Employee name",
+          "SPIFFE ID"
+        ],
+        [
+          "Desk number",
+          "Pod IP"
+        ]
+      ],
+      "breaks": "Badges last years; SVIDs expire in hours, by design."
+    },
+    "mindmap": {
+      "center": "Workload Identity",
+      "branches": [
+        {
+          "label": "SPIFFE ID",
+          "children": [
+            "spiffe://trust-domain/ns/x/sa/y"
+          ]
+        },
+        {
+          "label": "SVID",
+          "children": [
+            "X.509",
+            "JWT"
+          ]
+        },
+        {
+          "label": "Issuance",
+          "children": [
+            "Mesh CA",
+            "SPIRE"
+          ]
+        },
+        {
+          "label": "Rotation",
+          "children": [
+            "Short-lived",
+            "Automatic"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "AuthorizationPolicy by principal"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Identity-based authz",
+      "scenario": "Istio.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only cart's identity can POST /charge, wherever pods run."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: security.istio.io/v1\nkind: AuthorizationPolicy\nmetadata: { name: payments-allow-cart, namespace: shop }\nspec:\n  selector: { matchLabels: { app: payments } }\n  rules:\n    - from:\n        - source: { principals: [\"cluster.local/ns/shop/sa/cart\"] }\n      to:\n        - operation: { methods: [\"POST\"], paths: [\"/charge\"] }"
+        }
+      ],
+      "outcome": "stable, cryptographic workload identity."
+    },
+    "summary": {
+      "points": [
+        "IPs aren't identity.",
+        "SPIFFE IDs from service accounts.",
+        "Short-lived certs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are mesh certificates short-lived?",
+        "a": "To limit damage from key theft and avoid manual revocation; automatic rotation replaces them frequently."
+      }
+    ]
+  },
+  "security-mutual-tls-mtls": {
+    "core": "In mutual TLS both sides present certificates: the client verifies the server's identity and the server verifies the client's. Meshes make it automatic: sidecars originate and terminate mTLS using SVIDs, so all service-to-service traffic is encrypted and authenticated without app changes. Use PERMISSIVE mode (accept both plaintext and mTLS) during migration, then STRICT (mTLS only).",
+    "first_principles": {
+      "problem": "Internal traffic is plaintext, and a compromised pod can sniff or impersonate other services.",
+      "truths": [
+        "Internal networks aren't trustworthy.",
+        "Both sides need proof of identity.",
+        "Migration must avoid breaking non-mesh clients."
+      ],
+      "derivation": [
+        "Issue **certs to every workload**.",
+        "Sidecars do **mTLS automatically**.",
+        "Start in **PERMISSIVE** mode.",
+        "Move to **STRICT** per namespace.",
+        "Combine with **authorization policies**."
+      ]
+    },
+    "analogy": {
+      "title": "Two spies exchanging verified passwords",
+      "story": "Each must prove who they are before speaking, and the conversation is in code.",
+      "mapping": [
+        [
+          "Passwords",
+          "Certificates"
+        ],
+        [
+          "Code",
+          "Encryption"
+        ],
+        [
+          "Both verify",
+          "Mutual authentication"
+        ]
+      ],
+      "breaks": "Spies memorise; certificates rotate automatically."
+    },
+    "mindmap": {
+      "center": "mTLS",
+      "branches": [
+        {
+          "label": "Properties",
+          "children": [
+            "Encryption",
+            "Mutual authentication"
+          ]
+        },
+        {
+          "label": "Mesh",
+          "children": [
+            "Automatic",
+            "SVIDs",
+            "Rotation"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "PERMISSIVE",
+            "STRICT",
+            "DISABLE"
+          ]
+        },
+        {
+          "label": "Pair with",
+          "children": [
+            "AuthorizationPolicy"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Non-mesh clients",
+            "Health checks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enforce strict",
+      "scenario": "Istio.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Plaintext connections to shop namespace rejected."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: security.istio.io/v1\nkind: PeerAuthentication\nmetadata: { name: default, namespace: shop }\nspec:\n  mtls: { mode: STRICT }\n# check: istioctl x describe pod cart-7d9 -n shop"
+        }
+      ],
+      "outcome": "encrypted, authenticated service traffic."
+    },
+    "summary": {
+      "points": [
+        "Both sides verified.",
+        "Automatic in mesh.",
+        "Permissive → strict."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why start with PERMISSIVE mode?",
+        "a": "So services without sidecars can still connect while you roll out the mesh, avoiding outages before enforcing STRICT."
+      }
+    ]
+  },
+  "traffic-management-canary-deployments-traffic-splitting": {
+    "core": "Because every request passes through a proxy, the mesh can route by weight (send 5% to v2), by header (beta users to v2), or mirror traffic (copy requests to v2 and discard responses). It can also inject faults (delays, errors) for resilience testing and apply retries, timeouts and circuit breaking. Canary releases shift weights gradually while watching error and latency SLOs, and tools like Flagger and Argo Rollouts automate this.",
+    "first_principles": {
+      "problem": "A risky release must reach 1% of users first, with automatic rollback if errors rise.",
+      "truths": [
+        "Proxies can split per request.",
+        "Small exposure limits blast radius.",
+        "Metrics decide promotion."
+      ],
+      "derivation": [
+        "Define **subsets** (v1, v2).",
+        "Split by **weight/header**.",
+        "**Mirror** for dark testing.",
+        "Apply **timeouts/retries/circuit breakers**.",
+        "Automate with **Flagger/Argo Rollouts**."
+      ]
+    },
+    "analogy": {
+      "title": "Opening one checkout lane with a new till system",
+      "story": "Send a few customers through it; if it jams, close it and everyone uses the old tills.",
+      "mapping": [
+        [
+          "New till lane",
+          "v2 canary"
+        ],
+        [
+          "Few customers",
+          "Traffic weight"
+        ],
+        [
+          "Closing lane",
+          "Rollback"
+        ]
+      ],
+      "breaks": "Shops can watch the till; meshes rely on metrics thresholds."
+    },
+    "mindmap": {
+      "center": "Traffic Management",
+      "branches": [
+        {
+          "label": "Routing",
+          "children": [
+            "Weights",
+            "Headers",
+            "Mirroring"
+          ]
+        },
+        {
+          "label": "Resilience",
+          "children": [
+            "Timeouts",
+            "Retries",
+            "Circuit breaking",
+            "Outlier detection"
+          ]
+        },
+        {
+          "label": "Testing",
+          "children": [
+            "Fault injection"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Flagger",
+            "Argo Rollouts"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Error rate",
+            "Latency SLO"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "5% canary",
+      "scenario": "Istio.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Beta users and 5% of others hit v2."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: networking.istio.io/v1\nkind: VirtualService\nmetadata: { name: payments }\nspec:\n  hosts: [payments]\n  http:\n    - match: [{ headers: { x-beta: { exact: \"1\" } } }]\n      route: [{ destination: { host: payments, subset: v2 } }]\n    - route:\n        - { destination: { host: payments, subset: v1 }, weight: 95 }\n        - { destination: { host: payments, subset: v2 }, weight: 5 }\n      timeout: 2s\n      retries: { attempts: 2, perTryTimeout: 500ms, retryOn: 5xx,reset }"
+        }
+      ],
+      "outcome": "safe, gradual releases."
+    },
+    "summary": {
+      "points": [
+        "Split by weight/header.",
+        "Mirror and inject faults.",
+        "Automate promotion."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does traffic mirroring do?",
+        "a": "Sends a copy of live requests to another version, discarding its responses, to test it with real traffic without user impact."
+      }
+    ]
+  },
+  "observability-the-three-pillars-in-a-mesh": {
+    "core": "Proxies see every request, so a mesh produces uniform telemetry with no code changes. Metrics (request rate, errors and latency histograms per source and destination: golden signals in Prometheus), access logs, and distributed traces (spans per hop, as long as apps propagate trace headers such as traceparent). Tools like Kiali visualise the service graph, and the main gap is that apps must still forward trace context.",
+    "first_principles": {
+      "problem": "Each service team emits different metrics, and nobody can see the full request path during incidents.",
+      "truths": [
+        "Proxies see all requests.",
+        "Uniform labels enable comparison.",
+        "Traces need header propagation."
+      ],
+      "derivation": [
+        "Scrape **proxy metrics** (istio_requests_total).",
+        "Enable **access logs** selectively.",
+        "Configure **tracing** sampling.",
+        "**Propagate** trace headers in apps.",
+        "Visualise with **Kiali/Grafana/Jaeger**."
+      ]
+    },
+    "analogy": {
+      "title": "Toll booths recording every car",
+      "story": "Every booth logs cars, speeds and routes, so you can see traffic patterns across the whole network.",
+      "mapping": [
+        [
+          "Toll booths",
+          "Proxies"
+        ],
+        [
+          "Logs",
+          "Metrics/logs"
+        ],
+        [
+          "Route reconstruction",
+          "Traces"
+        ]
+      ],
+      "breaks": "Toll booths read plates automatically; traces need apps to pass the 'plate' along."
+    },
+    "mindmap": {
+      "center": "Mesh Observability",
+      "branches": [
+        {
+          "label": "Metrics",
+          "children": [
+            "RED/golden signals",
+            "Prometheus",
+            "Per source/destination"
+          ]
+        },
+        {
+          "label": "Logs",
+          "children": [
+            "Envoy access logs"
+          ]
+        },
+        {
+          "label": "Traces",
+          "children": [
+            "Spans per hop",
+            "traceparent propagation",
+            "Jaeger/Tempo"
+          ]
+        },
+        {
+          "label": "Visuals",
+          "children": [
+            "Kiali",
+            "Grafana"
+          ]
+        },
+        {
+          "label": "Gap",
+          "children": [
+            "App must forward headers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Golden signals query",
+      "scenario": "PromQL.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Error rate for any service, uniformly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "promql",
+          "text": "sum(rate(istio_requests_total{destination_service=\"payments.shop.svc.cluster.local\",response_code=~\"5..\"}[5m]))\n/\nsum(rate(istio_requests_total{destination_service=\"payments.shop.svc.cluster.local\"}[5m]))"
+        }
+      ],
+      "outcome": "consistent visibility."
+    },
+    "summary": {
+      "points": [
+        "Uniform metrics.",
+        "Access logs.",
+        "Traces need propagation."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do apps still need changes for full distributed tracing in a mesh?",
+        "a": "Proxies create spans, but apps must forward trace headers from inbound to outbound requests so spans link into one trace."
+      }
+    ]
+  },
+  "the-ebpf-based-mesh-cilium": {
+    "core": "Sidecars cost resources per pod. Cilium moves much of the mesh into the kernel with eBPF: L3/L4 load balancing, network policy, identity-aware filtering and transparent encryption (WireGuard or IPsec) run without proxies, and L7 features use a shared per-node Envoy only when needed. Istio's ambient mode takes a similar sidecarless path with per-node ztunnels and optional waypoint proxies.",
+    "first_principles": {
+      "problem": "Sidecars consume 30% of cluster memory across 3,000 pods.",
+      "truths": [
+        "Kernel datapaths are efficient.",
+        "Many policies need only L3/L4.",
+        "L7 can be shared per node."
+      ],
+      "derivation": [
+        "Do **L3/L4 in eBPF**.",
+        "Use **per-node Envoy** for L7 only where needed.",
+        "Encrypt with **WireGuard/IPsec** transparently.",
+        "Use **identity-based** policy (Cilium identities).",
+        "Consider **Istio ambient** as alternative."
+      ]
+    },
+    "analogy": {
+      "title": "Building-wide security system vs a guard per office",
+      "story": "Cameras and badge readers built into the building replace a guard at every door; specialists are called only when needed.",
+      "mapping": [
+        [
+          "Guard per office",
+          "Sidecar"
+        ],
+        [
+          "Building system",
+          "eBPF datapath"
+        ],
+        [
+          "Specialist",
+          "Per-node L7 proxy"
+        ]
+      ],
+      "breaks": "Building systems are shared; kernel bugs affect all pods on a node."
+    },
+    "mindmap": {
+      "center": "Sidecarless Meshes",
+      "branches": [
+        {
+          "label": "Cilium",
+          "children": [
+            "eBPF datapath",
+            "Identity policies",
+            "WireGuard encryption",
+            "Per-node Envoy for L7"
+          ]
+        },
+        {
+          "label": "Istio ambient",
+          "children": [
+            "ztunnel (L4)",
+            "Waypoint proxies (L7)"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Less resource use",
+            "No restarts for upgrades",
+            "Lower latency"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Shared failure domain",
+            "Kernel requirements"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Cilium L7 policy",
+      "scenario": "YAML.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Identity + L7 policy without sidecars."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "apiVersion: cilium.io/v2\nkind: CiliumNetworkPolicy\nmetadata: { name: payments-l7 }\nspec:\n  endpointSelector: { matchLabels: { app: payments } }\n  ingress:\n    - fromEndpoints: [{ matchLabels: { app: cart } }]\n      toPorts:\n        - ports: [{ port: \"8080\", protocol: TCP }]\n          rules: { http: [{ method: POST, path: \"/charge\" }] }"
+        }
+      ],
+      "outcome": "lighter-weight mesh."
+    },
+    "summary": {
+      "points": [
+        "eBPF for L3/L4.",
+        "Shared L7 proxies.",
+        "Big resource savings."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a sidecarless mesh still provide L7 features?",
+        "a": "By sending traffic that needs L7 processing through shared per-node or per-namespace proxies (Cilium's Envoy, Istio waypoints)."
+      }
+    ]
+  }
+}

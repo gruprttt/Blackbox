@@ -1,0 +1,644 @@
+{
+  "introduction-the-kernel-bottleneck-revisited": {
+    "core": "The Linux network stack is general-purpose: for every packet it allocates an sk_buff, runs netfilter hooks, routing, and protocol handling. That's great for flexibility but costs hundreds of nanoseconds. For simple decisions (drop this DDoS packet, forward that one) most of that work is wasted. The question is how to run custom fast-path logic early, without abandoning the kernel as DPDK does.",
+    "first_principles": {
+      "problem": "An iptables-based DDoS filter collapses at 5 Mpps because every packet goes through full stack processing before being dropped.",
+      "truths": [
+        "Most cost is per-packet setup.",
+        "Early decisions avoid wasted work.",
+        "Bypassing the kernel loses its benefits."
+      ],
+      "derivation": [
+        "Identify **where packets enter** (driver).",
+        "Make decisions **before sk_buff allocation**.",
+        "Keep **kernel stack** for normal traffic.",
+        "Run **safe custom code** in-kernel.",
+        "→ **XDP + eBPF**."
+      ]
+    },
+    "analogy": {
+      "title": "A bouncer at the car park entrance vs inside the club",
+      "story": "Turning away troublemakers at the car park saves the effort of checking coats and IDs first.",
+      "mapping": [
+        [
+          "Car park",
+          "Driver/XDP hook"
+        ],
+        [
+          "Club interior",
+          "Full network stack"
+        ],
+        [
+          "Bouncer",
+          "eBPF program"
+        ]
+      ],
+      "breaks": "Bouncers judge; eBPF programs follow verified code paths."
+    },
+    "mindmap": {
+      "center": "Kernel Bottleneck",
+      "branches": [
+        {
+          "label": "Costs",
+          "children": [
+            "sk_buff alloc",
+            "Netfilter",
+            "Routing",
+            "Copies"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Tune kernel",
+            "DPDK bypass",
+            "XDP early hook"
+          ]
+        },
+        {
+          "label": "Goal",
+          "children": [
+            "Fast path + keep kernel"
+          ]
+        },
+        {
+          "label": "Tech",
+          "children": [
+            "eBPF",
+            "XDP",
+            "TC hooks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "iptables vs XDP drop",
+      "scenario": "Benchmark idea.",
+      "flow": [
+        "iptables raw DROP: ~5 Mpps/core",
+        "XDP_DROP in driver: ~20+ Mpps/core",
+        "Same rule, earlier hook",
+        "Kernel still handles legit traffic"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Order-of-magnitude gain for drops."
+        }
+      ],
+      "code": [],
+      "outcome": "why early in-kernel processing matters."
+    },
+    "summary": {
+      "points": [
+        "Stack is general and costly.",
+        "Decide early.",
+        "Keep the kernel."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is dropping a packet in iptables more expensive than in XDP?",
+        "a": "By iptables the kernel has already allocated an sk_buff and run part of the stack; XDP runs in the driver before that."
+      }
+    ]
+  },
+  "the-old-king-dpdk-kernel-bypass": {
+    "core": "DPDK (kernel bypass) achieves maximal throughput by taking the NIC away from the kernel and polling it from user space. It dominated telco and NFV, but it needs dedicated cores at 100%, a reimplementation of everything the kernel provides (ARP, routing, TCP and tooling), special drivers, and it can't easily share the NIC with normal applications. Those costs are why XDP gained ground.",
+    "first_principles": {
+      "problem": "A team adopts DPDK for a load balancer and then has to rebuild health checks, ARP, metrics and debugging tools from scratch.",
+      "truths": [
+        "Bypass removes kernel overhead.",
+        "It also removes kernel features.",
+        "Dedicated polling wastes idle CPU."
+      ],
+      "derivation": [
+        "Use DPDK for **extreme Mpps** appliances.",
+        "Budget for **dedicated cores**.",
+        "Plan to **reimplement** stack features.",
+        "Lose **tcpdump/ip/ss** visibility.",
+        "Compare with **XDP** first."
+      ]
+    },
+    "analogy": {
+      "title": "Building a private railway",
+      "story": "Fastest possible trains, but you must also build your own stations, signals and maintenance crews.",
+      "mapping": [
+        [
+          "Private railway",
+          "DPDK"
+        ],
+        [
+          "Stations/signals",
+          "ARP, routing, tools"
+        ],
+        [
+          "Public rail",
+          "Kernel stack"
+        ]
+      ],
+      "breaks": "Railways serve many customers; a DPDK NIC serves only its app."
+    },
+    "mindmap": {
+      "center": "DPDK Trade-offs",
+      "branches": [
+        {
+          "label": "Strengths",
+          "children": [
+            "Max Mpps",
+            "Predictable latency"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Cores at 100%",
+            "Own stack",
+            "No kernel tools",
+            "NIC exclusivity"
+          ]
+        },
+        {
+          "label": "Fit",
+          "children": [
+            "Telco",
+            "NFV",
+            "Appliances"
+          ]
+        },
+        {
+          "label": "Alternative",
+          "children": [
+            "XDP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Operational burden",
+      "scenario": "Checklist.",
+      "flow": [
+        "Write ARP/ND responder",
+        "Write metrics exporter",
+        "Build packet capture tool",
+        "Handle NIC firmware quirks"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "High performance, high cost."
+        }
+      ],
+      "code": [],
+      "outcome": "informed bypass decision."
+    },
+    "summary": {
+      "points": [
+        "Fastest.",
+        "Most expensive.",
+        "Consider XDP first."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a major operational downside of DPDK?",
+        "a": "You lose the kernel networking stack and standard tools, so you must reimplement or work without them."
+      }
+    ]
+  },
+  "the-new-challenger-xdp-express-data-path": {
+    "core": "XDP runs an eBPF program in the NIC driver at the earliest point a packet arrives, on the raw DMA buffer before sk_buff allocation. The program can drop it, pass it to the normal stack, bounce it back out the same NIC, redirect it to another NIC, CPU or AF_XDP socket, or modify it. Normal traffic still uses the kernel, so you get fast-path speed and kernel features together.",
+    "first_principles": {
+      "problem": "A DNS service wants to drop amplification attack packets at line rate while serving legitimate queries normally.",
+      "truths": [
+        "The earliest hook is in the driver.",
+        "Raw buffers are cheap to inspect.",
+        "Passing to the stack keeps features."
+      ],
+      "derivation": [
+        "Attach eBPF to **XDP hook**.",
+        "Parse **headers** from raw buffer.",
+        "Return **verdict** (DROP/PASS/TX/REDIRECT).",
+        "Use **native mode** for speed (driver support).",
+        "Fall back to **generic mode** for testing."
+      ]
+    },
+    "analogy": {
+      "title": "A sorting machine at the loading dock",
+      "story": "It kicks out junk immediately and sends good parcels into the building as normal.",
+      "mapping": [
+        [
+          "Loading dock",
+          "Driver"
+        ],
+        [
+          "Sorting machine",
+          "XDP program"
+        ],
+        [
+          "Building",
+          "Kernel stack"
+        ]
+      ],
+      "breaks": "Sorting machines are fixed; XDP programs are loadable at runtime."
+    },
+    "mindmap": {
+      "center": "XDP",
+      "branches": [
+        {
+          "label": "Hook",
+          "children": [
+            "Driver RX",
+            "Before sk_buff"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Native",
+            "Offloaded (NIC)",
+            "Generic"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "DROP",
+            "PASS",
+            "TX",
+            "REDIRECT",
+            "ABORTED"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "DDoS",
+            "Load balancing (Katran)",
+            "Filtering",
+            "AF_XDP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Drop UDP to port 53 from source port 53 reflection",
+      "scenario": "eBPF C (simplified).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reflection packets dropped in the driver; queries proceed."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "SEC(\"xdp\")\nint xdp_dns_guard(struct xdp_md *ctx) {\n    void *data = (void *)(long)ctx->data, *end = (void *)(long)ctx->data_end;\n    struct ethhdr *eth = data;            if ((void *)(eth + 1) > end) return XDP_PASS;\n    if (eth->h_proto != bpf_htons(ETH_P_IP)) return XDP_PASS;\n    struct iphdr *ip = (void *)(eth + 1); if ((void *)(ip + 1) > end) return XDP_PASS;\n    if (ip->protocol != IPPROTO_UDP) return XDP_PASS;\n    struct udphdr *udp = (void *)ip + ip->ihl * 4; if ((void *)(udp + 1) > end) return XDP_PASS;\n    if (udp->source == bpf_htons(53) && udp->dest == bpf_htons(53)) return XDP_DROP;\n    return XDP_PASS;\n}"
+        }
+      ],
+      "outcome": "line-rate filtering inside the kernel."
+    },
+    "summary": {
+      "points": [
+        "Earliest hook.",
+        "Verdict per packet.",
+        "Kernel stays for the rest."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does XDP_PASS do?",
+        "a": "Hands the packet to the normal kernel network stack for regular processing."
+      }
+    ]
+  },
+  "how-xdp-works-actions-and-verdicts": {
+    "core": "An XDP program receives an xdp_md context with pointers to the packet's start and end, and must bounds-check every access. It can read and write the packet, adjust its head or tail (to add or remove headers for encapsulation), look up eBPF maps (blocklists, backends, counters) and call helpers. It returns DROP, PASS, TX, REDIRECT (via devmap, cpumap or xskmap to AF_XDP sockets) or ABORTED (an error, traced).",
+    "first_principles": {
+      "problem": "An engineer's XDP load balancer must encapsulate packets and forward them out another NIC to backends.",
+      "truths": [
+        "Packets are raw memory.",
+        "Maps share state with user space.",
+        "Redirect needs map targets."
+      ],
+      "derivation": [
+        "**Bounds-check** every header.",
+        "Use **maps** for config and counters.",
+        "**bpf_xdp_adjust_head** for encap.",
+        "**REDIRECT** via devmap/cpumap/xskmap.",
+        "Load and update with **libbpf/bpftool**."
+      ]
+    },
+    "analogy": {
+      "title": "A customs officer with a rulebook and a stamp",
+      "story": "They inspect each parcel's label (headers), consult the rulebook (maps), re-label if needed and choose the exit.",
+      "mapping": [
+        [
+          "Rulebook",
+          "eBPF maps"
+        ],
+        [
+          "Re-label",
+          "Adjust head/encap"
+        ],
+        [
+          "Exit choice",
+          "Verdict"
+        ]
+      ],
+      "breaks": "Officers can improvise; programs only do what the verifier allowed."
+    },
+    "mindmap": {
+      "center": "XDP Mechanics",
+      "branches": [
+        {
+          "label": "Context",
+          "children": [
+            "data",
+            "data_end",
+            "ingress ifindex"
+          ]
+        },
+        {
+          "label": "Maps",
+          "children": [
+            "Hash",
+            "Array",
+            "LPM trie",
+            "devmap",
+            "cpumap",
+            "xskmap"
+          ]
+        },
+        {
+          "label": "Helpers",
+          "children": [
+            "adjust_head/tail",
+            "redirect_map",
+            "fib_lookup"
+          ]
+        },
+        {
+          "label": "Verdicts",
+          "children": [
+            "DROP",
+            "PASS",
+            "TX",
+            "REDIRECT",
+            "ABORTED"
+          ]
+        },
+        {
+          "label": "Tooling",
+          "children": [
+            "libbpf",
+            "bpftool",
+            "xdp-tools"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Load and inspect",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Program loaded natively; backends updated live."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ip link set dev eth0 xdpdrv obj xdp_lb.o sec xdp\nbpftool prog show | grep xdp\nbpftool map update name backends key 0 0 0 0 value hex 0a 00 01 15\nbpftool map dump name pkt_count"
+        }
+      ],
+      "outcome": "XDP programs built and managed."
+    },
+    "summary": {
+      "points": [
+        "Raw packet + bounds checks.",
+        "Maps for state.",
+        "Rich verdicts."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does user space change an XDP program's behaviour without reloading it?",
+        "a": "By updating eBPF maps (e.g. blocklists, backend tables) that the program reads."
+      }
+    ]
+  },
+  "the-ebpf-verifier-safety-without-sacrifice": {
+    "core": "Before any eBPF program runs, the kernel verifier simulates every path. It rejects unbounded loops (only bounded loops are allowed), out-of-bounds memory access, uninitialised reads, invalid helper calls and excessive complexity. Then the JIT compiles it to native code. That's what makes it safe to run custom code in the kernel without crashing it, but it also explains cryptic 'invalid access' errors when bounds checks are missing.",
+    "first_principles": {
+      "problem": "An XDP program fails to load with 'invalid access to packet, off=14 size=20'.",
+      "truths": [
+        "Kernel crashes are unacceptable.",
+        "Static analysis can prove safety.",
+        "Proofs need explicit checks."
+      ],
+      "derivation": [
+        "Add **bounds checks** before reads.",
+        "Use **bounded loops** (#pragma unroll or bpf_loop).",
+        "Initialise **all stack variables**.",
+        "Keep **complexity** under limits.",
+        "Read **verifier logs** carefully."
+      ]
+    },
+    "analogy": {
+      "title": "A building inspector approving plans before construction",
+      "story": "No construction starts until every structural path is proven safe.",
+      "mapping": [
+        [
+          "Plans",
+          "eBPF bytecode"
+        ],
+        [
+          "Inspector",
+          "Verifier"
+        ],
+        [
+          "Construction",
+          "JIT + run"
+        ]
+      ],
+      "breaks": "Inspectors can approve exceptions; the verifier never does."
+    },
+    "mindmap": {
+      "center": "eBPF Verifier",
+      "branches": [
+        {
+          "label": "Checks",
+          "children": [
+            "Bounds",
+            "Loops",
+            "Init",
+            "Helper types",
+            "Complexity"
+          ]
+        },
+        {
+          "label": "After",
+          "children": [
+            "JIT to native"
+          ]
+        },
+        {
+          "label": "Common errors",
+          "children": [
+            "invalid access to packet",
+            "unbounded loop",
+            "R1 invalid mem access"
+          ]
+        },
+        {
+          "label": "Tips",
+          "children": [
+            "Explicit checks",
+            "Small functions",
+            "bpf_loop"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Fixing a bounds error",
+      "scenario": "C.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Program loads; access proven safe."
+        }
+      ],
+      "code": [
+        {
+          "lang": "c",
+          "text": "struct iphdr *ip = data + sizeof(struct ethhdr);\n// verifier error without this:\nif ((void *)(ip + 1) > data_end)\n    return XDP_PASS;\n__u8 proto = ip->protocol;   // now provably in bounds"
+        }
+      ],
+      "outcome": "safe kernel extensions."
+    },
+    "summary": {
+      "points": [
+        "Verifier proves safety.",
+        "Explicit bounds checks.",
+        "JIT for speed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does the eBPF verifier reject a packet read without a data_end check?",
+        "a": "It can't prove the read stays within the packet buffer, which could crash or leak kernel memory."
+      }
+    ]
+  },
+  "why-ebpfxdp-is-replacing-dpdk": {
+    "core": "XDP gets close to DPDK speeds for common tasks (drop, forward, load balance) while keeping the kernel: no dedicated polling cores (it's interrupt and NAPI driven), the NIC is shared with normal applications, standard tools work, programs reload live, and it runs on stock kernels. Facebook's Katran, Cloudflare's DDoS mitigation and Cilium all use it. DPDK remains for full user-space stacks and extreme per-core packet rates.",
+    "first_principles": {
+      "problem": "A team weighs DPDK versus XDP for a new L4 load balancer and DDoS layer.",
+      "truths": [
+        "Most fast paths are simple.",
+        "Keeping the kernel saves engineering.",
+        "Idle CPU shouldn't be burned."
+      ],
+      "derivation": [
+        "Use **XDP** for filters, LB, redirection.",
+        "Use **AF_XDP** for user-space packet apps.",
+        "Keep **DPDK** for full user stacks/NFV.",
+        "Leverage **existing tooling**.",
+        "Benchmark on **your NICs**."
+      ]
+    },
+    "analogy": {
+      "title": "A fast lane added to the existing motorway vs a private railway",
+      "story": "The fast lane uses existing infrastructure and is nearly as quick for most journeys.",
+      "mapping": [
+        [
+          "Fast lane",
+          "XDP"
+        ],
+        [
+          "Private railway",
+          "DPDK"
+        ],
+        [
+          "Existing motorway",
+          "Kernel stack"
+        ]
+      ],
+      "breaks": "Fast lanes have fixed speed; XDP throughput depends on driver support."
+    },
+    "mindmap": {
+      "center": "XDP vs DPDK",
+      "branches": [
+        {
+          "label": "XDP",
+          "children": [
+            "Kernel-integrated",
+            "No dedicated cores",
+            "Shared NIC",
+            "Live reload",
+            "Tools work"
+          ]
+        },
+        {
+          "label": "DPDK",
+          "children": [
+            "Max Mpps",
+            "User stack",
+            "Dedicated cores"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "Katran",
+            "Cloudflare",
+            "Cilium"
+          ]
+        },
+        {
+          "label": "Middle",
+          "children": [
+            "AF_XDP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision",
+      "scenario": "Matrix.",
+      "flow": [
+        "DDoS drop / L4 LB → XDP",
+        "Custom user-space packet app → AF_XDP",
+        "Full vRouter/NFV → DPDK",
+        "General services → kernel stack"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right tool per need."
+        }
+      ],
+      "code": [],
+      "outcome": "modern packet processing choices."
+    },
+    "summary": {
+      "points": [
+        "XDP nearly as fast.",
+        "Keeps kernel benefits.",
+        "DPDK for extremes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is AF_XDP?",
+        "a": "A socket type that lets XDP redirect packets to user space with zero-copy, giving DPDK-like user-space processing without unbinding the NIC."
+      }
+    ]
+  }
+}

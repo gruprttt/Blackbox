@@ -1,0 +1,632 @@
+{
+  "introduction-why-http11-wasnt-enough": {
+    "core": "HTTP/1.1 sends one request at a time per connection, so a slow response blocks those behind it (head-of-line blocking). Browsers worked around it by opening about 6 connections per host, domain sharding, sprite sheets and bundling, and every request repeats verbose text headers. Modern pages with 100+ resources made those hacks costly, which motivated HTTP/2's multiplexing and HTTP/3's move to QUIC.",
+    "first_principles": {
+      "problem": "A page with 120 assets loads slowly despite a fast connection because requests queue behind each other.",
+      "truths": [
+        "One request at a time per connection blocks.",
+        "Headers repeat on every request.",
+        "Extra connections cost handshakes and congestion state."
+      ],
+      "derivation": [
+        "Identify **HOL blocking**.",
+        "Count **connections and handshakes**.",
+        "Measure **header overhead**.",
+        "Recognise **hacks** (sharding, sprites).",
+        "Move to **multiplexed** protocols."
+      ]
+    },
+    "analogy": {
+      "title": "A single-lane drive-through",
+      "story": "One slow order holds up every car behind it, so restaurants open more lanes, which is expensive.",
+      "mapping": [
+        [
+          "Single lane",
+          "HTTP/1.1 connection"
+        ],
+        [
+          "More lanes",
+          "Parallel connections"
+        ],
+        [
+          "Slow order",
+          "Slow response"
+        ]
+      ],
+      "breaks": "Drive-throughs can't multiplex; HTTP/2 can."
+    },
+    "mindmap": {
+      "center": "HTTP/1.1 Limits",
+      "branches": [
+        {
+          "label": "Problems",
+          "children": [
+            "HOL blocking",
+            "Header bloat",
+            "Connection limits"
+          ]
+        },
+        {
+          "label": "Hacks",
+          "children": [
+            "6 connections/host",
+            "Domain sharding",
+            "Sprites",
+            "Bundling"
+          ]
+        },
+        {
+          "label": "Successors",
+          "children": [
+            "HTTP/2",
+            "HTTP/3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Waterfall view",
+      "scenario": "Observation.",
+      "flow": [
+        "6 connections open",
+        "Requests 7–120 queue",
+        "Each repeats ~800 B of headers",
+        "Total load 4.2 s"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Latency dominated by queuing, not bandwidth."
+        }
+      ],
+      "code": [],
+      "outcome": "why new protocols were needed."
+    },
+    "summary": {
+      "points": [
+        "One-at-a-time per connection.",
+        "Costly workarounds.",
+        "Need multiplexing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why did browsers open ~6 connections per host under HTTP/1.1?",
+        "a": "To parallelise requests, because each connection could only carry one request/response at a time."
+      }
+    ]
+  },
+  "http2-the-multiplexing-revolution": {
+    "core": "HTTP/2 keeps HTTP semantics but changes the wire format to binary frames. Many concurrent streams share one TCP connection, interleaved frame by frame, so a slow response doesn't block others at the HTTP layer. A single connection per origin means one TLS handshake and better congestion behaviour, and old hacks like domain sharding become counterproductive.",
+    "first_principles": {
+      "problem": "After enabling HTTP/2, domain sharding now hurts performance by preventing connection reuse.",
+      "truths": [
+        "Binary framing enables interleaving.",
+        "One connection reduces handshakes.",
+        "Semantics stay the same."
+      ],
+      "derivation": [
+        "Use **binary frames** with stream IDs.",
+        "**Multiplex** streams on one connection.",
+        "Apply **flow control** per stream.",
+        "Drop **sharding/sprites** hacks.",
+        "Negotiate via **ALPN h2**."
+      ]
+    },
+    "analogy": {
+      "title": "A multi-lane motorway merged into one road with numbered cars",
+      "story": "Cars from different trips share the road, each tagged so they reassemble at the destination.",
+      "mapping": [
+        [
+          "Numbered cars",
+          "Frames with stream IDs"
+        ],
+        [
+          "Trips",
+          "Requests"
+        ],
+        [
+          "One road",
+          "One TCP connection"
+        ]
+      ],
+      "breaks": "Cars can change lanes; a lost TCP packet still blocks all streams (TCP HOL)."
+    },
+    "mindmap": {
+      "center": "HTTP/2",
+      "branches": [
+        {
+          "label": "Framing",
+          "children": [
+            "Binary",
+            "Streams",
+            "Frames"
+          ]
+        },
+        {
+          "label": "Multiplexing",
+          "children": [
+            "One connection",
+            "Interleaving"
+          ]
+        },
+        {
+          "label": "Control",
+          "children": [
+            "Per-stream flow control",
+            "Priorities"
+          ]
+        },
+        {
+          "label": "Negotiation",
+          "children": [
+            "ALPN h2"
+          ]
+        },
+        {
+          "label": "Limit",
+          "children": [
+            "TCP-level HOL"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verify h2",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All assets share one connection."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -sI --http2 https://www.example.com -o /dev/null -w '%{http_version}\\n'\n# 2"
+        }
+      ],
+      "outcome": "fewer connections, less queuing."
+    },
+    "summary": {
+      "points": [
+        "Binary frames.",
+        "Multiplexed streams.",
+        "Retire HTTP/1 hacks."
+      ]
+    },
+    "check": [
+      {
+        "q": "What problem does HTTP/2 not solve?",
+        "a": "TCP-level head-of-line blocking: a lost packet stalls all streams on the connection until retransmitted."
+      }
+    ]
+  },
+  "http2-hpack-header-compression-and-server-push": {
+    "core": "HPACK compresses headers using a static table of common headers, a dynamic table of headers seen on this connection, and Huffman encoding. Repeated headers such as cookies shrink to a byte or two, and it was designed to resist the CRIME-style attacks that broke gzip-compressed headers. Server push let servers send resources before they were requested, but it was rarely beneficial and browsers removed support; 103 Early Hints replaced it.",
+    "first_principles": {
+      "problem": "Mobile requests carry 2 KB of repeated cookies and headers each, wasting bandwidth on slow links.",
+      "truths": [
+        "Headers repeat heavily.",
+        "Compression state can be shared per connection.",
+        "Pushing unrequested data often wastes bandwidth."
+      ],
+      "derivation": [
+        "Use **static table** for common headers.",
+        "Use **dynamic table** for repeats.",
+        "**Huffman-encode** literals.",
+        "Avoid **push**; use **103 Early Hints/preload**.",
+        "Keep **cookies small** anyway."
+      ]
+    },
+    "analogy": {
+      "title": "Shorthand between regular correspondents",
+      "story": "After the first letter, 'as before' replaces the whole address block.",
+      "mapping": [
+        [
+          "Shorthand",
+          "Index into table"
+        ],
+        [
+          "First letter",
+          "First request"
+        ],
+        [
+          "Shared notebook",
+          "Dynamic table"
+        ]
+      ],
+      "breaks": "Shorthand can be guessed; HPACK avoids compression oracles by design."
+    },
+    "mindmap": {
+      "center": "HPACK & Push",
+      "branches": [
+        {
+          "label": "HPACK",
+          "children": [
+            "Static table",
+            "Dynamic table",
+            "Huffman"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Resists CRIME"
+          ]
+        },
+        {
+          "label": "Push",
+          "children": [
+            "Server-initiated streams",
+            "Deprecated in browsers"
+          ]
+        },
+        {
+          "label": "Replacement",
+          "children": [
+            "103 Early Hints",
+            "rel=preload"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Early Hints",
+      "scenario": "Response.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Browser starts fetching CSS/JS while HTML is generated."
+        }
+      ],
+      "code": [
+        {
+          "lang": "http",
+          "text": "HTTP/1.1 103 Early Hints\nLink: </app.css>; rel=preload; as=style\nLink: </app.js>; rel=preload; as=script\n\nHTTP/1.1 200 OK\nContent-Type: text/html"
+        }
+      ],
+      "outcome": "smaller headers, smarter preloading."
+    },
+    "summary": {
+      "points": [
+        "HPACK shrinks headers.",
+        "Push mostly failed.",
+        "Use Early Hints."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why was HTTP/2 server push removed from browsers?",
+        "a": "It often pushed resources already cached or not needed, wasting bandwidth, with little measured benefit."
+      }
+    ]
+  },
+  "http3-solving-the-tcp-problem": {
+    "core": "HTTP/3 maps HTTP semantics onto QUIC (over UDP). Each stream recovers from loss independently, removing TCP's head-of-line blocking; TLS 1.3 is built into the handshake (1-RTT, 0-RTT resumption); connection IDs let connections survive network changes; and QPACK replaces HPACK to tolerate out-of-order streams. Servers advertise it via Alt-Svc, and clients fall back to HTTP/2 if UDP is blocked.",
+    "first_principles": {
+      "problem": "On lossy mobile networks, HTTP/2 pages stall because one lost TCP packet blocks every stream.",
+      "truths": [
+        "TCP orders all bytes on a connection.",
+        "Independent streams need independent recovery.",
+        "UDP can be blocked, so fallback is needed."
+      ],
+      "derivation": [
+        "Run over **QUIC/UDP 443**.",
+        "Recover loss **per stream**.",
+        "Use **QPACK** for headers.",
+        "Advertise via **Alt-Svc**.",
+        "Keep **HTTP/2 fallback**."
+      ]
+    },
+    "analogy": {
+      "title": "Separate couriers per parcel instead of one truck",
+      "story": "If one parcel is delayed, the others still arrive on time.",
+      "mapping": [
+        [
+          "One truck",
+          "TCP connection"
+        ],
+        [
+          "Separate couriers",
+          "QUIC streams"
+        ],
+        [
+          "Delayed parcel",
+          "Lost packet"
+        ]
+      ],
+      "breaks": "Couriers are independent companies; QUIC streams share congestion control."
+    },
+    "mindmap": {
+      "center": "HTTP/3",
+      "branches": [
+        {
+          "label": "Transport",
+          "children": [
+            "QUIC",
+            "UDP 443"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "No TCP HOL",
+            "Faster handshake",
+            "Migration"
+          ]
+        },
+        {
+          "label": "Headers",
+          "children": [
+            "QPACK"
+          ]
+        },
+        {
+          "label": "Discovery",
+          "children": [
+            "Alt-Svc",
+            "HTTPS DNS record"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "UDP blocked",
+            "CPU cost",
+            "Fallback"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable in nginx",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clients upgrade to h3; fall back to h2 if UDP blocked."
+        }
+      ],
+      "code": [
+        {
+          "lang": "nginx",
+          "text": "server {\n    listen 443 quic reuseport;\n    listen 443 ssl;\n    http2 on;\n    ssl_protocols TLSv1.3;\n    add_header Alt-Svc 'h3=\":443\"; ma=86400';\n}"
+        }
+      ],
+      "outcome": "resilient performance on lossy networks."
+    },
+    "summary": {
+      "points": [
+        "HTTP over QUIC.",
+        "Per-stream recovery.",
+        "Always keep fallback."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a browser learn a site supports HTTP/3?",
+        "a": "Via the Alt-Svc response header (or an HTTPS DNS record) advertising h3, then it tries QUIC on later requests."
+      }
+    ]
+  },
+  "grpc-and-protocol-buffers-binary-contracts": {
+    "core": "Protocol Buffers define messages and services in a .proto schema; code generators produce typed clients and servers in many languages. The binary encoding uses field numbers instead of names, so it's compact and fast, and backward and forward compatibility come from rules: never reuse field numbers, add new optional fields, and reserve removed ones. The schema is the contract between teams.",
+    "first_principles": {
+      "problem": "JSON APIs between services break silently when one team renames a field.",
+      "truths": [
+        "Schemas make contracts explicit.",
+        "Field numbers decouple names from wire format.",
+        "Generated code prevents typos."
+      ],
+      "derivation": [
+        "Define **messages and services** in .proto.",
+        "**Generate** clients/servers.",
+        "**Never reuse** field numbers.",
+        "**Reserve** removed fields.",
+        "Lint with **buf breaking** in CI."
+      ]
+    },
+    "analogy": {
+      "title": "A numbered form",
+      "story": "Box 7 is always 'postcode', even if the label text changes, and new boxes are added at the end.",
+      "mapping": [
+        [
+          "Box numbers",
+          "Field numbers"
+        ],
+        [
+          "Label text",
+          "Field names"
+        ],
+        [
+          "New boxes",
+          "New optional fields"
+        ]
+      ],
+      "breaks": "Paper forms can't be auto-validated; protobuf generates typed code."
+    },
+    "mindmap": {
+      "center": "Protocol Buffers",
+      "branches": [
+        {
+          "label": "Schema",
+          "children": [
+            ".proto",
+            "Messages",
+            "Services"
+          ]
+        },
+        {
+          "label": "Encoding",
+          "children": [
+            "Binary",
+            "Field numbers",
+            "Varints"
+          ]
+        },
+        {
+          "label": "Compatibility",
+          "children": [
+            "Don't reuse numbers",
+            "reserved",
+            "Add optional"
+          ]
+        },
+        {
+          "label": "Tooling",
+          "children": [
+            "protoc",
+            "buf lint/breaking"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Schema",
+      "scenario": "proto3.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Old clients ignore field 4; renaming fields is safe."
+        }
+      ],
+      "code": [
+        {
+          "lang": "protobuf",
+          "text": "syntax = \"proto3\";\npackage orders.v1;\nmessage Order {\n  string id = 1;\n  int64 amount_cents = 2;\n  reserved 3;            // was 'currency_old'\n  string currency = 4;\n}\nservice OrderService {\n  rpc GetOrder(GetOrderRequest) returns (Order);\n}\nmessage GetOrderRequest { string id = 1; }"
+        }
+      ],
+      "outcome": "explicit, evolvable contracts."
+    },
+    "summary": {
+      "points": [
+        "Schema-first.",
+        "Field numbers on the wire.",
+        "Compatibility rules."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must you never reuse a protobuf field number?",
+        "a": "Old clients/data would interpret the new field's bytes as the old field, corrupting meaning."
+      }
+    ]
+  },
+  "grpc-high-performance-service-to-service-communication": {
+    "core": "gRPC runs protobuf services over HTTP/2: unary calls plus client, server and bidirectional streaming on one multiplexed connection, with deadlines, cancellation and metadata built in. Because connections are long-lived, L4 load balancers pin all calls to one backend, so use L7 (Envoy, a service mesh) or client-side balancing. Use gRPC-Web or a gateway for browsers.",
+    "first_principles": {
+      "problem": "After moving to gRPC, one backend pod gets all traffic because the L4 load balancer balances connections, not requests.",
+      "truths": [
+        "HTTP/2 connections are long-lived.",
+        "L4 balancing is per connection.",
+        "Distributed calls need deadlines."
+      ],
+      "derivation": [
+        "Use **unary and streaming** RPCs as fit.",
+        "Always set **deadlines**.",
+        "Balance at **L7** or **client-side**.",
+        "Use **health checking** and retries policy.",
+        "Expose to browsers via **gRPC-Web/gateway**."
+      ]
+    },
+    "analogy": {
+      "title": "A dedicated phone line between offices",
+      "story": "Once connected, all calls flow over that line, so a switchboard that only routes new lines never spreads the load.",
+      "mapping": [
+        [
+          "Dedicated line",
+          "HTTP/2 connection"
+        ],
+        [
+          "Calls",
+          "RPCs"
+        ],
+        [
+          "Line-only switchboard",
+          "L4 load balancer"
+        ]
+      ],
+      "breaks": "Phone lines carry one call at a time; HTTP/2 multiplexes many."
+    },
+    "mindmap": {
+      "center": "gRPC",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Unary",
+            "Server stream",
+            "Client stream",
+            "Bidi"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Deadlines",
+            "Cancellation",
+            "Metadata",
+            "Status codes"
+          ]
+        },
+        {
+          "label": "Balancing",
+          "children": [
+            "L7 proxy",
+            "Client-side (xDS)",
+            "Not L4"
+          ]
+        },
+        {
+          "label": "Browsers",
+          "children": [
+            "gRPC-Web",
+            "Gateway"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "grpcurl"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Call with deadline",
+      "scenario": "grpcurl + Go.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bounded latency; deadline propagates downstream."
+        }
+      ],
+      "code": [
+        {
+          "lang": "go",
+          "text": "ctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)\ndefer cancel()\nresp, err := client.GetOrder(ctx, &ordersv1.GetOrderRequest{Id: \"42\"})\nif status.Code(err) == codes.DeadlineExceeded { /* fallback */ }\n// grpcurl -d '{\"id\":\"42\"}' orders:443 orders.v1.OrderService/GetOrder"
+        }
+      ],
+      "outcome": "fast, typed service calls."
+    },
+    "summary": {
+      "points": [
+        "Protobuf over HTTP/2.",
+        "Deadlines always.",
+        "L7 or client-side balancing."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does gRPC often need L7 load balancing?",
+        "a": "Calls are multiplexed on long-lived connections, so connection-level (L4) balancing sends all requests from a client to one backend."
+      }
+    ]
+  }
+}

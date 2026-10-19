@@ -1,0 +1,959 @@
+{
+  "introduction-why-we-dont-type-ip-addresses": {
+    "core": "DNS is the internet's distributed phone book: it maps human-friendly names to IP addresses and other data. It's hierarchical (root → TLD → domain), distributed (each zone's owner runs authoritative servers), and heavily cached, so it scales to billions of lookups. It also decouples names from addresses, so servers can move without anyone changing what they type.",
+    "first_principles": {
+      "problem": "Users bookmark an IP address and break when the service moves to a new server.",
+      "truths": [
+        "Humans remember names, not numbers.",
+        "Addresses change.",
+        "One central database couldn't scale."
+      ],
+      "derivation": [
+        "Map **names to records**.",
+        "Organise **hierarchically**.",
+        "**Delegate** zones to owners.",
+        "**Cache** answers with TTLs.",
+        "Use names for **indirection**."
+      ]
+    },
+    "analogy": {
+      "title": "Contacts on your phone",
+      "story": "You tap 'Mum'; the phone looks up the number, which can change without you noticing.",
+      "mapping": [
+        [
+          "Contact name",
+          "Domain name"
+        ],
+        [
+          "Number",
+          "IP address"
+        ],
+        [
+          "Contacts sync",
+          "DNS resolution"
+        ]
+      ],
+      "breaks": "Your contacts are local; DNS is a global, delegated system."
+    },
+    "mindmap": {
+      "center": "Why DNS",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Names → addresses",
+            "Indirection"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Hierarchy",
+            "Delegation",
+            "Caching"
+          ]
+        },
+        {
+          "label": "Parts",
+          "children": [
+            "Resolvers",
+            "Authoritative servers",
+            "Root/TLD"
+          ]
+        },
+        {
+          "label": "Data",
+          "children": [
+            "A",
+            "AAAA",
+            "CNAME",
+            "MX",
+            "TXT"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Resolve a name",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Name resolved; IP can change behind it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "dig +short www.example.com\n# 93.184.215.14"
+        }
+      ],
+      "outcome": "DNS's role understood."
+    },
+    "summary": {
+      "points": [
+        "Names for humans.",
+        "Hierarchical and delegated.",
+        "Cached for scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "What key benefit does DNS give besides convenience?",
+        "a": "Indirection: services can change IP addresses without clients changing anything."
+      }
+    ]
+  },
+  "how-a-dns-query-actually-works-the-resolution-chain": {
+    "core": "Your device asks a recursive resolver (ISP, 8.8.8.8, 1.1.1.1 or a VPC resolver). On a cache miss, the resolver walks the hierarchy: it asks a root server, which refers it to the .com TLD servers, which refer it to the domain's authoritative servers, which return the answer. The resolver caches every step by TTL and replies to the client. Most queries are answered from cache.",
+    "first_principles": {
+      "problem": "An engineer can't explain why one user sees the new IP and another the old one.",
+      "truths": [
+        "Resolvers do the work for clients.",
+        "Each level refers to the next.",
+        "Caches differ per resolver."
+      ],
+      "derivation": [
+        "Client → **stub resolver** → **recursive resolver**.",
+        "Resolver → **root** → **TLD** → **authoritative**.",
+        "**Cache** answers and referrals.",
+        "Different resolvers → **different cache states**.",
+        "Debug with **dig +trace**."
+      ]
+    },
+    "analogy": {
+      "title": "Asking a librarian for a rare book",
+      "story": "They check their shelf, then the national catalogue, then the regional library, then the specific branch, and remember the location for next time.",
+      "mapping": [
+        [
+          "Librarian",
+          "Recursive resolver"
+        ],
+        [
+          "National catalogue",
+          "Root"
+        ],
+        [
+          "Regional library",
+          "TLD"
+        ],
+        [
+          "Branch",
+          "Authoritative server"
+        ]
+      ],
+      "breaks": "Librarians remember forever; resolvers forget at TTL expiry."
+    },
+    "mindmap": {
+      "center": "Resolution Chain",
+      "branches": [
+        {
+          "label": "Client side",
+          "children": [
+            "Stub resolver",
+            "OS cache"
+          ]
+        },
+        {
+          "label": "Recursive",
+          "children": [
+            "ISP",
+            "Public",
+            "VPC resolver"
+          ]
+        },
+        {
+          "label": "Hierarchy",
+          "children": [
+            "Root",
+            "TLD",
+            "Authoritative"
+          ]
+        },
+        {
+          "label": "Caching",
+          "children": [
+            "Per TTL",
+            "Negative caching"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "dig +trace",
+            "dig @server"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Trace resolution",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows each referral step."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "dig +trace www.example.com\n# .  NS a.root-servers.net\n# com. NS a.gtld-servers.net\n# example.com. NS a.iana-servers.net\n# www.example.com. A 93.184.215.14"
+        }
+      ],
+      "outcome": "resolution path visible."
+    },
+    "summary": {
+      "points": [
+        "Recursive resolver does the walk.",
+        "Root → TLD → authoritative.",
+        "Caches everywhere."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might two users see different IPs for the same name after a change?",
+        "a": "They use different recursive resolvers with different cached records that expire at different times."
+      }
+    ]
+  },
+  "the-basic-records-a-aaaa-and-cname": {
+    "core": "An A record maps a name to an IPv4 address and an AAAA record to IPv6; several records give simple round-robin. A CNAME makes one name an alias of another, so the resolver restarts the lookup at the target. A CNAME can't coexist with other records at the same name, so it can't be used at the zone apex, which is why providers offer ALIAS/ANAME or Route 53 alias records.",
+    "first_principles": {
+      "problem": "Trying to CNAME example.com to a load balancer hostname fails because the apex also needs NS and SOA records.",
+      "truths": [
+        "Names map to addresses.",
+        "Aliases add indirection.",
+        "CNAME excludes other records at that name."
+      ],
+      "derivation": [
+        "Use **A/AAAA** for direct addresses.",
+        "Use **CNAME** for aliases (www → lb).",
+        "Avoid **CNAME at apex**.",
+        "Use **ALIAS/alias records** for apex to LB/CDN.",
+        "Avoid long **CNAME chains**."
+      ]
+    },
+    "analogy": {
+      "title": "A phone number vs 'call reception instead'",
+      "story": "A record is a direct number; CNAME says 'look up this other contact'.",
+      "mapping": [
+        [
+          "Direct number",
+          "A/AAAA"
+        ],
+        [
+          "Redirect to contact",
+          "CNAME"
+        ],
+        [
+          "Main office line",
+          "Zone apex"
+        ]
+      ],
+      "breaks": "Phones can have many entries per contact; CNAME names can't have others."
+    },
+    "mindmap": {
+      "center": "Basic Records",
+      "branches": [
+        {
+          "label": "A",
+          "children": [
+            "IPv4"
+          ]
+        },
+        {
+          "label": "AAAA",
+          "children": [
+            "IPv6"
+          ]
+        },
+        {
+          "label": "CNAME",
+          "children": [
+            "Alias",
+            "Restart lookup",
+            "No coexistence"
+          ]
+        },
+        {
+          "label": "Apex",
+          "children": [
+            "No CNAME",
+            "ALIAS/ANAME",
+            "Route 53 alias"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "www → CDN",
+            "Multiple A = round robin"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Zone snippet",
+      "scenario": "Records.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Apex direct, www aliased to CDN, api round-robin."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "example.com.       300 IN A     203.0.113.10\nexample.com.       300 IN AAAA  2001:db8::10\nwww.example.com.   300 IN CNAME d123.cloudfront.net.\napi.example.com.   60  IN A     203.0.113.20\napi.example.com.   60  IN A     203.0.113.21"
+        }
+      ],
+      "outcome": "correct record choice."
+    },
+    "summary": {
+      "points": [
+        "A and AAAA for addresses.",
+        "CNAME for aliases.",
+        "No CNAME at apex."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you put a CNAME at the zone apex?",
+        "a": "The apex must have SOA and NS records, and a CNAME can't coexist with any other record at the same name."
+      }
+    ]
+  },
+  "specialized-records-mx-txt-and-srv": {
+    "core": "MX records list mail servers for a domain with priorities (lower is preferred). TXT records hold arbitrary text, used for SPF (allowed senders), DKIM keys, DMARC policy and domain ownership verification. SRV records give service location (priority, weight, port, target) for protocols like SIP, XMPP and Kerberos. CAA restricts which certificate authorities may issue for the domain.",
+    "first_principles": {
+      "problem": "Marketing emails land in spam because SPF and DMARC records are missing.",
+      "truths": [
+        "Mail needs routing info.",
+        "Domains need to prove ownership and policies.",
+        "Services may run on non-standard ports."
+      ],
+      "derivation": [
+        "**MX** with priorities for mail.",
+        "**TXT** for SPF, DKIM, DMARC, verification.",
+        "**SRV** for service discovery with ports.",
+        "**CAA** to restrict certificate issuers.",
+        "Validate with **dig** and mail testers."
+      ]
+    },
+    "analogy": {
+      "title": "Building directory signs",
+      "story": "'Deliveries: loading dock B, then C' (MX); notices on the board (TXT); 'IT help: room 4, extension 22' (SRV).",
+      "mapping": [
+        [
+          "Loading docks",
+          "MX"
+        ],
+        [
+          "Notice board",
+          "TXT"
+        ],
+        [
+          "Room + extension",
+          "SRV target + port"
+        ]
+      ],
+      "breaks": "Notice boards aren't machine-parsed; SPF/DMARC syntax is strict."
+    },
+    "mindmap": {
+      "center": "Specialised Records",
+      "branches": [
+        {
+          "label": "MX",
+          "children": [
+            "Mail routing",
+            "Priority"
+          ]
+        },
+        {
+          "label": "TXT",
+          "children": [
+            "SPF",
+            "DKIM",
+            "DMARC",
+            "Verification"
+          ]
+        },
+        {
+          "label": "SRV",
+          "children": [
+            "_service._proto",
+            "Priority/weight/port"
+          ]
+        },
+        {
+          "label": "CAA",
+          "children": [
+            "Allowed CAs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Email records",
+      "scenario": "Zone.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Mail authenticated, SIP discoverable, cert issuance restricted."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "example.com.            MX  10 mx1.mailhost.net.\nexample.com.            MX  20 mx2.mailhost.net.\nexample.com.            TXT \"v=spf1 include:_spf.mailhost.net -all\"\n_dmarc.example.com.     TXT \"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com\"\n_sip._tcp.example.com.  SRV 10 60 5060 sip1.example.com.\nexample.com.            CAA 0 issue \"letsencrypt.org\""
+        }
+      ],
+      "outcome": "specialised records in use."
+    },
+    "summary": {
+      "points": [
+        "MX for mail.",
+        "TXT for policies.",
+        "SRV for services."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a lower MX priority number mean?",
+        "a": "Higher preference; senders try the lowest-numbered MX first."
+      }
+    ]
+  },
+  "infrastructure-records-ns-and-soa": {
+    "core": "NS records delegate a zone to its authoritative name servers; the parent zone (for example .com) holds matching NS and glue records pointing to them. The SOA record defines zone metadata: primary server, admin email, serial number, refresh and retry timers for secondaries, and the negative-caching TTL. Mismatched NS at parent and child, or forgotten serial bumps, cause subtle outages.",
+    "first_principles": {
+      "problem": "After migrating DNS providers, half of users still hit the old provider because the registrar's NS records weren't updated.",
+      "truths": [
+        "Delegation is set at the parent.",
+        "Secondaries sync by serial.",
+        "Negative answers are cached."
+      ],
+      "derivation": [
+        "Set **NS at the registrar/parent**.",
+        "Match **child NS** records.",
+        "Bump **SOA serial** on changes (if using AXFR).",
+        "Tune **negative TTL** (SOA minimum).",
+        "Lower **NS TTLs** before migrations."
+      ]
+    },
+    "analogy": {
+      "title": "Official land registry pointing to the local office",
+      "story": "The national registry says which local office holds the deeds; if it points to the old office, people go there.",
+      "mapping": [
+        [
+          "National registry",
+          "Parent zone/registrar"
+        ],
+        [
+          "Local office",
+          "Authoritative NS"
+        ],
+        [
+          "Deed version",
+          "SOA serial"
+        ]
+      ],
+      "breaks": "Registries update slowly by post; NS changes depend on TTLs."
+    },
+    "mindmap": {
+      "center": "NS & SOA",
+      "branches": [
+        {
+          "label": "NS",
+          "children": [
+            "Delegation",
+            "Parent + child",
+            "Glue records"
+          ]
+        },
+        {
+          "label": "SOA",
+          "children": [
+            "Primary",
+            "Admin",
+            "Serial",
+            "Refresh/retry/expire",
+            "Negative TTL"
+          ]
+        },
+        {
+          "label": "Migrations",
+          "children": [
+            "Lower TTLs",
+            "Update registrar",
+            "Run both"
+          ]
+        },
+        {
+          "label": "Debug",
+          "children": [
+            "dig NS",
+            "dig +trace"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check delegation",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Parent/child mismatch spotted."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "dig NS example.com +short                   # what the zone says\ndig NS example.com @a.gtld-servers.net      # what the parent delegates\ndig SOA example.com +short\n# ns1.provider.net. hostmaster.example.com. 2026101801 7200 3600 1209600 300"
+        }
+      ],
+      "outcome": "delegation verified."
+    },
+    "summary": {
+      "points": [
+        "NS delegates.",
+        "SOA holds metadata.",
+        "Parent must match."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where must NS changes be made to migrate DNS providers?",
+        "a": "At the parent zone via the registrar (and in the zone itself), otherwise resolvers keep being sent to the old servers."
+      }
+    ]
+  },
+  "ttl-and-caching-why-dns-changes-arent-instant": {
+    "core": "Every DNS record has a TTL in seconds telling resolvers how long to cache it. Changing a record only takes effect for a client once its resolver's cached copy expires, so with a TTL of 86400 that could be a day. Some clients, OS caches and Java's default caching ignore or extend TTLs. Lower TTLs in advance of planned changes, and remember negative answers (NXDOMAIN) are cached too.",
+    "first_principles": {
+      "problem": "A failover to a new IP takes hours because the record had a 24-hour TTL.",
+      "truths": [
+        "Caching trades freshness for load and speed.",
+        "Changes propagate only on expiry.",
+        "Not all clients honour TTLs."
+      ],
+      "derivation": [
+        "Choose TTLs by **change frequency**.",
+        "**Lower TTL** days before migrations.",
+        "Restore **higher TTL** afterwards.",
+        "Watch **negative caching**.",
+        "Check **client-side caches** (JVM, browsers)."
+      ]
+    },
+    "analogy": {
+      "title": "Printed menus vs a chalkboard",
+      "story": "Printed menus (long TTL) are cheap but slow to update; a chalkboard (short TTL) changes instantly but needs constant attention.",
+      "mapping": [
+        [
+          "Printed menu",
+          "Long TTL"
+        ],
+        [
+          "Chalkboard",
+          "Short TTL"
+        ],
+        [
+          "Old menu still on tables",
+          "Stale cache"
+        ]
+      ],
+      "breaks": "Menus can be collected; caches only expire."
+    },
+    "mindmap": {
+      "center": "TTL & Caching",
+      "branches": [
+        {
+          "label": "TTL",
+          "children": [
+            "Seconds",
+            "Per record"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Freshness",
+            "Query load",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Migration",
+          "children": [
+            "Lower early",
+            "Change",
+            "Raise later"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "Negative caching",
+            "JVM caches",
+            "Ignored TTLs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Watch TTL count down",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows how long the old answer will persist."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "dig api.example.com @1.1.1.1 | grep -A1 'ANSWER SECTION'\n# api.example.com. 2873 IN A 203.0.113.20   ← seconds remaining in cache"
+        }
+      ],
+      "outcome": "predictable DNS changes."
+    },
+    "summary": {
+      "points": [
+        "TTL bounds staleness.",
+        "Lower before changes.",
+        "Clients may cache longer."
+      ]
+    },
+    "check": [
+      {
+        "q": "How should you prepare a DNS record for a planned IP migration?",
+        "a": "Lower its TTL at least one old-TTL period in advance, make the change, then raise the TTL again."
+      }
+    ]
+  },
+  "advanced-concept-split-horizon-dns": {
+    "core": "Split-horizon DNS returns different answers for the same name depending on who asks. Internal clients get private IPs (10.x) and external clients get public ones, or internal-only names exist only inside. It's implemented with views (BIND), private hosted zones (Route 53) or conditional forwarding. It keeps internal topology hidden but makes debugging harder, because 'what does this resolve to?' depends on where you are.",
+    "first_principles": {
+      "problem": "Internal users hairpin through the public load balancer for an internal app, adding latency and egress cost.",
+      "truths": [
+        "Different audiences need different answers.",
+        "Internal topology should stay private.",
+        "Answers depend on resolver location."
+      ],
+      "derivation": [
+        "Use **private hosted zones** or **views**.",
+        "Serve **private IPs** internally.",
+        "Use **conditional forwarding** in hybrid setups.",
+        "Document **which resolver** sees which view.",
+        "Test from **both sides**."
+      ]
+    },
+    "analogy": {
+      "title": "A building with an internal and public directory",
+      "story": "Staff see office extensions; visitors see the main reception number for the same department.",
+      "mapping": [
+        [
+          "Internal directory",
+          "Private zone"
+        ],
+        [
+          "Public directory",
+          "Public zone"
+        ],
+        [
+          "Department",
+          "Hostname"
+        ]
+      ],
+      "breaks": "Visitors can't accidentally see the staff directory; misconfigured views can leak."
+    },
+    "mindmap": {
+      "center": "Split-Horizon",
+      "branches": [
+        {
+          "label": "Implementations",
+          "children": [
+            "BIND views",
+            "Route 53 private zones",
+            "Conditional forwarders"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Private IPs inside",
+            "Hide topology",
+            "Internal-only names"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Confusing debugging",
+            "Leaks",
+            "VPN client issues"
+          ]
+        },
+        {
+          "label": "Test",
+          "children": [
+            "dig from inside and outside"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same name, two answers",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Internal traffic stays private."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# from inside VPC\ndig +short app.acme.com     # 10.0.2.15\n# from internet\ndig +short app.acme.com @1.1.1.1   # 203.0.113.30"
+        }
+      ],
+      "outcome": "audience-specific DNS."
+    },
+    "summary": {
+      "points": [
+        "Different answers by source.",
+        "Private zones or views.",
+        "Test from both sides."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's a common debugging pitfall with split-horizon DNS?",
+        "a": "Results depend on which resolver you query, so engineers testing from a laptop vs inside the VPC see different answers."
+      }
+    ]
+  },
+  "advanced-concept-anycast-dns": {
+    "core": "Major DNS providers announce the same IP addresses via BGP from dozens or hundreds of locations (anycast). Queries reach the topologically nearest instance, giving low latency, automatic failover (a dead site withdraws its route), and DDoS absorption across sites. Root servers, 1.1.1.1, 8.8.8.8 and Route 53 all use anycast; UDP's statelessness makes DNS an ideal fit.",
+    "first_principles": {
+      "problem": "A single-location DNS server makes lookups slow for users in other continents and is easily DDoSed.",
+      "truths": [
+        "BGP routes to the nearest announcement.",
+        "DNS over UDP is mostly stateless.",
+        "Distributed sites absorb attacks."
+      ],
+      "derivation": [
+        "Announce **same prefix** from many PoPs.",
+        "Let **BGP pick nearest**.",
+        "**Withdraw** routes on site failure.",
+        "Spread **attack traffic** across sites.",
+        "Keep **zone data synced** globally."
+      ]
+    },
+    "analogy": {
+      "title": "One emergency number everywhere",
+      "story": "Dial 112 anywhere in Europe and the nearest centre answers.",
+      "mapping": [
+        [
+          "112",
+          "Anycast IP"
+        ],
+        [
+          "Nearest centre",
+          "Nearest PoP"
+        ],
+        [
+          "Centre closure",
+          "Route withdrawal"
+        ]
+      ],
+      "breaks": "Phone routing is geographic; BGP 'nearest' is topological, not always geographic."
+    },
+    "mindmap": {
+      "center": "Anycast DNS",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Same IP many PoPs",
+            "BGP nearest"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Latency",
+            "Failover",
+            "DDoS absorption"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Root servers",
+            "1.1.1.1",
+            "8.8.8.8",
+            "Route 53"
+          ]
+        },
+        {
+          "label": "Fit",
+          "children": [
+            "UDP stateless",
+            "Short exchanges"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Which instance answered?",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Different locations see different PoP IDs for the same IP."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "dig @1.1.1.1 id.server CH TXT +short\n# \"FRA\"   ← Frankfurt PoP served this query\ndig @k.root-servers.net hostname.bind CH TXT +short"
+        }
+      ],
+      "outcome": "global, resilient DNS."
+    },
+    "summary": {
+      "points": [
+        "Same IP, many sites.",
+        "BGP picks nearest.",
+        "Ideal for UDP DNS."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is DNS particularly well suited to anycast?",
+        "a": "Queries are short, mostly stateless UDP exchanges, so route changes mid-session rarely break anything."
+      }
+    ]
+  },
+  "security-dnssec-and-dns-over-https": {
+    "core": "Classic DNS is unauthenticated and unencrypted. DNSSEC adds authenticity: zones sign records (RRSIG), publish keys (DNSKEY), and parents vouch for children (DS records) in a chain of trust up to the root, so validating resolvers reject forged answers. Encrypted DNS (DoH, DoT) adds privacy between client and resolver. They solve different problems: integrity versus confidentiality.",
+    "first_principles": {
+      "problem": "A cache-poisoning attack redirects a bank's domain to a phishing server for users of one ISP.",
+      "truths": [
+        "Unsigned answers can be forged.",
+        "Plaintext queries can be observed.",
+        "Trust must chain to a known anchor."
+      ],
+      "derivation": [
+        "**Sign zones** with DNSSEC.",
+        "Publish **DS at parent**.",
+        "**Validate** at resolvers.",
+        "Encrypt client queries with **DoH/DoT**.",
+        "Monitor **key rollovers**."
+      ]
+    },
+    "analogy": {
+      "title": "A sealed, signed letter vs an opaque envelope",
+      "story": "A signature proves who sent it (DNSSEC); an opaque envelope hides what it says (DoH). You may want both.",
+      "mapping": [
+        [
+          "Signature",
+          "RRSIG"
+        ],
+        [
+          "Notary chain",
+          "DS chain of trust"
+        ],
+        [
+          "Opaque envelope",
+          "DoH/DoT"
+        ]
+      ],
+      "breaks": "Signatures on letters are rarely checked; validating resolvers check every answer."
+    },
+    "mindmap": {
+      "center": "DNS Security",
+      "branches": [
+        {
+          "label": "DNSSEC",
+          "children": [
+            "RRSIG",
+            "DNSKEY",
+            "DS",
+            "Chain of trust"
+          ]
+        },
+        {
+          "label": "Protects",
+          "children": [
+            "Integrity",
+            "Authenticity"
+          ]
+        },
+        {
+          "label": "DoH/DoT",
+          "children": [
+            "Encryption",
+            "Privacy"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Key rollover outages",
+            "Larger responses"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "dig +dnssec",
+            "delv"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check DNSSEC",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Proves answers are signed and validated."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "dig +dnssec example.com A | grep -E 'RRSIG|flags'\n# flags: qr rd ra ad;   ← 'ad' = authenticated data (validated)\ndelv example.com A\n# ; fully validated"
+        }
+      ],
+      "outcome": "authentic and private DNS."
+    },
+    "summary": {
+      "points": [
+        "DNSSEC for integrity.",
+        "DoH/DoT for privacy.",
+        "Different problems."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does DNSSEC encrypt DNS queries?",
+        "a": "No, it only signs records for authenticity; DoH/DoT provide encryption."
+      }
+    ]
+  }
+}

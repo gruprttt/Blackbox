@@ -1,0 +1,755 @@
+{
+  "introduction-the-trust-problem": {
+    "core": "BGP was designed in 1989 for a small community of trusted operators. Routers accept announcements from neighbours without proof that the origin AS is authorised to announce the prefix, or that the path is real. One misconfiguration or malicious actor can redirect traffic worldwide. BGP security layers cryptographic attestations (RPKI) and validation onto that trust-based system.",
+    "first_principles": {
+      "problem": "In 2008 a national ISP's attempt to block YouTube locally leaked a more-specific route and took YouTube offline globally.",
+      "truths": [
+        "BGP accepts claims without proof.",
+        "Errors propagate globally.",
+        "Authorisation can be published and checked."
+      ],
+      "derivation": [
+        "Recognise **implicit trust** in BGP.",
+        "Publish **authorisations** (RPKI ROAs).",
+        "**Validate** routes on import.",
+        "**Filter** by IRR and max-prefix.",
+        "Pursue **path validation** (ASPA, BGPsec)."
+      ]
+    },
+    "analogy": {
+      "title": "A town where anyone can put up road signs",
+      "story": "Most residents are honest, but one prankster can divert all traffic.",
+      "mapping": [
+        [
+          "Road signs",
+          "BGP announcements"
+        ],
+        [
+          "Prankster",
+          "Hijacker"
+        ],
+        [
+          "Official permits",
+          "RPKI ROAs"
+        ]
+      ],
+      "breaks": "Fake signs are local; BGP mistakes are global."
+    },
+    "mindmap": {
+      "center": "BGP Trust Problem",
+      "branches": [
+        {
+          "label": "Design",
+          "children": [
+            "1989",
+            "Trusted community"
+          ]
+        },
+        {
+          "label": "Weaknesses",
+          "children": [
+            "No origin proof",
+            "No path proof"
+          ]
+        },
+        {
+          "label": "Incidents",
+          "children": [
+            "YouTube 2008",
+            "Leaks",
+            "Crypto hijacks"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "RPKI ROV",
+            "IRR filters",
+            "ASPA",
+            "BGPsec"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "2008 incident",
+      "scenario": "Timeline.",
+      "flow": [
+        "ISP announces YouTube /24 internally to block it",
+        "Announcement leaks upstream",
+        "/24 beats YouTube's /22 globally",
+        "YouTube unreachable ~2 hours"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "One local change, global outage."
+        }
+      ],
+      "code": [],
+      "outcome": "why BGP needs security."
+    },
+    "summary": {
+      "points": [
+        "Trust by default.",
+        "Global blast radius.",
+        "Add attestations and validation."
+      ]
+    },
+    "check": [
+      {
+        "q": "What fundamental check does classic BGP lack?",
+        "a": "Verification that the announcing AS is authorised to originate the prefix (and that the path is real)."
+      }
+    ]
+  },
+  "bgp-hijacks-stealing-the-traffic": {
+    "core": "Hijack types include exact-prefix origin hijacks (competing with the real route), more-specific hijacks (always winning by longest match), and path manipulation (forged AS_PATH that keeps the real origin to evade simple checks). Motives range from accidents to theft: in 2018 attackers hijacked Amazon Route 53 prefixes to steal cryptocurrency via fake DNS answers.",
+    "first_principles": {
+      "problem": "Attackers hijack a DNS provider's prefixes for two hours and redirect a crypto wallet site to a phishing server.",
+      "truths": [
+        "Longest prefix always wins.",
+        "Origin checks alone miss forged paths.",
+        "DNS and TLS can amplify hijack impact."
+      ],
+      "derivation": [
+        "Announce **/24s** to block more-specifics.",
+        "Publish **ROAs** with tight maxLength.",
+        "**Monitor** your prefixes globally.",
+        "Use **DNSSEC and TLS** to limit hijack impact.",
+        "Push for **ASPA** path validation."
+      ]
+    },
+    "analogy": {
+      "title": "Mail redirection fraud",
+      "story": "A fraudster files a change of address for your street (more-specific) and all your post goes to them.",
+      "mapping": [
+        [
+          "Change of address",
+          "More-specific announcement"
+        ],
+        [
+          "Your post",
+          "Your traffic"
+        ],
+        [
+          "Fraudster",
+          "Hijacker"
+        ]
+      ],
+      "breaks": "Postal fraud needs paperwork; BGP hijacks need just a router."
+    },
+    "mindmap": {
+      "center": "Hijack Types",
+      "branches": [
+        {
+          "label": "Exact prefix",
+          "children": [
+            "Competes on attributes"
+          ]
+        },
+        {
+          "label": "More-specific",
+          "children": [
+            "Always wins"
+          ]
+        },
+        {
+          "label": "Forged path",
+          "children": [
+            "Real origin spoofed",
+            "Evades ROV"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Route 53 2018",
+            "Telecom interceptions"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "/24 announcements",
+            "ROAs",
+            "Monitoring",
+            "TLS/DNSSEC"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "2018 Route 53 hijack",
+      "scenario": "Timeline.",
+      "flow": [
+        "AS10297 announces Route 53 /24s",
+        "Some resolvers query attacker's DNS",
+        "myetherwallet.com → phishing IP",
+        "Users accepting bad TLS cert lose funds"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "BGP + DNS combined into theft."
+        }
+      ],
+      "code": [],
+      "outcome": "hijack anatomy understood."
+    },
+    "summary": {
+      "points": [
+        "Several hijack types.",
+        "More-specifics always win.",
+        "Layer defences."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't RPKI origin validation alone stop a forged-path hijack?",
+        "a": "The attacker keeps the legitimate origin ASN at the end of the AS_PATH, so the origin check passes."
+      }
+    ]
+  },
+  "route-leaks-the-middleman-mistake": {
+    "core": "A route leak happens when an AS propagates routes beyond their intended scope, typically when a customer re-announces routes learned from one provider or peer to another provider. The leaker becomes an unintended transit network, overwhelming its links and adding huge latency. Leaks are usually accidental (missing export filters), and prevention means strict customer filters, max-prefix limits and RFC 9234 roles with Only-To-Customer (OTC).",
+    "first_principles": {
+      "problem": "In 2019 a small ISP's optimiser leaked thousands of more-specific routes through Verizon, disrupting Cloudflare and others.",
+      "truths": [
+        "Routes have intended scopes.",
+        "Missing export filters leak everything.",
+        "Providers often accept too much from customers."
+      ],
+      "derivation": [
+        "Export to providers **only your and customer routes**.",
+        "Providers **filter customers** by IRR/RPKI.",
+        "Set **max-prefix** limits.",
+        "Use **BGP roles + OTC** (RFC 9234).",
+        "Validate paths with **ASPA**."
+      ]
+    },
+    "analogy": {
+      "title": "A neighbour letting through-traffic cut across their garden",
+      "story": "They didn't mean to become a road, but now everyone drives through and the lawn is destroyed.",
+      "mapping": [
+        [
+          "Garden",
+          "Small AS"
+        ],
+        [
+          "Through-traffic",
+          "Transit traffic"
+        ],
+        [
+          "Fence",
+          "Export filter"
+        ]
+      ],
+      "breaks": "Gardens are visible; leaks are only noticed by monitoring."
+    },
+    "mindmap": {
+      "center": "Route Leaks",
+      "branches": [
+        {
+          "label": "Definition",
+          "children": [
+            "Valley-free violation",
+            "Unintended transit"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Missing export filters",
+            "Optimisers",
+            "Misconfig"
+          ]
+        },
+        {
+          "label": "Impact",
+          "children": [
+            "Congestion",
+            "Latency",
+            "Outages"
+          ]
+        },
+        {
+          "label": "Prevention",
+          "children": [
+            "Export filters",
+            "Customer filters",
+            "Max-prefix",
+            "RFC 9234 OTC",
+            "ASPA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Export policy",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only own/customer routes leave; role checks catch leaks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "route-map TO-UPSTREAM permit 10\n match community OWN-OR-CUSTOMER\nroute-map TO-UPSTREAM deny 100\n!\nrouter bgp 64500\n neighbor 203.0.113.1 local-role customer\n neighbor 203.0.113.1 maximum-prefix 50"
+        }
+      ],
+      "outcome": "leaks prevented by policy."
+    },
+    "summary": {
+      "points": [
+        "Routes have scope.",
+        "Filter exports and imports.",
+        "Use roles and limits."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes a route leak different from a hijack?",
+        "a": "A leak propagates legitimate routes beyond their intended scope; a hijack announces routes the AS isn't authorised to originate."
+      }
+    ]
+  },
+  "rpki-the-passport-system": {
+    "core": "RPKI is a public key infrastructure for internet number resources. RIRs issue resource certificates to address holders, who use them to sign objects (ROAs) stating which ASNs may originate their prefixes. Relying-party validators (Routinator, rpki-client, Fort) fetch and verify all objects from the RIR repositories and feed validated payloads to routers via the RTR protocol.",
+    "first_principles": {
+      "problem": "Routers have no authoritative way to know which AS is allowed to announce a prefix.",
+      "truths": [
+        "RIRs know who holds which addresses.",
+        "Signatures prove authorisation.",
+        "Routers need a compact, validated feed."
+      ],
+      "derivation": [
+        "RIRs act as **trust anchors**.",
+        "Holders get **resource certificates**.",
+        "Holders sign **ROAs**.",
+        "**Validators** fetch and verify.",
+        "Routers get VRPs via **RTR**."
+      ]
+    },
+    "analogy": {
+      "title": "A passport system for IP addresses",
+      "story": "The government (RIR) issues passports (certificates); holders issue signed authorisations, and border guards (validators) check them.",
+      "mapping": [
+        [
+          "Government",
+          "RIR trust anchor"
+        ],
+        [
+          "Passport",
+          "Resource certificate"
+        ],
+        [
+          "Border guard",
+          "Validator/router"
+        ]
+      ],
+      "breaks": "Passports are carried; RPKI objects are fetched from repositories and can be stale if fetches fail."
+    },
+    "mindmap": {
+      "center": "RPKI",
+      "branches": [
+        {
+          "label": "Trust anchors",
+          "children": [
+            "AFRINIC",
+            "APNIC",
+            "ARIN",
+            "LACNIC",
+            "RIPE NCC"
+          ]
+        },
+        {
+          "label": "Objects",
+          "children": [
+            "Resource certs",
+            "ROAs",
+            "ASPA"
+          ]
+        },
+        {
+          "label": "Validators",
+          "children": [
+            "Routinator",
+            "rpki-client",
+            "Fort"
+          ]
+        },
+        {
+          "label": "Delivery",
+          "children": [
+            "RTR protocol",
+            "VRPs"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "Redundant validators",
+            "Monitor freshness"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Run a validator",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Routers query validator via RTR for VRPs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "routinator init --accept-arin-rpa\nroutinator server --rtr 0.0.0.0:3323 --http 0.0.0.0:8323 &\ncurl -s localhost:8323/api/v1/validity/AS13335/1.1.1.0/24 | jq .validated_route.validity.state\n# \"valid\""
+        }
+      ],
+      "outcome": "cryptographic origin data available to routers."
+    },
+    "summary": {
+      "points": [
+        "RIR-rooted PKI.",
+        "ROAs authorise origins.",
+        "Validators feed routers."
+      ]
+    },
+    "check": [
+      {
+        "q": "What do routers receive from an RPKI validator?",
+        "a": "Validated ROA Payloads (prefix, maxLength, origin ASN) via the RTR protocol, used to judge route origins."
+      }
+    ]
+  },
+  "roa-the-authorization-letter": {
+    "core": "A Route Origin Authorization states: 'prefix P, up to maxLength M, may be originated by AS X.' The address holder creates it in the RIR portal or via delegated RPKI. Set maxLength to exactly what you announce: a loose maxLength (/24 for a /22 you announce as /22) lets attackers announce forged-origin more-specifics that still validate. Multiple ROAs cover multiple origins, such as a DDoS-scrubbing provider.",
+    "first_principles": {
+      "problem": "A ROA with maxLength /24 for an announced /22 lets an attacker forge-origin a /24 that RPKI marks valid.",
+      "truths": [
+        "ROAs define allowed origins and lengths.",
+        "Loose maxLength widens the attack surface.",
+        "Third parties may need authorisation."
+      ],
+      "derivation": [
+        "Create ROA **per announced prefix**.",
+        "Set **maxLength = announced length**.",
+        "Add ROAs for **scrubbing/CDN** origins.",
+        "**Update before** changing announcements.",
+        "**Monitor** your prefixes' validity."
+      ]
+    },
+    "analogy": {
+      "title": "A signed letter authorising a specific agent",
+      "story": "'Alex may collect parcels for flat 12, but not for the whole building.'",
+      "mapping": [
+        [
+          "Agent",
+          "Origin AS"
+        ],
+        [
+          "Flat 12",
+          "Prefix"
+        ],
+        [
+          "Not whole building",
+          "maxLength"
+        ]
+      ],
+      "breaks": "Letters are checked by one clerk; ROAs are checked by thousands of routers."
+    },
+    "mindmap": {
+      "center": "ROAs",
+      "branches": [
+        {
+          "label": "Fields",
+          "children": [
+            "Prefix",
+            "maxLength",
+            "Origin ASN"
+          ]
+        },
+        {
+          "label": "Best practice",
+          "children": [
+            "Tight maxLength",
+            "One per announcement",
+            "Update first"
+          ]
+        },
+        {
+          "label": "Special",
+          "children": [
+            "AS0 ROA for unused space",
+            "Scrubbing providers"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "RIR portal",
+            "Delegated CA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ROA set",
+      "scenario": "Records.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only intended announcements validate."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "prefix 198.51.100.0/22  maxLength 22  origin AS64500   # normal announcement\nprefix 198.51.100.0/24  maxLength 24  origin AS64500   # announced during DDoS\nprefix 198.51.100.0/24  maxLength 24  origin AS19551   # scrubbing provider\nprefix 192.0.2.0/24     maxLength 24  origin AS0       # unused space: never valid"
+        }
+      ],
+      "outcome": "precise origin authorisation."
+    },
+    "summary": {
+      "points": [
+        "Prefix + maxLength + ASN.",
+        "Keep maxLength tight.",
+        "Authorise third parties."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an AS0 ROA mean?",
+        "a": "No AS is authorised to originate the prefix, so any announcement of it is invalid (protects unused space)."
+      }
+    ]
+  },
+  "route-validation-states": {
+    "core": "Route origin validation compares each received route to the VRPs. Valid: a VRP covers the prefix with a matching origin and allowed length. Invalid: covering VRPs exist but the origin or length doesn't match. NotFound: no VRP covers the prefix. The recommended policy is to drop Invalid and accept Valid and NotFound, since much of the internet still lacks ROAs. Major networks now drop Invalids.",
+    "first_principles": {
+      "problem": "A network enables ROV but sets 'prefer Valid' instead of 'drop Invalid', so hijacked routes still propagate via other paths.",
+      "truths": [
+        "Validation has three outcomes.",
+        "Coverage isn't universal.",
+        "Only dropping invalids blocks hijacks."
+      ],
+      "derivation": [
+        "Compute **Valid / Invalid / NotFound**.",
+        "**Drop Invalid**.",
+        "Accept **NotFound** (for now).",
+        "Optionally **prefer Valid**.",
+        "Monitor **invalid counts** and your own status."
+      ]
+    },
+    "analogy": {
+      "title": "A guest list at the door",
+      "story": "On the list with matching ID: in. On the list with the wrong ID: out. Not on any list: allowed in for now.",
+      "mapping": [
+        [
+          "Matching ID",
+          "Valid"
+        ],
+        [
+          "Wrong ID",
+          "Invalid"
+        ],
+        [
+          "No list",
+          "NotFound"
+        ]
+      ],
+      "breaks": "Doormen can make exceptions; routers apply policy uniformly."
+    },
+    "mindmap": {
+      "center": "Validation States",
+      "branches": [
+        {
+          "label": "Valid",
+          "children": [
+            "Covered + matching origin + length"
+          ]
+        },
+        {
+          "label": "Invalid",
+          "children": [
+            "Covered, mismatch"
+          ]
+        },
+        {
+          "label": "NotFound",
+          "children": [
+            "No covering VRP"
+          ]
+        },
+        {
+          "label": "Policy",
+          "children": [
+            "Drop Invalid",
+            "Accept NotFound",
+            "Prefer Valid (optional)"
+          ]
+        },
+        {
+          "label": "Adoption",
+          "children": [
+            "Tier-1s drop invalids",
+            "isbgpsafeyet.com"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Router policy",
+      "scenario": "Config (FRR).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Invalid routes never enter the table."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "rpki\n rpki cache 10.0.0.53 3323 preference 1\n!\nroute-map RPKI-IN deny 10\n match rpki invalid\nroute-map RPKI-IN permit 20\n!\nrouter bgp 64500\n neighbor 203.0.113.1 route-map RPKI-IN in"
+        }
+      ],
+      "outcome": "hijacks filtered at your edge."
+    },
+    "summary": {
+      "points": [
+        "Three states.",
+        "Drop Invalid.",
+        "Accept NotFound."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why not reject NotFound routes?",
+        "a": "Many legitimate prefixes still lack ROAs; rejecting NotFound would break reachability to a large part of the internet."
+      }
+    ]
+  },
+  "bgp-flowspec-the-global-firewall": {
+    "core": "BGP Flowspec (RFC 8955) distributes traffic-filtering rules through BGP: match on destination and source prefix, protocol, ports, packet length or TCP flags, then rate-limit, drop, mark or redirect. During a DDoS, an operator can push a precise rule ('drop UDP from port 123 to 203.0.113.45') to every edge router in seconds, much more surgical than blackholing the whole IP.",
+    "first_principles": {
+      "problem": "RTBH stops a DDoS by blackholing the victim IP, completing the attacker's goal of taking it offline.",
+      "truths": [
+        "BGP already reaches every edge router.",
+        "Attacks have identifiable patterns.",
+        "Precise filters keep legitimate traffic."
+      ],
+      "derivation": [
+        "Define **match criteria** (5-tuple, length, flags).",
+        "Choose **action** (drop, rate-limit, redirect).",
+        "Distribute via **BGP Flowspec**.",
+        "**Validate** rules to avoid self-DoS.",
+        "**Expire** rules after the attack."
+      ]
+    },
+    "analogy": {
+      "title": "A city-wide alert to police checkpoints",
+      "story": "'Stop only red vans heading to the stadium' rather than closing every road to the stadium.",
+      "mapping": [
+        [
+          "Red vans",
+          "Matching attack packets"
+        ],
+        [
+          "Checkpoints",
+          "Edge routers"
+        ],
+        [
+          "Closing roads",
+          "RTBH"
+        ]
+      ],
+      "breaks": "Police judge context; a bad flowspec rule can drop legitimate traffic everywhere at once."
+    },
+    "mindmap": {
+      "center": "BGP Flowspec",
+      "branches": [
+        {
+          "label": "Match",
+          "children": [
+            "Src/dst prefix",
+            "Protocol",
+            "Ports",
+            "Length",
+            "TCP flags",
+            "DSCP"
+          ]
+        },
+        {
+          "label": "Actions",
+          "children": [
+            "Drop",
+            "Rate-limit",
+            "Redirect to VRF",
+            "Mark"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "DDoS mitigation",
+            "Surgical filtering"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Self-inflicted outages",
+            "Router TCAM limits"
+          ]
+        },
+        {
+          "label": "vs RTBH",
+          "children": [
+            "Keeps service up"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Drop NTP amplification",
+      "scenario": "Flowspec rule (ExaBGP).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Attack dropped at every edge; the service stays online."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "flow {\n  route ntp-amp {\n    match {\n      destination 203.0.113.45/32;\n      protocol udp;\n      source-port =123;\n      packet-length >400;\n    }\n    then { discard; }\n  }\n}"
+        }
+      ],
+      "outcome": "precise, network-wide DDoS filtering."
+    },
+    "summary": {
+      "points": [
+        "Filters via BGP.",
+        "Match + action.",
+        "Surgical vs blackhole."
+      ]
+    },
+    "check": [
+      {
+        "q": "What advantage does Flowspec have over RTBH?",
+        "a": "It filters only attack traffic matching specific criteria, keeping the victim reachable, whereas RTBH drops all traffic to the IP."
+      }
+    ]
+  }
+}

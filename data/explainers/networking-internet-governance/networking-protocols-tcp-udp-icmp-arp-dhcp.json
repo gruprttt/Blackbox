@@ -1,0 +1,901 @@
+{
+  "introduction-the-rules-of-the-road": {
+    "core": "A handful of protocols carry almost everything: DHCP gives a host its identity (IP, gateway, DNS), ARP maps IPs to MAC addresses on the local link, ICMP reports errors and diagnostics, and TCP and UDP carry application data with or without reliability guarantees. Knowing how each works explains most everyday failures, from 'no IP address' to 'connection reset'.",
+    "first_principles": {
+      "problem": "A new VM boots but can't reach anything, and the team doesn't know whether DHCP, ARP or routing is at fault.",
+      "truths": [
+        "Hosts need configuration to join a network.",
+        "Local delivery needs MAC addresses.",
+        "Data delivery needs a transport choice."
+      ],
+      "derivation": [
+        "**DHCP** for identity.",
+        "**ARP** for local delivery.",
+        "**ICMP** for errors and diagnostics.",
+        "**TCP** for reliable streams.",
+        "**UDP** for lightweight datagrams."
+      ]
+    },
+    "analogy": {
+      "title": "Moving into a new town",
+      "story": "Register for an address (DHCP), learn your neighbours' doors (ARP), follow road signs and warnings (ICMP), choose courier or postcard (TCP/UDP).",
+      "mapping": [
+        [
+          "Town registration",
+          "DHCP"
+        ],
+        [
+          "Neighbours' doors",
+          "ARP"
+        ],
+        [
+          "Road warnings",
+          "ICMP"
+        ],
+        [
+          "Courier vs postcard",
+          "TCP vs UDP"
+        ]
+      ],
+      "breaks": "Towns don't expire your address; DHCP leases do."
+    },
+    "mindmap": {
+      "center": "Core Protocols",
+      "branches": [
+        {
+          "label": "Identity",
+          "children": [
+            "DHCP"
+          ]
+        },
+        {
+          "label": "Local delivery",
+          "children": [
+            "ARP",
+            "NDP (IPv6)"
+          ]
+        },
+        {
+          "label": "Diagnostics",
+          "children": [
+            "ICMP"
+          ]
+        },
+        {
+          "label": "Transport",
+          "children": [
+            "TCP",
+            "UDP",
+            "QUIC"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "No lease",
+            "ARP issues",
+            "Resets",
+            "Timeouts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Boot sequence",
+      "scenario": "Flow.",
+      "flow": [
+        "DHCP DORA → IP 10.0.1.15, gw 10.0.1.1",
+        "ARP: who has 10.0.1.1? → MAC",
+        "TCP SYN to 93.184.216.34:443",
+        "ICMP if anything is unreachable"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each step is a debugging checkpoint."
+        }
+      ],
+      "code": [],
+      "outcome": "the protocol journey of a new host."
+    },
+    "summary": {
+      "points": [
+        "DHCP, ARP, ICMP, TCP, UDP.",
+        "Each solves one problem.",
+        "Each is a checkpoint."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which protocol lets a host find the MAC of its default gateway?",
+        "a": "ARP (or NDP on IPv6)."
+      }
+    ]
+  },
+  "dhcp-getting-an-identity": {
+    "core": "DHCP hands out IP configuration in four steps (DORA): the client broadcasts Discover, servers Offer an address, the client Requests one, and the server Acknowledges with a lease (IP, mask, gateway, DNS, lease time). Clients renew at half the lease time. Relays forward broadcasts across subnets, and rogue DHCP servers or exhausted pools are classic failure modes.",
+    "first_principles": {
+      "problem": "Laptops get 169.254.x.x addresses because the DHCP pool on the guest VLAN is exhausted.",
+      "truths": [
+        "New hosts know nothing about the network.",
+        "Broadcast reaches the local segment.",
+        "Leases expire and renew."
+      ],
+      "derivation": [
+        "**Discover → Offer → Request → Ack**.",
+        "Use **relays** (ip helper) across subnets.",
+        "Size **pools and lease times** for churn.",
+        "Use **reservations** for fixed hosts.",
+        "Protect with **DHCP snooping**."
+      ]
+    },
+    "analogy": {
+      "title": "A hotel front desk",
+      "story": "You arrive, ask for a room, are offered one, accept, and get a key valid until checkout, which you can extend.",
+      "mapping": [
+        [
+          "Room",
+          "IP address"
+        ],
+        [
+          "Key expiry",
+          "Lease time"
+        ],
+        [
+          "Extension",
+          "Renewal"
+        ]
+      ],
+      "breaks": "Hotels don't broadcast to find guests; DHCP clients broadcast to find servers."
+    },
+    "mindmap": {
+      "center": "DHCP",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Discover",
+            "Offer",
+            "Request",
+            "Ack"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "Gateway",
+            "DNS",
+            "Domain",
+            "NTP"
+          ]
+        },
+        {
+          "label": "Lifecycle",
+          "children": [
+            "Lease",
+            "Renew at T1",
+            "Rebind at T2"
+          ]
+        },
+        {
+          "label": "Infra",
+          "children": [
+            "Relays",
+            "Reservations",
+            "Failover"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "Exhaustion",
+            "Rogue servers",
+            "APIPA 169.254"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Watch DORA",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See exactly which step fails."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sudo tcpdump -ni eth0 port 67 or port 68 -vv\n# DHCP-Discover, DHCP-Offer 10.0.1.15, DHCP-Request, DHCP-ACK lease 86400\nsudo dhclient -r eth0 && sudo dhclient -v eth0"
+        }
+      ],
+      "outcome": "IP assignment understood."
+    },
+    "summary": {
+      "points": [
+        "DORA handshake.",
+        "Leases renew.",
+        "Relays and snooping."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a 169.254.x.x address on a client indicate?",
+        "a": "It failed to get a DHCP lease and self-assigned a link-local (APIPA) address."
+      }
+    ]
+  },
+  "arp-the-bridge-between-software-and-hardware": {
+    "core": "IP addresses are logical, but Ethernet delivers frames to MAC addresses. ARP bridges the two: a host broadcasts 'who has 10.0.1.1?', the owner replies with its MAC, and the answer is cached in the ARP table for a while. Gratuitous ARP announces changes, for example during failover. Because ARP has no authentication, it enables spoofing and man-in-the-middle attacks on local networks.",
+    "first_principles": {
+      "problem": "After a VIP fails over to a new server, clients keep sending to the old MAC until their ARP caches expire.",
+      "truths": [
+        "Frames need MAC addresses.",
+        "Hosts cache mappings.",
+        "ARP replies aren't authenticated."
+      ],
+      "derivation": [
+        "**Broadcast request**, unicast reply.",
+        "**Cache** with timeouts.",
+        "Send **gratuitous ARP** on failover.",
+        "Defend with **Dynamic ARP Inspection**.",
+        "Inspect with **ip neigh**."
+      ]
+    },
+    "analogy": {
+      "title": "Shouting 'who is Alex?' in an office",
+      "story": "Alex answers and you note their desk; if Alex moves desks, they announce it to everyone.",
+      "mapping": [
+        [
+          "Name",
+          "IP"
+        ],
+        [
+          "Desk",
+          "MAC"
+        ],
+        [
+          "Announcement",
+          "Gratuitous ARP"
+        ]
+      ],
+      "breaks": "Imposters in an office are noticed; ARP spoofers aren't."
+    },
+    "mindmap": {
+      "center": "ARP",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Broadcast request",
+            "Unicast reply",
+            "Cache"
+          ]
+        },
+        {
+          "label": "Special",
+          "children": [
+            "Gratuitous ARP",
+            "Proxy ARP"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Spoofing",
+            "MITM",
+            "Stale caches"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "DAI",
+            "Static entries"
+          ]
+        },
+        {
+          "label": "IPv6",
+          "children": [
+            "NDP replaces ARP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ARP table",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clients update immediately after failover."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ip neigh show\n# 10.0.1.1 dev eth0 lladdr 0a:1b:2c:3d:4e:5f REACHABLE\narping -U -I eth0 10.0.1.50    # send gratuitous ARP after VIP move"
+        }
+      ],
+      "outcome": "IP-to-MAC resolution understood."
+    },
+    "summary": {
+      "points": [
+        "Maps IP to MAC.",
+        "Cached with timeouts.",
+        "Unauthenticated, spoofable."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is gratuitous ARP used during failover?",
+        "a": "To immediately update neighbours' caches so traffic for the IP goes to the new MAC instead of the old one."
+      }
+    ]
+  },
+  "icmp-the-internets-diagnostic-tool": {
+    "core": "ICMP carries control messages: echo request and reply (ping), destination unreachable (with codes for port, host or fragmentation-needed), time exceeded (which traceroute relies on), and redirects. Blocking all ICMP 'for security' breaks Path MTU Discovery, causing black-holed large packets. Allow at least the essential types while rate-limiting.",
+    "first_principles": {
+      "problem": "After a firewall blocks all ICMP, HTTPS uploads hang because 'fragmentation needed' messages no longer arrive.",
+      "truths": [
+        "Routers report errors via ICMP.",
+        "PMTUD depends on ICMP.",
+        "Traceroute uses TTL-exceeded."
+      ],
+      "derivation": [
+        "Use **echo** for reachability.",
+        "Use **TTL-exceeded** for path tracing.",
+        "Allow **type 3 code 4** (frag needed) / ICMPv6 Packet Too Big.",
+        "**Rate-limit**, don't blanket-block.",
+        "Interpret **unreachable codes**."
+      ]
+    },
+    "analogy": {
+      "title": "Return-to-sender notices",
+      "story": "The post office tells you 'address unknown' or 'too big for this route'; ignore those notices and parcels just vanish.",
+      "mapping": [
+        [
+          "Address unknown",
+          "Destination unreachable"
+        ],
+        [
+          "Too big",
+          "Fragmentation needed"
+        ],
+        [
+          "Expired in transit",
+          "Time exceeded"
+        ]
+      ],
+      "breaks": "Post notices are rarely forged; ICMP can be abused, hence rate limits."
+    },
+    "mindmap": {
+      "center": "ICMP",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Echo",
+            "Unreachable",
+            "Time exceeded",
+            "Redirect"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "ping",
+            "traceroute",
+            "PMTUD"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Blanket blocking",
+            "MTU black holes"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Rate limit",
+            "Allow essentials"
+          ]
+        },
+        {
+          "label": "IPv6",
+          "children": [
+            "ICMPv6 is mandatory (NDP)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detect PMTU black hole",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Find the real path MTU."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ping -M do -s 1472 example.com   # 1472 + 28 = 1500: works?\nping -M do -s 1400 example.com   # if only smaller works, path MTU < 1500\ntracepath example.com            # reports pmtu per hop"
+        }
+      ],
+      "outcome": "ICMP used, not feared."
+    },
+    "summary": {
+      "points": [
+        "Control and diagnostics.",
+        "PMTUD needs it.",
+        "Rate-limit, don't block."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is blocking all ICMP harmful?",
+        "a": "It breaks Path MTU Discovery (and IPv6 neighbour discovery), so large packets silently disappear."
+      }
+    ]
+  },
+  "tcp-the-three-way-handshake": {
+    "core": "TCP sets up a connection with SYN (client picks an initial sequence number), SYN-ACK (server acknowledges and picks its own), and ACK. Both sides then agree on sequence numbers, window sizes and options (MSS, window scaling, SACK). Teardown uses FIN/ACK in each direction, and the closing side waits in TIME_WAIT. RST aborts immediately: the classic 'connection reset'.",
+    "first_principles": {
+      "problem": "A load test fails with 'connection refused' and nobody knows whether the SYN reached the server.",
+      "truths": [
+        "Both sides need synchronised sequence numbers.",
+        "The handshake costs one round trip.",
+        "Different failures produce different signals."
+      ],
+      "derivation": [
+        "**SYN → SYN-ACK → ACK**.",
+        "Negotiate **MSS, window scale, SACK**.",
+        "No reply → **filtered** (timeout).",
+        "RST → **closed port** (refused).",
+        "Close with **FIN**, then TIME_WAIT."
+      ]
+    },
+    "analogy": {
+      "title": "A phone call opening",
+      "story": "'Hello, can you hear me?' 'Yes, can you hear me?' 'Yes.' Only then does the conversation start.",
+      "mapping": [
+        [
+          "'Can you hear me?'",
+          "SYN"
+        ],
+        [
+          "'Yes, can you?'",
+          "SYN-ACK"
+        ],
+        [
+          "'Yes'",
+          "ACK"
+        ],
+        [
+          "Hanging up",
+          "FIN"
+        ]
+      ],
+      "breaks": "Calls don't track byte counts; TCP numbers every byte."
+    },
+    "mindmap": {
+      "center": "TCP Handshake",
+      "branches": [
+        {
+          "label": "Open",
+          "children": [
+            "SYN",
+            "SYN-ACK",
+            "ACK"
+          ]
+        },
+        {
+          "label": "Options",
+          "children": [
+            "MSS",
+            "Window scale",
+            "SACK",
+            "Timestamps"
+          ]
+        },
+        {
+          "label": "Close",
+          "children": [
+            "FIN/ACK",
+            "TIME_WAIT"
+          ]
+        },
+        {
+          "label": "Abort",
+          "children": [
+            "RST"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Timeout = filtered",
+            "Refused = RST"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Capture a handshake",
+      "scenario": "tcpdump.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows whether SYNs leave, return, or get RST."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sudo tcpdump -ni eth0 'tcp[tcpflags] & (tcp-syn|tcp-rst) != 0 and port 443'\n# Flags [S]  seq 1000  win 64240 options [mss 1460,sackOK,TS,wscale 7]\n# Flags [S.] seq 5000 ack 1001\n# (then [.] ack)"
+        }
+      ],
+      "outcome": "connection setup understood."
+    },
+    "summary": {
+      "points": [
+        "Three-way handshake.",
+        "Options negotiated.",
+        "Timeout vs refused."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between 'connection refused' and a timeout?",
+        "a": "Refused means a RST came back (port closed); a timeout means no reply at all, typically a firewall dropping packets."
+      }
+    ]
+  },
+  "tcp-advanced-flow-control-and-congestion-control": {
+    "core": "Flow control protects the receiver: it advertises a receive window, and the sender never has more unacknowledged bytes in flight than that. Congestion control protects the network: the sender keeps a congestion window that grows (slow start, then congestion avoidance) and shrinks on loss or delay signals. Throughput is roughly min(rwnd, cwnd) / RTT, so high-latency links need big windows.",
+    "first_principles": {
+      "problem": "A 1 Gbps transatlantic link only achieves 50 Mbps for a single TCP stream.",
+      "truths": [
+        "Receivers have finite buffers.",
+        "Networks have finite capacity.",
+        "In-flight data is bounded per RTT."
+      ],
+      "derivation": [
+        "**rwnd** limits for receiver.",
+        "**cwnd** limits for network.",
+        "Throughput ≈ **window / RTT**.",
+        "Enable **window scaling** for >64 KB.",
+        "Choose **CUBIC/BBR** algorithms."
+      ]
+    },
+    "analogy": {
+      "title": "Water through a pipe with a tap at each end",
+      "story": "The receiver's tap (rwnd) and pipe width (cwnd) limit flow; a long pipe needs more water in it to keep flow up.",
+      "mapping": [
+        [
+          "Receiver tap",
+          "rwnd"
+        ],
+        [
+          "Pipe capacity",
+          "cwnd"
+        ],
+        [
+          "Pipe length",
+          "RTT"
+        ]
+      ],
+      "breaks": "Pipes don't drop water; networks drop packets to signal congestion."
+    },
+    "mindmap": {
+      "center": "TCP Control",
+      "branches": [
+        {
+          "label": "Flow control",
+          "children": [
+            "Receive window",
+            "Zero window"
+          ]
+        },
+        {
+          "label": "Congestion",
+          "children": [
+            "Slow start",
+            "Congestion avoidance",
+            "Fast retransmit"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "Reno",
+            "CUBIC",
+            "BBR"
+          ]
+        },
+        {
+          "label": "Formula",
+          "children": [
+            "Throughput ≈ window/RTT"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Window scaling",
+            "Buffers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Window math",
+      "scenario": "Calculation.",
+      "flow": [
+        "RTT 80 ms, window 64 KB",
+        "64 KB / 0.08 s = 800 KB/s ≈ 6.4 Mbps",
+        "Need 1 Gbps → window = 125 MB/s × 0.08 = 10 MB",
+        "Enable scaling, raise tcp_rmem/wmem"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains slow long-distance transfers."
+        }
+      ],
+      "code": [],
+      "outcome": "throughput limits understood."
+    },
+    "summary": {
+      "points": [
+        "Flow vs congestion control.",
+        "Window / RTT.",
+        "Scale windows for long links."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between flow control and congestion control?",
+        "a": "Flow control prevents overwhelming the receiver (rwnd); congestion control prevents overwhelming the network (cwnd)."
+      }
+    ]
+  },
+  "tcp-vs-udp-the-fundamental-choice": {
+    "core": "TCP gives reliable, ordered streams at the cost of handshake latency, retransmission delays and head-of-line blocking. UDP gives independent, unordered datagrams with no setup, so applications handle loss themselves. Choose TCP for correctness-critical transfers (web, databases, files) and UDP for real-time, loss-tolerant or custom-reliability traffic (DNS, VoIP, games, video, QUIC).",
+    "first_principles": {
+      "problem": "A voice app over TCP stutters badly because one lost packet stalls all audio behind it.",
+      "truths": [
+        "Reliability costs latency.",
+        "Some data is useless if late.",
+        "Apps can build their own reliability."
+      ],
+      "derivation": [
+        "Need **every byte in order** → TCP.",
+        "Need **low latency, tolerate loss** → UDP.",
+        "Need **custom reliability** → UDP + app logic (QUIC).",
+        "Consider **firewall/NAT** behaviour (UDP timeouts).",
+        "Measure **jitter and loss**."
+      ]
+    },
+    "analogy": {
+      "title": "Registered mail vs live radio",
+      "story": "Registered mail guarantees delivery but is slow; live radio keeps going even if you miss a word.",
+      "mapping": [
+        [
+          "Registered mail",
+          "TCP"
+        ],
+        [
+          "Live radio",
+          "UDP"
+        ],
+        [
+          "Missed word",
+          "Lost datagram"
+        ]
+      ],
+      "breaks": "Radio is one-way; UDP apps can still request retransmits selectively."
+    },
+    "mindmap": {
+      "center": "TCP vs UDP",
+      "branches": [
+        {
+          "label": "TCP",
+          "children": [
+            "Reliable",
+            "Ordered",
+            "Handshake",
+            "HOL blocking"
+          ]
+        },
+        {
+          "label": "UDP",
+          "children": [
+            "No setup",
+            "Unordered",
+            "No guarantees",
+            "Low latency"
+          ]
+        },
+        {
+          "label": "TCP uses",
+          "children": [
+            "HTTP/1-2",
+            "DBs",
+            "SSH"
+          ]
+        },
+        {
+          "label": "UDP uses",
+          "children": [
+            "DNS",
+            "VoIP",
+            "Games",
+            "QUIC"
+          ]
+        },
+        {
+          "label": "Middleboxes",
+          "children": [
+            "UDP NAT timeouts"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Head-of-line blocking",
+      "scenario": "Trace.",
+      "flow": [
+        "Audio packets 1–10 sent over TCP",
+        "Packet 3 lost",
+        "Packets 4–10 wait for retransmit (~RTT)",
+        "With UDP: 3 skipped, 4–10 play"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "UDP keeps real-time media smooth."
+        }
+      ],
+      "code": [],
+      "outcome": "right transport for the workload."
+    },
+    "summary": {
+      "points": [
+        "TCP: reliable, ordered.",
+        "UDP: fast, lossy.",
+        "Match to data's value over time."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does real-time voice usually prefer UDP?",
+        "a": "Late audio is useless, so waiting for retransmissions (TCP head-of-line blocking) is worse than skipping a lost packet."
+      }
+    ]
+  },
+  "udp-and-the-future-quic": {
+    "core": "QUIC builds a reliable, encrypted, multiplexed transport on top of UDP, implemented in user space. It combines the transport and TLS 1.3 handshakes (1-RTT, or 0-RTT on resumption), gives each stream independent loss recovery (no head-of-line blocking across streams), and uses connection IDs so connections survive IP changes, such as switching from Wi-Fi to cellular. HTTP/3 runs on QUIC.",
+    "first_principles": {
+      "problem": "Mobile users drop connections when moving between Wi-Fi and 4G, and page loads stall on lossy networks.",
+      "truths": [
+        "TCP is in kernels and middleboxes, so it's hard to evolve.",
+        "UDP passes through most networks.",
+        "Connection identity needn't be the 4-tuple."
+      ],
+      "derivation": [
+        "Run transport over **UDP** in user space.",
+        "Merge **TLS 1.3** into the handshake.",
+        "Make **streams independent**.",
+        "Identify by **connection ID** for migration.",
+        "Encrypt **headers** against ossification."
+      ]
+    },
+    "analogy": {
+      "title": "A courier service that runs its own vans on public roads",
+      "story": "It doesn't wait for road authorities to change rules; it tracks each parcel separately and keeps deliveries going if you move house.",
+      "mapping": [
+        [
+          "Public roads",
+          "UDP"
+        ],
+        [
+          "Own vans",
+          "User-space QUIC"
+        ],
+        [
+          "Moving house",
+          "Connection migration"
+        ]
+      ],
+      "breaks": "Couriers can't be blocked by road type; some networks still block or throttle UDP 443."
+    },
+    "mindmap": {
+      "center": "QUIC",
+      "branches": [
+        {
+          "label": "Base",
+          "children": [
+            "UDP",
+            "User space"
+          ]
+        },
+        {
+          "label": "Handshake",
+          "children": [
+            "TLS 1.3 integrated",
+            "1-RTT",
+            "0-RTT"
+          ]
+        },
+        {
+          "label": "Streams",
+          "children": [
+            "Independent loss recovery"
+          ]
+        },
+        {
+          "label": "Mobility",
+          "children": [
+            "Connection IDs",
+            "Migration"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "HTTP/3",
+            "DNS over QUIC"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "UDP blocking",
+            "CPU cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check HTTP/3",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Server advertises h3 via Alt-Svc; client upgrades."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -sI --http3 https://cloudflare.com | head -1\n# HTTP/3 200\ncurl -sI https://cloudflare.com | grep -i alt-svc\n# alt-svc: h3=\":443\"; ma=86400"
+        }
+      ],
+      "outcome": "modern transport understood."
+    },
+    "summary": {
+      "points": [
+        "Reliable transport over UDP.",
+        "Fast encrypted handshake.",
+        "Independent streams, migration."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does QUIC avoid TCP's head-of-line blocking?",
+        "a": "Each stream has independent loss recovery, so a lost packet only delays its own stream, not all others."
+      }
+    ]
+  }
+}

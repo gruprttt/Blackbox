@@ -1,0 +1,630 @@
+{
+  "introduction-one-ip-one-server": {
+    "core": "Normally an IP address identifies one interface in one place (unicast). Anycast announces the same IP prefix from many locations, and BGP delivers each packet to the topologically nearest one. Clients see one address, the network picks the site. That makes anycast the backbone of global DNS, CDNs and DDoS protection.",
+    "first_principles": {
+      "problem": "A global service with a single IP in Virginia gives Asian users 250 ms round trips.",
+      "truths": [
+        "BGP picks shortest/preferred paths.",
+        "The same prefix can be announced from many places.",
+        "Clients only know the IP."
+      ],
+      "derivation": [
+        "Announce **one prefix from many PoPs**.",
+        "Let **BGP route to nearest**.",
+        "Run **identical services** at each PoP.",
+        "**Withdraw** on failure.",
+        "Keep services **mostly stateless**."
+      ]
+    },
+    "analogy": {
+      "title": "A chain store with one phone number",
+      "story": "Call the number anywhere and you reach the nearest branch automatically.",
+      "mapping": [
+        [
+          "Phone number",
+          "Anycast IP"
+        ],
+        [
+          "Branches",
+          "PoPs"
+        ],
+        [
+          "Nearest branch",
+          "BGP best path"
+        ]
+      ],
+      "breaks": "Phone routing is geographic; BGP nearness is topological."
+    },
+    "mindmap": {
+      "center": "Anycast",
+      "branches": [
+        {
+          "label": "Concept",
+          "children": [
+            "Same IP, many sites"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "BGP announcements"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "DNS",
+            "CDNs",
+            "DDoS protection",
+            "NTP"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Identical services",
+            "Health-based withdrawal"
+          ]
+        },
+        {
+          "label": "Contrast",
+          "children": [
+            "Unicast",
+            "GeoDNS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same IP, different sites",
+      "scenario": "traceroute.",
+      "flow": [
+        "From London: 1.1.1.1 → LHR PoP (5 ms)",
+        "From Tokyo: 1.1.1.1 → NRT PoP (3 ms)",
+        "From São Paulo: 1.1.1.1 → GRU PoP (4 ms)",
+        "One IP everywhere"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Low latency without client changes."
+        }
+      ],
+      "code": [],
+      "outcome": "anycast concept clear."
+    },
+    "summary": {
+      "points": [
+        "One IP, many places.",
+        "BGP picks the site.",
+        "Foundation of edge services."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a client choose which anycast site to reach?",
+        "a": "It doesn't; the internet's BGP routing delivers packets to the topologically nearest announcing site."
+      }
+    ]
+  },
+  "how-it-works-bgp-trickery": {
+    "core": "Each anycast site runs routers that announce the shared prefix (usually a /24 for IPv4, the smallest widely accepted) to local transit and peers. Upstream networks see multiple paths with different AS_PATHs and pick their best, which typically means the nearest site. Health checks drive announcements: if a site's service fails, a BGP daemon withdraws the route and traffic shifts to other sites within seconds.",
+    "first_principles": {
+      "problem": "A site's DNS servers crash but the router keeps announcing the prefix, black-holing nearby users.",
+      "truths": [
+        "Announcements attract traffic.",
+        "Withdrawals redirect it.",
+        "Health must control announcements."
+      ],
+      "derivation": [
+        "Announce a **/24 (or /48 v6)** from each site.",
+        "Run **BGP on service hosts** (ExaBGP, BIRD) or routers.",
+        "**Tie announcements to health checks**.",
+        "Use **communities/prepends** to tune catchments.",
+        "**Monitor catchments** (which users hit which site)."
+      ]
+    },
+    "analogy": {
+      "title": "Shops turning their 'open' sign on and off",
+      "story": "If a shop closes, its sign goes off and customers automatically go to the next nearest.",
+      "mapping": [
+        [
+          "Open sign",
+          "BGP announcement"
+        ],
+        [
+          "Sign off",
+          "Withdrawal"
+        ],
+        [
+          "Customers",
+          "Traffic"
+        ]
+      ],
+      "breaks": "Customers read signs instantly; BGP convergence takes seconds to minutes."
+    },
+    "mindmap": {
+      "center": "Anycast Mechanics",
+      "branches": [
+        {
+          "label": "Announce",
+          "children": [
+            "/24 v4",
+            "/48 v6",
+            "Per site"
+          ]
+        },
+        {
+          "label": "Health",
+          "children": [
+            "Checks → announce/withdraw",
+            "ExaBGP",
+            "BIRD"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "Prepends",
+            "Communities",
+            "Selective peering"
+          ]
+        },
+        {
+          "label": "Observe",
+          "children": [
+            "Catchment mapping",
+            "RIPE Atlas"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Health-driven announcement",
+      "scenario": "ExaBGP.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failed site withdraws within seconds."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "#!/usr/bin/env python3\n# ExaBGP process: announce while local DNS answers\nimport subprocess, sys, time\nup = None\nwhile True:\n    ok = subprocess.run(['dig', '+time=1', '@127.0.0.1', 'health.example'], capture_output=True).returncode == 0\n    if ok != up:\n        verb = 'announce' if ok else 'withdraw'\n        sys.stdout.write(f'{verb} route 192.0.2.0/24 next-hop self\\n'); sys.stdout.flush()\n        up = ok\n    time.sleep(2)"
+        }
+      ],
+      "outcome": "self-healing anycast."
+    },
+    "summary": {
+      "points": [
+        "Announce per site.",
+        "Health controls announcements.",
+        "Tune catchments."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do anycast deployments typically announce /24s?",
+        "a": "Many networks filter IPv4 prefixes longer than /24, so a /24 is the smallest prefix reliably propagated."
+      }
+    ]
+  },
+  "benefit-1-latency-reduction": {
+    "core": "Latency is bounded by the speed of light in fibre, about 200 km per ms, plus routing detours. Serving from a site 50 km away instead of 8,000 km cuts round trips from ~100 ms to a few ms. Every TCP and TLS handshake and every DNS lookup multiplies the saving, so anycast PoPs that terminate connections near users speed up the whole interaction, not just the first byte.",
+    "first_principles": {
+      "problem": "A login flow with DNS, TCP, TLS and three API calls takes 1.2 s for distant users, mostly waiting on round trips.",
+      "truths": [
+        "Light in fibre is ~200 km/ms.",
+        "Protocols need multiple round trips.",
+        "Nearby termination shortens each."
+      ],
+      "derivation": [
+        "Measure **RTT per region**.",
+        "Count **round trips** per interaction.",
+        "Terminate **DNS, TCP, TLS** at edge.",
+        "Use **persistent connections** to origin.",
+        "Track **p95 latency** by geography."
+      ]
+    },
+    "analogy": {
+      "title": "Local bank branches",
+      "story": "Multiple short trips to a nearby branch beat a single trip to the head office in another country.",
+      "mapping": [
+        [
+          "Trips",
+          "Round trips"
+        ],
+        [
+          "Nearby branch",
+          "Edge PoP"
+        ],
+        [
+          "Head office",
+          "Origin"
+        ]
+      ],
+      "breaks": "Bank trips are sequential human time; network RTTs add up silently."
+    },
+    "mindmap": {
+      "center": "Latency Benefit",
+      "branches": [
+        {
+          "label": "Physics",
+          "children": [
+            "~200 km/ms in fibre"
+          ]
+        },
+        {
+          "label": "Multipliers",
+          "children": [
+            "DNS",
+            "TCP",
+            "TLS",
+            "Requests"
+          ]
+        },
+        {
+          "label": "Anycast",
+          "children": [
+            "Nearest PoP",
+            "Edge termination"
+          ]
+        },
+        {
+          "label": "Origin",
+          "children": [
+            "Persistent connections",
+            "Optimised paths"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "RTT by region",
+            "p95"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Round-trip math",
+      "scenario": "Numbers.",
+      "flow": [
+        "Origin 8,000 km: RTT ~90 ms",
+        "DNS + TCP + TLS 1.3 + request ≈ 4 RTT = 360 ms",
+        "Edge 50 km: RTT ~3 ms → 12 ms",
+        "Edge→origin on warm connection: 1 RTT"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hundreds of ms saved per interaction."
+        }
+      ],
+      "code": [],
+      "outcome": "why nearby matters."
+    },
+    "summary": {
+      "points": [
+        "Physics limits speed.",
+        "Round trips multiply.",
+        "Terminate near users."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does edge TLS termination help even for uncached dynamic content?",
+        "a": "The multiple handshake round trips happen over a short distance, and the edge reuses a warm connection to the origin."
+      }
+    ]
+  },
+  "benefit-2-ddos-mitigation": {
+    "core": "With anycast, attack traffic from a global botnet is split across every site by BGP: each PoP absorbs only the bots in its catchment. Combined capacity (hundreds of Tbps for large providers) dwarfs any single site, and a saturated site can withdraw while others keep serving. That's why DNS roots, Cloudflare and scrubbing services all use anycast.",
+    "first_principles": {
+      "problem": "A 1 Tbps DDoS overwhelms a single 100 Gbps data centre, but the attacker can't concentrate it on one site of a 300-PoP anycast network.",
+      "truths": [
+        "Botnets are geographically distributed.",
+        "Anycast splits by catchment.",
+        "Aggregate capacity beats single-site capacity."
+      ],
+      "derivation": [
+        "Spread capacity across **many PoPs**.",
+        "Let BGP **distribute attack** by catchment.",
+        "**Scrub** at each PoP.",
+        "**Withdraw** saturated sites selectively.",
+        "Keep **origin hidden** behind anycast."
+      ]
+    },
+    "analogy": {
+      "title": "Many small dams instead of one big one",
+      "story": "A flood spread across many rivers is absorbed; concentrated on one, it breaks the dam.",
+      "mapping": [
+        [
+          "Rivers",
+          "Catchments"
+        ],
+        [
+          "Dams",
+          "PoPs"
+        ],
+        [
+          "Flood",
+          "DDoS"
+        ]
+      ],
+      "breaks": "Floods follow terrain; attackers can try to target specific catchments."
+    },
+    "mindmap": {
+      "center": "DDoS Benefit",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Catchment splitting",
+            "Aggregate capacity"
+          ]
+        },
+        {
+          "label": "Defence",
+          "children": [
+            "Per-PoP scrubbing",
+            "Selective withdrawal",
+            "Rate limits"
+          ]
+        },
+        {
+          "label": "Users",
+          "children": [
+            "DNS roots",
+            "Cloudflare",
+            "Akamai Prolexic"
+          ]
+        },
+        {
+          "label": "Requirement",
+          "children": [
+            "Hide origin IPs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Attack distribution",
+      "scenario": "Numbers.",
+      "flow": [
+        "1 Tbps attack from botnet worldwide",
+        "Split across 300 PoPs ≈ 3.3 Gbps each",
+        "Each PoP has 100+ Gbps",
+        "No site saturated"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Attack absorbed without impact."
+        }
+      ],
+      "code": [],
+      "outcome": "resilience through distribution."
+    },
+    "summary": {
+      "points": [
+        "Attack split by catchment.",
+        "Aggregate capacity wins.",
+        "Hide the origin."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must the origin IP stay hidden behind an anycast DDoS service?",
+        "a": "Attackers who learn it can bypass the anycast network and hit the origin directly."
+      }
+    ]
+  },
+  "the-catch-tcp-state-and-route-flapping": {
+    "core": "Anycast is ideal for stateless UDP (DNS), but TCP connections hold state on one server. If a BGP change shifts a client's packets to another site mid-connection, that site has no state and sends RST, breaking the session. Route flaps, ECMP differences and load-balancer hashing can all cause this. Mitigations are stable announcements, consistent hashing within sites, short-lived connections, and QUIC connection IDs.",
+    "first_principles": {
+      "problem": "Large downloads from an anycast CDN occasionally fail with resets when internet routes shift.",
+      "truths": [
+        "TCP state lives on one host.",
+        "BGP paths can change mid-connection.",
+        "Other sites don't share that state."
+      ],
+      "derivation": [
+        "Keep announcements **stable** (dampen flaps).",
+        "Use **consistent hashing** within a site.",
+        "Prefer **short connections** or resumable downloads.",
+        "Use **QUIC connection IDs**.",
+        "Use **anycast for entry**, unicast for long sessions."
+      ]
+    },
+    "analogy": {
+      "title": "Switching call centres mid-call",
+      "story": "If the network reroutes you to a different centre mid-conversation, the new agent has no idea who you are.",
+      "mapping": [
+        [
+          "Call centre",
+          "Anycast site"
+        ],
+        [
+          "Mid-call reroute",
+          "Route change"
+        ],
+        [
+          "New agent",
+          "Server without state"
+        ]
+      ],
+      "breaks": "Agents can ask to start over; TCP just resets."
+    },
+    "mindmap": {
+      "center": "Anycast & TCP",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "State per server",
+            "Route changes",
+            "RST"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Flaps",
+            "ECMP",
+            "Policy changes"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "Stable routes",
+            "Consistent hashing",
+            "Short sessions",
+            "QUIC CIDs",
+            "Redirect to unicast"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Hybrid pattern",
+      "scenario": "Design.",
+      "flow": [
+        "Client connects to anycast edge",
+        "Short API calls served directly",
+        "Large downloads redirected to unicast PoP IP",
+        "Downloads resumable via Range requests"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Anycast benefits without long-session breakage."
+        }
+      ],
+      "code": [],
+      "outcome": "anycast's limits handled."
+    },
+    "summary": {
+      "points": [
+        "TCP state is local.",
+        "Route shifts break sessions.",
+        "Design around it."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is anycast a natural fit for DNS but trickier for long TCP sessions?",
+        "a": "DNS queries are short stateless UDP exchanges; TCP sessions break if routing shifts packets to a site without the connection state."
+      }
+    ]
+  },
+  "anycast-vs-geodns-choosing-the-right-tool": {
+    "core": "Anycast steers at the network layer: one IP, BGP chooses, failover in seconds, superb DDoS absorption, but you need your own ASN and prefixes (or a provider) and get coarse control. GeoDNS steers at the DNS layer: different IPs per location, fine-grained policies such as data residency and weights, and works with any servers, but it's slowed by DNS TTLs and resolver location errors. Many platforms combine them.",
+    "first_principles": {
+      "problem": "A team must choose between anycast and GeoDNS for a new multi-region API.",
+      "truths": [
+        "Network-layer steering is fast and coarse.",
+        "DNS-layer steering is flexible and cached.",
+        "Requirements differ: residency, failover speed, DDoS."
+      ],
+      "derivation": [
+        "Need **fast failover + DDoS** → anycast.",
+        "Need **residency/fine control** → GeoDNS.",
+        "Lack **ASN/prefixes** → GeoDNS or provider anycast.",
+        "**Combine**: GeoDNS to regional anycast.",
+        "Measure **real user latency**."
+      ]
+    },
+    "analogy": {
+      "title": "Automatic call routing vs a receptionist",
+      "story": "The phone network routes the call to the nearest office automatically (anycast); a receptionist decides by caller details (GeoDNS).",
+      "mapping": [
+        [
+          "Phone network",
+          "BGP"
+        ],
+        [
+          "Receptionist",
+          "GeoDNS server"
+        ],
+        [
+          "Caller details",
+          "Resolver location"
+        ]
+      ],
+      "breaks": "Receptionists can be updated instantly; DNS answers are cached."
+    },
+    "mindmap": {
+      "center": "Anycast vs GeoDNS",
+      "branches": [
+        {
+          "label": "Anycast",
+          "children": [
+            "One IP",
+            "BGP-based",
+            "Fast failover",
+            "DDoS",
+            "Needs ASN/IPs"
+          ]
+        },
+        {
+          "label": "GeoDNS",
+          "children": [
+            "Many IPs",
+            "Policies",
+            "Residency",
+            "TTL-bound"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "GeoDNS → regional anycast"
+          ]
+        },
+        {
+          "label": "Decision",
+          "children": [
+            "Failover speed",
+            "Control",
+            "Ownership"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision",
+      "scenario": "Matrix.",
+      "flow": [
+        "Global DNS service → anycast",
+        "EU data residency API → GeoDNS",
+        "Global CDN → anycast",
+        "Multi-region SaaS → GeoDNS + per-region anycast LBs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Each requirement mapped to the right tool."
+        }
+      ],
+      "code": [],
+      "outcome": "informed traffic-steering choice."
+    },
+    "summary": {
+      "points": [
+        "Anycast: fast, coarse.",
+        "GeoDNS: flexible, cached.",
+        "Combine when needed."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which approach suits strict data-residency requirements better?",
+        "a": "GeoDNS, because it explicitly maps client locations to specific regional endpoints, whereas anycast follows BGP paths you don't fully control."
+      }
+    ]
+  }
+}

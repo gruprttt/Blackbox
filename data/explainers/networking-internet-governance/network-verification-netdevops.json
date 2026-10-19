@@ -1,0 +1,753 @@
+{
+  "introduction-the-pray-and-deploy-era": {
+    "core": "Traditional network changes are typed into CLIs during maintenance windows, checked by eye, and validated by 'did anything break?'. Most outages are self-inflicted by such changes. NetDevOps and network verification bring software practices: configs in Git, automated testing, and mathematical analysis that proves properties such as reachability or isolation before a change is deployed.",
+    "first_principles": {
+      "problem": "A single ACL typo during a midnight change window cuts off a data centre for two hours.",
+      "truths": [
+        "Most outages come from changes.",
+        "Manual review misses subtle interactions.",
+        "Network behaviour can be modelled."
+      ],
+      "derivation": [
+        "Store **configs in Git**.",
+        "**Generate** configs from templates and data.",
+        "**Model** the network from configs.",
+        "**Verify** properties before deploy.",
+        "**Automate** deploy and rollback."
+      ]
+    },
+    "analogy": {
+      "title": "Flight simulators for pilots",
+      "story": "Instead of testing a manoeuvre in a real plane with passengers, you prove it in a simulator first.",
+      "mapping": [
+        [
+          "Real plane",
+          "Production network"
+        ],
+        [
+          "Simulator",
+          "Verification model"
+        ],
+        [
+          "Manoeuvre",
+          "Config change"
+        ]
+      ],
+      "breaks": "Simulators approximate; config verification models can be exact for the logic they cover."
+    },
+    "mindmap": {
+      "center": "Pray and Deploy",
+      "branches": [
+        {
+          "label": "Old way",
+          "children": [
+            "CLI changes",
+            "Windows",
+            "Eyeball review"
+          ]
+        },
+        {
+          "label": "Problems",
+          "children": [
+            "Typos",
+            "Hidden interactions",
+            "Slow rollback"
+          ]
+        },
+        {
+          "label": "New way",
+          "children": [
+            "Git",
+            "Templates",
+            "Verification",
+            "CI/CD"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Batfish",
+            "Ansible/Nornir",
+            "Containerlab"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Before vs after",
+      "scenario": "Flow.",
+      "flow": [
+        "Before: SSH, paste, hope",
+        "After: PR with generated config",
+        "CI: Batfish proves no reachability loss",
+        "Automated deploy with rollback"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Errors caught before production."
+        }
+      ],
+      "code": [],
+      "outcome": "engineering discipline for networks."
+    },
+    "summary": {
+      "points": [
+        "Changes cause outages.",
+        "Model and verify.",
+        "Automate deploys."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are network changes the main source of network outages?",
+        "a": "Manual, unverified edits easily introduce subtle errors whose interactions aren't visible until deployed."
+      }
+    ]
+  },
+  "netdevops-applying-software-engineering-to-networks": {
+    "core": "NetDevOps treats network configuration as code. A source of truth (NetBox, Nautobot) holds intended state (devices, IPs, VLANs), templates (Jinja2) render device configs, Git and pull requests give review and history, automation (Ansible, Nornir, NAPALM, gNMI) pushes changes, and tests (linting, Batfish, lab emulation) run in CI. Changes become small, reviewed, repeatable and reversible.",
+    "first_principles": {
+      "problem": "Switch configs differ subtly across 200 devices because each was hand-edited over years.",
+      "truths": [
+        "Intended state can be data.",
+        "Configs can be generated.",
+        "Automation removes typos."
+      ],
+      "derivation": [
+        "Model intent in a **source of truth**.",
+        "**Render** configs from templates.",
+        "Review via **pull requests**.",
+        "Push with **NAPALM/Nornir/gNMI**.",
+        "**Diff and roll back** automatically."
+      ]
+    },
+    "analogy": {
+      "title": "A printing press for configs",
+      "story": "Instead of hand-copying manuscripts, you typeset once and print identical copies.",
+      "mapping": [
+        [
+          "Typesetting",
+          "Templates"
+        ],
+        [
+          "Manuscript data",
+          "Source of truth"
+        ],
+        [
+          "Printing",
+          "Rendering + push"
+        ]
+      ],
+      "breaks": "Printed books don't change; networks need ongoing drift detection."
+    },
+    "mindmap": {
+      "center": "NetDevOps",
+      "branches": [
+        {
+          "label": "Source of truth",
+          "children": [
+            "NetBox",
+            "Nautobot"
+          ]
+        },
+        {
+          "label": "Generation",
+          "children": [
+            "Jinja2",
+            "Data models"
+          ]
+        },
+        {
+          "label": "Workflow",
+          "children": [
+            "Git",
+            "PRs",
+            "CI"
+          ]
+        },
+        {
+          "label": "Delivery",
+          "children": [
+            "Ansible",
+            "Nornir",
+            "NAPALM",
+            "gNMI"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Diffs",
+            "Rollback",
+            "Drift detection"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Render and push",
+      "scenario": "Python (Nornir + NAPALM).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dry-run diffs for every leaf before commit."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from nornir import InitNornir\nfrom nornir_jinja2.plugins.tasks import template_file\nfrom nornir_napalm.plugins.tasks import napalm_configure\n\ndef deploy(task):\n    cfg = task.run(template_file, template=\"leaf.j2\", path=\"templates\").result\n    task.run(napalm_configure, configuration=cfg, replace=True, dry_run=task.host.get(\"dry\", True))\n\nInitNornir(config_file=\"nornir.yaml\").filter(role=\"leaf\").run(task=deploy)"
+        }
+      ],
+      "outcome": "consistent, reviewable configs."
+    },
+    "summary": {
+      "points": [
+        "Intent as data.",
+        "Generated configs.",
+        "Automated, reversible pushes."
+      ]
+    },
+    "check": [
+      {
+        "q": "What role does a source of truth like NetBox play?",
+        "a": "It holds the intended network state (devices, IPs, VLANs, links) from which configs are generated and against which drift is checked."
+      }
+    ]
+  },
+  "config-as-code-vs-intent-based-networking": {
+    "core": "Config-as-code manages device configurations in Git and templates: you still describe how each device should be configured. Intent-based networking describes what you want (segment A can't reach B, app X needs 10 Gbps), and a system translates that into configs, continuously verifies the network meets it, and alerts or remediates on violation. Most teams combine them: config-as-code for delivery, verification for intent assurance.",
+    "first_principles": {
+      "problem": "Configs are in Git, but nobody can prove PCI systems are isolated after each change.",
+      "truths": [
+        "Configs are means, intent is the goal.",
+        "Intent must be continuously checked.",
+        "Translation needs a model."
+      ],
+      "derivation": [
+        "Express **intent as policies** (reachability, isolation).",
+        "**Translate** into configs (templates/controllers).",
+        "**Verify** intent against modelled configs.",
+        "**Monitor** live state for drift.",
+        "Combine with **config-as-code**."
+      ]
+    },
+    "analogy": {
+      "title": "Giving directions vs stating the destination",
+      "story": "Config-as-code is turn-by-turn directions; intent says 'get me to the airport by 5' and checks you're on track.",
+      "mapping": [
+        [
+          "Directions",
+          "Device configs"
+        ],
+        [
+          "Destination",
+          "Intent"
+        ],
+        [
+          "Satnav rerouting",
+          "Continuous verification"
+        ]
+      ],
+      "breaks": "Satnavs see traffic live; intent systems need good models and telemetry."
+    },
+    "mindmap": {
+      "center": "Config vs Intent",
+      "branches": [
+        {
+          "label": "Config-as-code",
+          "children": [
+            "How",
+            "Templates",
+            "Git"
+          ]
+        },
+        {
+          "label": "Intent-based",
+          "children": [
+            "What",
+            "Policies",
+            "Translation",
+            "Assurance"
+          ]
+        },
+        {
+          "label": "Verification",
+          "children": [
+            "Batfish",
+            "Forward Networks"
+          ]
+        },
+        {
+          "label": "Hybrid",
+          "children": [
+            "Code delivers, verification assures"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Intent as tests",
+      "scenario": "Policy list.",
+      "flow": [
+        "PCI zone cannot reach corp Wi-Fi",
+        "All leaves have 2 uplinks to spines",
+        "No device accepts SSH from internet",
+        "Every VLAN has a gateway"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Checked on every change and periodically."
+        }
+      ],
+      "code": [],
+      "outcome": "intent continuously assured."
+    },
+    "summary": {
+      "points": [
+        "Configs are means.",
+        "Intent is the goal.",
+        "Verify continuously."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does intent-based networking add beyond config-as-code?",
+        "a": "Declaring desired outcomes and continuously verifying (and possibly remediating) that the network actually meets them."
+      }
+    ]
+  },
+  "formal-verification-the-batfish-model": {
+    "core": "Batfish parses device configs from many vendors into a vendor-neutral model, then simulates the control plane (BGP, OSPF, static routes) to compute each device's forwarding tables and ACL behaviour, without touching the live network. You then query it: 'can host A reach B on 443?', 'which flows does this ACL line affect?', 'are there undefined references?'. It finds errors in planned changes before deployment.",
+    "first_principles": {
+      "problem": "A BGP policy change would make a backup link preferred and overload it, which no reviewer noticed.",
+      "truths": [
+        "Configs determine behaviour.",
+        "Control planes can be simulated.",
+        "Queries can cover all flows symbolically."
+      ],
+      "derivation": [
+        "**Snapshot** configs (current + proposed).",
+        "**Parse** into vendor-neutral model.",
+        "**Simulate** routing to get data plane.",
+        "**Query** reachability, ACLs, routes.",
+        "Integrate into **CI**."
+      ]
+    },
+    "analogy": {
+      "title": "A wind tunnel for networks",
+      "story": "Test the design with simulated airflow and see where it fails, before building the plane.",
+      "mapping": [
+        [
+          "Wind tunnel",
+          "Batfish"
+        ],
+        [
+          "Airflow",
+          "Simulated routing/flows"
+        ],
+        [
+          "Design",
+          "Configs"
+        ]
+      ],
+      "breaks": "Wind tunnels approximate physics; Batfish can miss bugs in vendor implementations."
+    },
+    "mindmap": {
+      "center": "Batfish",
+      "branches": [
+        {
+          "label": "Input",
+          "children": [
+            "Device configs",
+            "Topology",
+            "External BGP announcements"
+          ]
+        },
+        {
+          "label": "Model",
+          "children": [
+            "Vendor-neutral",
+            "Control plane simulation"
+          ]
+        },
+        {
+          "label": "Queries",
+          "children": [
+            "traceroute",
+            "reachability",
+            "searchFilters",
+            "undefinedReferences",
+            "bgpSessionStatus"
+          ]
+        },
+        {
+          "label": "Use",
+          "children": [
+            "Pre-change CI",
+            "Audits"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Vendor bugs",
+            "Unsupported features"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "pybatfish query",
+      "scenario": "Python.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "CI fails the PR if the forbidden path exists."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "from pybatfish.client.session import Session\nfrom pybatfish.datamodel.flow import HeaderConstraints\nbf = Session(host=\"localhost\")\nbf.init_snapshot(\"snapshots/proposed\", name=\"proposed\", overwrite=True)\nans = bf.q.reachability(\n    pathConstraints={\"startLocation\": \"@enter(edge1[Gi0/1])\"},\n    headers=HeaderConstraints(dstIps=\"10.50.0.0/24\", applications=[\"ssh\"]),\n    actions=\"SUCCESS\").answer().frame()\nassert ans.empty, \"SSH from internet edge reaches PCI subnet!\""
+        }
+      ],
+      "outcome": "behaviour proven pre-deploy."
+    },
+    "summary": {
+      "points": [
+        "Parse configs.",
+        "Simulate routing.",
+        "Query properties."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does Batfish need access to live network devices?",
+        "a": "No, it analyses configuration files (snapshots), simulating the control and data planes offline."
+      }
+    ]
+  },
+  "reachability-analysis-proving-the-negative": {
+    "core": "Testing with pings can show that some flows work, but never that no path exists for a forbidden flow. Symbolic reachability analysis (Batfish, AWS Reachability Analyzer and Network Access Analyzer) considers all packets in a header space at once, such as any source IP and any port, and either proves none can reach the target or returns a concrete counterexample flow. That makes isolation claims auditable.",
+    "first_principles": {
+      "problem": "An auditor asks for proof that no path exists from the internet to the database subnet, and ping tests can't provide it.",
+      "truths": [
+        "Tests sample; proofs cover all cases.",
+        "Header spaces can be reasoned about symbolically.",
+        "Counterexamples make bugs concrete."
+      ],
+      "derivation": [
+        "Define **source, destination, header space**.",
+        "Ask **'does any packet succeed?'**.",
+        "Get **proof or counterexample**.",
+        "Encode as **CI assertions**.",
+        "Use cloud analyzers for **VPC/SG paths**."
+      ]
+    },
+    "analogy": {
+      "title": "Proving a maze has no exit vs walking a few paths",
+      "story": "Walking some paths and finding no exit proves nothing; mapping the whole maze does.",
+      "mapping": [
+        [
+          "Maze",
+          "Network"
+        ],
+        [
+          "Walking paths",
+          "Ping tests"
+        ],
+        [
+          "Full map",
+          "Symbolic analysis"
+        ]
+      ],
+      "breaks": "Mazes are static; networks change, so re-verify each change."
+    },
+    "mindmap": {
+      "center": "Reachability Analysis",
+      "branches": [
+        {
+          "label": "Testing",
+          "children": [
+            "Samples flows",
+            "Can't prove absence"
+          ]
+        },
+        {
+          "label": "Symbolic",
+          "children": [
+            "All packets in header space",
+            "Proof or counterexample"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Batfish",
+            "AWS Reachability Analyzer",
+            "Network Access Analyzer"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Isolation proofs",
+            "Audits",
+            "CI gates"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AWS Network Access Analyzer",
+      "scenario": "CLI.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Auditable proof of isolation."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "aws ec2 create-network-insights-access-scope --match-paths '[{\"Source\":{\"ResourceStatement\":{\"ResourceTypes\":[\"AWS::EC2::InternetGateway\"]}},\"Destination\":{\"ResourceStatement\":{\"Resources\":[\"subnet-0db123\"]}}}]'\naws ec2 start-network-insights-access-scope-analysis --network-insights-access-scope-id nis-0abc\n# findings: [] → no path from any IGW to DB subnet"
+        }
+      ],
+      "outcome": "negatives proven, not assumed."
+    },
+    "summary": {
+      "points": [
+        "Tests can't prove absence.",
+        "Symbolic analysis can.",
+        "Counterexamples guide fixes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't ping/traceroute tests prove network isolation?",
+        "a": "They only test specific flows; proving no path exists requires reasoning over all possible packets."
+      }
+    ]
+  },
+  "differential-analysis-semantic-diffs-for-networks": {
+    "core": "A text diff of configs shows which lines changed, but not what that means for traffic. Differential analysis compares the modelled behaviour of the current and proposed snapshots: which flows newly succeed or fail, which routes change best path, which ACL lines now match different traffic. Reviewers see 'this change blocks HTTPS from branch-12 to CRM', not '+ deny ip any 10.4.0.0 0.0.255.255'.",
+    "first_principles": {
+      "problem": "A one-line ACL change looks harmless in the text diff but silently blocks a branch's CRM access.",
+      "truths": [
+        "Text diffs hide impact.",
+        "Behaviour can be compared between snapshots.",
+        "Reviewers need consequences."
+      ],
+      "derivation": [
+        "Snapshot **before and after**.",
+        "Run **differential reachability**.",
+        "Compare **routing tables/best paths**.",
+        "Report **flows gained/lost**.",
+        "Require **expected diffs** in PR description."
+      ]
+    },
+    "analogy": {
+      "title": "Comparing two maps' journey times instead of their ink",
+      "story": "Not 'this line moved' but 'trips from A to B now take twice as long'.",
+      "mapping": [
+        [
+          "Ink changes",
+          "Config text diff"
+        ],
+        [
+          "Journey changes",
+          "Behaviour diff"
+        ]
+      ],
+      "breaks": "Maps are visual; behaviour diffs need clear summaries."
+    },
+    "mindmap": {
+      "center": "Differential Analysis",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Base snapshot",
+            "Proposed snapshot"
+          ]
+        },
+        {
+          "label": "Outputs",
+          "children": [
+            "Flows gained",
+            "Flows lost",
+            "Route changes",
+            "ACL impact"
+          ]
+        },
+        {
+          "label": "Workflow",
+          "children": [
+            "PR comment",
+            "Expected-diff approval"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "Batfish differentialReachability",
+            "Forward Networks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Differential query",
+      "scenario": "pybatfish.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reviewer sees the real impact before approving."
+        }
+      ],
+      "code": [
+        {
+          "lang": "python",
+          "text": "diff = bf.q.differentialReachability(\n    headers=HeaderConstraints(applications=[\"https\"])\n).answer(snapshot=\"proposed\", reference_snapshot=\"current\").frame()\nprint(diff[[\"Flow\", \"Snapshot_Traces\", \"Reference_Traces\"]].head())\n# Flow: branch-12 → 10.4.2.10:443  current: ACCEPTED  proposed: DENIED"
+        }
+      ],
+      "outcome": "semantic change review."
+    },
+    "summary": {
+      "points": [
+        "Text hides impact.",
+        "Compare behaviour.",
+        "Approve expected diffs."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a differential reachability analysis report?",
+        "a": "Flows whose outcome changes between the current and proposed configurations, e.g. newly denied or newly permitted traffic."
+      }
+    ]
+  },
+  "the-netdevops-cicd-pipeline-end-to-end": {
+    "core": "A full pipeline runs like this. An engineer updates intent or data in the source of truth or Git; CI renders configs, lints them, loads proposed snapshots into Batfish, runs policy assertions and differential analysis, optionally tests in an emulated lab (Containerlab); a human approves the semantic diff; automation deploys in stages (canary devices first) with automatic rollback on health-check failure; and post-deploy checks and drift detection close the loop.",
+    "first_principles": {
+      "problem": "A network team wants software-style confidence for weekly changes across 500 devices.",
+      "truths": [
+        "Each stage catches different errors.",
+        "Staged rollout limits blast radius.",
+        "Post-deploy validation closes the loop."
+      ],
+      "derivation": [
+        "**Commit** intent/data.",
+        "**Render + lint**.",
+        "**Verify** (Batfish asserts + diffs).",
+        "**Lab test** (Containerlab).",
+        "**Staged deploy + rollback + drift checks**."
+      ]
+    },
+    "analogy": {
+      "title": "A car assembly line with quality gates",
+      "story": "Every station checks its work, test drives happen before shipping, and recalls are fast.",
+      "mapping": [
+        [
+          "Stations",
+          "CI stages"
+        ],
+        [
+          "Test drive",
+          "Lab emulation"
+        ],
+        [
+          "Recall",
+          "Rollback"
+        ]
+      ],
+      "breaks": "Assembly lines build identical cars; networks are unique topologies."
+    },
+    "mindmap": {
+      "center": "NetDevOps Pipeline",
+      "branches": [
+        {
+          "label": "Source",
+          "children": [
+            "NetBox",
+            "Git"
+          ]
+        },
+        {
+          "label": "Build",
+          "children": [
+            "Render",
+            "Lint"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "Batfish asserts",
+            "Differential"
+          ]
+        },
+        {
+          "label": "Test",
+          "children": [
+            "Containerlab",
+            "vendor images"
+          ]
+        },
+        {
+          "label": "Deploy",
+          "children": [
+            "Canary",
+            "Staged",
+            "Rollback"
+          ]
+        },
+        {
+          "label": "Operate",
+          "children": [
+            "Post-checks",
+            "Drift detection"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Pipeline",
+      "scenario": "GitHub Actions sketch.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Verified, staged, reversible network changes."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "jobs:\n  verify:\n    steps:\n      - run: python render.py --from netbox --out configs/\n      - run: batfish-assert --snapshot configs/ --policies policies/\n      - run: batfish-diff --base main --proposed configs/ > diff.md\n  lab:\n    needs: verify\n    steps: [ { run: containerlab deploy -t lab.clab.yml && pytest lab_tests/ } ]\n  deploy:\n    needs: lab\n    environment: production   # manual approval\n    steps: [ { run: nornir-deploy --canary leaf-01,leaf-02 --then-all --rollback-on-fail } ]"
+        }
+      ],
+      "outcome": "software-grade network delivery."
+    },
+    "summary": {
+      "points": [
+        "Intent → verify → deploy.",
+        "Lab and staged rollout.",
+        "Close loop with drift checks."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why deploy network changes to canary devices first?",
+        "a": "To limit the blast radius and detect real-world problems the models missed before affecting the whole network."
+      }
+    ]
+  }
+}

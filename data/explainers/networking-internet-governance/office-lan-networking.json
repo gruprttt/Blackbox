@@ -1,0 +1,783 @@
+{
+  "introduction-the-physical-office": {
+    "core": "An office network is cabling, switches, Wi-Fi access points, a firewall/router and core services (DHCP, DNS). On top sit segmentation (VLANs), loop prevention (STP), access control (802.1X), protections against rogue devices (DHCP snooping) and remote connectivity (VPNs). Getting the physical and L2 layers right prevents most 'the internet is slow' tickets.",
+    "first_principles": {
+      "problem": "A growing office's flat network lets guests, printers and finance laptops all talk to each other, and a looped cable takes it down.",
+      "truths": [
+        "Physical and L2 issues dominate office outages.",
+        "Flat networks have no isolation.",
+        "Untrusted devices connect constantly."
+      ],
+      "derivation": [
+        "Design **access/core** switching.",
+        "Segment with **VLANs**.",
+        "Prevent loops with **STP**.",
+        "Control access with **802.1X**.",
+        "Protect services with **snooping/guards**."
+      ]
+    },
+    "analogy": {
+      "title": "Plumbing and rooms in a building",
+      "story": "Pipes (cables) and valves (switches) must be sound, and rooms (VLANs) keep different activities separate.",
+      "mapping": [
+        [
+          "Pipes",
+          "Cabling"
+        ],
+        [
+          "Valves",
+          "Switches"
+        ],
+        [
+          "Rooms",
+          "VLANs"
+        ],
+        [
+          "Door locks",
+          "802.1X"
+        ]
+      ],
+      "breaks": "Plumbing leaks are visible; broadcast storms are not until everything stops."
+    },
+    "mindmap": {
+      "center": "Office LAN",
+      "branches": [
+        {
+          "label": "Physical",
+          "children": [
+            "Cabling",
+            "Switches",
+            "APs",
+            "Firewall"
+          ]
+        },
+        {
+          "label": "Segmentation",
+          "children": [
+            "VLANs",
+            "Inter-VLAN rules"
+          ]
+        },
+        {
+          "label": "Stability",
+          "children": [
+            "STP"
+          ]
+        },
+        {
+          "label": "Access",
+          "children": [
+            "802.1X",
+            "NAC"
+          ]
+        },
+        {
+          "label": "Protection",
+          "children": [
+            "DHCP snooping",
+            "DAI"
+          ]
+        },
+        {
+          "label": "Remote",
+          "children": [
+            "VPNs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Typical layout",
+      "scenario": "Design.",
+      "flow": [
+        "Firewall ↔ core switch (L3)",
+        "Access switches per floor (PoE for APs/phones)",
+        "VLANs: staff, guest, voice, IoT, servers",
+        "Wi-Fi SSIDs mapped to VLANs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolated, manageable office network."
+        }
+      ],
+      "code": [],
+      "outcome": "solid office foundation."
+    },
+    "summary": {
+      "points": [
+        "Physical layer matters.",
+        "Segment and protect.",
+        "Control access."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are flat office networks risky?",
+        "a": "Any compromised device can reach every other device, and broadcast problems affect everyone."
+      }
+    ]
+  },
+  "vlans-in-the-office-segmentation": {
+    "core": "VLANs split one physical switch fabric into separate broadcast domains. Access ports belong to one VLAN (for example staff 10, guest 20, voice 30); trunk ports carry several VLANs tagged with 802.1Q between switches and to the router or firewall. Traffic between VLANs must be routed, which is where firewall policy applies: guests reach only the internet, IoT can't reach finance.",
+    "first_principles": {
+      "problem": "Smart TVs and printers on the staff network become an entry point for malware to reach laptops.",
+      "truths": [
+        "Broadcast domains can be logical.",
+        "Tags identify VLANs on shared links.",
+        "Inter-VLAN traffic passes a router."
+      ],
+      "derivation": [
+        "Assign **VLAN per trust zone**.",
+        "Configure **access vs trunk** ports.",
+        "Tag with **802.1Q** on trunks.",
+        "Route via **firewall** with policies.",
+        "Map **SSIDs → VLANs**."
+      ]
+    },
+    "analogy": {
+      "title": "Coloured lanes in a shared building",
+      "story": "Everyone uses the same corridors, but coloured lanes keep departments separate, and crossing requires passing reception.",
+      "mapping": [
+        [
+          "Coloured lanes",
+          "VLANs"
+        ],
+        [
+          "Shared corridor",
+          "Trunk"
+        ],
+        [
+          "Reception",
+          "Firewall/router"
+        ]
+      ],
+      "breaks": "Lanes are visual; misconfigured trunks silently join VLANs."
+    },
+    "mindmap": {
+      "center": "VLANs",
+      "branches": [
+        {
+          "label": "Concepts",
+          "children": [
+            "Broadcast domain",
+            "VLAN ID",
+            "802.1Q tag"
+          ]
+        },
+        {
+          "label": "Ports",
+          "children": [
+            "Access",
+            "Trunk",
+            "Native VLAN"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "SVIs",
+            "Router-on-a-stick",
+            "Firewall policy"
+          ]
+        },
+        {
+          "label": "Typical",
+          "children": [
+            "Staff",
+            "Guest",
+            "Voice",
+            "IoT",
+            "Servers"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "VLAN hopping",
+            "Native VLAN misuse"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Switch config",
+      "scenario": "Cisco-style.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ports isolated; uplink carries only needed VLANs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "vlan 10\n name STAFF\nvlan 20\n name GUEST\ninterface Gi1/0/5\n switchport mode access\n switchport access vlan 10\ninterface Gi1/0/48\n switchport mode trunk\n switchport trunk allowed vlan 10,20,30\n switchport trunk native vlan 999"
+        }
+      ],
+      "outcome": "segmented office."
+    },
+    "summary": {
+      "points": [
+        "VLANs separate domains.",
+        "Trunks carry tags.",
+        "Firewall between VLANs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why set the trunk native VLAN to an unused ID?",
+        "a": "To mitigate VLAN-hopping attacks that exploit untagged native VLAN traffic."
+      }
+    ]
+  },
+  "spanning-tree-protocol-preventing-broadcast-storms": {
+    "core": "Redundant links between switches create loops, and Ethernet frames have no TTL. A broadcast circulates forever, multiplying until links and CPUs saturate (a broadcast storm). STP elects a root bridge and blocks redundant ports, leaving a loop-free tree, and unblocks them if an active link fails. RSTP converges in seconds. Edge ports use PortFast plus BPDU Guard so a user's looped cable gets shut down instead of melting the network.",
+    "first_principles": {
+      "problem": "Someone plugs both ends of a cable into the same desk switch and the whole office network collapses.",
+      "truths": [
+        "Ethernet frames don't expire.",
+        "Loops multiply broadcasts.",
+        "Redundancy needs controlled blocking."
+      ],
+      "derivation": [
+        "Run **RSTP/MSTP**.",
+        "Set **root bridge priority** on core.",
+        "Use **PortFast** on edge ports.",
+        "Enable **BPDU Guard** on edge ports.",
+        "Add **storm control** limits."
+      ]
+    },
+    "analogy": {
+      "title": "One-way signs on a ring road",
+      "story": "Blocking one segment prevents cars circling forever; if a road closes, the sign is removed to restore a route.",
+      "mapping": [
+        [
+          "Ring road",
+          "Redundant links"
+        ],
+        [
+          "Blocked segment",
+          "Blocked port"
+        ],
+        [
+          "Removing sign",
+          "Failover"
+        ]
+      ],
+      "breaks": "Cars stop when lost; frames circulate until switches fail."
+    },
+    "mindmap": {
+      "center": "Spanning Tree",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Loops",
+            "Broadcast storms",
+            "MAC flapping"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Root bridge",
+            "Port roles",
+            "Blocking"
+          ]
+        },
+        {
+          "label": "Versions",
+          "children": [
+            "STP",
+            "RSTP",
+            "MSTP"
+          ]
+        },
+        {
+          "label": "Edge protection",
+          "children": [
+            "PortFast",
+            "BPDU Guard",
+            "Storm control"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Root on core"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Edge port protection",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "A looped desk cable err-disables one port, not the office."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "spanning-tree mode rapid-pvst\nspanning-tree vlan 1-4094 priority 4096     ! on core: become root\ninterface range Gi1/0/1-46\n spanning-tree portfast\n spanning-tree bpduguard enable\n storm-control broadcast level 5.00"
+        }
+      ],
+      "outcome": "loop-safe switching."
+    },
+    "summary": {
+      "points": [
+        "Loops cause storms.",
+        "STP blocks redundancy.",
+        "Guard edge ports."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does BPDU Guard do on an edge port?",
+        "a": "Shuts the port down if it receives a spanning-tree BPDU, indicating a switch or loop where only end devices should be."
+      }
+    ]
+  },
+  "dhcp-snooping-the-rogue-router": {
+    "core": "Any device can run a DHCP server, and a rogue one (a home router plugged in backwards, or an attacker) can hand out its own gateway and DNS, hijacking traffic. DHCP snooping marks only uplink ports toward real DHCP servers as trusted and drops DHCP offers arriving on untrusted ports. It also builds a binding table (MAC, IP, port) that Dynamic ARP Inspection and IP Source Guard use to block spoofing.",
+    "first_principles": {
+      "problem": "Users suddenly get 192.168.0.x addresses and no internet because someone plugged a consumer router into a wall port.",
+      "truths": [
+        "DHCP has no server authentication.",
+        "Clients accept the first offer.",
+        "Switches know which ports lead to servers."
+      ],
+      "derivation": [
+        "Enable **DHCP snooping** per VLAN.",
+        "Mark **uplinks trusted**.",
+        "Rate-limit **DHCP on untrusted** ports.",
+        "Enable **DAI** using the binding table.",
+        "Enable **IP Source Guard**."
+      ]
+    },
+    "analogy": {
+      "title": "Only accepting keys from the official front desk",
+      "story": "If someone in the corridor hands you a room key, the building ignores it.",
+      "mapping": [
+        [
+          "Front desk",
+          "Legit DHCP server"
+        ],
+        [
+          "Corridor stranger",
+          "Rogue DHCP"
+        ],
+        [
+          "Building rule",
+          "Snooping"
+        ]
+      ],
+      "breaks": "Guests can check badges; DHCP clients can't, so the switch must."
+    },
+    "mindmap": {
+      "center": "DHCP Snooping",
+      "branches": [
+        {
+          "label": "Threat",
+          "children": [
+            "Rogue DHCP",
+            "MITM via gateway/DNS"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "Trusted/untrusted ports",
+            "Drop offers on untrusted"
+          ]
+        },
+        {
+          "label": "Binding table",
+          "children": [
+            "MAC",
+            "IP",
+            "Port",
+            "VLAN"
+          ]
+        },
+        {
+          "label": "Builds on",
+          "children": [
+            "DAI",
+            "IP Source Guard"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable snooping",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Rogue offers dropped; ARP spoofing blocked."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "ip dhcp snooping\nip dhcp snooping vlan 10,20,30\ninterface Gi1/0/48\n ip dhcp snooping trust          ! uplink to DHCP server\ninterface range Gi1/0/1-46\n ip dhcp snooping limit rate 15\nip arp inspection vlan 10,20,30"
+        }
+      ],
+      "outcome": "trusted address assignment."
+    },
+    "summary": {
+      "points": [
+        "Rogue DHCP hijacks.",
+        "Trust only uplinks.",
+        "Foundation for DAI."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which switch feature uses the DHCP snooping binding table to stop ARP spoofing?",
+        "a": "Dynamic ARP Inspection (DAI)."
+      }
+    ]
+  },
+  "8021x-port-based-network-access-control": {
+    "core": "802.1X makes a switch port or Wi-Fi SSID authenticate a device before granting access. The supplicant (device) talks EAP to the authenticator (switch or AP), which relays to a RADIUS server checking certificates (EAP-TLS) or credentials. On success, RADIUS can assign a VLAN or ACL dynamically. Devices that can't do 802.1X (printers) use MAB with tight policies.",
+    "first_principles": {
+      "problem": "Anyone can plug a laptop into a meeting-room port and land on the internal network.",
+      "truths": [
+        "Physical access isn't authorisation.",
+        "Devices can prove identity with certificates.",
+        "Policy can be assigned per identity."
+      ],
+      "derivation": [
+        "Deploy **RADIUS** (NPS, ISE, FreeRADIUS).",
+        "Use **EAP-TLS** with device certs.",
+        "Enable **802.1X on access ports and Wi-Fi**.",
+        "Assign **dynamic VLANs/ACLs**.",
+        "Use **MAB** + profiling for headless devices."
+      ]
+    },
+    "analogy": {
+      "title": "A badge reader on every door",
+      "story": "The door won't open until your badge is checked, and the badge decides which floors you can reach.",
+      "mapping": [
+        [
+          "Badge",
+          "Certificate"
+        ],
+        [
+          "Badge reader",
+          "Switch/AP"
+        ],
+        [
+          "Security office",
+          "RADIUS"
+        ],
+        [
+          "Floor access",
+          "Dynamic VLAN"
+        ]
+      ],
+      "breaks": "Badges can be lent; certificates should be device-bound (TPM)."
+    },
+    "mindmap": {
+      "center": "802.1X",
+      "branches": [
+        {
+          "label": "Roles",
+          "children": [
+            "Supplicant",
+            "Authenticator",
+            "Auth server (RADIUS)"
+          ]
+        },
+        {
+          "label": "Methods",
+          "children": [
+            "EAP-TLS",
+            "PEAP-MSCHAPv2 (weaker)"
+          ]
+        },
+        {
+          "label": "Outcomes",
+          "children": [
+            "Dynamic VLAN",
+            "dACL",
+            "Guest VLAN"
+          ]
+        },
+        {
+          "label": "Fallback",
+          "children": [
+            "MAB",
+            "Profiling"
+          ]
+        },
+        {
+          "label": "Wi-Fi",
+          "children": [
+            "WPA2/3-Enterprise"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Switch port",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Unknown devices get no access; known ones land in the right VLAN."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "aaa new-model\naaa authentication dot1x default group radius\ndot1x system-auth-control\nradius server ISE\n address ipv4 10.0.50.10 auth-port 1812\n key <secret>\ninterface Gi1/0/12\n switchport mode access\n authentication port-control auto\n dot1x pae authenticator\n mab"
+        }
+      ],
+      "outcome": "identity-based network access."
+    },
+    "summary": {
+      "points": [
+        "Authenticate before access.",
+        "RADIUS decides policy.",
+        "MAB for headless devices."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is EAP-TLS preferred over PEAP-MSCHAPv2?",
+        "a": "It uses mutual certificate authentication, avoiding password capture and offline cracking risks of MSCHAPv2."
+      }
+    ]
+  },
+  "wifi-basics-the-alphabet-soup-80211": {
+    "core": "Wi-Fi standards are Wi-Fi 4 (802.11n), 5 (ac), 6 and 6E (ax, adding the 6 GHz band) and 7 (be). Real throughput depends on band (2.4 GHz has long range, few channels and congestion; 5 and 6 GHz are faster with shorter range), channel width, co-channel interference and client count, since airtime is shared. Good office design means many lower-power APs, non-overlapping channels, WPA3, and SSIDs mapped to VLANs.",
+    "first_principles": {
+      "problem": "A single powerful AP covers the office but users get terrible speeds in meetings with 40 laptops.",
+      "truths": [
+        "Airtime is shared per channel.",
+        "Bands trade range for speed.",
+        "Interference reduces capacity."
+      ],
+      "derivation": [
+        "Design for **capacity**, not just coverage.",
+        "Use **5/6 GHz**, minimise 2.4 GHz.",
+        "Plan **non-overlapping channels**.",
+        "Use **WPA3** (Enterprise with 802.1X).",
+        "Limit **SSIDs** (each costs airtime)."
+      ]
+    },
+    "analogy": {
+      "title": "A meeting room where only one person talks at a time",
+      "story": "More people means less time each; more rooms (APs/channels) lets more conversations happen.",
+      "mapping": [
+        [
+          "Speaking turn",
+          "Airtime"
+        ],
+        [
+          "Rooms",
+          "Channels/APs"
+        ],
+        [
+          "Shouting",
+          "High transmit power"
+        ]
+      ],
+      "breaks": "People take polite turns; Wi-Fi uses contention and retries."
+    },
+    "mindmap": {
+      "center": "Wi-Fi Basics",
+      "branches": [
+        {
+          "label": "Standards",
+          "children": [
+            "Wi-Fi 4/5/6/6E/7"
+          ]
+        },
+        {
+          "label": "Bands",
+          "children": [
+            "2.4 GHz",
+            "5 GHz",
+            "6 GHz"
+          ]
+        },
+        {
+          "label": "Capacity",
+          "children": [
+            "Airtime",
+            "Channel width",
+            "Client count",
+            "OFDMA"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Many APs",
+            "Channel plan",
+            "Power tuning",
+            "Few SSIDs"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "WPA3-Personal/Enterprise"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Survey readings",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reveals channel overlap to fix."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "nmcli -f SSID,CHAN,FREQ,SIGNAL,SECURITY dev wifi list\n# Office  36  5180 MHz  78  WPA3\n# Office  1   2412 MHz  92  WPA3\n# Neighbor 36 5180 MHz  60  WPA2   ← co-channel interference"
+        }
+      ],
+      "outcome": "capacity-driven Wi-Fi."
+    },
+    "summary": {
+      "points": [
+        "Airtime is shared.",
+        "Prefer 5/6 GHz.",
+        "Many APs, good channel plan."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does adding more SSIDs reduce Wi-Fi performance?",
+        "a": "Each SSID sends beacons that consume airtime on every channel, leaving less for data."
+      }
+    ]
+  },
+  "vpns-client-vs-site-to-site": {
+    "core": "Site-to-site VPNs permanently connect whole networks (office to data centre or cloud) between gateways, invisible to users. Client (remote-access) VPNs connect individual devices to the office network, authenticating users, often with MFA. Full-tunnel sends all traffic through the office; split-tunnel sends only corporate subnets. Zero-trust access (ZTNA) increasingly replaces broad client VPN access with per-application access.",
+    "first_principles": {
+      "problem": "Remote workers on a full-tunnel VPN saturate the office internet link while streaming video calls.",
+      "truths": [
+        "Networks and individuals have different needs.",
+        "Full tunnels centralise traffic.",
+        "Broad network access increases risk."
+      ],
+      "derivation": [
+        "**Site-to-site** for network-to-network.",
+        "**Client VPN** for remote users (MFA).",
+        "Choose **split vs full tunnel**.",
+        "Limit access with **ACLs per group**.",
+        "Consider **ZTNA** for app-level access."
+      ]
+    },
+    "analogy": {
+      "title": "A private road between buildings vs personal keycards",
+      "story": "The road permanently links sites; keycards let individuals in from anywhere.",
+      "mapping": [
+        [
+          "Private road",
+          "Site-to-site VPN"
+        ],
+        [
+          "Keycard",
+          "Client VPN"
+        ],
+        [
+          "Room-specific keycard",
+          "ZTNA"
+        ]
+      ],
+      "breaks": "Keycards don't route your other traffic; full-tunnel VPNs do."
+    },
+    "mindmap": {
+      "center": "VPN Types",
+      "branches": [
+        {
+          "label": "Site-to-site",
+          "children": [
+            "Gateway to gateway",
+            "Always on",
+            "IPsec"
+          ]
+        },
+        {
+          "label": "Client",
+          "children": [
+            "User auth",
+            "MFA",
+            "WireGuard/OpenVPN/IPsec"
+          ]
+        },
+        {
+          "label": "Tunnel modes",
+          "children": [
+            "Full",
+            "Split"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Broad access",
+            "Bandwidth hairpin"
+          ]
+        },
+        {
+          "label": "Evolution",
+          "children": [
+            "ZTNA",
+            "SASE"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Split tunnel",
+      "scenario": "WireGuard client.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Corporate traffic tunnelled; video calls go direct."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "[Interface]\nPrivateKey = <client-key>\nAddress = 10.99.0.15/32\nDNS = 10.0.0.2\n[Peer]\nPublicKey = <gateway-key>\nEndpoint = vpn.acme.com:51820\nAllowedIPs = 10.0.0.0/16, 10.20.0.0/16   # only corporate subnets"
+        }
+      ],
+      "outcome": "right VPN for each need."
+    },
+    "summary": {
+      "points": [
+        "Site vs client.",
+        "Split vs full.",
+        "ZTNA for least privilege."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the trade-off of split tunnelling?",
+        "a": "It saves bandwidth and latency but internet traffic bypasses corporate security controls."
+      }
+    ]
+  }
+}

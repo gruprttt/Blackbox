@@ -1,0 +1,750 @@
+{
+  "introduction-running-out-of-vlans": {
+    "core": "VLAN IDs are 12 bits (4,094 usable), far too few for multi-tenant clouds and large data centres, and VLANs require a stretched L2 across the physical network, inheriting STP and broadcast problems. Overlays encapsulate tenant L2/L3 traffic inside UDP/IP packets over a routed underlay. That gives millions of segments, L2 over L3, and decouples virtual networks from the physical topology.",
+    "first_principles": {
+      "problem": "A cloud provider needs 50,000 isolated tenant networks on a routed leaf-spine fabric.",
+      "truths": [
+        "12-bit IDs cap at ~4k.",
+        "Stretched L2 is fragile.",
+        "IP fabrics scale well."
+      ],
+      "derivation": [
+        "**Encapsulate** frames in UDP/IP.",
+        "Use **24-bit IDs** (VNI).",
+        "Run a **routed underlay** (leaf-spine, ECMP).",
+        "Place **tunnel endpoints** at hypervisors/leaves.",
+        "Use a **control plane** (EVPN) for learning."
+      ]
+    },
+    "analogy": {
+      "title": "Shipping containers on a rail network",
+      "story": "Any cargo (tenant traffic) goes into standard containers on standard rails (IP), with millions of container IDs.",
+      "mapping": [
+        [
+          "Containers",
+          "Encapsulation"
+        ],
+        [
+          "Rails",
+          "Underlay"
+        ],
+        [
+          "Container IDs",
+          "VNIs"
+        ]
+      ],
+      "breaks": "Containers are physical; encapsulation adds header bytes."
+    },
+    "mindmap": {
+      "center": "Why Overlays",
+      "branches": [
+        {
+          "label": "VLAN limits",
+          "children": [
+            "4094 IDs",
+            "Stretched L2",
+            "STP"
+          ]
+        },
+        {
+          "label": "Overlay",
+          "children": [
+            "Encapsulation",
+            "24-bit IDs",
+            "L2 over L3"
+          ]
+        },
+        {
+          "label": "Underlay",
+          "children": [
+            "Routed fabric",
+            "ECMP"
+          ]
+        },
+        {
+          "label": "Protocols",
+          "children": [
+            "VXLAN",
+            "Geneve",
+            "NVGRE"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Scale comparison",
+      "scenario": "Numbers.",
+      "flow": [
+        "VLAN: 12 bits → 4,094 segments",
+        "VXLAN VNI: 24 bits → 16,777,216",
+        "Underlay: plain IP routing",
+        "Tenants unaware of physical topology"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Multi-tenancy at cloud scale."
+        }
+      ],
+      "code": [],
+      "outcome": "why overlays exist."
+    },
+    "summary": {
+      "points": [
+        "VLANs run out.",
+        "Overlays encapsulate.",
+        "Routed underlays scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many segments can VXLAN identify?",
+        "a": "About 16 million (2^24) via its 24-bit VNI."
+      }
+    ]
+  },
+  "underlay-vs-overlay": {
+    "core": "The underlay is the physical routed network (leaf-spine with BGP or OSPF and ECMP) whose job is simply to deliver IP packets between tunnel endpoints quickly and reliably. The overlay is the virtual network tenants see, built from tunnels between endpoints. Keeping them separate means the underlay is simple and stable while overlays are created and changed in software, but troubleshooting must consider both layers.",
+    "first_principles": {
+      "problem": "Tenant traffic drops intermittently, and the team can't tell whether the virtual network or the physical fabric is at fault.",
+      "truths": [
+        "Physical and virtual concerns differ.",
+        "Overlays depend on underlay health.",
+        "Encapsulation hides inner details from the underlay."
+      ],
+      "derivation": [
+        "Design the **underlay** for IP reachability + ECMP.",
+        "Design **overlays** for tenant topology.",
+        "Monitor **both layers**.",
+        "Ensure **MTU** headroom in underlay.",
+        "Correlate **outer and inner** headers when debugging."
+      ]
+    },
+    "analogy": {
+      "title": "Roads and delivery routes",
+      "story": "The road network (underlay) must be sound; delivery companies (overlays) design routes on top without rebuilding roads.",
+      "mapping": [
+        [
+          "Roads",
+          "Underlay"
+        ],
+        [
+          "Delivery routes",
+          "Overlays"
+        ],
+        [
+          "Parcel labels",
+          "Inner headers"
+        ]
+      ],
+      "breaks": "Delivery firms see road closures; overlays only see tunnel failures."
+    },
+    "mindmap": {
+      "center": "Underlay vs Overlay",
+      "branches": [
+        {
+          "label": "Underlay",
+          "children": [
+            "Physical",
+            "Routed",
+            "ECMP",
+            "BGP/OSPF"
+          ]
+        },
+        {
+          "label": "Overlay",
+          "children": [
+            "Virtual",
+            "Tunnels",
+            "Tenant topology"
+          ]
+        },
+        {
+          "label": "Coupling",
+          "children": [
+            "MTU",
+            "Health",
+            "Entropy in UDP src port"
+          ]
+        },
+        {
+          "label": "Debugging",
+          "children": [
+            "Outer headers",
+            "Inner headers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two-layer capture",
+      "scenario": "tcpdump.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See both layers in one packet."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "tcpdump -ni eth0 udp port 4789 -vv\n# outer: 10.0.1.11 > 10.0.2.12 UDP 4789 (underlay)\n#   VXLAN vni 5001\n#   inner: 192.168.10.5 > 192.168.10.9 ICMP echo (overlay)"
+        }
+      ],
+      "outcome": "layered troubleshooting."
+    },
+    "summary": {
+      "points": [
+        "Underlay delivers IP.",
+        "Overlay defines tenants.",
+        "Debug both."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do VXLAN tunnel endpoints vary the outer UDP source port?",
+        "a": "To provide entropy so the underlay's ECMP hashing spreads different inner flows across multiple paths."
+      }
+    ]
+  },
+  "vxlan-the-standard-overlay": {
+    "core": "VXLAN (RFC 7348) wraps an Ethernet frame in an 8-byte VXLAN header carrying a 24-bit VNI, inside UDP (port 4789), IP and an outer Ethernet header, about 50 bytes of overhead. It's supported everywhere: Linux, switches, NSX and Kubernetes CNIs like Flannel and Calico. Endpoints learn remote MACs by flood-and-learn via multicast or, preferably, via a BGP EVPN control plane.",
+    "first_principles": {
+      "problem": "A data centre needs L2 tenant segments across racks without stretching VLANs through the spine.",
+      "truths": [
+        "Ethernet frames can ride inside UDP.",
+        "A 24-bit ID gives scale.",
+        "Learning MAC locations needs a mechanism."
+      ],
+      "derivation": [
+        "Encapsulate: **Eth / IP / UDP 4789 / VXLAN / inner Eth**.",
+        "Map **VNI per segment**.",
+        "Learn via **EVPN** (BGP) or multicast.",
+        "Ensure **underlay MTU ≥ 1550**.",
+        "Use **hardware VTEPs** in leaves."
+      ]
+    },
+    "analogy": {
+      "title": "Putting a sealed letter inside a courier envelope",
+      "story": "The courier only reads the outer envelope's address; the recipient opens it to find the original letter with its own address.",
+      "mapping": [
+        [
+          "Original letter",
+          "Inner frame"
+        ],
+        [
+          "Courier envelope",
+          "Outer IP/UDP"
+        ],
+        [
+          "Department code",
+          "VNI"
+        ]
+      ],
+      "breaks": "Couriers don't charge per gram of envelope; every VXLAN packet carries 50 extra bytes."
+    },
+    "mindmap": {
+      "center": "VXLAN",
+      "branches": [
+        {
+          "label": "Header",
+          "children": [
+            "8 bytes",
+            "24-bit VNI"
+          ]
+        },
+        {
+          "label": "Transport",
+          "children": [
+            "UDP 4789"
+          ]
+        },
+        {
+          "label": "Overhead",
+          "children": [
+            "~50 bytes"
+          ]
+        },
+        {
+          "label": "Learning",
+          "children": [
+            "Flood-and-learn",
+            "Multicast",
+            "BGP EVPN"
+          ]
+        },
+        {
+          "label": "Support",
+          "children": [
+            "Linux",
+            "Switches",
+            "Flannel",
+            "Calico",
+            "NSX"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Linux VXLAN",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "L2 segment 100 spans hosts over routed underlay."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ip link add vxlan100 type vxlan id 100 dstport 4789 local 10.0.1.11 nolearning\nip link set vxlan100 master br100 && ip link set vxlan100 up\nbridge fdb append 00:00:00:00:00:00 dev vxlan100 dst 10.0.2.12   # head-end replication"
+        }
+      ],
+      "outcome": "standard overlay in place."
+    },
+    "summary": {
+      "points": [
+        "Ethernet in UDP.",
+        "24-bit VNI.",
+        "EVPN for learning."
+      ]
+    },
+    "check": [
+      {
+        "q": "What UDP port does VXLAN use by default?",
+        "a": "4789 (IANA-assigned)."
+      }
+    ]
+  },
+  "vteps-the-tunnel-endpoints": {
+    "core": "VXLAN Tunnel Endpoints (VTEPs) encapsulate and decapsulate traffic. They can be software in hypervisors and hosts (Linux, OVS, Cilium) or hardware in top-of-rack switches. A VTEP must know which remote VTEP hosts each MAC/IP in a VNI. BGP EVPN distributes that (type-2 MAC/IP routes, type-3 for BUM replication), enabling ARP suppression and distributed anycast gateways, which avoids flood-and-learn.",
+    "first_principles": {
+      "problem": "Flood-and-learn VXLAN floods unknown traffic to every VTEP, wasting bandwidth at scale.",
+      "truths": [
+        "Encapsulation needs a destination VTEP.",
+        "Learning by flooding doesn't scale.",
+        "A control plane can advertise locations."
+      ],
+      "derivation": [
+        "Place VTEPs at **hosts or leaves**.",
+        "Run **BGP EVPN** between VTEPs.",
+        "Advertise **MAC/IP (type-2)** routes.",
+        "Use **ARP suppression**.",
+        "Deploy **anycast gateways** on all leaves."
+      ]
+    },
+    "analogy": {
+      "title": "Post offices with a shared address directory",
+      "story": "Instead of shouting at every office 'who has this resident?', offices publish who lives where.",
+      "mapping": [
+        [
+          "Post office",
+          "VTEP"
+        ],
+        [
+          "Directory",
+          "EVPN routes"
+        ],
+        [
+          "Shouting",
+          "Flood-and-learn"
+        ]
+      ],
+      "breaks": "Directories update slowly; EVPN updates on every VM move."
+    },
+    "mindmap": {
+      "center": "VTEPs",
+      "branches": [
+        {
+          "label": "Types",
+          "children": [
+            "Software (hypervisor/host)",
+            "Hardware (ToR)"
+          ]
+        },
+        {
+          "label": "Functions",
+          "children": [
+            "Encap/decap",
+            "MAC/IP mapping"
+          ]
+        },
+        {
+          "label": "Control plane",
+          "children": [
+            "BGP EVPN type-2",
+            "type-3",
+            "type-5"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "ARP suppression",
+            "Anycast gateway"
+          ]
+        },
+        {
+          "label": "Without EVPN",
+          "children": [
+            "Flood-and-learn",
+            "Multicast"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "EVPN on a leaf",
+      "scenario": "FRR.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "VTEPs learn remote MACs via BGP; no flooding."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "router bgp 65001\n neighbor SPINES peer-group\n neighbor SPINES remote-as external\n address-family l2vpn evpn\n  neighbor SPINES activate\n  advertise-all-vni\n!\n# show bgp l2vpn evpn route type macip"
+        }
+      ],
+      "outcome": "scalable tunnel endpoints."
+    },
+    "summary": {
+      "points": [
+        "VTEPs encapsulate.",
+        "EVPN distributes locations.",
+        "Suppress ARP floods."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does an EVPN type-2 route advertise?",
+        "a": "A MAC (and optionally IP) address and the VTEP/VNI behind which it lives."
+      }
+    ]
+  },
+  "the-mtu-headache-encapsulation-tax": {
+    "core": "Encapsulation adds bytes: VXLAN about 50, Geneve 50 or more with options, IPsec around 60. If the underlay MTU is 1500 and the inner packet is 1500, the outer packet is about 1550 and gets dropped or fragmented. Symptoms are classic: pings and small requests work, but large transfers, TLS handshakes with big certificates, or SSH sessions hang. The overlay must either shrink the inner MTU or the underlay must grow.",
+    "first_principles": {
+      "problem": "Pods can curl small endpoints, but image pulls and large API responses hang after enabling a VXLAN CNI.",
+      "truths": [
+        "Headers consume MTU.",
+        "Oversize packets drop or fragment.",
+        "Small packets hide the problem."
+      ],
+      "derivation": [
+        "Compute **overhead** per encapsulation.",
+        "Test with **DF-bit pings** at size.",
+        "Watch for **'small works, large hangs'**.",
+        "Check **ICMP frag-needed** delivery.",
+        "Fix via **MTU sizing** (next lesson)."
+      ]
+    },
+    "analogy": {
+      "title": "Fitting a full-size box into a slightly bigger box that won't fit the door",
+      "story": "The outer box is too big for the doorway, so large deliveries get stuck while small parcels pass.",
+      "mapping": [
+        [
+          "Inner box",
+          "Inner packet"
+        ],
+        [
+          "Outer box",
+          "Encapsulated packet"
+        ],
+        [
+          "Doorway",
+          "Underlay MTU"
+        ]
+      ],
+      "breaks": "Delivery drivers notice; networks silently drop."
+    },
+    "mindmap": {
+      "center": "Encapsulation Tax",
+      "branches": [
+        {
+          "label": "Overheads",
+          "children": [
+            "VXLAN ~50 B",
+            "Geneve 50+ B",
+            "IPsec ~60 B",
+            "WireGuard 60/80 B"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Large transfers hang",
+            "TLS stalls",
+            "Small pings OK"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "MTU mismatch",
+            "Blocked ICMP"
+          ]
+        },
+        {
+          "label": "Detection",
+          "children": [
+            "ping -M do -s",
+            "tracepath"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detect",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms ~50-byte overlay tax."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# inside pod (MTU 1500, underlay 1500)\nping -M do -s 1472 10.244.2.7   # fails/silent\nping -M do -s 1422 10.244.2.7   # works → effective path ~1450"
+        }
+      ],
+      "outcome": "MTU issue diagnosed."
+    },
+    "summary": {
+      "points": [
+        "Headers cost bytes.",
+        "Large packets fail.",
+        "Test with DF pings."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do small pings succeed while large transfers hang in an MTU mismatch?",
+        "a": "Small packets fit even after encapsulation; only full-size packets exceed the underlay MTU and get dropped."
+      }
+    ]
+  },
+  "solving-the-mtu-problem": {
+    "core": "Fix the encapsulation tax in one of two ways. Raise the underlay MTU (9000 jumbo frames in data centres, 9001 in AWS VPCs) so 1500-byte inner packets fit with room to spare. Or lower the inner MTU (1450 for VXLAN) on overlay interfaces and pods, often with TCP MSS clamping at gateways for traffic entering from outside. Also ensure ICMP 'fragmentation needed' passes for PMTUD, and verify end-to-end.",
+    "first_principles": {
+      "problem": "A CNI uses 1500 inner MTU over a 1500 underlay, and production traffic stalls.",
+      "truths": [
+        "Either the outer can grow or the inner can shrink.",
+        "TCP MSS can be rewritten.",
+        "PMTUD needs ICMP."
+      ],
+      "derivation": [
+        "Prefer **jumbo underlay** where possible.",
+        "Else set **inner MTU = underlay − overhead**.",
+        "Apply **MSS clamping** at edges.",
+        "Allow **ICMP type 3 code 4** / ICMPv6 PTB.",
+        "**Test** with DF pings after changes."
+      ]
+    },
+    "analogy": {
+      "title": "Widening the door or using smaller boxes",
+      "story": "Either enlarge the doorway or pack goods in slightly smaller inner boxes so the outer box fits.",
+      "mapping": [
+        [
+          "Wider door",
+          "Jumbo underlay"
+        ],
+        [
+          "Smaller inner box",
+          "Lower inner MTU"
+        ],
+        [
+          "Repacking at the dock",
+          "MSS clamping"
+        ]
+      ],
+      "breaks": "Doors are fixed per building; every hop's MTU must match."
+    },
+    "mindmap": {
+      "center": "MTU Fixes",
+      "branches": [
+        {
+          "label": "Grow underlay",
+          "children": [
+            "9000 jumbo",
+            "AWS 9001"
+          ]
+        },
+        {
+          "label": "Shrink inner",
+          "children": [
+            "1450 VXLAN",
+            "CNI MTU setting"
+          ]
+        },
+        {
+          "label": "MSS clamping",
+          "children": [
+            "iptables TCPMSS",
+            "Router config"
+          ]
+        },
+        {
+          "label": "PMTUD",
+          "children": [
+            "Allow ICMP frag-needed"
+          ]
+        },
+        {
+          "label": "Verify",
+          "children": [
+            "DF pings",
+            "tracepath"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Both approaches",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Large transfers work again."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# shrink inner MTU (Calico)\nkubectl patch felixconfiguration default --type merge -p '{\"spec\":{\"vxlanMTU\":1450}}'\n# clamp MSS at gateway\niptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu\n# or raise underlay\nip link set eth0 mtu 9000"
+        }
+      ],
+      "outcome": "MTU consistent end-to-end."
+    },
+    "summary": {
+      "points": [
+        "Grow outer or shrink inner.",
+        "Clamp MSS.",
+        "Keep ICMP flowing."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does TCP MSS clamping do?",
+        "a": "Rewrites the MSS option in SYN packets so endpoints send segments small enough to fit the path after encapsulation."
+      }
+    ]
+  },
+  "geneve-vxlan-20": {
+    "core": "Geneve (RFC 8926) is a generic overlay encapsulation over UDP 6081 with a 24-bit VNI and variable-length TLV options. The options carry metadata such as security policy IDs, telemetry and service-chain context, without inventing a new protocol for each need. OVN/OVS, VMware NSX-T, AWS Gateway Load Balancer and Cilium use it. VXLAN remains more widely supported in hardware.",
+    "first_principles": {
+      "problem": "A virtual network platform needs to carry policy group IDs with each packet, which VXLAN's fixed header can't express.",
+      "truths": [
+        "Fixed headers limit evolution.",
+        "TLV options are extensible.",
+        "Hardware support lags new formats."
+      ],
+      "derivation": [
+        "Use **Geneve** for extensible metadata.",
+        "Define **TLV options** for policy/telemetry.",
+        "Keep **options small** (MTU and hardware parsing).",
+        "Use **VXLAN** where hardware VTEPs need it.",
+        "Check **NIC offload** support."
+      ]
+    },
+    "analogy": {
+      "title": "A shipping container with a flexible label pouch",
+      "story": "Instead of a fixed label, you can add extra tags (handling, customs, tracking) as needs change.",
+      "mapping": [
+        [
+          "Fixed label",
+          "VXLAN header"
+        ],
+        [
+          "Label pouch",
+          "Geneve TLV options"
+        ],
+        [
+          "Extra tags",
+          "Metadata"
+        ]
+      ],
+      "breaks": "Label pouches are free; options cost MTU and parsing."
+    },
+    "mindmap": {
+      "center": "Geneve",
+      "branches": [
+        {
+          "label": "Header",
+          "children": [
+            "24-bit VNI",
+            "Variable TLV options"
+          ]
+        },
+        {
+          "label": "Transport",
+          "children": [
+            "UDP 6081"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "OVN",
+            "NSX-T",
+            "AWS GWLB",
+            "Cilium"
+          ]
+        },
+        {
+          "label": "vs VXLAN",
+          "children": [
+            "Extensible",
+            "Less hardware support"
+          ]
+        },
+        {
+          "label": "Caveats",
+          "children": [
+            "MTU",
+            "Offload support"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Linux Geneve",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Extensible overlay with metadata."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ip link add gnv0 type geneve id 5001 remote 10.0.2.12 dstport 6081\nip link set gnv0 up\n# AWS GWLB sends traffic to appliances encapsulated in Geneve with flow cookie options"
+        }
+      ],
+      "outcome": "future-proof encapsulation."
+    },
+    "summary": {
+      "points": [
+        "Generic and extensible.",
+        "TLV metadata.",
+        "Hardware support growing."
+      ]
+    },
+    "check": [
+      {
+        "q": "What advantage does Geneve have over VXLAN?",
+        "a": "Variable-length TLV options that carry arbitrary metadata (policy, telemetry) without a new protocol."
+      }
+    ]
+  }
+}

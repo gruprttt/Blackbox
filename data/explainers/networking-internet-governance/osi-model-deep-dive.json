@@ -1,0 +1,997 @@
+{
+  "introduction-the-universal-debugging-map": {
+    "core": "The OSI model splits networking into seven layers, each with one job and a clean interface to the layers above and below. Real networks follow the simpler TCP/IP model, but OSI's value is as a debugging map. It lets you say \"this is a layer 3 problem\" and test layer by layer from the cable up, instead of guessing.",
+    "first_principles": {
+      "problem": "'The website is down' could be a cable, a route, a firewall, TLS or the app, and the team checks randomly.",
+      "truths": [
+        "Networking is layered.",
+        "Each layer depends on the one below.",
+        "Isolating the failing layer narrows the search."
+      ],
+      "derivation": [
+        "Name the **seven layers**.",
+        "Know each layer's **job and unit** (bit, frame, packet, segment).",
+        "Debug **bottom-up** (or top-down).",
+        "Map **tools** to layers.",
+        "Use layers as a **shared vocabulary**."
+      ]
+    },
+    "analogy": {
+      "title": "A building's floors for troubleshooting",
+      "story": "If the lift doesn't reach floor 7, check power in the basement before blaming the 7th-floor office.",
+      "mapping": [
+        [
+          "Basement power",
+          "Layer 1"
+        ],
+        [
+          "Floors",
+          "Layers"
+        ],
+        [
+          "Office",
+          "Application"
+        ]
+      ],
+      "breaks": "Buildings have strict floors; real protocols blur layer boundaries."
+    },
+    "mindmap": {
+      "center": "OSI as a Map",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Debugging",
+            "Shared language"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "1 Physical",
+            "2 Data link",
+            "3 Network",
+            "4 Transport",
+            "5 Session",
+            "6 Presentation",
+            "7 Application"
+          ]
+        },
+        {
+          "label": "Method",
+          "children": [
+            "Bottom-up",
+            "Top-down",
+            "Divide and conquer"
+          ]
+        },
+        {
+          "label": "Reality",
+          "children": [
+            "TCP/IP 4-layer model"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Layered triage",
+      "scenario": "Commands.",
+      "flow": [
+        "L1/2: ip link → interface UP?",
+        "L3: ping 10.0.0.1 → route OK?",
+        "L4: nc -zv host 443 → port open?",
+        "L7: curl -v https://host → app response?"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Failure isolated to one layer in minutes."
+        }
+      ],
+      "code": [],
+      "outcome": "systematic network debugging."
+    },
+    "summary": {
+      "points": [
+        "Seven layers, one job each.",
+        "Debug layer by layer.",
+        "Shared vocabulary."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is OSI still useful if real networks use TCP/IP?",
+        "a": "It provides a precise mental map and vocabulary for isolating which part of the stack is failing."
+      }
+    ]
+  },
+  "the-7-layers-overview": {
+    "core": "Layer 1 (physical) moves bits over a medium. Layer 2 (data link) moves frames between neighbours using MAC addresses. Layer 3 (network) routes packets across networks using IP. Layer 4 (transport) delivers segments between processes using ports (TCP, UDP). Layers 5–6 handle sessions and data formats such as encryption, and layer 7 is the application protocol (HTTP, DNS).",
+    "first_principles": {
+      "problem": "An engineer confuses MAC and IP addresses and can't explain why a router changes one but not the other.",
+      "truths": [
+        "Each layer has its own addressing.",
+        "Each layer has its own data unit.",
+        "Upper layers ride on lower ones."
+      ],
+      "derivation": [
+        "L1: **bits**, cables, radio.",
+        "L2: **frames**, MAC, switches.",
+        "L3: **packets**, IP, routers.",
+        "L4: **segments/datagrams**, ports.",
+        "L5–7: **sessions, formats, apps**."
+      ]
+    },
+    "analogy": {
+      "title": "Sending a parcel internationally",
+      "story": "Road (L1), local van between depots (L2), international routing by country/city (L3), the specific recipient (L4), and the letter's language and content (L5–7).",
+      "mapping": [
+        [
+          "Road",
+          "Physical"
+        ],
+        [
+          "Local van",
+          "Data link"
+        ],
+        [
+          "Country/city routing",
+          "IP"
+        ],
+        [
+          "Recipient name",
+          "Port"
+        ]
+      ],
+      "breaks": "Parcels keep one label; packets get new L2 headers at every hop."
+    },
+    "mindmap": {
+      "center": "Seven Layers",
+      "branches": [
+        {
+          "label": "L1",
+          "children": [
+            "Bits",
+            "Cables",
+            "Radio"
+          ]
+        },
+        {
+          "label": "L2",
+          "children": [
+            "Frames",
+            "MAC",
+            "Switches"
+          ]
+        },
+        {
+          "label": "L3",
+          "children": [
+            "Packets",
+            "IP",
+            "Routers"
+          ]
+        },
+        {
+          "label": "L4",
+          "children": [
+            "Segments",
+            "Ports",
+            "TCP/UDP"
+          ]
+        },
+        {
+          "label": "L5-7",
+          "children": [
+            "Sessions",
+            "TLS/encoding",
+            "HTTP/DNS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Addresses per hop",
+      "scenario": "Trace.",
+      "flow": [
+        "Laptop → router: src MAC laptop, dst MAC router, dst IP server",
+        "Router → ISP: new MACs, same IPs",
+        "Server receives: dst port 443",
+        "App reads HTTP request"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "MACs change per hop; IPs stay end-to-end."
+        }
+      ],
+      "code": [],
+      "outcome": "clear model of each layer."
+    },
+    "summary": {
+      "points": [
+        "Layer-specific addresses.",
+        "Layer-specific units.",
+        "Stacked dependencies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which address changes at every router hop, MAC or IP?",
+        "a": "The MAC (layer 2) address changes per hop; the IP (layer 3) stays the same end-to-end (absent NAT)."
+      }
+    ]
+  },
+  "layer-1-2-the-hardware-layers": {
+    "core": "Layer 1 is signals: copper, fibre and radio, with speed, duplex and physical errors. Layer 2 frames those bits for a local segment. Ethernet frames carry source and destination MAC addresses; switches learn which MAC sits on which port and forward frames only there, while broadcasts flood the whole VLAN. Many 'network' problems are L1/L2: bad cables, duplex mismatches, VLAN misconfiguration and MAC flapping.",
+    "first_principles": {
+      "problem": "A server has intermittent packet loss traced to a duplex mismatch on the switch port.",
+      "truths": [
+        "Physical faults show as errors and drops.",
+        "Switches forward by MAC tables.",
+        "Broadcast domains are bounded by VLANs."
+      ],
+      "derivation": [
+        "Check **link state, speed, duplex**.",
+        "Check **CRC/interface errors**.",
+        "Understand **MAC learning** and flooding.",
+        "Use **VLANs** to bound broadcast domains.",
+        "Watch for **loops** (STP)."
+      ]
+    },
+    "analogy": {
+      "title": "Roads and local postal sorting",
+      "story": "The road surface (L1) must be sound; the local sorter (switch) learns which house is on which street.",
+      "mapping": [
+        [
+          "Road surface",
+          "Cable/signal"
+        ],
+        [
+          "Local sorter",
+          "Switch"
+        ],
+        [
+          "House number",
+          "MAC"
+        ]
+      ],
+      "breaks": "Postmen don't flood every house with unknown mail; switches do."
+    },
+    "mindmap": {
+      "center": "Hardware Layers",
+      "branches": [
+        {
+          "label": "L1",
+          "children": [
+            "Copper",
+            "Fibre",
+            "Wi-Fi",
+            "Speed/duplex"
+          ]
+        },
+        {
+          "label": "L2",
+          "children": [
+            "Ethernet",
+            "MAC",
+            "Switches",
+            "VLANs"
+          ]
+        },
+        {
+          "label": "Faults",
+          "children": [
+            "CRC errors",
+            "Duplex mismatch",
+            "Loops",
+            "MAC flapping"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ethtool",
+            "ip -s link",
+            "switch MAC table"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spot L1 errors",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Physical issue identified before blaming the app."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ethtool eth0 | grep -E 'Speed|Duplex|Link'\nip -s link show eth0     # RX errors, dropped, overrun\n# rising CRC/RX errors → cable or duplex problem"
+        }
+      ],
+      "outcome": "hardware-layer diagnosis."
+    },
+    "summary": {
+      "points": [
+        "Signals and frames.",
+        "Switches learn MACs.",
+        "Many issues are L1/L2."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a switch do with a frame for an unknown destination MAC?",
+        "a": "It floods the frame out all ports in the VLAN except the one it arrived on."
+      }
+    ]
+  },
+  "layer-3-the-routing-layer": {
+    "core": "Layer 3 moves packets between networks. Each host has an IP address and subnet mask; destinations outside its subnet go to the default gateway. Routers forward each packet by longest-prefix match in their routing table, decrementing TTL to stop loops. ICMP reports problems. Typical L3 failures are missing routes, wrong masks, asymmetric routing and MTU or fragmentation issues.",
+    "first_principles": {
+      "problem": "A new subnet can reach the internet but not another VPC because a return route is missing.",
+      "truths": [
+        "Routing is hop-by-hop.",
+        "Most specific route wins.",
+        "Return paths need routes too."
+      ],
+      "derivation": [
+        "Check **IP, mask, gateway**.",
+        "Read **routing tables** (longest prefix).",
+        "Trace path with **traceroute/mtr**.",
+        "Verify **return routes**.",
+        "Watch **TTL and MTU**."
+      ]
+    },
+    "analogy": {
+      "title": "Road signs at every junction",
+      "story": "Each junction only knows which direction leads to a destination; the most specific sign wins.",
+      "mapping": [
+        [
+          "Junction",
+          "Router"
+        ],
+        [
+          "Signs",
+          "Routing table"
+        ],
+        [
+          "'City centre' vs 'Main St'",
+          "Prefix length"
+        ]
+      ],
+      "breaks": "Drivers can ask for directions; packets just follow tables."
+    },
+    "mindmap": {
+      "center": "Layer 3",
+      "branches": [
+        {
+          "label": "Addressing",
+          "children": [
+            "IPv4",
+            "IPv6",
+            "CIDR"
+          ]
+        },
+        {
+          "label": "Forwarding",
+          "children": [
+            "Longest-prefix match",
+            "Default gateway",
+            "TTL"
+          ]
+        },
+        {
+          "label": "Signalling",
+          "children": [
+            "ICMP"
+          ]
+        },
+        {
+          "label": "Faults",
+          "children": [
+            "Missing routes",
+            "Asymmetry",
+            "MTU"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ip route",
+            "traceroute",
+            "mtr"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Route lookup",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "See exact next hop and where packets die."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ip route get 10.20.3.4\n# 10.20.3.4 via 10.0.0.1 dev eth0 src 10.0.1.15\nmtr -rwc 20 10.20.3.4    # where does it stop?"
+        }
+      ],
+      "outcome": "routing problems located."
+    },
+    "summary": {
+      "points": [
+        "Hop-by-hop forwarding.",
+        "Longest prefix wins.",
+        "Check return paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "If routes 10.0.0.0/8 and 10.20.0.0/16 both match, which is used?",
+        "a": "10.20.0.0/16, because it is the longer, more specific prefix."
+      }
+    ]
+  },
+  "layer-4-the-transport-layer": {
+    "core": "Layer 4 delivers data between processes using ports. TCP provides reliable, ordered byte streams with handshakes, acknowledgements, retransmission, flow control and congestion control. UDP sends independent datagrams with no guarantees and minimal overhead. Firewalls, load balancers and NAT mostly operate on the L4 5-tuple (protocol, source/destination IP and port).",
+    "first_principles": {
+      "problem": "A firewall rule allows TCP 53 but DNS still times out because most queries use UDP 53.",
+      "truths": [
+        "Ports identify processes.",
+        "TCP trades latency for reliability.",
+        "Middleboxes key on 5-tuples."
+      ],
+      "derivation": [
+        "Identify **protocol and port**.",
+        "Test with **nc/ss**.",
+        "Know **TCP states** (SYN_SENT, ESTABLISHED, TIME_WAIT).",
+        "Consider **UDP** needs separately.",
+        "Check **firewall/NAT 5-tuple** rules."
+      ]
+    },
+    "analogy": {
+      "title": "Apartment numbers and delivery types",
+      "story": "The building (IP) is right, but you need the apartment (port) and whether you want signed-for (TCP) or drop-off (UDP).",
+      "mapping": [
+        [
+          "Apartment",
+          "Port"
+        ],
+        [
+          "Signed-for",
+          "TCP"
+        ],
+        [
+          "Drop-off",
+          "UDP"
+        ]
+      ],
+      "breaks": "Drop-offs are rarely lost; UDP packets often are."
+    },
+    "mindmap": {
+      "center": "Layer 4",
+      "branches": [
+        {
+          "label": "TCP",
+          "children": [
+            "Handshake",
+            "ACKs",
+            "Ordering",
+            "Congestion control"
+          ]
+        },
+        {
+          "label": "UDP",
+          "children": [
+            "Datagrams",
+            "No guarantees",
+            "Low overhead"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Ports",
+            "5-tuple"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ss",
+            "nc",
+            "tcpdump"
+          ]
+        },
+        {
+          "label": "Middleboxes",
+          "children": [
+            "Firewalls",
+            "NAT",
+            "L4 LBs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check listeners and connectivity",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows whether the port is listening and reachable per protocol."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ss -ltnup | grep ':53'        # TCP and UDP listeners\nnc -vz db.internal 5432       # TCP reachability\ndig @10.0.0.2 example.com     # UDP DNS test"
+        }
+      ],
+      "outcome": "transport-level clarity."
+    },
+    "summary": {
+      "points": [
+        "Ports and 5-tuples.",
+        "TCP reliable, UDP light.",
+        "Test both protocols."
+      ]
+    },
+    "check": [
+      {
+        "q": "What fields make up the 5-tuple?",
+        "a": "Protocol, source IP, source port, destination IP, destination port."
+      }
+    ]
+  },
+  "layers-5-6-session-and-presentation": {
+    "core": "In practice, layers 5 and 6 are folded into applications and libraries. Session concerns (establishing, maintaining and resuming conversations) show up as TLS sessions, RPC streams and authentication tokens. Presentation concerns (encoding, compression and encryption) show up as TLS, character sets, JSON and Protobuf serialisation. Bugs here look like 'connected but garbled' or 'handshake failed'.",
+    "first_principles": {
+      "problem": "A client connects to port 443 but fails with 'wrong version number' because it's speaking TLS to a plaintext port.",
+      "truths": [
+        "Encryption and encoding sit between transport and app.",
+        "Sessions can outlive connections.",
+        "Mismatched formats cause garbled data."
+      ],
+      "derivation": [
+        "Treat **TLS** as session/presentation.",
+        "Check **certificate and protocol versions**.",
+        "Verify **encoding** (UTF-8, gzip).",
+        "Verify **serialisation** formats match.",
+        "Consider **session resumption** behaviour."
+      ]
+    },
+    "analogy": {
+      "title": "Language and envelope sealing",
+      "story": "The letter arrives, but if it's sealed with a lock you can't open or written in a language you don't read, it's useless.",
+      "mapping": [
+        [
+          "Sealed envelope",
+          "TLS encryption"
+        ],
+        [
+          "Language",
+          "Encoding/serialisation"
+        ],
+        [
+          "Ongoing correspondence",
+          "Session"
+        ]
+      ],
+      "breaks": "Letters don't renegotiate languages; TLS negotiates versions and ciphers."
+    },
+    "mindmap": {
+      "center": "Layers 5–6",
+      "branches": [
+        {
+          "label": "Session",
+          "children": [
+            "TLS sessions",
+            "Resumption",
+            "Auth tokens",
+            "RPC streams"
+          ]
+        },
+        {
+          "label": "Presentation",
+          "children": [
+            "Encryption",
+            "Compression",
+            "Encoding",
+            "Serialisation"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "Handshake errors",
+            "Garbled data",
+            "Cert issues"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "openssl s_client",
+            "curl -v"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "TLS check",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Reveals handshake, cert and version issues."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "openssl s_client -connect api.acme.com:443 -servername api.acme.com </dev/null | head -20\n# shows cert chain, protocol (TLSv1.3), cipher"
+        }
+      ],
+      "outcome": "session and format problems diagnosed."
+    },
+    "summary": {
+      "points": [
+        "Folded into apps.",
+        "TLS, encoding, serialisation.",
+        "Handshake and garbling bugs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Where does TLS fit in the OSI model?",
+        "a": "Roughly layers 5–6: it manages secure sessions and encrypts/presents data between transport and application."
+      }
+    ]
+  },
+  "layer-7-the-application-layer": {
+    "core": "Layer 7 is the protocol the application speaks: HTTP, DNS, SMTP, gRPC. Problems here show up as status codes (404, 502, 503), protocol errors, wrong Host headers, auth failures or slow backends, even though every lower layer is fine. L7 proxies and load balancers can route by path, header or cookie, which makes them powerful and also a frequent source of misconfiguration.",
+    "first_principles": {
+      "problem": "curl to the server IP works but the site returns 404 because the request lacks the right Host header.",
+      "truths": [
+        "Lower layers can be fine while L7 fails.",
+        "App protocols carry routing info (Host, path).",
+        "Proxies terminate and re-originate L7."
+      ],
+      "derivation": [
+        "Read **status codes** and errors.",
+        "Check **Host/SNI** and paths.",
+        "Trace through **proxies/LBs**.",
+        "Inspect **headers and auth**.",
+        "Measure **backend latency**."
+      ]
+    },
+    "analogy": {
+      "title": "A correctly delivered letter addressed to the wrong person",
+      "story": "It reached the building and the right flat, but the person named isn't there.",
+      "mapping": [
+        [
+          "Named person",
+          "Host header/vhost"
+        ],
+        [
+          "Receptionist",
+          "Reverse proxy"
+        ],
+        [
+          "Reply note",
+          "Status code"
+        ]
+      ],
+      "breaks": "Receptionists ask; proxies follow rules exactly."
+    },
+    "mindmap": {
+      "center": "Layer 7",
+      "branches": [
+        {
+          "label": "Protocols",
+          "children": [
+            "HTTP",
+            "DNS",
+            "gRPC",
+            "SMTP"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Status codes",
+            "Headers",
+            "Errors"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "Host",
+            "Path",
+            "Cookies"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "404",
+            "502/503",
+            "Auth",
+            "Timeouts"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "curl -v",
+            "browser devtools",
+            "proxy logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Host header matters",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Proves the issue is virtual-host routing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -s -o /dev/null -w '%{http_code}\\n' http://203.0.113.10/            # 404\ncurl -s -o /dev/null -w '%{http_code}\\n' -H 'Host: shop.acme.com' http://203.0.113.10/  # 200"
+        }
+      ],
+      "outcome": "application-layer diagnosis."
+    },
+    "summary": {
+      "points": [
+        "App protocol problems.",
+        "Host and path routing.",
+        "Proxies add complexity."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a 502 from a load balancer usually indicate?",
+        "a": "The LB reached but got an invalid/no response from the upstream backend, an application or backend connectivity problem."
+      }
+    ]
+  },
+  "encapsulation-the-russian-dolls": {
+    "core": "Sending data wraps it layer by layer: application data gets a TCP header (segment), then an IP header (packet), then an Ethernet header and trailer (frame), then becomes bits. Each hop unwraps and rewraps only what it needs: switches look at L2, routers at L3. Every header costs bytes, which is why tunnels and overlays reduce the effective MTU.",
+    "first_principles": {
+      "problem": "Adding a VPN tunnel causes large transfers to hang because the encapsulation overhead pushes packets over the MTU.",
+      "truths": [
+        "Each layer adds a header.",
+        "Devices read only their layer's header.",
+        "Headers consume the MTU."
+      ],
+      "derivation": [
+        "Data → **segment → packet → frame → bits**.",
+        "Switches read **L2**, routers **L3**.",
+        "Tunnels add **extra headers**.",
+        "Effective **MTU shrinks**.",
+        "Inspect with **Wireshark** layer by layer."
+      ]
+    },
+    "analogy": {
+      "title": "Russian dolls",
+      "story": "Each layer is a doll around the previous one; each handler only opens the doll meant for them.",
+      "mapping": [
+        [
+          "Innermost doll",
+          "App data"
+        ],
+        [
+          "Outer dolls",
+          "Headers"
+        ],
+        [
+          "Opening one doll",
+          "Device processing its layer"
+        ]
+      ],
+      "breaks": "Dolls don't have size limits; frames do (MTU)."
+    },
+    "mindmap": {
+      "center": "Encapsulation",
+      "branches": [
+        {
+          "label": "Units",
+          "children": [
+            "Data",
+            "Segment",
+            "Packet",
+            "Frame",
+            "Bits"
+          ]
+        },
+        {
+          "label": "Headers",
+          "children": [
+            "TCP 20B",
+            "IPv4 20B",
+            "Ethernet 14B+4B"
+          ]
+        },
+        {
+          "label": "Devices",
+          "children": [
+            "Switch: L2",
+            "Router: L3",
+            "LB/proxy: L4/L7"
+          ]
+        },
+        {
+          "label": "Overhead",
+          "children": [
+            "Tunnels",
+            "MTU reduction"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Byte budget",
+      "scenario": "Numbers.",
+      "flow": [
+        "Ethernet MTU 1500 bytes",
+        "IPv4 20 + TCP 20 → MSS 1460",
+        "Add IPsec ~60 bytes overhead",
+        "Effective payload ~1400 → set MSS clamping"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Explains tunnel MTU problems."
+        }
+      ],
+      "code": [],
+      "outcome": "encapsulation understood."
+    },
+    "summary": {
+      "points": [
+        "Layers wrap data.",
+        "Devices read their layer.",
+        "Headers cost MTU."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do tunnels reduce the maximum payload size?",
+        "a": "They add extra headers inside the same physical MTU, leaving fewer bytes for the inner packet."
+      }
+    ]
+  },
+  "mapping-tools-to-layers": {
+    "core": "Each layer has go-to tools. L1/L2: ethtool, ip link, switch port counters, arp/ip neigh. L3: ping, traceroute/mtr, ip route. L4: ss, nc, telnet, nmap. L5/6: openssl s_client. L7: curl -v, dig, browser devtools. tcpdump and Wireshark span all layers. Knowing what each tool proves, and what it doesn't, avoids false conclusions such as 'ping works, so the port must be open'.",
+    "first_principles": {
+      "problem": "An engineer concludes the database is reachable because ping succeeds, but port 5432 is blocked.",
+      "truths": [
+        "Each tool tests specific layers.",
+        "Success at one layer doesn't prove the next.",
+        "Packet captures show ground truth."
+      ],
+      "derivation": [
+        "**L1/2**: ethtool, ip link, ip neigh.",
+        "**L3**: ping, mtr, ip route.",
+        "**L4**: ss, nc, nmap.",
+        "**L5–7**: openssl, curl, dig.",
+        "**All**: tcpdump, Wireshark."
+      ]
+    },
+    "analogy": {
+      "title": "A doctor's diagnostic kit",
+      "story": "A stethoscope says nothing about bones; you pick the instrument for the system you're examining.",
+      "mapping": [
+        [
+          "Stethoscope",
+          "ping"
+        ],
+        [
+          "X-ray",
+          "tcpdump"
+        ],
+        [
+          "Blood test",
+          "curl -v"
+        ]
+      ],
+      "breaks": "Doctors combine results intuitively; be explicit about what each tool proves."
+    },
+    "mindmap": {
+      "center": "Tools by Layer",
+      "branches": [
+        {
+          "label": "L1/L2",
+          "children": [
+            "ethtool",
+            "ip link",
+            "ip neigh"
+          ]
+        },
+        {
+          "label": "L3",
+          "children": [
+            "ping",
+            "mtr",
+            "traceroute",
+            "ip route"
+          ]
+        },
+        {
+          "label": "L4",
+          "children": [
+            "ss",
+            "nc",
+            "nmap"
+          ]
+        },
+        {
+          "label": "L5-7",
+          "children": [
+            "openssl s_client",
+            "curl",
+            "dig"
+          ]
+        },
+        {
+          "label": "All",
+          "children": [
+            "tcpdump",
+            "Wireshark"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Ping isn't enough",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Proves an L4 block, not an L3 outage."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ping -c2 db.internal          # L3 OK\nnc -vz db.internal 5432       # L4: Connection timed out → firewall\ntcpdump -ni eth0 host db.internal and port 5432   # SYNs out, nothing back"
+        }
+      ],
+      "outcome": "the right tool for each layer."
+    },
+    "summary": {
+      "points": [
+        "Tools map to layers.",
+        "Don't over-conclude.",
+        "Captures are ground truth."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does a successful ping prove?",
+        "a": "Only that ICMP echo works at layer 3 between the hosts; not that any specific TCP/UDP port is open."
+      }
+    ]
+  }
+}

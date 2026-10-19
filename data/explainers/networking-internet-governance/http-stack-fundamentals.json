@@ -1,0 +1,793 @@
+{
+  "introduction-the-language-of-the-web": {
+    "core": "HTTP is a stateless request/response protocol. A client sends a method, a path, headers and an optional body; the server returns a status code, headers and an optional body. Statelessness means every request carries everything needed to process it (cookies, tokens), which lets any server behind a load balancer handle it. That property is what makes the web horizontally scalable.",
+    "first_principles": {
+      "problem": "A team stores session state in server memory, and users get logged out whenever the load balancer switches servers.",
+      "truths": [
+        "Each request is independent.",
+        "Context must travel with the request.",
+        "Any server can serve stateless requests."
+      ],
+      "derivation": [
+        "Model interactions as **request/response**.",
+        "Carry state in **cookies/tokens**.",
+        "Store sessions in a **shared store**.",
+        "Use **methods and status codes** semantically.",
+        "Use **headers** for metadata."
+      ]
+    },
+    "analogy": {
+      "title": "Ordering at a counter with a ticket",
+      "story": "Each order slip contains everything needed; any cook can prepare it without remembering you.",
+      "mapping": [
+        [
+          "Order slip",
+          "Request"
+        ],
+        [
+          "Any cook",
+          "Any server"
+        ],
+        [
+          "Loyalty card",
+          "Cookie/token"
+        ]
+      ],
+      "breaks": "Cooks may remember regulars; servers shouldn't rely on memory."
+    },
+    "mindmap": {
+      "center": "HTTP Basics",
+      "branches": [
+        {
+          "label": "Request",
+          "children": [
+            "Method",
+            "Path",
+            "Headers",
+            "Body"
+          ]
+        },
+        {
+          "label": "Response",
+          "children": [
+            "Status",
+            "Headers",
+            "Body"
+          ]
+        },
+        {
+          "label": "Property",
+          "children": [
+            "Stateless"
+          ]
+        },
+        {
+          "label": "State",
+          "children": [
+            "Cookies",
+            "Tokens",
+            "Shared session store"
+          ]
+        },
+        {
+          "label": "Versions",
+          "children": [
+            "1.1",
+            "2",
+            "3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Raw request",
+      "scenario": "Text.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Token carries identity; any server can answer."
+        }
+      ],
+      "code": [
+        {
+          "lang": "http",
+          "text": "GET /api/orders/42 HTTP/1.1\nHost: shop.example.com\nAuthorization: Bearer eyJ...\nAccept: application/json\n\nHTTP/1.1 200 OK\nContent-Type: application/json\nCache-Control: private, max-age=0\n\n{\"id\":42,\"status\":\"shipped\"}"
+        }
+      ],
+      "outcome": "stateless web design."
+    },
+    "summary": {
+      "points": [
+        "Request/response.",
+        "Stateless by design.",
+        "State travels with requests."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does HTTP statelessness help scaling?",
+        "a": "Any server can handle any request because no per-client memory is needed, so you can add servers behind a load balancer freely."
+      }
+    ]
+  },
+  "http-verbs-the-actions": {
+    "core": "Methods express intent. GET reads, POST creates or triggers processing, PUT replaces a resource at a known URL, PATCH partially updates, DELETE removes, HEAD fetches headers only, and OPTIONS describes capabilities (and handles CORS preflight). Using them correctly lets caches, proxies, retries and API tooling behave safely; tunnelling everything through POST throws that away.",
+    "first_principles": {
+      "problem": "An API uses GET /deleteUser?id=5, and a link prefetcher deletes users.",
+      "truths": [
+        "Intermediaries act on method semantics.",
+        "GET must not change state.",
+        "Correct verbs enable caching and retries."
+      ],
+      "derivation": [
+        "**GET/HEAD** for reads only.",
+        "**POST** to create/process.",
+        "**PUT** to replace idempotently.",
+        "**PATCH** for partial updates.",
+        "**DELETE** to remove."
+      ]
+    },
+    "analogy": {
+      "title": "Library actions",
+      "story": "Reading a book (GET), donating a new one (POST), replacing a copy (PUT), correcting a page (PATCH), removing it (DELETE).",
+      "mapping": [
+        [
+          "Reading",
+          "GET"
+        ],
+        [
+          "Donating",
+          "POST"
+        ],
+        [
+          "Replacing",
+          "PUT"
+        ],
+        [
+          "Correcting",
+          "PATCH"
+        ],
+        [
+          "Removing",
+          "DELETE"
+        ]
+      ],
+      "breaks": "Librarians notice misuse; crawlers and caches don't."
+    },
+    "mindmap": {
+      "center": "HTTP Methods",
+      "branches": [
+        {
+          "label": "Read",
+          "children": [
+            "GET",
+            "HEAD"
+          ]
+        },
+        {
+          "label": "Write",
+          "children": [
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        {
+          "label": "Meta",
+          "children": [
+            "OPTIONS"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Safe",
+            "Idempotent",
+            "Cacheable"
+          ]
+        },
+        {
+          "label": "Anti-patterns",
+          "children": [
+            "State-changing GET",
+            "POST for everything"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "RESTful order API",
+      "scenario": "Requests.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Clients, caches and retries know what's safe."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "GET    /orders          list\nPOST   /orders          create → 201 Location: /orders/42\nGET    /orders/42       read\nPUT    /orders/42       replace\nPATCH  /orders/42       {\"status\":\"cancelled\"}\nDELETE /orders/42       → 204"
+        }
+      ],
+      "outcome": "semantic APIs."
+    },
+    "summary": {
+      "points": [
+        "Methods express intent.",
+        "GET never changes state.",
+        "Semantics enable infrastructure."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is a state-changing GET dangerous?",
+        "a": "Crawlers, prefetchers, caches and retries assume GET is safe and may trigger it without user intent."
+      }
+    ]
+  },
+  "status-codes-the-feedback": {
+    "core": "Status codes come in classes. 1xx is informational, 2xx success (200, 201, 204), 3xx redirection (301 permanent, 302/307 temporary, 304 not modified), 4xx client errors (400, 401 unauthenticated, 403 forbidden, 404, 409, 429 rate limited), and 5xx server errors (500, 502 bad gateway, 503 unavailable, 504 gateway timeout). Codes drive client retries, caching, monitoring and SLOs.",
+    "first_principles": {
+      "problem": "An API returns 200 with {\"error\":\"failed\"}, so monitoring shows 100% success during an outage.",
+      "truths": [
+        "Machines act on codes, not bodies.",
+        "4xx vs 5xx splits blame.",
+        "Specific codes enable correct behaviour."
+      ],
+      "derivation": [
+        "Return **accurate codes**.",
+        "**4xx** for client mistakes; **5xx** for server faults.",
+        "Use **429 + Retry-After** for throttling.",
+        "Use **503** during overload/maintenance.",
+        "Alert on **5xx rate**."
+      ]
+    },
+    "analogy": {
+      "title": "Traffic lights for clients",
+      "story": "Green (2xx) go, yellow (3xx) go elsewhere, red (4xx) you did something wrong, flashing red (5xx) the road itself is broken.",
+      "mapping": [
+        [
+          "Green",
+          "2xx"
+        ],
+        [
+          "Detour",
+          "3xx"
+        ],
+        [
+          "Your fault",
+          "4xx"
+        ],
+        [
+          "Road broken",
+          "5xx"
+        ]
+      ],
+      "breaks": "Traffic lights have three states; HTTP has dozens of nuanced codes."
+    },
+    "mindmap": {
+      "center": "Status Codes",
+      "branches": [
+        {
+          "label": "2xx",
+          "children": [
+            "200",
+            "201",
+            "204"
+          ]
+        },
+        {
+          "label": "3xx",
+          "children": [
+            "301",
+            "302/307",
+            "304"
+          ]
+        },
+        {
+          "label": "4xx",
+          "children": [
+            "400",
+            "401",
+            "403",
+            "404",
+            "409",
+            "429"
+          ]
+        },
+        {
+          "label": "5xx",
+          "children": [
+            "500",
+            "502",
+            "503",
+            "504"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Retries",
+            "Caching",
+            "SLOs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Proxy errors decoded",
+      "scenario": "Meaning.",
+      "flow": [
+        "502: LB got bad/no response from upstream",
+        "503: no healthy upstream or overloaded",
+        "504: upstream too slow (timeout)",
+        "499 (nginx): client closed connection"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Faster root-cause during incidents."
+        }
+      ],
+      "code": [],
+      "outcome": "meaningful feedback for clients and monitors."
+    },
+    "summary": {
+      "points": [
+        "Five classes.",
+        "4xx vs 5xx.",
+        "Accurate codes drive tooling."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between 401 and 403?",
+        "a": "401 means not authenticated (credentials missing/invalid); 403 means authenticated but not allowed."
+      }
+    ]
+  },
+  "headers-the-metadata": {
+    "core": "Headers carry everything that isn't the body. Request headers carry routing (Host), negotiation (Accept, Accept-Encoding), auth (Authorization, Cookie) and context (User-Agent, X-Forwarded-For, traceparent). Response headers carry content metadata (Content-Type, Content-Length), caching (Cache-Control, ETag, Vary), cookies (Set-Cookie) and security policy. Many production bugs are header bugs.",
+    "first_principles": {
+      "problem": "A CDN serves gzipped content to clients that didn't ask for it because the origin forgot Vary: Accept-Encoding.",
+      "truths": [
+        "Headers control proxies and caches.",
+        "Negotiation picks representations.",
+        "Context must survive hops."
+      ],
+      "derivation": [
+        "Set **Content-Type** precisely.",
+        "Control caching with **Cache-Control/ETag/Vary**.",
+        "Preserve client IP via **X-Forwarded-For/Forwarded**.",
+        "Propagate **trace headers**.",
+        "Harden with **security headers**."
+      ]
+    },
+    "analogy": {
+      "title": "Labels and instructions on a parcel",
+      "story": "'Fragile', 'this side up', 'deliver to reception' tell handlers what to do without opening it.",
+      "mapping": [
+        [
+          "Fragile label",
+          "Cache-Control"
+        ],
+        [
+          "Contents label",
+          "Content-Type"
+        ],
+        [
+          "Sender address",
+          "X-Forwarded-For"
+        ]
+      ],
+      "breaks": "Parcel labels are rarely forged; X-Forwarded-For from clients can be."
+    },
+    "mindmap": {
+      "center": "Headers",
+      "branches": [
+        {
+          "label": "Routing",
+          "children": [
+            "Host"
+          ]
+        },
+        {
+          "label": "Negotiation",
+          "children": [
+            "Accept",
+            "Accept-Encoding",
+            "Accept-Language"
+          ]
+        },
+        {
+          "label": "Caching",
+          "children": [
+            "Cache-Control",
+            "ETag",
+            "Vary",
+            "Age"
+          ]
+        },
+        {
+          "label": "Context",
+          "children": [
+            "X-Forwarded-For",
+            "traceparent",
+            "User-Agent"
+          ]
+        },
+        {
+          "label": "Auth",
+          "children": [
+            "Authorization",
+            "Cookie",
+            "Set-Cookie"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Conditional request",
+      "scenario": "Exchange.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No body re-sent; cache revalidated cheaply."
+        }
+      ],
+      "code": [
+        {
+          "lang": "http",
+          "text": "GET /logo.png HTTP/1.1\nIf-None-Match: \"abc123\"\n\nHTTP/1.1 304 Not Modified\nETag: \"abc123\"\nCache-Control: public, max-age=86400"
+        }
+      ],
+      "outcome": "metadata used deliberately."
+    },
+    "summary": {
+      "points": [
+        "Headers steer intermediaries.",
+        "Caching via Cache-Control/ETag/Vary.",
+        "Trust forwarded headers carefully."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is Vary important for caches?",
+        "a": "It tells caches which request headers change the response, so they store separate variants (e.g. gzip vs plain)."
+      }
+    ]
+  },
+  "crucial-concept-idempotency-and-safety": {
+    "core": "A safe method doesn't change server state (GET, HEAD, OPTIONS). An idempotent method has the same effect whether executed once or many times (all safe methods, plus PUT and DELETE). POST and PATCH are neither by default. Because networks fail mid-request, clients and proxies retry, and only idempotent operations are safe to retry blindly. Make POSTs retry-safe with idempotency keys.",
+    "first_principles": {
+      "problem": "A payment POST times out, the client retries, and the customer is charged twice.",
+      "truths": [
+        "Networks fail after the server acts.",
+        "Clients can't tell whether it succeeded.",
+        "Retries must not duplicate effects."
+      ],
+      "derivation": [
+        "Know **safe vs idempotent** methods.",
+        "Retry automatically only **idempotent** requests.",
+        "Add **Idempotency-Key** to POSTs.",
+        "Server stores **key → result**.",
+        "Return the **stored result** on replays."
+      ]
+    },
+    "analogy": {
+      "title": "A lift button",
+      "story": "Pressing it five times still calls one lift (idempotent); ordering five pizzas by repeating the call isn't.",
+      "mapping": [
+        [
+          "Lift button",
+          "PUT/DELETE"
+        ],
+        [
+          "Pizza order",
+          "POST"
+        ],
+        [
+          "Order number",
+          "Idempotency key"
+        ]
+      ],
+      "breaks": "Pizzerias may ask 'is this a repeat?'; servers need the key to know."
+    },
+    "mindmap": {
+      "center": "Idempotency & Safety",
+      "branches": [
+        {
+          "label": "Safe",
+          "children": [
+            "GET",
+            "HEAD",
+            "OPTIONS"
+          ]
+        },
+        {
+          "label": "Idempotent",
+          "children": [
+            "Safe + PUT, DELETE"
+          ]
+        },
+        {
+          "label": "Neither",
+          "children": [
+            "POST",
+            "PATCH"
+          ]
+        },
+        {
+          "label": "Retry-safe POST",
+          "children": [
+            "Idempotency-Key",
+            "Stored results",
+            "TTL"
+          ]
+        },
+        {
+          "label": "Why",
+          "children": [
+            "Timeouts",
+            "Retries",
+            "Proxies"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Idempotent payment",
+      "scenario": "Request.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Retries are safe."
+        }
+      ],
+      "code": [
+        {
+          "lang": "http",
+          "text": "POST /v1/charges HTTP/1.1\nIdempotency-Key: 7f3c2a1e-9b4d-4e1a-8c55-2f0e6b1d9a77\nContent-Type: application/json\n\n{\"amount\": 4999, \"currency\": \"usd\"}\n# retry with same key → server returns original 201 response, no second charge"
+        }
+      ],
+      "outcome": "no duplicate side effects."
+    },
+    "summary": {
+      "points": [
+        "Safe vs idempotent.",
+        "Retry only idempotent ops.",
+        "Keys make POST retry-safe."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is DELETE idempotent even though the second call returns 404?",
+        "a": "Yes, idempotency concerns the server state effect (resource gone), not identical response codes."
+      }
+    ]
+  },
+  "the-tls-handshake-making-http-secure-https": {
+    "core": "HTTPS is HTTP over TLS. In TLS 1.3 the client sends ClientHello with supported ciphers, key shares and SNI (the hostname); the server replies with ServerHello, its key share, its certificate and a signature proving it holds the private key. Both derive session keys via ECDHE, and the client validates the certificate chain to a trusted CA and the hostname. That takes 1 round trip, or 0-RTT on resumption.",
+    "first_principles": {
+      "problem": "Users see certificate errors after a deploy because the server presents a cert missing the intermediate CA.",
+      "truths": [
+        "Encryption needs shared keys.",
+        "Identity needs third-party trust.",
+        "Hostnames must match certificates."
+      ],
+      "derivation": [
+        "Exchange **key shares** (ECDHE) for forward secrecy.",
+        "Present **cert + intermediates**.",
+        "Client verifies **chain and hostname**.",
+        "Use **SNI** for multiple hosts per IP.",
+        "Prefer **TLS 1.3**; disable old versions."
+      ]
+    },
+    "analogy": {
+      "title": "Showing a notarised passport and agreeing a secret code",
+      "story": "The passport (cert) is vouched for by an authority (CA), and both sides derive a code no eavesdropper can reconstruct.",
+      "mapping": [
+        [
+          "Passport",
+          "Certificate"
+        ],
+        [
+          "Issuing authority",
+          "CA"
+        ],
+        [
+          "Secret code",
+          "Session keys"
+        ]
+      ],
+      "breaks": "Passports are checked visually; TLS checks cryptographic signatures and hostnames."
+    },
+    "mindmap": {
+      "center": "TLS Handshake",
+      "branches": [
+        {
+          "label": "Messages",
+          "children": [
+            "ClientHello",
+            "ServerHello",
+            "Certificate",
+            "Finished"
+          ]
+        },
+        {
+          "label": "Crypto",
+          "children": [
+            "ECDHE",
+            "Forward secrecy",
+            "AEAD ciphers"
+          ]
+        },
+        {
+          "label": "Identity",
+          "children": [
+            "Cert chain",
+            "Hostname/SAN",
+            "CA trust store"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "SNI",
+            "ALPN",
+            "0-RTT"
+          ]
+        },
+        {
+          "label": "Failures",
+          "children": [
+            "Missing intermediate",
+            "Expired cert",
+            "Name mismatch"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Inspect chain",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Missing level 1 would explain client errors."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "openssl s_client -connect shop.example.com:443 -servername shop.example.com -showcerts </dev/null 2>/dev/null | grep -E 's:|i:'\n# 0 s:CN=shop.example.com  i:CN=R11\n# 1 s:CN=R11               i:CN=ISRG Root X1"
+        }
+      ],
+      "outcome": "secure, trusted connections."
+    },
+    "summary": {
+      "points": [
+        "Key exchange plus identity.",
+        "Chain and hostname checks.",
+        "TLS 1.3 is 1-RTT."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does forward secrecy provide?",
+        "a": "Session keys can't be recovered later even if the server's private key is stolen, because they came from ephemeral key exchange."
+      }
+    ]
+  },
+  "browser-security-headers-cors-and-content-policy": {
+    "core": "Browsers enforce the same-origin policy: scripts from one origin can't read responses from another. CORS lets servers relax this deliberately with Access-Control-Allow-Origin and preflight OPTIONS requests. Other headers harden pages: Content-Security-Policy limits script sources against XSS, HSTS forces HTTPS, X-Content-Type-Options stops MIME sniffing, and frame-ancestors or X-Frame-Options prevents clickjacking.",
+    "first_principles": {
+      "problem": "A frontend on app.example.com can't call api.example.com, and a developer 'fixes' it with Access-Control-Allow-Origin: * plus credentials.",
+      "truths": [
+        "Browsers isolate origins.",
+        "Servers must opt in to sharing.",
+        "Headers can shrink attack surface."
+      ],
+      "derivation": [
+        "Allow **specific origins** in CORS.",
+        "Handle **preflight** OPTIONS.",
+        "Never combine **'*' with credentials**.",
+        "Add **CSP** with strict script-src.",
+        "Add **HSTS, nosniff, frame-ancestors**."
+      ]
+    },
+    "analogy": {
+      "title": "Building security that only lets residents into flats",
+      "story": "A resident can put a named guest on the list (CORS); house rules (CSP) forbid strangers' furniture (scripts).",
+      "mapping": [
+        [
+          "Guest list",
+          "Access-Control-Allow-Origin"
+        ],
+        [
+          "House rules",
+          "CSP"
+        ],
+        [
+          "Front door policy",
+          "HSTS"
+        ]
+      ],
+      "breaks": "Guests can be vetted in person; browsers only check headers."
+    },
+    "mindmap": {
+      "center": "Browser Security",
+      "branches": [
+        {
+          "label": "Same-origin",
+          "children": [
+            "Scheme+host+port"
+          ]
+        },
+        {
+          "label": "CORS",
+          "children": [
+            "Allow-Origin",
+            "Preflight",
+            "Credentials"
+          ]
+        },
+        {
+          "label": "Hardening",
+          "children": [
+            "CSP",
+            "HSTS",
+            "nosniff",
+            "frame-ancestors",
+            "Referrer-Policy"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Wildcard + credentials",
+            "unsafe-inline"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "API and page headers",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only the app origin can call the API; XSS and clickjacking surface reduced."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# API response\nAccess-Control-Allow-Origin: https://app.example.com\nAccess-Control-Allow-Credentials: true\nVary: Origin\n# HTML response\nContent-Security-Policy: default-src 'self'; script-src 'self' https://cdn.example.com; frame-ancestors 'none'\nStrict-Transport-Security: max-age=31536000; includeSubDomains; preload\nX-Content-Type-Options: nosniff"
+        }
+      ],
+      "outcome": "hardened browser behaviour."
+    },
+    "summary": {
+      "points": [
+        "Same-origin by default.",
+        "CORS opts in narrowly.",
+        "Security headers harden pages."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you use Access-Control-Allow-Origin: * with credentials?",
+        "a": "Browsers forbid it because it would let any site make authenticated requests and read the responses."
+      }
+    ]
+  }
+}

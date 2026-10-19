@@ -1,0 +1,1373 @@
+{
+  "introduction-how-the-internet-connects": {
+    "core": "The internet is about 75,000 independently run networks (autonomous systems): ISPs, clouds, enterprises and universities. They interconnect at internet exchange points and private links. No central router exists; BGP lets each network tell its neighbours which IP prefixes it can reach, and each makes its own policy decisions. CDNs then sit at the edge to bring content close to users.",
+    "first_principles": {
+      "problem": "An engineer can't explain why traffic from Singapore to a US server takes a path through Japan.",
+      "truths": [
+        "Networks are independently owned.",
+        "Reachability is advertised, not centrally known.",
+        "Paths follow business policy."
+      ],
+      "derivation": [
+        "See the internet as **ASes**.",
+        "Connect via **IXPs and private peering**.",
+        "Exchange routes with **BGP**.",
+        "Paths follow **policy and economics**.",
+        "Use **CDNs** to shorten distance."
+      ]
+    },
+    "analogy": {
+      "title": "Airlines and alliances",
+      "story": "No single airline flies everywhere; routes depend on partnerships and hub agreements, not just distance.",
+      "mapping": [
+        [
+          "Airlines",
+          "ASes"
+        ],
+        [
+          "Hub airports",
+          "IXPs"
+        ],
+        [
+          "Codeshare deals",
+          "Peering agreements"
+        ]
+      ],
+      "breaks": "Airlines publish schedules; BGP routes change dynamically."
+    },
+    "mindmap": {
+      "center": "How the Internet Connects",
+      "branches": [
+        {
+          "label": "Units",
+          "children": [
+            "Autonomous systems",
+            "Prefixes"
+          ]
+        },
+        {
+          "label": "Interconnect",
+          "children": [
+            "IXPs",
+            "Private peering",
+            "Transit"
+          ]
+        },
+        {
+          "label": "Protocol",
+          "children": [
+            "BGP"
+          ]
+        },
+        {
+          "label": "Drivers",
+          "children": [
+            "Policy",
+            "Cost"
+          ]
+        },
+        {
+          "label": "Edge",
+          "children": [
+            "CDNs",
+            "PoPs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "See the path",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Path crosses several independent networks."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mtr -rwzc 10 example.com   # -z shows AS numbers per hop\n# AS7473 → AS2914 → AS15133"
+        }
+      ],
+      "outcome": "internet structure understood."
+    },
+    "summary": {
+      "points": [
+        "Network of networks.",
+        "BGP shares reachability.",
+        "Policy shapes paths."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why aren't internet paths always the geographically shortest?",
+        "a": "Each network chooses routes by business policy (peering, transit costs), not geography."
+      }
+    ]
+  },
+  "asns-public-vs-private-identity": {
+    "core": "An Autonomous System Number identifies a network with its own routing policy. Public ASNs (from RIRs) are globally unique and used on the internet; private ASNs (64512–65534, and 4200000000–4294967294 for 32-bit) are for internal BGP, such as data centre fabrics, cloud VPN/Direct Connect sessions and Kubernetes BGP, and must be stripped before announcing to the internet.",
+    "first_principles": {
+      "problem": "A company announcing its own IP space over two ISPs needs to know whether it needs a public ASN.",
+      "truths": [
+        "BGP identifies networks by ASN.",
+        "Multi-homing needs a consistent identity.",
+        "Private ASNs must not leak."
+      ],
+      "derivation": [
+        "Get a **public ASN** from an RIR for multi-homing.",
+        "Use **private ASNs** internally.",
+        "Use **32-bit ASNs** where 16-bit run out.",
+        "**Remove private AS** before upstream announcements.",
+        "Register in **IRR/RPKI**."
+      ]
+    },
+    "analogy": {
+      "title": "Company registration numbers",
+      "story": "Public companies have official registration numbers; internal departments use internal codes not valid outside.",
+      "mapping": [
+        [
+          "Official number",
+          "Public ASN"
+        ],
+        [
+          "Department codes",
+          "Private ASN"
+        ]
+      ],
+      "breaks": "Department codes don't route mail; leaked private ASNs cause route rejection."
+    },
+    "mindmap": {
+      "center": "ASNs",
+      "branches": [
+        {
+          "label": "Public",
+          "children": [
+            "RIR-assigned",
+            "Globally unique",
+            "Multi-homing"
+          ]
+        },
+        {
+          "label": "Private",
+          "children": [
+            "64512–65534",
+            "4.2B range",
+            "Internal fabrics",
+            "Cloud BGP"
+          ]
+        },
+        {
+          "label": "Formats",
+          "children": [
+            "16-bit",
+            "32-bit"
+          ]
+        },
+        {
+          "label": "Hygiene",
+          "children": [
+            "remove-private-as",
+            "IRR",
+            "RPKI"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Look up an ASN",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Identifies who runs a network."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "whois -h whois.radb.net AS13335 | head -5\n# aut-num: AS13335\n# as-name: CLOUDFLARENET"
+        }
+      ],
+      "outcome": "ASN roles clear."
+    },
+    "summary": {
+      "points": [
+        "ASN identifies a network.",
+        "Public for internet.",
+        "Private for internal BGP."
+      ]
+    },
+    "check": [
+      {
+        "q": "When do you need a public ASN?",
+        "a": "When you announce your own prefixes to multiple upstream providers (multi-homing) on the internet."
+      }
+    ]
+  },
+  "bgp-the-path-vector-protocol": {
+    "core": "BGP is a path-vector protocol over TCP 179. Neighbours exchange UPDATE messages announcing prefixes with attributes, chiefly the AS_PATH (the list of ASes the route traversed), and withdraw them when unreachable. Each router picks a best path per prefix using an ordered decision process, then re-advertises according to policy. Loops are prevented by rejecting routes whose AS_PATH already contains your own ASN.",
+    "first_principles": {
+      "problem": "An engineer expects BGP to choose the fastest path and is surprised it ignores latency.",
+      "truths": [
+        "BGP exchanges reachability, not performance.",
+        "Paths are lists of ASes.",
+        "Policy decides selection and export."
+      ],
+      "derivation": [
+        "Peers over **TCP 179**.",
+        "**Announce/withdraw** prefixes.",
+        "Carry **attributes** (AS_PATH, NEXT_HOP...).",
+        "Select **best path** per prefix.",
+        "Apply **import/export policy**."
+      ]
+    },
+    "analogy": {
+      "title": "Word-of-mouth directions with a travel log",
+      "story": "Each town tells neighbours 'I can reach X via towns A, B, C'; you ignore routes that already passed through you.",
+      "mapping": [
+        [
+          "Travel log",
+          "AS_PATH"
+        ],
+        [
+          "Towns",
+          "ASes"
+        ],
+        [
+          "Ignoring loops",
+          "Loop prevention"
+        ]
+      ],
+      "breaks": "People mention traffic jams; BGP has no congestion awareness."
+    },
+    "mindmap": {
+      "center": "BGP",
+      "branches": [
+        {
+          "label": "Transport",
+          "children": [
+            "TCP 179"
+          ]
+        },
+        {
+          "label": "Messages",
+          "children": [
+            "OPEN",
+            "UPDATE",
+            "KEEPALIVE",
+            "NOTIFICATION"
+          ]
+        },
+        {
+          "label": "Types",
+          "children": [
+            "eBGP",
+            "iBGP"
+          ]
+        },
+        {
+          "label": "Attributes",
+          "children": [
+            "AS_PATH",
+            "NEXT_HOP",
+            "LOCAL_PREF",
+            "MED",
+            "Communities"
+          ]
+        },
+        {
+          "label": "Properties",
+          "children": [
+            "Policy-based",
+            "Path vector",
+            "Loop prevention"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Looking glass",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shorter AS_PATH chosen when other attributes tie."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# FRR / bird example\nvtysh -c 'show ip bgp 1.1.1.0/24'\n#  Paths: (2 available, best #1)\n#   13335  (AS_PATH)  next-hop 198.51.100.1  best\n#   3356 13335        next-hop 203.0.113.1"
+        }
+      ],
+      "outcome": "BGP mechanics understood."
+    },
+    "summary": {
+      "points": [
+        "Path vector over TCP.",
+        "Attributes drive choice.",
+        "Policy, not performance."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does BGP prevent routing loops between ASes?",
+        "a": "A router rejects any route whose AS_PATH already contains its own ASN."
+      }
+    ]
+  },
+  "bgp-attributes-making-the-decision": {
+    "core": "When several paths to a prefix exist, BGP applies a tie-breaking sequence. A common order (vendor-specific details vary): highest weight (Cisco, local), highest LOCAL_PREF, locally originated, shortest AS_PATH, lowest origin type, lowest MED (from the same neighbour AS), eBGP over iBGP, lowest IGP cost to next hop, then oldest route or lowest router ID. Operators steer traffic by manipulating these attributes.",
+    "first_principles": {
+      "problem": "Traffic leaves via the expensive transit link even though a cheaper peer offers the same prefix.",
+      "truths": [
+        "Multiple paths require ordered tie-breakers.",
+        "Earlier criteria dominate later ones.",
+        "Operators can set attributes."
+      ],
+      "derivation": [
+        "Know the **decision order**.",
+        "Use **LOCAL_PREF** for outbound choice.",
+        "Use **AS_PATH prepend/MED** for inbound influence.",
+        "Use **communities** to signal policy.",
+        "Verify with **show bgp** best-path reason."
+      ]
+    },
+    "analogy": {
+      "title": "Choosing a supplier with a checklist",
+      "story": "First preferred-vendor status, then fewest middlemen, then delivery terms; you only look further down if earlier items tie.",
+      "mapping": [
+        [
+          "Preferred vendor",
+          "LOCAL_PREF"
+        ],
+        [
+          "Middlemen",
+          "AS_PATH length"
+        ],
+        [
+          "Delivery terms",
+          "MED"
+        ]
+      ],
+      "breaks": "Purchasing can weigh factors together; BGP is strictly sequential."
+    },
+    "mindmap": {
+      "center": "Best-Path Selection",
+      "branches": [
+        {
+          "label": "Outbound control",
+          "children": [
+            "Weight",
+            "LOCAL_PREF"
+          ]
+        },
+        {
+          "label": "Path",
+          "children": [
+            "Shortest AS_PATH",
+            "Origin"
+          ]
+        },
+        {
+          "label": "Inbound hints",
+          "children": [
+            "MED",
+            "Prepending"
+          ]
+        },
+        {
+          "label": "Tie-breakers",
+          "children": [
+            "eBGP > iBGP",
+            "IGP cost",
+            "Router ID"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Prefer the peer",
+      "scenario": "Route map.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Peer path wins before AS_PATH length is even considered."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "route-map FROM-PEER permit 10\n set local-preference 200\nroute-map FROM-TRANSIT permit 10\n set local-preference 100\n!\nrouter bgp 64500\n neighbor 198.51.100.1 route-map FROM-PEER in\n neighbor 203.0.113.1 route-map FROM-TRANSIT in"
+        }
+      ],
+      "outcome": "deliberate path selection."
+    },
+    "summary": {
+      "points": [
+        "Ordered tie-breakers.",
+        "LOCAL_PREF for outbound.",
+        "MED/prepend for inbound."
+      ]
+    },
+    "check": [
+      {
+        "q": "Which attribute is evaluated first: LOCAL_PREF or AS_PATH length?",
+        "a": "LOCAL_PREF; AS_PATH length only matters when LOCAL_PREF ties."
+      }
+    ]
+  },
+  "bgp-attribute-local-preference-local-pref": {
+    "core": "LOCAL_PREF is shared among all routers within your AS (via iBGP) and never sent to other ASes. Higher wins. It's the main tool for deciding which exit your traffic uses: prefer cheap peering over paid transit, prefer a primary link over a backup. Because it ranks above AS_PATH, it overrides path length.",
+    "first_principles": {
+      "problem": "A backup 1 Gbps link is carrying production traffic instead of the primary 10 Gbps link.",
+      "truths": [
+        "Outbound choice is yours.",
+        "LOCAL_PREF is AS-internal.",
+        "Higher value wins."
+      ],
+      "derivation": [
+        "Set **higher LOCAL_PREF** on primary/peer routes.",
+        "Set **lower** on backup/transit.",
+        "Apply at **ingress** route maps.",
+        "Propagates via **iBGP**.",
+        "Verify **best path** after change."
+      ]
+    },
+    "analogy": {
+      "title": "Company travel policy",
+      "story": "'Always fly the partner airline (pref 200) unless unavailable; otherwise any airline (pref 100).'",
+      "mapping": [
+        [
+          "Partner airline",
+          "Preferred exit"
+        ],
+        [
+          "Policy memo",
+          "LOCAL_PREF"
+        ],
+        [
+          "Employees",
+          "Internal routers"
+        ]
+      ],
+      "breaks": "Travel policies get exceptions; LOCAL_PREF is absolute per prefix."
+    },
+    "mindmap": {
+      "center": "LOCAL_PREF",
+      "branches": [
+        {
+          "label": "Scope",
+          "children": [
+            "Within AS",
+            "iBGP only"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Higher wins"
+          ]
+        },
+        {
+          "label": "Default",
+          "children": [
+            "100"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Peer over transit",
+            "Primary over backup",
+            "Cost control"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Outbound traffic"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Primary/backup",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All routers exit via primary unless it withdraws."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "route-map PRIMARY-IN permit 10\n set local-preference 150\nroute-map BACKUP-IN permit 10\n set local-preference 50"
+        }
+      ],
+      "outcome": "controlled outbound traffic."
+    },
+    "summary": {
+      "points": [
+        "AS-internal.",
+        "Higher wins.",
+        "Controls outbound."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does LOCAL_PREF influence how other networks send traffic to you?",
+        "a": "No, it never leaves your AS; it only controls your outbound path selection."
+      }
+    ]
+  },
+  "bgp-attribute-med-multi-exit-discriminator": {
+    "core": "MED is a hint you send to a neighbouring AS about which of your multiple links it should use to reach you; lower MED is preferred. It's only compared between routes from the same neighbouring AS (by default) and is evaluated after LOCAL_PREF and AS_PATH, so the neighbour's own policy can override it. Many providers honour it for customers, but it's a request, not a command.",
+    "first_principles": {
+      "problem": "Inbound traffic from a provider arrives at the London link when the company wants it via Frankfurt.",
+      "truths": [
+        "Inbound path is the other network's choice.",
+        "You can only suggest.",
+        "MED compares within one neighbour."
+      ],
+      "derivation": [
+        "Set **lower MED** on preferred link.",
+        "Works only with **same neighbour AS**.",
+        "Neighbour may **ignore** it.",
+        "Combine with **communities** the provider supports.",
+        "Use **prepending** for broader influence."
+      ]
+    },
+    "analogy": {
+      "title": "Telling a courier which of your two doors to use",
+      "story": "You can post a sign 'please use the back door'; the courier usually complies but isn't obliged.",
+      "mapping": [
+        [
+          "Sign",
+          "MED"
+        ],
+        [
+          "Courier",
+          "Neighbour AS"
+        ],
+        [
+          "Two doors",
+          "Multiple links"
+        ]
+      ],
+      "breaks": "Couriers might ask; BGP neighbours just apply their policy."
+    },
+    "mindmap": {
+      "center": "MED",
+      "branches": [
+        {
+          "label": "Purpose",
+          "children": [
+            "Inbound hint to one neighbour"
+          ]
+        },
+        {
+          "label": "Rule",
+          "children": [
+            "Lower preferred"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "Same neighbour AS (default)"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "After LOCAL_PREF/AS_PATH",
+            "Can be ignored"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "Communities",
+            "Prepending"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Set MED per link",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "ISP sends traffic via Frankfurt if it honours MED."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "route-map TO-ISP-FRA permit 10\n set metric 10\nroute-map TO-ISP-LON permit 10\n set metric 100"
+        }
+      ],
+      "outcome": "inbound suggestion to a neighbour."
+    },
+    "summary": {
+      "points": [
+        "Hint, not command.",
+        "Lower preferred.",
+        "Same neighbour only."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might a provider ignore your MED?",
+        "a": "Their own LOCAL_PREF or AS_PATH evaluation comes first, or their policy is configured to disregard customer MEDs."
+      }
+    ]
+  },
+  "bgp-attribute-as-path": {
+    "core": "AS_PATH lists every AS a route passed through, and it serves two purposes: loop prevention and path length comparison (shorter preferred when earlier attributes tie). Prepending (repeating your ASN) makes a path look longer, discouraging other networks from using that link for inbound traffic. It's a blunt tool that affects everyone, and over-prepending is common and ineffective.",
+    "first_principles": {
+      "problem": "A company wants internet traffic to arrive mostly via ISP A, using ISP B only as backup.",
+      "truths": [
+        "Shorter paths are preferred (all else equal).",
+        "You control what you announce.",
+        "Prepending is visible globally."
+      ],
+      "derivation": [
+        "**Prepend** your ASN on the backup announcement.",
+        "Use **1–3 prepends**, rarely more.",
+        "Combine with **provider communities**.",
+        "Watch **AS_PATH filters** for leaks.",
+        "Use **as-path regex** in policies."
+      ]
+    },
+    "analogy": {
+      "title": "Making one route look like a longer drive",
+      "story": "Adding fake stops on the map for road B makes most drivers choose road A.",
+      "mapping": [
+        [
+          "Fake stops",
+          "Prepended ASNs"
+        ],
+        [
+          "Drivers",
+          "Remote networks"
+        ],
+        [
+          "Road A",
+          "Primary ISP"
+        ]
+      ],
+      "breaks": "Drivers can see the road is short; some networks ignore path length via LOCAL_PREF."
+    },
+    "mindmap": {
+      "center": "AS_PATH",
+      "branches": [
+        {
+          "label": "Roles",
+          "children": [
+            "Loop prevention",
+            "Path length"
+          ]
+        },
+        {
+          "label": "Prepending",
+          "children": [
+            "Inbound influence",
+            "Blunt",
+            "1–3 times"
+          ]
+        },
+        {
+          "label": "Filters",
+          "children": [
+            "as-path access-lists",
+            "Regex"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Overridden by LOCAL_PREF"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Prepend to backup ISP",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Most inbound traffic arrives via ISP A."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "route-map TO-ISP-B permit 10\n set as-path prepend 64500 64500 64500\n! Announced path via B: 64500 64500 64500 64500 → looks 3 hops longer"
+        }
+      ],
+      "outcome": "coarse inbound traffic engineering."
+    },
+    "summary": {
+      "points": [
+        "Loop prevention and length.",
+        "Prepend to discourage.",
+        "Blunt and global."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is excessive AS_PATH prepending often pointless?",
+        "a": "Beyond a few prepends, networks using LOCAL_PREF or specific policies ignore path length anyway, and long paths may be filtered."
+      }
+    ]
+  },
+  "bgp-communities-tagging-routes": {
+    "core": "Communities are tags (ASN:value) attached to routes to signal intent across networks. Well-known ones include NO_EXPORT and NO_ADVERTISE; providers publish action communities that customers can set, such as 'prepend toward Europe', 'set local-pref 50' or 'blackhole this /32'. Large communities (ASN:x:y) suit 32-bit ASNs. Communities turn policy into data you can apply without phone calls.",
+    "first_principles": {
+      "problem": "A customer under DDoS needs their provider to drop traffic to one IP immediately.",
+      "truths": [
+        "Policy can travel with routes.",
+        "Providers expose actions via tags.",
+        "Tags enable automation."
+      ],
+      "derivation": [
+        "Read the provider's **community guide**.",
+        "Use **blackhole** communities for DDoS.",
+        "Use **location/prepend** communities for TE.",
+        "Tag internally for **origin/region**.",
+        "Use **large communities** for 32-bit ASNs."
+      ]
+    },
+    "analogy": {
+      "title": "Coloured stickers on parcels",
+      "story": "'Red: don't forward abroad', 'Blue: route via Europe hub': handlers know what to do without a phone call.",
+      "mapping": [
+        [
+          "Stickers",
+          "Communities"
+        ],
+        [
+          "Handlers",
+          "Provider routers"
+        ],
+        [
+          "Red sticker",
+          "NO_EXPORT"
+        ]
+      ],
+      "breaks": "Stickers are universal; community meanings differ per provider."
+    },
+    "mindmap": {
+      "center": "Communities",
+      "branches": [
+        {
+          "label": "Format",
+          "children": [
+            "ASN:value",
+            "Large ASN:x:y"
+          ]
+        },
+        {
+          "label": "Well-known",
+          "children": [
+            "NO_EXPORT",
+            "NO_ADVERTISE",
+            "BLACKHOLE 65535:666"
+          ]
+        },
+        {
+          "label": "Provider actions",
+          "children": [
+            "Prepend",
+            "Local-pref",
+            "Blackhole",
+            "Region scoping"
+          ]
+        },
+        {
+          "label": "Internal",
+          "children": [
+            "Origin tags",
+            "Policy matching"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "RTBH announcement",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Provider drops traffic to that IP at its edge."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "ip route 203.0.113.45/32 Null0\nroute-map RTBH permit 10\n match ip address prefix-list VICTIM\n set community 65535:666\nrouter bgp 64500\n network 203.0.113.45 mask 255.255.255.255 route-map RTBH"
+        }
+      ],
+      "outcome": "policy signalled through routes."
+    },
+    "summary": {
+      "points": [
+        "Tags carry intent.",
+        "Provider action communities.",
+        "RTBH for DDoS."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does the BLACKHOLE community (65535:666) request?",
+        "a": "That the receiving network discard traffic destined to the tagged prefix, typically used to mitigate DDoS."
+      }
+    ]
+  },
+  "bgp-route-leaks-and-hijacks-when-routing-goes-wrong": {
+    "core": "BGP trusts what neighbours announce. A hijack is an AS announcing prefixes it doesn't own, or more specific ones that win by longest-prefix match, diverting traffic. A route leak is an AS re-announcing routes against policy, such as passing one provider's routes to another and becoming an unintended transit. Both cause outages or interception, and defences are filtering, max-prefix limits, IRR and RPKI.",
+    "first_principles": {
+      "problem": "A small ISP leaks a full table to its upstream, and large chunks of traffic get routed through its tiny links.",
+      "truths": [
+        "BGP has no built-in origin validation.",
+        "More-specific prefixes win.",
+        "Mistakes propagate globally."
+      ],
+      "derivation": [
+        "**Filter** customer announcements by IRR.",
+        "Set **max-prefix** limits.",
+        "Deploy **RPKI ROV**.",
+        "Monitor with **BGP alerting** (e.g. RIPE RIS, BGPalerter).",
+        "Announce **/24s** to limit more-specific hijacks."
+      ]
+    },
+    "analogy": {
+      "title": "Fake road signs",
+      "story": "Someone posts a sign claiming a shortcut to your city; drivers follow it into a dead end or a toll booth.",
+      "mapping": [
+        [
+          "Fake sign",
+          "Hijacked announcement"
+        ],
+        [
+          "Shortcut",
+          "More-specific prefix"
+        ],
+        [
+          "Toll booth",
+          "Interception"
+        ]
+      ],
+      "breaks": "Road signs are local; BGP announcements spread worldwide in minutes."
+    },
+    "mindmap": {
+      "center": "Leaks & Hijacks",
+      "branches": [
+        {
+          "label": "Hijack",
+          "children": [
+            "False origin",
+            "More-specific",
+            "Interception"
+          ]
+        },
+        {
+          "label": "Leak",
+          "children": [
+            "Policy violation",
+            "Unintended transit"
+          ]
+        },
+        {
+          "label": "Causes",
+          "children": [
+            "Fat fingers",
+            "Malice",
+            "Missing filters"
+          ]
+        },
+        {
+          "label": "Defences",
+          "children": [
+            "Prefix filters",
+            "Max-prefix",
+            "RPKI",
+            "Monitoring"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Detection alert",
+      "scenario": "Monitoring.",
+      "flow": [
+        "You own 198.51.100.0/22 (AS64500)",
+        "Monitor sees 198.51.100.0/24 from AS666",
+        "Alert fires in seconds",
+        "Contact upstreams; announce /24s yourself"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Hijack detected and countered quickly."
+        }
+      ],
+      "code": [],
+      "outcome": "awareness and defences against BGP incidents."
+    },
+    "summary": {
+      "points": [
+        "BGP trusts by default.",
+        "Hijacks vs leaks.",
+        "Filter, limit, validate, monitor."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a more-specific hijack win even if the legitimate route exists?",
+        "a": "Routers forward by longest-prefix match, so a /24 beats a /22 regardless of BGP attributes."
+      }
+    ]
+  },
+  "edge-caching-cdns-and-pops": {
+    "core": "A CDN runs points of presence (PoPs) near users. Requests are routed to the nearest PoP (anycast or GeoDNS), which serves cached content or fetches it from the origin and caches it per Cache-Control. That cuts latency (shorter round trips, TLS terminated nearby), offloads the origin, and absorbs traffic spikes and DDoS. Cache-hit ratio is the key metric.",
+    "first_principles": {
+      "problem": "Users in Australia wait 1.5 s for images served from a single US origin.",
+      "truths": [
+        "Distance adds latency.",
+        "Most content is reused.",
+        "Origins have limited capacity."
+      ],
+      "derivation": [
+        "Deploy **PoPs** near users.",
+        "Route via **anycast/GeoDNS**.",
+        "Cache per **Cache-Control**.",
+        "Terminate **TLS at edge**.",
+        "Track **cache-hit ratio**."
+      ]
+    },
+    "analogy": {
+      "title": "Local warehouses for an online shop",
+      "story": "Popular items are stocked nearby, so delivery is next-day instead of shipping from one central depot.",
+      "mapping": [
+        [
+          "Local warehouse",
+          "PoP"
+        ],
+        [
+          "Central depot",
+          "Origin"
+        ],
+        [
+          "Stock",
+          "Cache"
+        ]
+      ],
+      "breaks": "Warehouses stock physical goods; caches can serve stale data if TTLs are wrong."
+    },
+    "mindmap": {
+      "center": "CDNs",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "PoPs",
+            "Edge caches",
+            "Origin"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "Anycast",
+            "GeoDNS"
+          ]
+        },
+        {
+          "label": "Caching",
+          "children": [
+            "Cache-Control",
+            "TTL",
+            "Cache keys"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Latency",
+            "Offload",
+            "DDoS absorption"
+          ]
+        },
+        {
+          "label": "Metrics",
+          "children": [
+            "Hit ratio",
+            "Origin requests"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check cache status",
+      "scenario": "Headers.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Served from nearby PoP in ~20 ms."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -sI https://cdn.example.com/hero.jpg | grep -iE 'cache|age|cf-ray|x-cache'\n# cf-cache-status: HIT\n# age: 3412\n# cache-control: public, max-age=86400"
+        }
+      ],
+      "outcome": "fast, offloaded delivery."
+    },
+    "summary": {
+      "points": [
+        "PoPs near users.",
+        "Cache by headers.",
+        "Measure hit ratio."
+      ]
+    },
+    "check": [
+      {
+        "q": "Besides caching, how does a CDN reduce latency for dynamic content?",
+        "a": "TLS and TCP terminate at a nearby PoP, and the CDN uses optimised, persistent connections back to the origin."
+      }
+    ]
+  },
+  "cdn-architecture-the-origin-shield": {
+    "core": "With hundreds of PoPs, each cache miss would hit the origin separately: 300 PoPs means up to 300 origin fetches for the same object. An origin shield is an intermediate cache tier (one or a few regional PoPs) that all edge PoPs fetch through. It collapses duplicate misses, raises the overall hit ratio, and protects the origin during purges and launches.",
+    "first_principles": {
+      "problem": "After a cache purge, the origin is hammered by simultaneous fetches from every PoP and falls over.",
+      "truths": [
+        "Edge misses multiply by PoP count.",
+        "Collapsing requests reduces load.",
+        "A middle tier concentrates caching."
+      ],
+      "derivation": [
+        "Add a **shield PoP** near the origin.",
+        "Route **all edge misses** through it.",
+        "Enable **request collapsing**.",
+        "Monitor **origin offload %**.",
+        "Place shield **close to origin**."
+      ]
+    },
+    "analogy": {
+      "title": "A regional distribution centre",
+      "story": "Local shops restock from one regional centre instead of all calling the factory.",
+      "mapping": [
+        [
+          "Local shops",
+          "Edge PoPs"
+        ],
+        [
+          "Regional centre",
+          "Origin shield"
+        ],
+        [
+          "Factory",
+          "Origin"
+        ]
+      ],
+      "breaks": "Distribution centres hold inventory; shields can also expire content simultaneously."
+    },
+    "mindmap": {
+      "center": "Origin Shield",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Miss multiplication",
+            "Purge storms"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Tiered caching",
+            "Shield near origin"
+          ]
+        },
+        {
+          "label": "Features",
+          "children": [
+            "Request collapsing",
+            "Higher hit ratio"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Extra hop on miss",
+            "Shield as dependency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tiered flow",
+      "scenario": "Trace.",
+      "flow": [
+        "Sydney edge miss → shield (us-east)",
+        "Tokyo edge miss → same shield (now HIT)",
+        "Shield → origin only once",
+        "Origin sees 1 request, not 300"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Origin protected after purges."
+        }
+      ],
+      "code": [],
+      "outcome": "efficient tiered caching."
+    },
+    "summary": {
+      "points": [
+        "Misses multiply.",
+        "Shield collapses them.",
+        "Protects origin."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is request collapsing?",
+        "a": "When many concurrent requests miss for the same object, the cache sends only one request upstream and serves all waiters from that response."
+      }
+    ]
+  },
+  "cdn-cache-invalidation": {
+    "core": "Cached content must eventually change. Options: wait for TTL expiry; purge specific URLs; purge by tag or surrogate key (all objects for product 42); or avoid invalidation entirely with versioned, immutable URLs (app.3f2a9c.js with max-age=31536000, immutable). Purges propagate in seconds on modern CDNs but can trigger origin load spikes, which is one reason origin shields exist.",
+    "first_principles": {
+      "problem": "A pricing error stays visible for hours because the page had a 24-hour TTL and nobody knew how to purge it.",
+      "truths": [
+        "TTL bounds staleness.",
+        "Purges are explicit invalidations.",
+        "Unique URLs never go stale."
+      ],
+      "derivation": [
+        "Use **content-hashed URLs** for static assets.",
+        "Use **short TTL + stale-while-revalidate** for HTML.",
+        "**Purge by tag** for related objects.",
+        "Automate **purges in deploys**.",
+        "Protect origin with **shield**."
+      ]
+    },
+    "analogy": {
+      "title": "Updating restaurant menus",
+      "story": "Wait for the next print run (TTL), recall specific menus (purge), or print a new menu with a new edition number (versioned URL).",
+      "mapping": [
+        [
+          "Print run",
+          "TTL expiry"
+        ],
+        [
+          "Recall",
+          "Purge"
+        ],
+        [
+          "New edition",
+          "Versioned URL"
+        ]
+      ],
+      "breaks": "Recalled menus are physically removed; purges may take seconds to reach all PoPs."
+    },
+    "mindmap": {
+      "center": "Cache Invalidation",
+      "branches": [
+        {
+          "label": "Strategies",
+          "children": [
+            "TTL expiry",
+            "URL purge",
+            "Tag/surrogate-key purge",
+            "Versioned URLs"
+          ]
+        },
+        {
+          "label": "Headers",
+          "children": [
+            "Cache-Control",
+            "stale-while-revalidate",
+            "Surrogate-Key"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Origin spikes",
+            "Stale content"
+          ]
+        },
+        {
+          "label": "Automation",
+          "children": [
+            "Purge on deploy"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Immutable assets + tag purge",
+      "scenario": "Headers + API.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Assets never need purging; product pages purge by tag."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# static asset\n# Cache-Control: public, max-age=31536000, immutable  (/static/app.3f2a9c.js)\n# HTML\n# Cache-Control: public, max-age=60, stale-while-revalidate=300\n# Surrogate-Key: product-42\ncurl -X POST -H \"Fastly-Key: $KEY\" https://api.fastly.com/service/$SVC/purge/product-42"
+        }
+      ],
+      "outcome": "controlled freshness."
+    },
+    "summary": {
+      "points": [
+        "Versioned URLs avoid purges.",
+        "Short TTL for HTML.",
+        "Tag purges for groups."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why are content-hashed filenames the best invalidation strategy for static assets?",
+        "a": "A change produces a new URL, so caches can hold old versions forever without ever serving stale content."
+      }
+    ]
+  },
+  "beyond-routing-geo-dns": {
+    "core": "GeoDNS returns different answers depending on the client's location, usually inferred from the resolver's IP or the EDNS Client Subnet. It steers users to the nearest region, enforces data residency, or fails over by health checks. Unlike anycast it works with any servers and gives fine-grained control, but it's limited by DNS caching (TTL) and by inaccurate resolver location.",
+    "first_principles": {
+      "problem": "EU users must be served from EU infrastructure for compliance, but a single global IP sends some to the US.",
+      "truths": [
+        "DNS answers can vary by requester.",
+        "Resolver location approximates user location.",
+        "Caching delays changes."
+      ],
+      "derivation": [
+        "Map **regions → endpoints**.",
+        "Use **EDNS Client Subnet** for accuracy.",
+        "Add **health checks** for failover.",
+        "Set **short TTLs** for agility.",
+        "Combine with **latency-based** routing."
+      ]
+    },
+    "analogy": {
+      "title": "A national helpline that redirects by area code",
+      "story": "Callers dial one number but are connected to their regional office.",
+      "mapping": [
+        [
+          "Area code",
+          "Resolver/client subnet location"
+        ],
+        [
+          "Regional office",
+          "Regional endpoint"
+        ],
+        [
+          "Redirect",
+          "GeoDNS answer"
+        ]
+      ],
+      "breaks": "Area codes are accurate; resolver IPs may be far from users (public resolvers)."
+    },
+    "mindmap": {
+      "center": "GeoDNS",
+      "branches": [
+        {
+          "label": "Inputs",
+          "children": [
+            "Resolver IP",
+            "EDNS Client Subnet"
+          ]
+        },
+        {
+          "label": "Policies",
+          "children": [
+            "Geolocation",
+            "Latency",
+            "Weighted",
+            "Failover"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Nearest region",
+            "Residency",
+            "DR"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "TTL caching",
+            "Location inaccuracy"
+          ]
+        },
+        {
+          "label": "vs Anycast",
+          "children": [
+            "App-agnostic",
+            "Finer control"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Route 53 geolocation",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "EU resolvers get the EU load balancer."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_route53_record\" \"eu\" {\n  zone_id        = var.zone_id\n  name           = \"app.example.com\"\n  type           = \"A\"\n  set_identifier = \"eu\"\n  geolocation_routing_policy { continent = \"EU\" }\n  alias { name = aws_lb.eu.dns_name, zone_id = aws_lb.eu.zone_id, evaluate_target_health = true }\n}"
+        }
+      ],
+      "outcome": "location-aware traffic steering."
+    },
+    "summary": {
+      "points": [
+        "Answers by location.",
+        "ECS improves accuracy.",
+        "TTL limits agility."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can GeoDNS misroute users of public resolvers?",
+        "a": "The resolver's location may differ from the user's; without EDNS Client Subnet the DNS server sees only the resolver IP."
+      }
+    ]
+  }
+}

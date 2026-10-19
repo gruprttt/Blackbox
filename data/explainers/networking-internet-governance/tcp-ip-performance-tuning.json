@@ -1,0 +1,858 @@
+{
+  "introduction-why-default-settings-are-wrong": {
+    "core": "Linux TCP defaults are tuned for generic, modest networks. On high-bandwidth, high-latency links (cross-region replication, CDN origins, backups), small default buffers cap throughput far below link capacity, the default congestion control may react poorly to loss, and deep queues cause bufferbloat. Tuning means matching buffers to the bandwidth-delay product, choosing congestion control, and managing queues.",
+    "first_principles": {
+      "problem": "A 10 Gbps link between US and EU regions moves a single stream at 300 Mbps.",
+      "truths": [
+        "Defaults target average cases.",
+        "Throughput ≈ window / RTT.",
+        "Queues trade latency for throughput."
+      ],
+      "derivation": [
+        "Measure **RTT and bandwidth**.",
+        "Compute **BDP**.",
+        "Size **buffers** to BDP.",
+        "Pick **congestion control** (BBR/CUBIC).",
+        "Control **queues** (fq/fq_codel)."
+      ]
+    },
+    "analogy": {
+      "title": "A pipeline with a small tap",
+      "story": "A huge, long pipeline stays mostly empty if the tap at the start only lets a trickle in.",
+      "mapping": [
+        [
+          "Pipeline length",
+          "RTT"
+        ],
+        [
+          "Pipeline width",
+          "Bandwidth"
+        ],
+        [
+          "Tap",
+          "TCP window"
+        ]
+      ],
+      "breaks": "Water doesn't need acknowledgements; TCP does."
+    },
+    "mindmap": {
+      "center": "TCP Tuning",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "Generic defaults",
+            "Long fat networks"
+          ]
+        },
+        {
+          "label": "Levers",
+          "children": [
+            "Buffers",
+            "Window scaling",
+            "Congestion control",
+            "Qdiscs",
+            "TFO"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "iperf3",
+            "ss -ti",
+            "ping RTT"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Memory use",
+            "Bufferbloat"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Measure first",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms window-limited throughput."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ping -c 10 10.20.0.5 | tail -1          # RTT ~80 ms\niperf3 -c 10.20.0.5 -t 20               # ~300 Mbits/sec\nss -ti dst 10.20.0.5 | grep -E 'cwnd|rtt|wscale'"
+        }
+      ],
+      "outcome": "tuning grounded in measurement."
+    },
+    "summary": {
+      "points": [
+        "Defaults are generic.",
+        "Measure RTT and rate.",
+        "Tune buffers and CC."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't a faster link automatically speed up a single TCP stream?",
+        "a": "Throughput is capped by window size divided by RTT, so small windows limit speed regardless of link capacity."
+      }
+    ]
+  },
+  "bandwidth-delay-product-bdp": {
+    "core": "The bandwidth-delay product is how much data must be in flight to keep a link full: bandwidth × RTT. A 10 Gbps link with 80 ms RTT needs 10e9 × 0.08 / 8 = 100 MB in flight. If the sender's or receiver's window (bounded by socket buffers) is smaller, the link idles between ACKs. BDP sets the buffer sizes needed for full throughput.",
+    "first_principles": {
+      "problem": "Engineers don't know how big to make TCP buffers for a cross-ocean link.",
+      "truths": [
+        "Data in flight equals rate × time.",
+        "Windows bound data in flight.",
+        "Buffers bound windows."
+      ],
+      "derivation": [
+        "**BDP = bandwidth × RTT**.",
+        "Convert to **bytes**.",
+        "Set **max buffer ≥ BDP** (often 2×).",
+        "Ensure **window scaling** is on.",
+        "Verify **achieved cwnd** with ss."
+      ]
+    },
+    "analogy": {
+      "title": "Cars needed to fill a motorway",
+      "story": "A longer, wider motorway needs more cars on it at once to be fully used.",
+      "mapping": [
+        [
+          "Motorway width",
+          "Bandwidth"
+        ],
+        [
+          "Length",
+          "RTT"
+        ],
+        [
+          "Cars on road",
+          "Bytes in flight"
+        ]
+      ],
+      "breaks": "Cars don't need return trips; ACKs must come back before more data is sent."
+    },
+    "mindmap": {
+      "center": "BDP",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "bandwidth × RTT"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "1 Gbps × 10 ms = 1.25 MB",
+            "10 Gbps × 80 ms = 100 MB"
+          ]
+        },
+        {
+          "label": "Implications",
+          "children": [
+            "Buffer sizes",
+            "Window scaling"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "ss -ti cwnd",
+            "iperf3"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Compute and apply",
+      "scenario": "Math + sysctl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Autotuning can grow windows to fill the pipe."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# 10 Gbps × 0.08 s / 8 = 100 MB → allow up to 128 MB\nsysctl -w net.core.rmem_max=134217728 net.core.wmem_max=134217728\nsysctl -w net.ipv4.tcp_rmem='4096 131072 134217728'\nsysctl -w net.ipv4.tcp_wmem='4096 65536 134217728'"
+        }
+      ],
+      "outcome": "buffers sized to the path."
+    },
+    "summary": {
+      "points": [
+        "BDP = rate × RTT.",
+        "Buffers ≥ BDP.",
+        "Verify in practice."
+      ]
+    },
+    "check": [
+      {
+        "q": "What is the BDP for a 1 Gbps link with 20 ms RTT?",
+        "a": "1e9 × 0.02 / 8 = 2.5 MB."
+      }
+    ]
+  },
+  "tcp-window-scaling": {
+    "core": "The TCP header's window field is 16 bits, so the maximum is 65,535 bytes, far below modern BDPs. Window scaling (RFC 7323), negotiated in the SYN, adds a shift count of up to 14 that multiplies the advertised window by up to 2^14, allowing about 1 GB windows. It must be enabled on both ends and survive middleboxes, which have historically stripped or mangled the option.",
+    "first_principles": {
+      "problem": "Throughput is stuck at ~6 Mbps on a 80 ms link because a middlebox strips the window scale option.",
+      "truths": [
+        "16 bits cap at 64 KB.",
+        "The scale factor is negotiated once.",
+        "Middleboxes can interfere."
+      ],
+      "derivation": [
+        "Ensure **tcp_window_scaling=1**.",
+        "Check **wscale** in SYN captures.",
+        "Verify **ss -ti** shows wscale.",
+        "Fix **middleboxes** that strip options.",
+        "Combine with **large buffers**."
+      ]
+    },
+    "analogy": {
+      "title": "Using 'thousands' units on a small display",
+      "story": "A counter that shows only 5 digits can show millions if everyone agrees it's in thousands.",
+      "mapping": [
+        [
+          "Display digits",
+          "16-bit window field"
+        ],
+        [
+          "'In thousands'",
+          "Scale factor"
+        ],
+        [
+          "Agreement",
+          "SYN negotiation"
+        ]
+      ],
+      "breaks": "Displays don't get edited mid-route; middleboxes can strip options."
+    },
+    "mindmap": {
+      "center": "Window Scaling",
+      "branches": [
+        {
+          "label": "Limit",
+          "children": [
+            "16-bit field",
+            "64 KB"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "SYN option",
+            "Shift 0–14"
+          ]
+        },
+        {
+          "label": "Max",
+          "children": [
+            "~1 GB"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Both ends",
+            "Middlebox-safe"
+          ]
+        },
+        {
+          "label": "Check",
+          "children": [
+            "tcpdump wscale",
+            "ss -ti"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verify negotiation",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms large windows possible."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl net.ipv4.tcp_window_scaling      # 1\nss -ti dst 10.20.0.5 | grep -o 'wscale:[0-9,]*'\n# wscale:9,9  → windows multiplied by 512\ntcpdump -ni eth0 'tcp[tcpflags] & tcp-syn != 0' -v | grep wscale"
+        }
+      ],
+      "outcome": "windows beyond 64 KB."
+    },
+    "summary": {
+      "points": [
+        "16-bit limit.",
+        "Scale negotiated in SYN.",
+        "Watch middleboxes."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must window scaling be negotiated in the SYN?",
+        "a": "Both sides must agree on the shift factor at connection start; it can't be changed later."
+      }
+    ]
+  },
+  "tcp-congestion-control-algorithms": {
+    "core": "Congestion control decides how fast to send. Reno and NewReno halve the window on loss and grow linearly. CUBIC, the Linux default, grows as a cubic function and recovers faster on high-BDP paths but still treats loss as congestion. BBR models bottleneck bandwidth and RTT, pacing at the estimated rate regardless of random loss, which greatly improves throughput on lossy long paths, though fairness with CUBIC flows needs care.",
+    "first_principles": {
+      "problem": "A transfer over a path with 0.1% random loss gets 20% of link capacity with CUBIC.",
+      "truths": [
+        "Loss isn't always congestion.",
+        "Algorithms differ in signals.",
+        "Fairness matters on shared links."
+      ],
+      "derivation": [
+        "Use **CUBIC** as general default.",
+        "Try **BBR** for long/lossy paths.",
+        "Pair BBR with **fq qdisc** (pacing).",
+        "Measure **throughput and retransmits**.",
+        "Watch **fairness** with mixed flows."
+      ]
+    },
+    "analogy": {
+      "title": "Driving by brake lights vs by measuring road capacity",
+      "story": "CUBIC brakes whenever it sees a brake light (loss); BBR estimates the road's speed limit and cruises at it.",
+      "mapping": [
+        [
+          "Brake lights",
+          "Packet loss"
+        ],
+        [
+          "Speed limit estimate",
+          "Bottleneck bandwidth"
+        ],
+        [
+          "Cruise",
+          "Pacing"
+        ]
+      ],
+      "breaks": "Drivers see other cars; algorithms infer from ACKs."
+    },
+    "mindmap": {
+      "center": "Congestion Control",
+      "branches": [
+        {
+          "label": "Loss-based",
+          "children": [
+            "Reno",
+            "CUBIC"
+          ]
+        },
+        {
+          "label": "Model-based",
+          "children": [
+            "BBRv1",
+            "BBRv2/v3"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Loss",
+            "RTT",
+            "Delivery rate",
+            "ECN"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "sysctl tcp_congestion_control",
+            "fq pacing"
+          ]
+        },
+        {
+          "label": "Concerns",
+          "children": [
+            "Fairness",
+            "Retransmits"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Switch to BBR",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Lossy long path throughput rises dramatically."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl net.ipv4.tcp_available_congestion_control\nsysctl -w net.core.default_qdisc=fq\nsysctl -w net.ipv4.tcp_congestion_control=bbr\niperf3 -c 10.20.0.5 -C bbr -t 20"
+        }
+      ],
+      "outcome": "algorithm matched to path."
+    },
+    "summary": {
+      "points": [
+        "Loss-based vs model-based.",
+        "BBR for lossy long paths.",
+        "Pace with fq."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does BBR outperform CUBIC on paths with random loss?",
+        "a": "CUBIC interprets every loss as congestion and backs off; BBR paces by estimated bandwidth and RTT, largely ignoring non-congestive loss."
+      }
+    ]
+  },
+  "bufferbloat-the-latency-killer": {
+    "core": "Bufferbloat is excessive buffering in routers, modems and hosts. Loss-based TCP fills any buffer before seeing loss, so a large queue at the bottleneck holds seconds of data, and latency for everything else (calls, games, DNS) explodes under load even though throughput looks fine. The fix isn't bigger buffers but smarter queue management that keeps queues short.",
+    "first_principles": {
+      "problem": "Video calls freeze whenever someone in the house uploads a large file, though bandwidth tests look good.",
+      "truths": [
+        "Loss-based TCP fills buffers.",
+        "Queues add latency.",
+        "Big dumb buffers hide congestion."
+      ],
+      "derivation": [
+        "Measure **latency under load**.",
+        "Identify the **bottleneck queue**.",
+        "Apply **AQM** (fq_codel, CAKE).",
+        "Shape slightly **below link rate** to own the queue.",
+        "Prefer **delay-based** congestion control."
+      ]
+    },
+    "analogy": {
+      "title": "A long queue at a single checkout",
+      "story": "The cashier is always busy (good throughput), but someone with one item waits 20 minutes.",
+      "mapping": [
+        [
+          "Long queue",
+          "Bloated buffer"
+        ],
+        [
+          "Busy cashier",
+          "Full link"
+        ],
+        [
+          "One item",
+          "Small latency-sensitive packet"
+        ]
+      ],
+      "breaks": "Shoppers can switch queues; packets can't."
+    },
+    "mindmap": {
+      "center": "Bufferbloat",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "Oversized buffers",
+            "Loss-based TCP"
+          ]
+        },
+        {
+          "label": "Symptoms",
+          "children": [
+            "Latency spikes under load",
+            "Laggy calls"
+          ]
+        },
+        {
+          "label": "Measure",
+          "children": [
+            "Waveform/Flent tests",
+            "ping during upload"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "fq_codel",
+            "CAKE",
+            "Shaping",
+            "BBR"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Latency under load",
+      "scenario": "Test.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Proves queueing delay, not bandwidth, is the problem."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ping -i 0.2 8.8.8.8 &          # idle ~15 ms\niperf3 -c server -R -t 30      # saturate download\n# ping rises to 800+ ms → bufferbloat"
+        }
+      ],
+      "outcome": "bufferbloat recognised."
+    },
+    "summary": {
+      "points": [
+        "Buffers fill.",
+        "Latency explodes.",
+        "Manage queues."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why doesn't buying more bandwidth always fix bufferbloat?",
+        "a": "The bottleneck still has an oversized queue that loss-based TCP fills; latency depends on queue length, not raw speed."
+      }
+    ]
+  },
+  "fighting-bufferbloat-codel-and-fq_codel": {
+    "core": "CoDel (Controlled Delay) watches how long packets sit in the queue. If the minimum sojourn time stays above about 5 ms for an interval of about 100 ms, it starts dropping (or ECN-marking) to signal senders to slow down, keeping queues short without tuning by size. fq_codel adds fair queuing, giving each flow its own queue, so a bulk upload can't starve small flows. CAKE adds shaping and more for home routers.",
+    "first_principles": {
+      "problem": "A router must keep latency low for calls while uploads saturate the link.",
+      "truths": [
+        "Delay, not size, is the right signal.",
+        "Isolation protects small flows.",
+        "Early signals keep queues short."
+      ],
+      "derivation": [
+        "Use **fq_codel** as default qdisc.",
+        "Shape to **~95% of bottleneck**.",
+        "Enable **ECN** end-to-end.",
+        "Use **CAKE** on edge routers.",
+        "Re-test **latency under load**."
+      ]
+    },
+    "analogy": {
+      "title": "A supermarket manager watching wait times",
+      "story": "If people wait over 5 minutes, open a separate lane for small baskets and tell bulk shoppers to slow down.",
+      "mapping": [
+        [
+          "Wait time",
+          "Sojourn time"
+        ],
+        [
+          "Separate lanes",
+          "Per-flow queues"
+        ],
+        [
+          "Telling shoppers",
+          "Drops/ECN marks"
+        ]
+      ],
+      "breaks": "Shoppers comply; TCP responds only if it sees signals."
+    },
+    "mindmap": {
+      "center": "CoDel & fq_codel",
+      "branches": [
+        {
+          "label": "CoDel",
+          "children": [
+            "Sojourn time",
+            "target 5 ms",
+            "interval 100 ms"
+          ]
+        },
+        {
+          "label": "fq_codel",
+          "children": [
+            "Per-flow queues",
+            "DRR scheduling",
+            "CoDel per queue"
+          ]
+        },
+        {
+          "label": "CAKE",
+          "children": [
+            "Shaping",
+            "Host fairness",
+            "NAT-aware"
+          ]
+        },
+        {
+          "label": "Signals",
+          "children": [
+            "Drop",
+            "ECN"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Apply on Linux edge",
+      "scenario": "tc.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Ping under load stays near idle latency."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "tc qdisc replace dev eth0 root fq_codel\n# or with shaping for a 100 Mbit uplink:\ntc qdisc replace dev eth0 root cake bandwidth 95mbit\ntc -s qdisc show dev eth0"
+        }
+      ],
+      "outcome": "low latency under load."
+    },
+    "summary": {
+      "points": [
+        "Signal on delay.",
+        "Isolate flows.",
+        "Shape at the edge."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why shape slightly below the link rate when applying fq_codel/CAKE?",
+        "a": "So the queue forms in your managed qdisc instead of the modem/ISP's unmanaged buffer."
+      }
+    ]
+  },
+  "tcp-fast-open-tfo": {
+    "core": "A normal TCP connection spends one full RTT on the handshake before sending data. TCP Fast Open lets a returning client send data in the SYN, using a cookie the server issued on an earlier connection, so the server can respond immediately, saving one RTT. It needs client and server support and middleboxes that don't drop SYNs carrying data, and replayed SYN data means the first request should be idempotent.",
+    "first_principles": {
+      "problem": "Short API calls from mobile clients spend half their latency on TCP handshakes.",
+      "truths": [
+        "The handshake costs an RTT.",
+        "Previously seen clients can be trusted with a cookie.",
+        "SYN data can be replayed."
+      ],
+      "derivation": [
+        "Enable **tcp_fastopen** (client=1, server=2, both=3).",
+        "Use **TFO-aware sockets** (sendto MSG_FASTOPEN).",
+        "Make first requests **idempotent**.",
+        "Watch **middlebox drops**.",
+        "Compare with **TLS 1.3 0-RTT / QUIC**."
+      ]
+    },
+    "analogy": {
+      "title": "A regular customer phoning in their order while walking in",
+      "story": "The barista recognises them (cookie) and starts the coffee before formal greetings.",
+      "mapping": [
+        [
+          "Recognition",
+          "TFO cookie"
+        ],
+        [
+          "Early order",
+          "Data in SYN"
+        ],
+        [
+          "Greetings",
+          "Handshake"
+        ]
+      ],
+      "breaks": "Baristas spot impostors; replayed SYNs can repeat the order."
+    },
+    "mindmap": {
+      "center": "TCP Fast Open",
+      "branches": [
+        {
+          "label": "Mechanism",
+          "children": [
+            "Cookie",
+            "Data in SYN"
+          ]
+        },
+        {
+          "label": "Saving",
+          "children": [
+            "1 RTT"
+          ]
+        },
+        {
+          "label": "Config",
+          "children": [
+            "net.ipv4.tcp_fastopen"
+          ]
+        },
+        {
+          "label": "Risks",
+          "children": [
+            "Replay",
+            "Middleboxes"
+          ]
+        },
+        {
+          "label": "Alternatives",
+          "children": [
+            "QUIC 0-RTT",
+            "TLS 1.3 0-RTT",
+            "Connection reuse"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Enable and test",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Repeat connections send request with SYN."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sysctl -w net.ipv4.tcp_fastopen=3\ncurl --tcp-fastopen -so /dev/null -w '%{time_connect} %{time_starttransfer}\\n' https://api.example.com/ping\n# nginx: listen 443 ssl fastopen=256;"
+        }
+      ],
+      "outcome": "one RTT saved for repeat clients."
+    },
+    "summary": {
+      "points": [
+        "Data in SYN.",
+        "Cookie-based.",
+        "Idempotent first requests."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why should TFO's first request be idempotent?",
+        "a": "SYN data can be replayed or duplicated, so processing it twice must be harmless."
+      }
+    ]
+  },
+  "putting-it-all-together-a-tuning-checklist": {
+    "core": "Tune systematically. Measure baseline RTT, throughput and latency under load; compute the BDP and raise rmem/wmem maxima (with window scaling on); choose BBR plus fq for long or lossy paths, CUBIC otherwise; use fq_codel or CAKE where queues form; enable TFO or connection reuse for short flows; check MTU and offloads; then re-measure and roll out gradually, since every setting has trade-offs.",
+    "first_principles": {
+      "problem": "A team changes ten sysctls at once, performance worsens, and nobody knows which change caused it.",
+      "truths": [
+        "Changes interact.",
+        "Measurement guides tuning.",
+        "Gradual rollout limits risk."
+      ],
+      "derivation": [
+        "**Baseline** with iperf3/ss/ping.",
+        "Fix **buffers + window scaling**.",
+        "Choose **CC + qdisc**.",
+        "Address **short-flow latency** (TFO, keepalive).",
+        "**Change one thing**, re-measure, roll out."
+      ]
+    },
+    "analogy": {
+      "title": "Tuning a race car",
+      "story": "Change one setting per lap and time it; changing everything at once tells you nothing.",
+      "mapping": [
+        [
+          "Lap time",
+          "Benchmark"
+        ],
+        [
+          "Settings",
+          "sysctls"
+        ],
+        [
+          "Pit crew log",
+          "Change record"
+        ]
+      ],
+      "breaks": "Race tracks are consistent; production traffic varies."
+    },
+    "mindmap": {
+      "center": "Tuning Checklist",
+      "branches": [
+        {
+          "label": "Measure",
+          "children": [
+            "RTT",
+            "Throughput",
+            "Latency under load",
+            "Retransmits"
+          ]
+        },
+        {
+          "label": "Buffers",
+          "children": [
+            "BDP",
+            "rmem/wmem",
+            "Window scaling"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "BBR+fq",
+            "CUBIC"
+          ]
+        },
+        {
+          "label": "Queues",
+          "children": [
+            "fq_codel",
+            "CAKE"
+          ]
+        },
+        {
+          "label": "Short flows",
+          "children": [
+            "TFO",
+            "Keep-alive",
+            "HTTP/2"
+          ]
+        },
+        {
+          "label": "Process",
+          "children": [
+            "One change",
+            "Canary",
+            "Persist in /etc/sysctl.d"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Persisted profile",
+      "scenario": "sysctl.d.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Cross-region stream: 300 Mbps → 8 Gbps."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# /etc/sysctl.d/90-wan-tuning.conf\nnet.core.rmem_max = 134217728\nnet.core.wmem_max = 134217728\nnet.ipv4.tcp_rmem = 4096 131072 134217728\nnet.ipv4.tcp_wmem = 4096 65536 134217728\nnet.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\nnet.ipv4.tcp_fastopen = 3\nnet.ipv4.tcp_mtu_probing = 1"
+        }
+      ],
+      "outcome": "disciplined, repeatable tuning."
+    },
+    "summary": {
+      "points": [
+        "Measure first.",
+        "One change at a time.",
+        "Persist and roll out."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why change only one TCP setting at a time?",
+        "a": "Settings interact; isolating changes shows which one helped or hurt."
+      }
+    ]
+  }
+}

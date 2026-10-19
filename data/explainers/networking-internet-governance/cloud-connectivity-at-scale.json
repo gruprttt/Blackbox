@@ -1,0 +1,859 @@
+{
+  "introduction-beyond-the-single-vpc": {
+    "core": "Real organisations have dozens to hundreds of VPCs across accounts and regions, plus on-premises data centres and offices. Connecting them means choosing between peering meshes, hub-and-spoke routers (Transit Gateway, Azure vWAN), encrypted tunnels over the internet (IPsec, WireGuard), and private circuits (Direct Connect, ExpressRoute, Interconnect), while managing routing, IP overlap, encryption and cost.",
+    "first_principles": {
+      "problem": "A company with 60 VPCs and 3 data centres has an unmanageable web of peerings and VPNs.",
+      "truths": [
+        "Mesh connectivity grows quadratically.",
+        "Internet paths vary in quality.",
+        "Private circuits cost money but are predictable."
+      ],
+      "derivation": [
+        "Centralise with **hub-and-spoke**.",
+        "Use **VPN** for quick, encrypted links.",
+        "Use **Direct Connect** for steady, high bandwidth.",
+        "Plan **non-overlapping CIDRs** (IPAM).",
+        "Encrypt **every hop** as needed."
+      ]
+    },
+    "analogy": {
+      "title": "Building an airport hub system",
+      "story": "Instead of direct flights between every city pair, flights go via hubs, with private charter for the busiest routes.",
+      "mapping": [
+        [
+          "Hub airport",
+          "Transit Gateway"
+        ],
+        [
+          "Scheduled flights",
+          "VPN over internet"
+        ],
+        [
+          "Private charter",
+          "Direct Connect"
+        ]
+      ],
+      "breaks": "Airports add layover time; hub routing adds little latency but per-GB fees."
+    },
+    "mindmap": {
+      "center": "Cloud Connectivity",
+      "branches": [
+        {
+          "label": "Topologies",
+          "children": [
+            "Peering mesh",
+            "Hub-and-spoke"
+          ]
+        },
+        {
+          "label": "Hubs",
+          "children": [
+            "Transit Gateway",
+            "Azure vWAN",
+            "GCP NCC"
+          ]
+        },
+        {
+          "label": "Links",
+          "children": [
+            "IPsec VPN",
+            "WireGuard",
+            "Direct Connect",
+            "ExpressRoute"
+          ]
+        },
+        {
+          "label": "Concerns",
+          "children": [
+            "IPAM",
+            "Routing",
+            "Encryption",
+            "Cost"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Target architecture",
+      "scenario": "Design.",
+      "flow": [
+        "Transit Gateway per region",
+        "All VPCs attach to TGW",
+        "DCs via Direct Connect + backup VPN",
+        "TGW peering across regions"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Manageable, centrally routed network."
+        }
+      ],
+      "code": [],
+      "outcome": "scalable connectivity plan."
+    },
+    "summary": {
+      "points": [
+        "Mesh doesn't scale.",
+        "Hubs centralise.",
+        "Mix VPN and private circuits."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is planning non-overlapping CIDRs essential before connecting networks?",
+        "a": "Overlapping ranges can't be routed between each other without NAT, blocking direct connectivity."
+      }
+    ]
+  },
+  "the-transit-gateway-your-central-cloud-router": {
+    "core": "AWS Transit Gateway is a regional, managed router. VPCs, VPNs, Direct Connect gateways and other TGWs attach to it, and TGW route tables decide which attachments can reach which. That enables transitive routing, segmentation (prod and dev isolated, shared services reachable by both) and central inspection via a security VPC. You pay per attachment-hour and per GB processed.",
+    "first_principles": {
+      "problem": "Dev VPCs can reach prod databases through a shared peering mesh, violating segmentation policy.",
+      "truths": [
+        "A central router enables transitivity.",
+        "Route tables define segments.",
+        "Inspection needs traffic steering."
+      ],
+      "derivation": [
+        "**Attach** VPCs/VPNs/DX to TGW.",
+        "Create **route tables per segment**.",
+        "**Associate and propagate** carefully.",
+        "Steer through **inspection VPC** (appliance mode).",
+        "Share TGW across accounts via **RAM**."
+      ]
+    },
+    "analogy": {
+      "title": "A central post office with sorting rules",
+      "story": "Every branch sends mail through it; sorting rules decide which branches can send to which.",
+      "mapping": [
+        [
+          "Post office",
+          "TGW"
+        ],
+        [
+          "Branches",
+          "Attachments"
+        ],
+        [
+          "Sorting rules",
+          "TGW route tables"
+        ]
+      ],
+      "breaks": "Post offices are slow; TGW adds microseconds but costs per GB."
+    },
+    "mindmap": {
+      "center": "Transit Gateway",
+      "branches": [
+        {
+          "label": "Attachments",
+          "children": [
+            "VPC",
+            "VPN",
+            "DX gateway",
+            "Peering",
+            "Connect (GRE)"
+          ]
+        },
+        {
+          "label": "Routing",
+          "children": [
+            "Route tables",
+            "Associations",
+            "Propagations"
+          ]
+        },
+        {
+          "label": "Patterns",
+          "children": [
+            "Segmentation",
+            "Shared services",
+            "Central inspection"
+          ]
+        },
+        {
+          "label": "Ops",
+          "children": [
+            "RAM sharing",
+            "Appliance mode"
+          ]
+        },
+        {
+          "label": "Cost",
+          "children": [
+            "Per attachment",
+            "Per GB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Segmented route tables",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Dev reaches shared services, never prod."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_ec2_transit_gateway_route_table\" \"prod\" { transit_gateway_id = aws_ec2_transit_gateway.main.id }\nresource \"aws_ec2_transit_gateway_route_table\" \"dev\"  { transit_gateway_id = aws_ec2_transit_gateway.main.id }\n# prod VPCs associate with 'prod'; shared-services propagates into both\nresource \"aws_ec2_transit_gateway_route_table_propagation\" \"shared_to_dev\" {\n  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.shared.id\n  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.dev.id\n}"
+        }
+      ],
+      "outcome": "central, segmented routing."
+    },
+    "summary": {
+      "points": [
+        "Managed regional router.",
+        "Route tables segment.",
+        "Pay per GB."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the difference between association and propagation in TGW?",
+        "a": "Association decides which route table an attachment uses for lookups; propagation installs that attachment's routes into a route table."
+      }
+    ]
+  },
+  "vpns-connecting-over-the-public-internet": {
+    "core": "Site-to-site VPNs build encrypted tunnels across the internet between a cloud gateway and an on-prem router. They're quick to set up, cheap and encrypted, but throughput per tunnel is limited (about 1.25 Gbps on AWS) and latency and jitter follow internet conditions. Use two tunnels for redundancy, BGP for dynamic failover, and ECMP across tunnels for more bandwidth.",
+    "first_principles": {
+      "problem": "A branch office needs private connectivity to AWS today, and a Direct Connect circuit takes weeks to provision.",
+      "truths": [
+        "The internet is everywhere and cheap.",
+        "Encryption makes it private.",
+        "Performance varies."
+      ],
+      "derivation": [
+        "Create **two tunnels** per connection.",
+        "Run **BGP** over tunnels for failover.",
+        "Use **ECMP** with TGW for more bandwidth.",
+        "Monitor **tunnel status and latency**.",
+        "Use VPN as **DX backup**."
+      ]
+    },
+    "analogy": {
+      "title": "An armoured car on public roads",
+      "story": "Contents are safe, but travel time depends on traffic.",
+      "mapping": [
+        [
+          "Armoured car",
+          "IPsec tunnel"
+        ],
+        [
+          "Public roads",
+          "Internet"
+        ],
+        [
+          "Traffic",
+          "Jitter/latency"
+        ]
+      ],
+      "breaks": "Armoured cars have fixed capacity; tunnels too (≈1.25 Gbps each)."
+    },
+    "mindmap": {
+      "center": "Internet VPNs",
+      "branches": [
+        {
+          "label": "Pros",
+          "children": [
+            "Fast setup",
+            "Cheap",
+            "Encrypted"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Variable latency",
+            "Throughput caps"
+          ]
+        },
+        {
+          "label": "Resilience",
+          "children": [
+            "Two tunnels",
+            "BGP",
+            "ECMP"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Branches",
+            "DX backup",
+            "Quick start"
+          ]
+        },
+        {
+          "label": "Protocols",
+          "children": [
+            "IPsec IKEv2",
+            "WireGuard (self-managed)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "AWS VPN with BGP",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Two tunnels with BGP failover."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_customer_gateway\" \"office\" {\n  bgp_asn    = 65010\n  ip_address = \"198.51.100.20\"\n  type       = \"ipsec.1\"\n}\nresource \"aws_vpn_connection\" \"office\" {\n  customer_gateway_id = aws_customer_gateway.office.id\n  transit_gateway_id  = aws_ec2_transit_gateway.main.id\n  type                = \"ipsec.1\"\n  static_routes_only  = false   # BGP\n}"
+        }
+      ],
+      "outcome": "quick, encrypted connectivity."
+    },
+    "summary": {
+      "points": [
+        "Encrypted over internet.",
+        "Redundant tunnels + BGP.",
+        "Variable performance."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why use BGP rather than static routes on a site-to-site VPN?",
+        "a": "BGP detects tunnel failure and shifts traffic automatically, and advertises route changes dynamically."
+      }
+    ]
+  },
+  "vpn-types-route-based-vs-policy-based": {
+    "core": "Policy-based VPNs encrypt traffic matching specific source and destination selectors, with one security association per subnet pair. They're simple for two fixed networks but scale poorly and can't run dynamic routing. Route-based VPNs create a virtual tunnel interface: anything routed into it is encrypted, you can run BGP over it, and selectors are usually 0.0.0.0/0. Cloud VPNs and most modern designs are route-based.",
+    "first_principles": {
+      "problem": "Adding a new subnet requires renegotiating every policy-based tunnel's selectors on both sides.",
+      "truths": [
+        "Selectors define what's encrypted.",
+        "Interfaces let routing decide.",
+        "Dynamic routing needs interfaces."
+      ],
+      "derivation": [
+        "Use **route-based** (VTI) by default.",
+        "Run **BGP** over the tunnel interface.",
+        "Use **policy-based** only for legacy peers.",
+        "Match **selectors** exactly when forced.",
+        "Watch for **multiple SA** issues with cloud gateways."
+      ]
+    },
+    "analogy": {
+      "title": "A guest list vs a dedicated corridor",
+      "story": "Policy-based checks each person against a list; route-based says anyone sent down this corridor is escorted securely.",
+      "mapping": [
+        [
+          "Guest list",
+          "Traffic selectors"
+        ],
+        [
+          "Corridor",
+          "Tunnel interface"
+        ],
+        [
+          "Directions",
+          "Routing table"
+        ]
+      ],
+      "breaks": "Guest lists are easy to read; selector mismatches cause silent failures."
+    },
+    "mindmap": {
+      "center": "VPN Types",
+      "branches": [
+        {
+          "label": "Policy-based",
+          "children": [
+            "Selectors",
+            "SA per pair",
+            "No dynamic routing"
+          ]
+        },
+        {
+          "label": "Route-based",
+          "children": [
+            "VTI",
+            "Routing decides",
+            "BGP capable"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "Route-based preferred"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Selector mismatch",
+            "Multiple SAs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Linux route-based tunnel",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "New subnets just need routes, not new selectors."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ip link add vti0 type vti local 198.51.100.20 remote 203.0.113.5 key 42\nip addr add 169.254.10.2/30 dev vti0 && ip link set vti0 up\nip route add 10.20.0.0/16 dev vti0     # or learn via BGP over vti0"
+        }
+      ],
+      "outcome": "flexible, routable VPNs."
+    },
+    "summary": {
+      "points": [
+        "Policy = selectors.",
+        "Route = interface.",
+        "Prefer route-based."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you easily run BGP over a policy-based VPN?",
+        "a": "There's no tunnel interface to peer on; encryption is decided by selectors, not routing."
+      }
+    ]
+  },
+  "ipsec-vs-wireguard-old-reliable-vs-modern-speed": {
+    "core": "IPsec (IKEv2 plus ESP) is the interoperable standard: every router, firewall and cloud supports it, with many negotiable cipher suites and modes. That flexibility makes it complex to configure and debug. WireGuard is a small, opinionated protocol with fixed modern cryptography (Curve25519, ChaCha20-Poly1305), public keys as identity and in-kernel speed, but less vendor and cloud-gateway support and no built-in dynamic key distribution or routing.",
+    "first_principles": {
+      "problem": "A team spends days debugging IKE phase-2 mismatches between two vendors' firewalls.",
+      "truths": [
+        "Interoperability needs standards.",
+        "Negotiation adds complexity.",
+        "Fixed cryptography is simpler and safer."
+      ],
+      "derivation": [
+        "Use **IPsec** for vendor/cloud gateways.",
+        "Use **WireGuard** for host/mesh VPNs.",
+        "Pin **strong IKEv2 suites** (AES-GCM, DH 19/20).",
+        "Manage WireGuard **keys/peers** via tooling.",
+        "Benchmark **throughput** for your hardware."
+      ]
+    },
+    "analogy": {
+      "title": "A universal diplomatic protocol vs a private handshake",
+      "story": "Diplomatic protocol works with every country but needs long negotiation; a private handshake is fast but only with those who know it.",
+      "mapping": [
+        [
+          "Diplomatic protocol",
+          "IPsec/IKE"
+        ],
+        [
+          "Negotiation",
+          "Cipher proposals"
+        ],
+        [
+          "Private handshake",
+          "WireGuard"
+        ]
+      ],
+      "breaks": "Diplomats can improvise; IPsec peers fail on any mismatch."
+    },
+    "mindmap": {
+      "center": "IPsec vs WireGuard",
+      "branches": [
+        {
+          "label": "IPsec",
+          "children": [
+            "IKEv2",
+            "ESP",
+            "Interoperable",
+            "Complex"
+          ]
+        },
+        {
+          "label": "WireGuard",
+          "children": [
+            "~4k LoC",
+            "Fixed crypto",
+            "Fast",
+            "Keys as identity"
+          ]
+        },
+        {
+          "label": "Choose IPsec",
+          "children": [
+            "Cloud VPN gateways",
+            "Firewalls"
+          ]
+        },
+        {
+          "label": "Choose WireGuard",
+          "children": [
+            "Host meshes",
+            "Remote access",
+            "Performance"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Same link, two configs",
+      "scenario": "Snippets.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "WireGuard config is far shorter; IPsec needed for cloud gateways."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# strongSwan (IPsec)\nconn aws\n  keyexchange=ikev2\n  ike=aes256gcm16-prfsha384-ecp384!\n  esp=aes256gcm16-ecp384!\n  left=%defaultroute  right=203.0.113.5  leftsubnet=10.0.0.0/16  rightsubnet=10.20.0.0/16\n\n# WireGuard\n[Peer]\nPublicKey = 4mF...=\nEndpoint = 203.0.113.5:51820\nAllowedIPs = 10.20.0.0/16"
+        }
+      ],
+      "outcome": "right protocol per use."
+    },
+    "summary": {
+      "points": [
+        "IPsec for interoperability.",
+        "WireGuard for simplicity/speed.",
+        "Both secure if configured well."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why can't you connect WireGuard directly to an AWS Site-to-Site VPN?",
+        "a": "AWS managed VPN gateways only speak IPsec/IKE; WireGuard needs a self-managed endpoint (e.g. an EC2 instance)."
+      }
+    ]
+  },
+  "direct-connect-bypassing-the-internet": {
+    "core": "Direct Connect (AWS), ExpressRoute (Azure) and Cloud Interconnect (GCP) provide private physical circuits from your network to the cloud at colocation facilities. They give consistent latency, high bandwidth (1–100 Gbps), lower per-GB transfer prices and no internet exposure. They take weeks to provision, aren't encrypted by default, and need redundancy across devices and locations to avoid single points of failure.",
+    "first_principles": {
+      "problem": "Nightly 20 TB data syncs over VPN are slow, variable and expensive in internet egress.",
+      "truths": [
+        "Private circuits avoid internet variability.",
+        "Physical links can fail.",
+        "Per-GB pricing is lower on DX."
+      ],
+      "derivation": [
+        "Order **DX at a colo** (or via partner).",
+        "Create **virtual interfaces** (private/transit/public).",
+        "Connect to **DX gateway → TGW**.",
+        "Build **redundancy**: 2 locations, 2 devices.",
+        "Add **MACsec or IPsec** for encryption."
+      ]
+    },
+    "analogy": {
+      "title": "A private toll-free road to the warehouse",
+      "story": "No traffic jams and cheaper per trip, but it takes time to build and a single road can be closed.",
+      "mapping": [
+        [
+          "Private road",
+          "DX circuit"
+        ],
+        [
+          "Building time",
+          "Provisioning weeks"
+        ],
+        [
+          "Second road",
+          "Redundant location"
+        ]
+      ],
+      "breaks": "Roads are visible; you need monitoring to see a DX link degrade."
+    },
+    "mindmap": {
+      "center": "Direct Connect",
+      "branches": [
+        {
+          "label": "Benefits",
+          "children": [
+            "Consistent latency",
+            "High bandwidth",
+            "Lower $/GB",
+            "Private"
+          ]
+        },
+        {
+          "label": "Components",
+          "children": [
+            "Cross-connect",
+            "VIFs",
+            "DX gateway",
+            "TGW"
+          ]
+        },
+        {
+          "label": "Resilience",
+          "children": [
+            "Max resiliency model",
+            "VPN backup"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "Not encrypted by default",
+            "MACsec",
+            "IPsec over DX"
+          ]
+        },
+        {
+          "label": "Lead time",
+          "children": [
+            "Weeks"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Resilient design",
+      "scenario": "Layout.",
+      "flow": [
+        "2 DX locations × 2 connections",
+        "Transit VIFs → DX gateway → TGW",
+        "BGP with LOCAL_PREF for primary",
+        "Site-to-site VPN as last-resort backup"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Survives device and location failures."
+        }
+      ],
+      "code": [],
+      "outcome": "predictable private cloud connectivity."
+    },
+    "summary": {
+      "points": [
+        "Private, consistent, cheaper per GB.",
+        "Weeks to provision.",
+        "Design redundancy and encryption."
+      ]
+    },
+    "check": [
+      {
+        "q": "Is traffic over Direct Connect encrypted by default?",
+        "a": "No; you need MACsec (on supported dedicated connections) or IPsec over the DX link."
+      }
+    ]
+  },
+  "types-of-direct-connect-dedicated-vs-hosted": {
+    "core": "A Dedicated Connection is a physical port (1, 10, 100 or 400 Gbps) owned by you at an AWS DX location, with a cross-connect from your rack; it supports MACsec and multiple VIFs. A Hosted Connection is a slice (50 Mbps–25 Gbps) of a partner's port, provisioned faster where you have no colo presence, usually with one VIF. Choose by bandwidth, presence and lead time.",
+    "first_principles": {
+      "problem": "A company without a colo presence needs 500 Mbps to AWS within two weeks.",
+      "truths": [
+        "Ports are physical assets.",
+        "Partners aggregate customers.",
+        "Features differ by type."
+      ],
+      "derivation": [
+        "**Dedicated**: own port, high bandwidth, MACsec.",
+        "**Hosted**: partner-provisioned, flexible sizes.",
+        "Check **VIF limits** per type.",
+        "Consider **lead time** and colo presence.",
+        "Plan **upgrade paths**."
+      ]
+    },
+    "analogy": {
+      "title": "Owning a dock vs renting a berth",
+      "story": "Owning a dock gives full control and capacity; renting a berth from a marina is faster and smaller.",
+      "mapping": [
+        [
+          "Own dock",
+          "Dedicated connection"
+        ],
+        [
+          "Rented berth",
+          "Hosted connection"
+        ],
+        [
+          "Marina operator",
+          "DX partner"
+        ]
+      ],
+      "breaks": "Berths can be upgraded easily; hosted bandwidth changes may need re-provisioning."
+    },
+    "mindmap": {
+      "center": "DX Types",
+      "branches": [
+        {
+          "label": "Dedicated",
+          "children": [
+            "1/10/100/400 Gbps",
+            "Own port",
+            "MACsec",
+            "Multiple VIFs"
+          ]
+        },
+        {
+          "label": "Hosted",
+          "children": [
+            "50 Mbps–25 Gbps",
+            "Partner port",
+            "Usually 1 VIF",
+            "Faster"
+          ]
+        },
+        {
+          "label": "Decide by",
+          "children": [
+            "Bandwidth",
+            "Colo presence",
+            "Lead time",
+            "Features"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Decision",
+      "scenario": "Matrix.",
+      "flow": [
+        "Need 500 Mbps, no colo → hosted via partner",
+        "Need 2×10 Gbps, have colo rack → dedicated",
+        "Need encryption at L2 → dedicated with MACsec",
+        "Need many VIFs → dedicated or hosted VIFs"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Right connection type chosen."
+        }
+      ],
+      "code": [],
+      "outcome": "informed DX procurement."
+    },
+    "summary": {
+      "points": [
+        "Dedicated: own port.",
+        "Hosted: partner slice.",
+        "Choose by needs."
+      ]
+    },
+    "check": [
+      {
+        "q": "When is a hosted Direct Connect the better choice?",
+        "a": "When you need modest bandwidth quickly and lack a presence at a DX colocation facility."
+      }
+    ]
+  },
+  "macsec-securing-the-physical-link": {
+    "core": "MACsec (IEEE 802.1AE) encrypts Ethernet frames hop-by-hop at layer 2, in hardware at line rate, between two directly connected devices, such as your router and the AWS DX router on a dedicated 10/100/400 Gbps connection. It protects against taps on the physical path without IPsec's throughput limits, but only covers that link, not end-to-end. Keys are managed with MKA using a pre-shared CAK/CKN.",
+    "first_principles": {
+      "problem": "Compliance requires encryption on the DX circuit, but IPsec over DX caps throughput far below 100 Gbps.",
+      "truths": [
+        "Physical links can be tapped.",
+        "Hardware L2 encryption runs at line rate.",
+        "Hop-by-hop isn't end-to-end."
+      ],
+      "derivation": [
+        "Use **dedicated DX** with MACsec support.",
+        "Configure **MKA with CAK/CKN**.",
+        "Use **GCM-AES-XPN-256** cipher.",
+        "Keep **end-to-end TLS** for apps.",
+        "Rotate **keys** per policy."
+      ]
+    },
+    "analogy": {
+      "title": "A locked pipe between two buildings",
+      "story": "Anything flowing through the pipe is protected, but once it enters a building it's no longer in the pipe.",
+      "mapping": [
+        [
+          "Locked pipe",
+          "MACsec link"
+        ],
+        [
+          "Buildings",
+          "Routers"
+        ],
+        [
+          "Inside the building",
+          "Beyond the link"
+        ]
+      ],
+      "breaks": "Pipes are visible; MACsec misconfig drops the link entirely."
+    },
+    "mindmap": {
+      "center": "MACsec",
+      "branches": [
+        {
+          "label": "Layer",
+          "children": [
+            "L2 Ethernet",
+            "Hop-by-hop"
+          ]
+        },
+        {
+          "label": "Performance",
+          "children": [
+            "Line rate",
+            "Hardware"
+          ]
+        },
+        {
+          "label": "Keys",
+          "children": [
+            "MKA",
+            "CAK/CKN"
+          ]
+        },
+        {
+          "label": "Cipher",
+          "children": [
+            "GCM-AES-XPN-256"
+          ]
+        },
+        {
+          "label": "Scope",
+          "children": [
+            "One link only",
+            "Combine with TLS"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Router config",
+      "scenario": "Cisco-style.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "100 Gbps encrypted without throughput loss."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "key chain DX-MACSEC macsec\n key 1000\n  cryptographic-algorithm aes-256-cmac\n  key-string <CAK>\nmacsec-policy DX-POL\n cipher-suite GCM-AES-XPN-256\ninterface HundredGigE0/0/1\n macsec network-link\n mka policy DX-POL\n mka pre-shared-key key-chain DX-MACSEC"
+        }
+      ],
+      "outcome": "line-rate link encryption."
+    },
+    "summary": {
+      "points": [
+        "L2 hop-by-hop.",
+        "Line-rate hardware.",
+        "Not end-to-end."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why choose MACsec over IPsec on a 100 Gbps Direct Connect?",
+        "a": "MACsec encrypts in hardware at line rate, while IPsec tunnels have much lower throughput limits."
+      }
+    ]
+  }
+}

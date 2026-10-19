@@ -1,0 +1,627 @@
+{
+  "introduction-the-privacy-leak": {
+    "core": "Even with HTTPS everywhere, traditional DNS queries travel in plaintext over UDP 53, revealing every domain you visit to your ISP, the Wi-Fi operator or anyone on-path, who can also tamper with answers. Encrypted DNS (DNS over TLS and DNS over HTTPS) closes that leak between client and resolver, though the resolver still sees your queries.",
+    "first_principles": {
+      "problem": "A coffee-shop Wi-Fi operator logs and injects ads based on every domain customers look up.",
+      "truths": [
+        "HTTPS hides content, not DNS lookups.",
+        "Plaintext can be read and modified.",
+        "Encryption needs an endpoint you trust."
+      ],
+      "derivation": [
+        "Recognise **plaintext DNS** leaks.",
+        "Encrypt the **stub-to-resolver** hop.",
+        "Choose a **trusted resolver**.",
+        "Consider **DNSSEC** for integrity.",
+        "Remember **SNI** also leaks (ECH)."
+      ]
+    },
+    "analogy": {
+      "title": "Sealing letters but writing addresses on postcards",
+      "story": "Your letters are private, but the postcards asking for addresses are readable by every postman.",
+      "mapping": [
+        [
+          "Sealed letters",
+          "HTTPS content"
+        ],
+        [
+          "Postcards",
+          "Plaintext DNS"
+        ],
+        [
+          "Postman",
+          "ISP/Wi-Fi"
+        ]
+      ],
+      "breaks": "Postcards can't be altered undetectably; DNS answers can."
+    },
+    "mindmap": {
+      "center": "DNS Privacy Leak",
+      "branches": [
+        {
+          "label": "Exposure",
+          "children": [
+            "Domains visited",
+            "Timing"
+          ]
+        },
+        {
+          "label": "Threats",
+          "children": [
+            "ISP logging",
+            "Wi-Fi snooping",
+            "Injection"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "DoT",
+            "DoH",
+            "DoQ"
+          ]
+        },
+        {
+          "label": "Remaining leaks",
+          "children": [
+            "SNI (until ECH)",
+            "Resolver logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "See the leak",
+      "scenario": "tcpdump.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Every lookup visible in plaintext."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "sudo tcpdump -ni wlan0 udp port 53 -l | grep -o 'A? [^ ]*'\n# A? bank.example.\n# A? health-clinic.example."
+        }
+      ],
+      "outcome": "why encrypt DNS."
+    },
+    "summary": {
+      "points": [
+        "DNS leaks browsing.",
+        "Encrypt client-resolver hop.",
+        "Trust moves to resolver."
+      ]
+    },
+    "check": [
+      {
+        "q": "Does HTTPS hide which domains you look up?",
+        "a": "No, standard DNS queries are plaintext, and SNI also reveals the hostname unless ECH is used."
+      }
+    ]
+  },
+  "how-traditional-dns-works-the-unencrypted-baseline": {
+    "core": "A stub resolver on your device sends a small UDP packet to port 53 of a recursive resolver configured via DHCP. The query has a random ID and source port; the response is accepted if they match. There is no encryption or authentication, so on-path attackers read everything and off-path attackers can attempt cache poisoning by guessing IDs and ports, as in the Kaminsky attack.",
+    "first_principles": {
+      "problem": "An engineer assumes DNS answers are trustworthy because they 'come from the resolver'.",
+      "truths": [
+        "UDP is connectionless.",
+        "Matching uses ID and port only.",
+        "No cryptographic protection."
+      ],
+      "derivation": [
+        "Stub → recursive via **UDP 53**.",
+        "Responses matched by **ID + source port**.",
+        "Large answers fall back to **TCP 53**.",
+        "Randomisation helps against **poisoning**.",
+        "Integrity needs **DNSSEC**."
+      ]
+    },
+    "analogy": {
+      "title": "Shouting a question across a crowded room",
+      "story": "Anyone can hear it, and anyone shouting back with the right ticket number might be believed.",
+      "mapping": [
+        [
+          "Shout",
+          "UDP query"
+        ],
+        [
+          "Ticket number",
+          "Query ID"
+        ],
+        [
+          "Fake answer",
+          "Spoofed response"
+        ]
+      ],
+      "breaks": "Rooms are small; the internet has many on-path observers."
+    },
+    "mindmap": {
+      "center": "Plain DNS",
+      "branches": [
+        {
+          "label": "Transport",
+          "children": [
+            "UDP 53",
+            "TCP 53 fallback"
+          ]
+        },
+        {
+          "label": "Matching",
+          "children": [
+            "Query ID",
+            "Source port"
+          ]
+        },
+        {
+          "label": "Weaknesses",
+          "children": [
+            "No encryption",
+            "No auth",
+            "Spoofing"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "Port randomisation",
+            "DNSSEC",
+            "0x20 case"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Query anatomy",
+      "scenario": "dig.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows ID and plaintext UDP transport."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "dig example.com A +noedns\n# ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 41237\n# ;; SERVER: 192.168.1.1#53(UDP)"
+        }
+      ],
+      "outcome": "baseline understood."
+    },
+    "summary": {
+      "points": [
+        "UDP plaintext.",
+        "ID/port matching.",
+        "Spoofable."
+      ]
+    },
+    "check": [
+      {
+        "q": "What did the Kaminsky attack exploit?",
+        "a": "Weak randomness in DNS query IDs/ports, letting off-path attackers flood forged answers to poison resolver caches."
+      }
+    ]
+  },
+  "dns-over-tls-dot-the-dedicated-lane": {
+    "core": "DNS over TLS (RFC 7858) wraps standard DNS messages in a TLS session on TCP port 853. It's simple and standardised and supported by Android's Private DNS, systemd-resolved and Unbound. Because it uses a dedicated port, networks can easily see that DoT is in use, and block it to force plaintext fallback, which is good for enterprise control and bad for censorship resistance.",
+    "first_principles": {
+      "problem": "A privacy-focused admin wants OS-wide encrypted DNS without depending on browser settings.",
+      "truths": [
+        "TLS secures any stream.",
+        "A dedicated port is identifiable.",
+        "OS-level config covers all apps."
+      ],
+      "derivation": [
+        "Use **TCP/853 + TLS**.",
+        "Configure at **OS/router** level.",
+        "Authenticate resolver via **hostname/cert**.",
+        "Decide **strict vs opportunistic** mode.",
+        "Expect **blocking** on restrictive networks."
+      ]
+    },
+    "analogy": {
+      "title": "A dedicated armoured van lane",
+      "story": "Your messages are locked in an armoured van, but everyone can see the van in its special lane.",
+      "mapping": [
+        [
+          "Armoured van",
+          "TLS"
+        ],
+        [
+          "Special lane",
+          "Port 853"
+        ],
+        [
+          "Lane closure",
+          "Blocking DoT"
+        ]
+      ],
+      "breaks": "Armoured vans are rare; port 853 traffic is easy to fingerprint."
+    },
+    "mindmap": {
+      "center": "DoT",
+      "branches": [
+        {
+          "label": "Transport",
+          "children": [
+            "TCP 853",
+            "TLS"
+          ]
+        },
+        {
+          "label": "Support",
+          "children": [
+            "Android Private DNS",
+            "systemd-resolved",
+            "Unbound",
+            "Stubby"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Strict",
+            "Opportunistic"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Simple",
+            "OS-wide"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Easily blocked",
+            "Visible"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "systemd-resolved",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "All system lookups encrypted to authenticated resolvers."
+        }
+      ],
+      "code": [
+        {
+          "lang": "ini",
+          "text": "# /etc/systemd/resolved.conf\n[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net\nDNSOverTLS=yes\n# resolvectl status → +DNSOverTLS"
+        }
+      ],
+      "outcome": "OS-wide encrypted DNS."
+    },
+    "summary": {
+      "points": [
+        "DNS inside TLS on 853.",
+        "OS-level coverage.",
+        "Visible and blockable."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does strict mode in DoT mean?",
+        "a": "The client refuses to fall back to plaintext if a TLS connection to the authenticated resolver can't be established."
+      }
+    ]
+  },
+  "dns-over-https-doh-the-camouflage": {
+    "core": "DNS over HTTPS (RFC 8484) sends DNS messages as HTTP requests (application/dns-message) over HTTPS on port 443, blending in with ordinary web traffic. It's hard to block without breaking the web and is built into browsers (Firefox, Chrome) and OSes. The trade-off: it can bypass enterprise DNS controls and split-horizon zones, and it concentrates queries at a few large resolvers.",
+    "first_principles": {
+      "problem": "A browser silently switches to a public DoH resolver and internal hostnames stop resolving.",
+      "truths": [
+        "HTTPS on 443 is everywhere.",
+        "Applications can choose their own resolver.",
+        "Enterprise DNS policies assume the OS resolver."
+      ],
+      "derivation": [
+        "Send DNS as **HTTP POST/GET**.",
+        "Use **HTTP/2 or 3** for multiplexing.",
+        "Configure **browser/OS policies**.",
+        "Respect **enterprise canary/policy** settings.",
+        "Choose **resolver privacy policy** carefully."
+      ]
+    },
+    "analogy": {
+      "title": "Hiding letters inside ordinary parcels",
+      "story": "Your question travels inside normal-looking packages on the main road, impossible to single out.",
+      "mapping": [
+        [
+          "Ordinary parcels",
+          "HTTPS traffic"
+        ],
+        [
+          "Main road",
+          "Port 443"
+        ],
+        [
+          "Hidden letter",
+          "DNS message"
+        ]
+      ],
+      "breaks": "Parcels can be X-rayed; DoH endpoints can still be blocked by IP/hostname lists."
+    },
+    "mindmap": {
+      "center": "DoH",
+      "branches": [
+        {
+          "label": "Transport",
+          "children": [
+            "HTTPS 443",
+            "HTTP/2/3"
+          ]
+        },
+        {
+          "label": "Format",
+          "children": [
+            "application/dns-message",
+            "JSON variant"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "Browsers",
+            "Windows/macOS",
+            "Apps"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Hard to block",
+            "Multiplexing"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Bypasses enterprise DNS",
+            "Centralisation"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Query via DoH",
+      "scenario": "curl.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "DNS answer fetched over ordinary HTTPS."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "curl -s -H 'accept: application/dns-json' 'https://cloudflare-dns.com/dns-query?name=example.com&type=A' | jq '.Answer[].data'\n# \"93.184.215.14\""
+        }
+      ],
+      "outcome": "camouflaged encrypted DNS."
+    },
+    "summary": {
+      "points": [
+        "DNS inside HTTPS.",
+        "Hard to block.",
+        "Can bypass policies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is DoH harder for networks to block than DoT?",
+        "a": "It uses port 443 and looks like ordinary HTTPS, so blocking it risks breaking normal web traffic."
+      }
+    ]
+  },
+  "the-privacy-paradox-trading-one-watcher-for-another": {
+    "core": "Encrypted DNS hides queries from the network path, but the resolver still sees all of them. Moving from your ISP's resolver to a big public one trades one watcher for another, and concentrates the internet's DNS data with a few companies. Mitigations include choosing resolvers with audited no-logging policies, Oblivious DoH (a proxy separating who asks from what's asked), and running your own recursive resolver.",
+    "first_principles": {
+      "problem": "Users enable DoH thinking they're anonymous, but their resolver logs every query with their IP.",
+      "truths": [
+        "Someone must resolve your queries.",
+        "Encryption protects transit, not endpoints.",
+        "Separating identity from content reduces exposure."
+      ],
+      "derivation": [
+        "Pick resolvers with **audited policies**.",
+        "Consider **Oblivious DoH** (ODoH).",
+        "Run a **local recursive resolver**.",
+        "Avoid **single-resolver** concentration.",
+        "Combine with **ECH** for SNI privacy."
+      ]
+    },
+    "analogy": {
+      "title": "Swapping a nosy neighbour for a nosy concierge",
+      "story": "The street can't see your mail anymore, but the concierge who forwards it still can.",
+      "mapping": [
+        [
+          "Nosy neighbour",
+          "ISP/network"
+        ],
+        [
+          "Concierge",
+          "DoH resolver"
+        ],
+        [
+          "Anonymous drop box",
+          "Oblivious DoH proxy"
+        ]
+      ],
+      "breaks": "Concierges can be vetted personally; resolver policies must be trusted."
+    },
+    "mindmap": {
+      "center": "Privacy Paradox",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Resolver sees all",
+            "Centralisation"
+          ]
+        },
+        {
+          "label": "Mitigations",
+          "children": [
+            "No-log audits",
+            "ODoH",
+            "Own resolver",
+            "Resolver rotation"
+          ]
+        },
+        {
+          "label": "Related",
+          "children": [
+            "ECH",
+            "DNSSEC"
+          ]
+        },
+        {
+          "label": "Trade-offs",
+          "children": [
+            "Performance",
+            "Trust"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Oblivious DoH",
+      "scenario": "Flow.",
+      "flow": [
+        "Client encrypts query to target resolver's key",
+        "Sends via proxy (sees IP, not query)",
+        "Target decrypts query (sees query, not IP)",
+        "Answer returns same path"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "No single party sees both who and what."
+        }
+      ],
+      "code": [],
+      "outcome": "informed privacy trade-offs."
+    },
+    "summary": {
+      "points": [
+        "Resolver still sees queries.",
+        "Choose carefully.",
+        "ODoH splits knowledge."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does Oblivious DoH achieve?",
+        "a": "It separates client identity (seen by the proxy) from query content (seen by the resolver), so neither knows both."
+      }
+    ]
+  },
+  "the-enterprise-challenge-split-horizon-dns-and-the-canary-domain": {
+    "core": "Enterprises rely on internal resolvers for split-horizon zones, security filtering and logging, and browser DoH can bypass all of it. Controls include the canary domain use-application-dns.net (if the network's resolver returns NXDOMAIN for it, Firefox disables default DoH), browser enterprise policies, running an internal DoH/DoT resolver, and blocking known public DoH endpoints at the firewall.",
+    "first_principles": {
+      "problem": "After a browser update, employees can't reach intranet sites, and DNS-based malware filtering stops working.",
+      "truths": [
+        "Enterprise DNS enforces policy.",
+        "Browsers default to public DoH in some regions.",
+        "Signals and policies can steer clients."
+      ],
+      "derivation": [
+        "Answer **NXDOMAIN for use-application-dns.net**.",
+        "Set **browser enterprise policies** (DNSOverHttpsMode).",
+        "Offer an **internal encrypted resolver**.",
+        "Block **public DoH endpoints**.",
+        "Monitor for **bypass** traffic."
+      ]
+    },
+    "analogy": {
+      "title": "A company post room with a 'use internal mail' sign",
+      "story": "The sign tells couriers to route through the post room so internal addresses and security checks work.",
+      "mapping": [
+        [
+          "Sign",
+          "Canary domain"
+        ],
+        [
+          "Post room",
+          "Internal resolver"
+        ],
+        [
+          "Courier",
+          "Browser DoH"
+        ]
+      ],
+      "breaks": "Signs are honoured voluntarily; malware ignores the canary."
+    },
+    "mindmap": {
+      "center": "Enterprise DoH",
+      "branches": [
+        {
+          "label": "Risks",
+          "children": [
+            "Bypass split-horizon",
+            "Lose filtering",
+            "Lose logging"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "Canary domain",
+            "Browser policies",
+            "Internal DoH",
+            "Firewall blocks"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Malware ignores canary",
+            "Hardcoded resolvers"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Policies",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Browsers use the corporate encrypted resolver; intranet works."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "# Internal resolver (Unbound)\nlocal-zone: \"use-application-dns.net.\" always_nxdomain\n\n# Chrome policy (JSON)\n{ \"DnsOverHttpsMode\": \"secure\",\n  \"DnsOverHttpsTemplates\": \"https://doh.corp.example.com/dns-query\" }"
+        }
+      ],
+      "outcome": "encryption without losing control."
+    },
+    "summary": {
+      "points": [
+        "DoH can bypass policy.",
+        "Canary + policies.",
+        "Offer internal encrypted DNS."
+      ]
+    },
+    "check": [
+      {
+        "q": "What does returning NXDOMAIN for use-application-dns.net do?",
+        "a": "Signals to browsers like Firefox that the network wants them to disable default DoH and use the local resolver."
+      }
+    ]
+  }
+}

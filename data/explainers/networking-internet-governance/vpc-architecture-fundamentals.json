@@ -1,0 +1,868 @@
+{
+  "introduction-your-private-slice-of-the-cloud": {
+    "core": "A VPC is a logically isolated virtual network in a cloud region: you choose its IP range (CIDR), carve it into subnets per availability zone, and control routing, internet access and security. Nothing enters or leaves unless you configure it (gateways, routes, security rules), which makes the VPC the foundation of cloud network security and connectivity design.",
+    "first_principles": {
+      "problem": "A team launches everything in the default VPC with public IPs and later can't segment or connect it to the corporate network.",
+      "truths": [
+        "Isolation is the default.",
+        "IP ranges must not overlap if networks connect.",
+        "Connectivity is explicit."
+      ],
+      "derivation": [
+        "Choose a **non-overlapping CIDR**.",
+        "Create **subnets per AZ and tier**.",
+        "Control traffic with **route tables**.",
+        "Add **gateways** deliberately.",
+        "Secure with **SGs and NACLs**."
+      ]
+    },
+    "analogy": {
+      "title": "A private gated estate",
+      "story": "You own the land plan, decide the streets (subnets), the gates (gateways) and the guards (security groups).",
+      "mapping": [
+        [
+          "Estate",
+          "VPC"
+        ],
+        [
+          "Streets",
+          "Subnets"
+        ],
+        [
+          "Gates",
+          "IGW/NAT"
+        ],
+        [
+          "Guards",
+          "Security groups"
+        ]
+      ],
+      "breaks": "Estates can't be cloned in minutes; VPCs can, so plan IP ranges for growth."
+    },
+    "mindmap": {
+      "center": "VPC Basics",
+      "branches": [
+        {
+          "label": "Scope",
+          "children": [
+            "Region",
+            "Isolated"
+          ]
+        },
+        {
+          "label": "Building blocks",
+          "children": [
+            "CIDR",
+            "Subnets",
+            "Route tables",
+            "Gateways"
+          ]
+        },
+        {
+          "label": "Security",
+          "children": [
+            "SGs",
+            "NACLs"
+          ]
+        },
+        {
+          "label": "Connectivity",
+          "children": [
+            "Peering",
+            "TGW",
+            "VPN",
+            "Direct Connect"
+          ]
+        },
+        {
+          "label": "Avoid",
+          "children": [
+            "Default VPC",
+            "Overlapping CIDRs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Minimal VPC",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Isolated network; nothing reachable until configured."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_vpc\" \"main\" {\n  cidr_block           = \"10.20.0.0/16\"\n  enable_dns_hostnames = true\n  tags = { Name = \"prod\" }\n}"
+        }
+      ],
+      "outcome": "a private network foundation."
+    },
+    "summary": {
+      "points": [
+        "Isolated by default.",
+        "Plan CIDRs.",
+        "Explicit connectivity."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does CIDR choice matter at VPC creation?",
+        "a": "Overlapping ranges prevent peering/VPN/TGW connectivity later, and changing a VPC's primary CIDR is disruptive."
+      }
+    ]
+  },
+  "subnetting-cidr-math-the-basics": {
+    "core": "CIDR notation /n means the first n bits are the network; the remaining 32−n bits give 2^(32−n) addresses. A /16 is 65,536 addresses, a /24 is 256, and in AWS 5 addresses per subnet are reserved. You split a VPC CIDR into subnets by borrowing bits: a /16 splits into 256 /24s or 16 /20s. Plan for growth and leave room for future AZs and tiers.",
+    "first_principles": {
+      "problem": "A VPC built with /28 subnets runs out of IPs when EKS assigns a pod IP to every pod.",
+      "truths": [
+        "Prefix length determines size.",
+        "Subnets can't overlap.",
+        "Some addresses are reserved."
+      ],
+      "derivation": [
+        "Size = **2^(32 − prefix)**.",
+        "Subtract **reserved** (AWS: 5).",
+        "Split by **borrowing bits**.",
+        "Allocate per **AZ × tier**.",
+        "Reserve **spare blocks**."
+      ]
+    },
+    "analogy": {
+      "title": "Dividing a plot of land into lots",
+      "story": "Each extra bit halves the lot size and doubles the number of lots.",
+      "mapping": [
+        [
+          "Plot",
+          "VPC CIDR"
+        ],
+        [
+          "Lots",
+          "Subnets"
+        ],
+        [
+          "Halving",
+          "Adding a prefix bit"
+        ]
+      ],
+      "breaks": "Land can be re-surveyed; subnet CIDRs can't be resized in place."
+    },
+    "mindmap": {
+      "center": "CIDR Math",
+      "branches": [
+        {
+          "label": "Formula",
+          "children": [
+            "2^(32−n)"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "/16 = 65,536",
+            "/20 = 4,096",
+            "/24 = 256",
+            "/28 = 16"
+          ]
+        },
+        {
+          "label": "Reserved",
+          "children": [
+            "AWS 5 per subnet"
+          ]
+        },
+        {
+          "label": "Planning",
+          "children": [
+            "AZ × tier",
+            "Growth room",
+            "Pod IPs"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ipcalc",
+            "cidrsubnet()"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Carve subnets",
+      "scenario": "Terraform cidrsubnet.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Large private subnets for pods, small public ones for LBs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "locals {\n  azs = [\"us-east-1a\", \"us-east-1b\", \"us-east-1c\"]\n  # 10.20.0.0/16 → /20 blocks (4,091 usable each)\n  private = [for i, az in local.azs : cidrsubnet(\"10.20.0.0/16\", 4, i)]       # 10.20.0.0/20, 10.20.16.0/20, 10.20.32.0/20\n  public  = [for i, az in local.azs : cidrsubnet(\"10.20.0.0/16\", 8, 240 + i)] # 10.20.240.0/24 ...\n}"
+        }
+      ],
+      "outcome": "right-sized subnets."
+    },
+    "summary": {
+      "points": [
+        "Prefix sets size.",
+        "Split by bits.",
+        "Plan for growth."
+      ]
+    },
+    "check": [
+      {
+        "q": "How many usable IPs does an AWS /24 subnet have?",
+        "a": "251: 256 minus 5 reserved by AWS."
+      }
+    ]
+  },
+  "availability-zones-and-multi-az-vpc-design": {
+    "core": "An availability zone is one or more data centres with independent power and networking; a region has several. Subnets live in exactly one AZ, so high availability means spreading every tier across at least two (better three) AZs, with load balancers, Multi-AZ databases and per-AZ NAT gateways, so losing one AZ doesn't take down the service.",
+    "first_principles": {
+      "problem": "An AZ outage takes down production because all app instances and the NAT gateway were in us-east-1a.",
+      "truths": [
+        "AZs fail independently.",
+        "Subnets are single-AZ.",
+        "Shared single points defeat redundancy."
+      ],
+      "derivation": [
+        "Create **subnets per AZ per tier**.",
+        "Spread **instances via ASG** across AZs.",
+        "Use **Multi-AZ** databases.",
+        "Deploy **NAT per AZ** with per-AZ routes.",
+        "Test **AZ failure**."
+      ]
+    },
+    "analogy": {
+      "title": "Keeping spare keys at different friends' houses",
+      "story": "If one friend is away, another can let you in.",
+      "mapping": [
+        [
+          "Friends' houses",
+          "AZs"
+        ],
+        [
+          "Spare keys",
+          "Redundant instances"
+        ],
+        [
+          "One friend away",
+          "AZ outage"
+        ]
+      ],
+      "breaks": "Friends are independent; cross-AZ traffic costs money and latency."
+    },
+    "mindmap": {
+      "center": "Multi-AZ Design",
+      "branches": [
+        {
+          "label": "AZ",
+          "children": [
+            "Independent power/network",
+            "Single subnet scope"
+          ]
+        },
+        {
+          "label": "Tiers",
+          "children": [
+            "Public",
+            "Private app",
+            "Data"
+          ]
+        },
+        {
+          "label": "Redundancy",
+          "children": [
+            "ASG across AZs",
+            "Multi-AZ RDS",
+            "NAT per AZ",
+            "LB across AZs"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Cross-AZ transfer"
+          ]
+        },
+        {
+          "label": "Test",
+          "children": [
+            "AZ evacuation drills"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Three-AZ layout",
+      "scenario": "Design.",
+      "flow": [
+        "Public /24 × 3 AZs: ALB + NAT each",
+        "Private app /20 × 3: ASG",
+        "Data /24 × 3: RDS Multi-AZ",
+        "Each private route table → own AZ's NAT"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Any single AZ can fail with service intact."
+        }
+      ],
+      "code": [],
+      "outcome": "AZ-resilient architecture."
+    },
+    "summary": {
+      "points": [
+        "AZs fail independently.",
+        "Spread every tier.",
+        "No single-AZ dependencies."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why deploy a NAT gateway in each AZ?",
+        "a": "A single NAT gateway is an AZ-level single point of failure; per-AZ NATs with per-AZ routes keep egress working if one AZ fails."
+      }
+    ]
+  },
+  "internet-gateway-and-route-tables-the-traffic-directors": {
+    "core": "Route tables decide where traffic goes: each subnet is associated with one, and the most specific matching route wins. The 'local' route covers the VPC CIDR. A subnet is public only because its route table sends 0.0.0.0/0 to an internet gateway (and instances need public IPs); a private subnet routes 0.0.0.0/0 to a NAT gateway or nowhere. The IGW also performs 1:1 NAT for public IPs.",
+    "first_principles": {
+      "problem": "An instance with a public IP can't reach the internet because its subnet's route table has no IGW route.",
+      "truths": [
+        "Subnets are public only by routing.",
+        "Most specific route wins.",
+        "IGW translates public IPs."
+      ],
+      "derivation": [
+        "Attach an **IGW** to the VPC.",
+        "Public RT: **0.0.0.0/0 → igw**.",
+        "Private RT: **0.0.0.0/0 → nat** (or none).",
+        "Associate **each subnet** explicitly.",
+        "Add routes for **peering/TGW/endpoints**."
+      ]
+    },
+    "analogy": {
+      "title": "Signposts at an estate's junctions",
+      "story": "Streets with a sign to the main gate are 'public'; others only lead to the service exit or stay internal.",
+      "mapping": [
+        [
+          "Main gate",
+          "Internet gateway"
+        ],
+        [
+          "Signposts",
+          "Route tables"
+        ],
+        [
+          "Service exit",
+          "NAT gateway"
+        ]
+      ],
+      "breaks": "Signposts guide people; routes are enforced for every packet."
+    },
+    "mindmap": {
+      "center": "Routing in a VPC",
+      "branches": [
+        {
+          "label": "Route table",
+          "children": [
+            "Per-subnet association",
+            "Longest prefix",
+            "local route"
+          ]
+        },
+        {
+          "label": "IGW",
+          "children": [
+            "Internet access",
+            "1:1 NAT for public IPs"
+          ]
+        },
+        {
+          "label": "Public subnet",
+          "children": [
+            "0/0 → IGW"
+          ]
+        },
+        {
+          "label": "Private subnet",
+          "children": [
+            "0/0 → NAT",
+            "No route"
+          ]
+        },
+        {
+          "label": "Other targets",
+          "children": [
+            "Peering",
+            "TGW",
+            "VPC endpoints"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Public route table",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Subnet becomes public by routing."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_internet_gateway\" \"igw\" { vpc_id = aws_vpc.main.id }\nresource \"aws_route_table\" \"public\" {\n  vpc_id = aws_vpc.main.id\n  route {\n    cidr_block = \"0.0.0.0/0\"\n    gateway_id = aws_internet_gateway.igw.id\n  }\n}\nresource \"aws_route_table_association\" \"pub_a\" {\n  subnet_id      = aws_subnet.public_a.id\n  route_table_id = aws_route_table.public.id\n}"
+        }
+      ],
+      "outcome": "routing understood."
+    },
+    "summary": {
+      "points": [
+        "Route tables decide public/private.",
+        "IGW for internet.",
+        "Longest prefix wins."
+      ]
+    },
+    "check": [
+      {
+        "q": "What makes a subnet 'public' in AWS?",
+        "a": "Its route table has a route for 0.0.0.0/0 to an internet gateway."
+      }
+    ]
+  },
+  "nat-gateways-vs-instances": {
+    "core": "Private instances need outbound internet (updates, APIs) without being reachable inbound. NAT translates their private source IPs to a public IP. Managed NAT gateways are highly available within an AZ, scale automatically and need no patching, but charge per hour and per GB processed. NAT instances are cheaper at low volume but are single points of failure you must maintain. For AWS services, VPC endpoints avoid NAT entirely.",
+    "first_principles": {
+      "problem": "A NAT gateway processing 50 TB/month of S3 traffic costs $2,250 in data processing alone.",
+      "truths": [
+        "Outbound-only access needs translation.",
+        "Managed services trade cost for operations.",
+        "Not all egress needs NAT."
+      ],
+      "derivation": [
+        "Use **NAT gateway** for production simplicity.",
+        "Deploy **per AZ** for resilience.",
+        "Use **VPC endpoints** for AWS services.",
+        "Consider **NAT instances** for dev/low traffic.",
+        "Monitor **BytesOutToDestination**."
+      ]
+    },
+    "analogy": {
+      "title": "A company switchboard for outgoing calls",
+      "story": "Staff can call out, showing the main number; outsiders can't dial staff extensions directly.",
+      "mapping": [
+        [
+          "Switchboard",
+          "NAT"
+        ],
+        [
+          "Main number",
+          "Elastic IP"
+        ],
+        [
+          "Extensions",
+          "Private IPs"
+        ]
+      ],
+      "breaks": "Switchboards don't charge per word; NAT gateways charge per GB."
+    },
+    "mindmap": {
+      "center": "NAT Options",
+      "branches": [
+        {
+          "label": "NAT gateway",
+          "children": [
+            "Managed",
+            "AZ-HA",
+            "Auto-scale",
+            "$/hour + $/GB"
+          ]
+        },
+        {
+          "label": "NAT instance",
+          "children": [
+            "Cheap",
+            "Self-managed",
+            "SPOF"
+          ]
+        },
+        {
+          "label": "Avoid NAT",
+          "children": [
+            "Gateway endpoints",
+            "Interface endpoints",
+            "IPv6 egress-only IGW"
+          ]
+        },
+        {
+          "label": "Monitor",
+          "children": [
+            "CloudWatch bytes",
+            "Cost Explorer"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bypass NAT for S3",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "S3 traffic no longer billed through NAT."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_vpc_endpoint\" \"s3\" {\n  vpc_id            = aws_vpc.main.id\n  service_name      = \"com.amazonaws.us-east-1.s3\"\n  vpc_endpoint_type = \"Gateway\"\n  route_table_ids   = [aws_route_table.private_a.id, aws_route_table.private_b.id]\n}"
+        }
+      ],
+      "outcome": "cost-aware egress."
+    },
+    "summary": {
+      "points": [
+        "NAT for outbound-only.",
+        "Gateway vs instance.",
+        "Endpoints avoid NAT costs."
+      ]
+    },
+    "check": [
+      {
+        "q": "How do you avoid NAT gateway processing charges for S3 traffic?",
+        "a": "Use an S3 gateway VPC endpoint, which routes S3 traffic privately with no per-GB charge."
+      }
+    ]
+  },
+  "security-groups-and-network-acls-two-layers-of-defense": {
+    "core": "Security groups are stateful firewalls attached to network interfaces: allow-only rules, and return traffic is automatically permitted. They can reference other security groups instead of IPs. Network ACLs are stateless filters at the subnet boundary with ordered allow and deny rules, so they need explicit return-traffic rules (ephemeral ports). Use SGs as the primary control and NACLs for coarse subnet-level denies.",
+    "first_principles": {
+      "problem": "A NACL allowing inbound 443 breaks HTTPS because return traffic on ephemeral ports isn't allowed outbound.",
+      "truths": [
+        "Stateful filters track connections.",
+        "Stateless filters see each packet alone.",
+        "Identity-based rules scale better than IPs."
+      ],
+      "derivation": [
+        "Use **SGs** as primary, least-privilege.",
+        "Reference **SG IDs** between tiers.",
+        "Use **NACLs** for broad denies.",
+        "Allow **ephemeral ports** in NACLs.",
+        "Audit with **VPC Flow Logs**."
+      ]
+    },
+    "analogy": {
+      "title": "A doorman vs a checkpoint",
+      "story": "The doorman (SG) remembers who went out and lets them back in; the checkpoint (NACL) checks every person both ways against a list.",
+      "mapping": [
+        [
+          "Doorman memory",
+          "Stateful"
+        ],
+        [
+          "Checkpoint list",
+          "Stateless ordered rules"
+        ],
+        [
+          "Building",
+          "Instance"
+        ],
+        [
+          "District border",
+          "Subnet"
+        ]
+      ],
+      "breaks": "Doormen can be persuaded; rules are exact."
+    },
+    "mindmap": {
+      "center": "SGs vs NACLs",
+      "branches": [
+        {
+          "label": "Security groups",
+          "children": [
+            "Stateful",
+            "Allow only",
+            "ENI level",
+            "SG references"
+          ]
+        },
+        {
+          "label": "NACLs",
+          "children": [
+            "Stateless",
+            "Allow + deny",
+            "Ordered",
+            "Subnet level"
+          ]
+        },
+        {
+          "label": "Pitfalls",
+          "children": [
+            "Ephemeral ports",
+            "0.0.0.0/0 SSH"
+          ]
+        },
+        {
+          "label": "Audit",
+          "children": [
+            "Flow logs",
+            "Reachability Analyzer"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tiered SGs",
+      "scenario": "Terraform.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Only the ALB can reach app port, whatever their IPs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "hcl",
+          "text": "resource \"aws_vpc_security_group_ingress_rule\" \"app_from_alb\" {\n  security_group_id            = aws_security_group.app.id\n  referenced_security_group_id = aws_security_group.alb.id\n  ip_protocol = \"tcp\"\n  from_port   = 8080\n  to_port     = 8080\n}"
+        }
+      ],
+      "outcome": "layered network defence."
+    },
+    "summary": {
+      "points": [
+        "SGs stateful, primary.",
+        "NACLs stateless, coarse.",
+        "Reference SGs, not IPs."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must NACLs allow ephemeral ports for return traffic?",
+        "a": "NACLs are stateless, so responses to allowed requests (sent to client ephemeral ports) need their own explicit allow rules."
+      }
+    ]
+  },
+  "bastion-hosts-the-jump-box": {
+    "core": "A bastion (jump host) is a hardened instance in a public subnet that admins SSH into before hopping to private hosts. It shrinks the exposed surface to one host, but it's still an internet-facing SSH server with keys to manage. Modern alternatives remove inbound access entirely: AWS SSM Session Manager, EC2 Instance Connect Endpoint, or identity-aware proxies with short-lived credentials and full session logging.",
+    "first_principles": {
+      "problem": "A bastion with SSH open to 0.0.0.0/0 and shared keys is brute-forced and becomes an entry point.",
+      "truths": [
+        "Inbound admin ports attract attacks.",
+        "Shared long-lived keys leak.",
+        "Sessions should be audited."
+      ],
+      "derivation": [
+        "If bastion: **restrict source IPs**, MFA, hardened AMI.",
+        "Use **ProxyJump** instead of copying keys.",
+        "Prefer **SSM Session Manager** (no inbound ports).",
+        "Use **short-lived certs** (SSH CA, IAM).",
+        "**Log** all sessions."
+      ]
+    },
+    "analogy": {
+      "title": "A guarded side entrance vs a remote-unlock system",
+      "story": "The guarded door is better than none, but a system that issues one-time passes with CCTV is better still.",
+      "mapping": [
+        [
+          "Side entrance",
+          "Bastion"
+        ],
+        [
+          "One-time pass",
+          "Short-lived credential"
+        ],
+        [
+          "CCTV",
+          "Session logging"
+        ]
+      ],
+      "breaks": "Guards can be bribed; SSM removes the door entirely."
+    },
+    "mindmap": {
+      "center": "Admin Access",
+      "branches": [
+        {
+          "label": "Bastion",
+          "children": [
+            "Public subnet",
+            "SSH",
+            "Restricted IPs",
+            "Hardened"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "ProxyJump",
+            "Agent forwarding (avoid)"
+          ]
+        },
+        {
+          "label": "Modern",
+          "children": [
+            "SSM Session Manager",
+            "EC2 Instance Connect Endpoint",
+            "Teleport/IAP"
+          ]
+        },
+        {
+          "label": "Controls",
+          "children": [
+            "MFA",
+            "Short-lived certs",
+            "Session logs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Two ways in",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "SSM gives shell with IAM auth and CloudTrail/S3 logs."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# bastion\nssh -J ec2-user@bastion.example.com ec2-user@10.20.3.14\n# no inbound ports at all\naws ssm start-session --target i-0abc123def456"
+        }
+      ],
+      "outcome": "safer administrative access."
+    },
+    "summary": {
+      "points": [
+        "Bastion reduces surface.",
+        "Still exposed.",
+        "Prefer SSM/IAP."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main security advantage of SSM Session Manager over a bastion?",
+        "a": "No inbound ports or SSH keys are needed; access uses IAM and every session is logged."
+      }
+    ]
+  },
+  "vpc-peering-and-the-transitive-limitation": {
+    "core": "VPC peering connects two VPCs privately over the provider backbone with no bandwidth bottleneck. It's non-transitive: if A peers with B and B with C, A cannot reach C through B, and an edge VPC can't share its IGW or VPN with peers. CIDRs must not overlap, and route tables on both sides need routes. With many VPCs, a full mesh needs n(n−1)/2 peerings, which is why hub-and-spoke Transit Gateways exist.",
+    "first_principles": {
+      "problem": "Ten VPCs require 45 peering connections and route entries, and nobody can track them.",
+      "truths": [
+        "Peering is point-to-point.",
+        "No transit through a peer.",
+        "Mesh grows quadratically."
+      ],
+      "derivation": [
+        "Peer **two VPCs** with non-overlapping CIDRs.",
+        "Add **routes on both sides**.",
+        "Update **security groups** for peer CIDRs/SGs.",
+        "Remember **non-transitivity**.",
+        "Move to **Transit Gateway** at scale."
+      ]
+    },
+    "analogy": {
+      "title": "Private footbridges between neighbouring houses",
+      "story": "You can walk to your neighbour's, but not through their house to the next street.",
+      "mapping": [
+        [
+          "Footbridge",
+          "Peering connection"
+        ],
+        [
+          "Walking through",
+          "Transitive routing"
+        ],
+        [
+          "Town square",
+          "Transit Gateway"
+        ]
+      ],
+      "breaks": "Footbridges are physical; peering is just routing, but equally non-transitive."
+    },
+    "mindmap": {
+      "center": "VPC Peering",
+      "branches": [
+        {
+          "label": "Properties",
+          "children": [
+            "Private",
+            "Low latency",
+            "No bandwidth cap"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Non-transitive",
+            "No overlapping CIDRs",
+            "No edge-to-edge"
+          ]
+        },
+        {
+          "label": "Setup",
+          "children": [
+            "Accept",
+            "Routes both sides",
+            "SG rules"
+          ]
+        },
+        {
+          "label": "Scale",
+          "children": [
+            "n(n−1)/2",
+            "→ Transit Gateway"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Mesh growth",
+      "scenario": "Numbers.",
+      "flow": [
+        "3 VPCs → 3 peerings",
+        "5 VPCs → 10",
+        "10 VPCs → 45",
+        "50 VPCs → 1,225 → use TGW"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Peering doesn't scale to many VPCs."
+        }
+      ],
+      "code": [],
+      "outcome": "peering used where it fits."
+    },
+    "summary": {
+      "points": [
+        "Point-to-point.",
+        "Non-transitive.",
+        "Quadratic mesh."
+      ]
+    },
+    "check": [
+      {
+        "q": "If A peers with B and B peers with C, can A reach C?",
+        "a": "No, peering is non-transitive; A needs its own peering with C or a transit gateway."
+      }
+    ]
+  }
+}

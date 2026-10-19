@@ -1,0 +1,770 @@
+{
+  "introduction-when-fast-enough-isnt": {
+    "core": "At 10–100 Gbps a server has only nanoseconds per packet: 64-byte packets at 10 Gbps arrive every 67 ns, about 200 CPU cycles. The default kernel path (interrupt, buffer allocation, protocol stack, copy to user space) can't keep up per core. High-performance networking pushes work to hardware (offloads), batches it (coalescing, GRO), spreads it across cores (RSS), bypasses layers (SR-IOV, DPDK, XDP) and enlarges units (jumbo frames).",
+    "first_principles": {
+      "problem": "A 25 Gbps NIC delivers only 6 Gbps because one CPU core is pegged at 100% handling interrupts.",
+      "truths": [
+        "Per-packet costs dominate at high rates.",
+        "Cores are finite and serial.",
+        "Hardware can do repetitive work."
+      ],
+      "derivation": [
+        "Compute **packets per second budget**.",
+        "**Offload** checksums/segmentation.",
+        "**Batch** interrupts and packets.",
+        "**Spread** across cores (RSS).",
+        "**Bypass** the kernel when needed."
+      ]
+    },
+    "analogy": {
+      "title": "A post office at Christmas",
+      "story": "Clerks can't hand-sort every letter, so you add machines (offload), bundle mail (batching), open more counters (RSS), and use express lanes (bypass).",
+      "mapping": [
+        [
+          "Clerk per letter",
+          "CPU per packet"
+        ],
+        [
+          "Sorting machines",
+          "NIC offloads"
+        ],
+        [
+          "More counters",
+          "RSS queues"
+        ]
+      ],
+      "breaks": "Post offices hire seasonal staff; servers have fixed cores."
+    },
+    "mindmap": {
+      "center": "High-Performance Networking",
+      "branches": [
+        {
+          "label": "Budget",
+          "children": [
+            "ns per packet",
+            "Cycles per packet"
+          ]
+        },
+        {
+          "label": "Offload",
+          "children": [
+            "Checksums",
+            "TSO/GSO",
+            "LRO/GRO"
+          ]
+        },
+        {
+          "label": "Batch",
+          "children": [
+            "Interrupt coalescing",
+            "NAPI"
+          ]
+        },
+        {
+          "label": "Spread",
+          "children": [
+            "RSS",
+            "RPS",
+            "IRQ affinity"
+          ]
+        },
+        {
+          "label": "Bypass",
+          "children": [
+            "SR-IOV",
+            "DPDK",
+            "XDP"
+          ]
+        },
+        {
+          "label": "Size",
+          "children": [
+            "Jumbo frames"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Find the bottleneck",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Shows single-core softirq saturation."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "mpstat -P ALL 1 | head -20          # one core at 100% softirq?\ncat /proc/interrupts | grep eth0    # all IRQs on CPU0?\nethtool -S eth0 | grep -E 'drop|miss'"
+        }
+      ],
+      "outcome": "where high-speed networking struggles."
+    },
+    "summary": {
+      "points": [
+        "Nanosecond budgets.",
+        "Per-packet cost dominates.",
+        "Offload, batch, spread, bypass."
+      ]
+    },
+    "check": [
+      {
+        "q": "Roughly how often do 64-byte packets arrive at 10 Gbps line rate?",
+        "a": "About every 67 ns (~14.88 million packets per second)."
+      }
+    ]
+  },
+  "interrupt-coalescing-batching-the-doorbell-rings": {
+    "core": "Raising a CPU interrupt for every packet costs thousands of cycles in context switching. Interrupt coalescing makes the NIC wait for N packets or T microseconds before interrupting, and Linux NAPI switches to polling under load, processing a batch per interrupt. The trade-off is latency against throughput: more coalescing means fewer interrupts and higher throughput but adds microseconds of delay. Adaptive coalescing tunes it automatically.",
+    "first_principles": {
+      "problem": "A trading system needs microsecond latency, but default coalescing adds 50 µs per packet.",
+      "truths": [
+        "Interrupts are expensive.",
+        "Batching amortises cost.",
+        "Waiting adds latency."
+      ],
+      "derivation": [
+        "Tune **rx-usecs / rx-frames**.",
+        "Use **adaptive coalescing** for mixed loads.",
+        "Lower coalescing for **latency-critical**.",
+        "Raise it for **bulk throughput**.",
+        "Rely on **NAPI polling** under load."
+      ]
+    },
+    "analogy": {
+      "title": "A doorbell for every parcel vs a delivery schedule",
+      "story": "Answering the door for each parcel wastes time; batched deliveries save effort but you wait a bit longer.",
+      "mapping": [
+        [
+          "Doorbell",
+          "Interrupt"
+        ],
+        [
+          "Batch delivery",
+          "Coalescing"
+        ],
+        [
+          "Waiting",
+          "Added latency"
+        ]
+      ],
+      "breaks": "Couriers don't adapt; adaptive coalescing does."
+    },
+    "mindmap": {
+      "center": "Interrupt Coalescing",
+      "branches": [
+        {
+          "label": "Problem",
+          "children": [
+            "Interrupt per packet",
+            "Context switch cost"
+          ]
+        },
+        {
+          "label": "Mechanism",
+          "children": [
+            "rx-usecs",
+            "rx-frames",
+            "NAPI polling"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "Adaptive",
+            "Static"
+          ]
+        },
+        {
+          "label": "Trade-off",
+          "children": [
+            "Latency vs throughput"
+          ]
+        },
+        {
+          "label": "Extreme",
+          "children": [
+            "Busy polling"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Tune coalescing",
+      "scenario": "ethtool.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Latency vs throughput tuned per workload."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ethtool -c eth0                        # current settings\nethtool -C eth0 adaptive-rx on         # general purpose\nethtool -C eth0 adaptive-rx off rx-usecs 0 rx-frames 1   # lowest latency\nsysctl -w net.core.busy_poll=50        # busy-poll sockets"
+        }
+      ],
+      "outcome": "interrupt load under control."
+    },
+    "summary": {
+      "points": [
+        "Interrupts cost cycles.",
+        "Batch to save.",
+        "Tune per workload."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the main downside of aggressive interrupt coalescing?",
+        "a": "Added latency, since packets wait in the NIC until the batch threshold or timer fires."
+      }
+    ]
+  },
+  "receive-side-scaling-rss-spreading-the-load": {
+    "core": "Modern NICs have many receive queues. RSS hashes each packet's flow (IPs and ports) to pick a queue, and each queue's interrupt is bound to a different CPU core, so flows are processed in parallel while each flow stays ordered on one core. RPS and RFS do the same in software for NICs without RSS, and steer packets to the core where the consuming application runs.",
+    "first_principles": {
+      "problem": "A 16-core load balancer uses only one core for networking because RSS is disabled.",
+      "truths": [
+        "Cores process in parallel.",
+        "Flows must stay ordered.",
+        "Hashing keeps a flow on one queue."
+      ],
+      "derivation": [
+        "Enable **multi-queue** (ethtool -L).",
+        "Set **IRQ affinity** per queue to cores.",
+        "Tune **RSS hash fields**.",
+        "Use **RFS** for app locality.",
+        "Mind **NUMA**: queues near the NIC's node."
+      ]
+    },
+    "analogy": {
+      "title": "Multiple checkout lanes by surname",
+      "story": "Customers are assigned a lane by surname so families stay together, and all cashiers work in parallel.",
+      "mapping": [
+        [
+          "Lanes",
+          "RX queues"
+        ],
+        [
+          "Surname",
+          "Flow hash"
+        ],
+        [
+          "Cashiers",
+          "CPU cores"
+        ]
+      ],
+      "breaks": "Customers choose lanes; one elephant flow can still overload one core."
+    },
+    "mindmap": {
+      "center": "RSS",
+      "branches": [
+        {
+          "label": "Hardware",
+          "children": [
+            "Multiple RX queues",
+            "Toeplitz hash",
+            "Indirection table"
+          ]
+        },
+        {
+          "label": "Software",
+          "children": [
+            "RPS",
+            "RFS",
+            "XPS"
+          ]
+        },
+        {
+          "label": "Tuning",
+          "children": [
+            "ethtool -L",
+            "IRQ affinity",
+            "irqbalance"
+          ]
+        },
+        {
+          "label": "Limits",
+          "children": [
+            "Elephant flows",
+            "NUMA"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Spread queues",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Networking load spread across 16 cores."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ethtool -l eth0                 # max combined queues\nethtool -L eth0 combined 16\nethtool -x eth0                 # indirection table\nfor q in /sys/class/net/eth0/queues/rx-*; do echo ffff > $q/rps_cpus; done"
+        }
+      ],
+      "outcome": "parallel packet processing."
+    },
+    "summary": {
+      "points": [
+        "Hash flows to queues.",
+        "Bind queues to cores.",
+        "Watch NUMA and elephants."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does RSS hash by flow rather than spreading packets randomly?",
+        "a": "To keep packets of the same flow on one queue/core and preserve ordering."
+      }
+    ]
+  },
+  "tcp-offloading-making-hardware-do-the-work": {
+    "core": "NICs can take over repetitive TCP/IP work. Checksum offload computes checksums in hardware. TSO (TCP Segmentation Offload) lets the kernel hand the NIC one 64 KB buffer, which it cuts into MSS-sized packets; LRO/GRO merge received packets into large buffers before the stack sees them. That cuts per-packet CPU dramatically, but captures look odd (huge packets) and LRO can break routing or forwarding, so GRO is preferred.",
+    "first_principles": {
+      "problem": "CPU usage hits 80% at 10 Gbps transfers because segmentation offloads were disabled during debugging and never re-enabled.",
+      "truths": [
+        "Segmentation and checksums are mechanical.",
+        "Fewer, bigger units mean less overhead.",
+        "Forwarding needs original packet boundaries."
+      ],
+      "derivation": [
+        "Enable **tx/rx checksum offload**.",
+        "Enable **TSO/GSO**.",
+        "Prefer **GRO** over LRO on routers.",
+        "Expect **large packets in tcpdump**.",
+        "Check with **ethtool -k**."
+      ]
+    },
+    "analogy": {
+      "title": "Sending one big box and letting the depot split it",
+      "story": "Instead of packing 40 small boxes yourself, hand one big box to the depot that splits and labels them.",
+      "mapping": [
+        [
+          "Big box",
+          "64 KB buffer"
+        ],
+        [
+          "Depot",
+          "NIC"
+        ],
+        [
+          "Small boxes",
+          "MSS packets"
+        ]
+      ],
+      "breaks": "Depots don't confuse inspectors; offloads confuse packet captures."
+    },
+    "mindmap": {
+      "center": "TCP Offloads",
+      "branches": [
+        {
+          "label": "TX",
+          "children": [
+            "Checksum",
+            "TSO",
+            "GSO"
+          ]
+        },
+        {
+          "label": "RX",
+          "children": [
+            "Checksum",
+            "LRO",
+            "GRO"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Less CPU",
+            "Higher throughput"
+          ]
+        },
+        {
+          "label": "Gotchas",
+          "children": [
+            "tcpdump shows huge packets",
+            "LRO breaks forwarding",
+            "Tunnel support varies"
+          ]
+        },
+        {
+          "label": "Tools",
+          "children": [
+            "ethtool -k/-K"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Check offloads",
+      "scenario": "ethtool.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "CPU per Gbps drops sharply."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ethtool -k eth0 | grep -E 'segmentation|receive-offload|checksum'\n# tcp-segmentation-offload: on\n# generic-receive-offload: on\n# large-receive-offload: off\nethtool -K eth0 tso on gro on"
+        }
+      ],
+      "outcome": "hardware-assisted TCP."
+    },
+    "summary": {
+      "points": [
+        "Offload checksums/segmentation.",
+        "GRO over LRO.",
+        "Captures look different."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why might tcpdump show 64 KB TCP packets on a 1500-MTU link?",
+        "a": "Capture happens before TSO segmentation (or after GRO merging), so you see the large buffers the kernel handles."
+      }
+    ]
+  },
+  "jumbo-frames-bigger-boxes-less-tape": {
+    "core": "The standard Ethernet MTU is 1500 bytes. Jumbo frames (typically 9000) carry six times more payload per packet, so there are fewer packets, fewer interrupts and less header overhead for bulk transfers such as storage, replication and backups. Every device on the path (NICs, switches, routers, hypervisors) must support the same MTU, or large packets get dropped or fragmented, and internet paths stay at 1500.",
+    "first_principles": {
+      "problem": "Enabling MTU 9000 on servers breaks NFS because one switch in the path still has MTU 1500.",
+      "truths": [
+        "Per-packet overhead is fixed.",
+        "Bigger packets amortise it.",
+        "One small-MTU hop breaks large packets."
+      ],
+      "derivation": [
+        "Use jumbo on **internal storage/replication** networks.",
+        "Set MTU **end-to-end**.",
+        "Keep **1500 for internet-facing**.",
+        "Verify with **ping -M do -s 8972**.",
+        "Ensure **PMTUD/ICMP** works."
+      ]
+    },
+    "analogy": {
+      "title": "Shipping in larger crates",
+      "story": "Fewer crates mean less handling, but every door along the route must be wide enough.",
+      "mapping": [
+        [
+          "Crates",
+          "Frames"
+        ],
+        [
+          "Handling",
+          "Per-packet CPU"
+        ],
+        [
+          "Narrow door",
+          "1500-MTU hop"
+        ]
+      ],
+      "breaks": "Crates that don't fit are noticed; jumbo frames are silently dropped."
+    },
+    "mindmap": {
+      "center": "Jumbo Frames",
+      "branches": [
+        {
+          "label": "Sizes",
+          "children": [
+            "1500 standard",
+            "9000 jumbo",
+            "9001 AWS"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Fewer packets",
+            "Less CPU",
+            "Better throughput"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "Every hop",
+            "Consistent config"
+          ]
+        },
+        {
+          "label": "Where",
+          "children": [
+            "Storage",
+            "Replication",
+            "Within VPC"
+          ]
+        },
+        {
+          "label": "Test",
+          "children": [
+            "ping -M do -s 8972",
+            "tracepath"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Verify end-to-end",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms jumbo path before relying on it."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ip link set eth1 mtu 9000\nping -M do -s 8972 -c 3 10.50.0.20     # 8972 + 28 = 9000\n# 'message too long' or loss → a hop has smaller MTU"
+        }
+      ],
+      "outcome": "efficient bulk transfers."
+    },
+    "summary": {
+      "points": [
+        "Bigger frames, less overhead.",
+        "Every hop must match.",
+        "Internal networks only."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is 8972 used as the ping payload to test a 9000 MTU?",
+        "a": "IPv4 header (20) + ICMP header (8) = 28 bytes, so 8972 + 28 = 9000."
+      }
+    ]
+  },
+  "sr-iov-high-performance-for-virtual-machines": {
+    "core": "Virtualised networking normally passes every packet through a software switch in the hypervisor, adding CPU cost and latency. SR-IOV lets one physical NIC present many virtual functions (VFs) that are assigned directly to VMs or pods, so the guest driver talks to hardware and bypasses the hypervisor's data path. That gives near-native throughput and latency. The costs are lost live migration (in many setups), limited VFs, and less software-level visibility and filtering.",
+    "first_principles": {
+      "problem": "A virtualised network function can't exceed 5 Gbps through the hypervisor's virtual switch.",
+      "truths": [
+        "Software switching costs CPU.",
+        "NICs can expose multiple PCIe functions.",
+        "Direct hardware access trades flexibility."
+      ],
+      "derivation": [
+        "Enable **SR-IOV** in BIOS and NIC.",
+        "Create **VFs** (sriov_numvfs).",
+        "Assign VFs to **VMs/pods** (SR-IOV CNI).",
+        "Set **VLAN/MAC/spoof checks** on VFs.",
+        "Accept **migration/visibility** limits."
+      ]
+    },
+    "analogy": {
+      "title": "Giving tenants their own direct phone lines",
+      "story": "Instead of all calls going through the building switchboard, each tenant gets a line straight to the exchange.",
+      "mapping": [
+        [
+          "Switchboard",
+          "Hypervisor vSwitch"
+        ],
+        [
+          "Direct line",
+          "Virtual function"
+        ],
+        [
+          "Exchange",
+          "Physical NIC"
+        ]
+      ],
+      "breaks": "Direct lines are easy to move; VFs often block live migration."
+    },
+    "mindmap": {
+      "center": "SR-IOV",
+      "branches": [
+        {
+          "label": "Parts",
+          "children": [
+            "Physical function (PF)",
+            "Virtual functions (VFs)"
+          ]
+        },
+        {
+          "label": "Benefits",
+          "children": [
+            "Near-native speed",
+            "Low latency",
+            "Low CPU"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Live migration",
+            "VF limits",
+            "Less vSwitch policy"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "NFV",
+            "HPC",
+            "Telco K8s"
+          ]
+        },
+        {
+          "label": "Cloud",
+          "children": [
+            "AWS ENA",
+            "Azure Accelerated Networking"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Create VFs",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "VMs get dedicated hardware queues."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "echo 8 > /sys/class/net/ens1f0/device/sriov_numvfs\nip link show ens1f0       # vf 0..7 listed\nip link set ens1f0 vf 0 vlan 100 spoofchk on mac 52:54:00:12:34:56"
+        }
+      ],
+      "outcome": "near-native VM networking."
+    },
+    "summary": {
+      "points": [
+        "NIC exposes VFs.",
+        "Bypass hypervisor path.",
+        "Trade flexibility."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does SR-IOV often prevent live migration?",
+        "a": "The VM is tied to a physical VF on a specific NIC, whose hardware state can't be easily moved to another host."
+      }
+    ]
+  },
+  "kernel-bypass-and-dpdk-skipping-the-middleman": {
+    "core": "DPDK moves packet processing entirely into user space. Poll-mode drivers own the NIC (unbinding it from the kernel), huge pages hold pre-allocated packet buffers, and dedicated cores spin polling the receive rings, avoiding interrupts, syscalls and copies. It reaches tens of millions of packets per second per core, at the cost of burning cores at 100%, losing the kernel's TCP/IP stack and tools, and much greater complexity.",
+    "first_principles": {
+      "problem": "A software firewall needs to process 40 Mpps, which the kernel stack can't reach.",
+      "truths": [
+        "Kernel generality costs cycles.",
+        "Polling avoids interrupts.",
+        "Pre-allocated memory avoids allocation costs."
+      ],
+      "derivation": [
+        "Bind NIC to **vfio-pci**.",
+        "Allocate **huge pages**.",
+        "Pin **dedicated cores** for polling.",
+        "Process packets in **batches**.",
+        "Reimplement or skip **protocol stack**."
+      ]
+    },
+    "analogy": {
+      "title": "A private express lane with dedicated staff",
+      "story": "Packages skip the main sorting hall entirely, handled by staff who do nothing but watch the conveyor.",
+      "mapping": [
+        [
+          "Main hall",
+          "Kernel stack"
+        ],
+        [
+          "Dedicated staff",
+          "Polling cores"
+        ],
+        [
+          "Conveyor",
+          "RX ring"
+        ]
+      ],
+      "breaks": "Staff can rest; polling cores are 100% busy even when idle."
+    },
+    "mindmap": {
+      "center": "DPDK",
+      "branches": [
+        {
+          "label": "Techniques",
+          "children": [
+            "Poll-mode drivers",
+            "Huge pages",
+            "Core pinning",
+            "Batching",
+            "Zero-copy"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Tens of Mpps/core",
+            "Low latency"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "Burns cores",
+            "No kernel stack",
+            "No standard tools",
+            "Complexity"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Routers",
+            "Firewalls",
+            "NFV",
+            "OVS-DPDK"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Bind and run",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Line-rate forwarding on dedicated cores."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "echo 2048 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages\ndpdk-devbind.py --bind=vfio-pci 0000:3b:00.0\ndpdk-testpmd -l 2-5 -n 4 -- --forward-mode=io --nb-cores=3\n# NIC disappears from 'ip link'"
+        }
+      ],
+      "outcome": "kernel-bypass performance."
+    },
+    "summary": {
+      "points": [
+        "User-space polling.",
+        "Huge pages and pinned cores.",
+        "Lose kernel stack and tools."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does a DPDK-bound NIC disappear from ip link?",
+        "a": "It's unbound from the kernel driver and owned by the user-space poll-mode driver."
+      }
+    ]
+  }
+}

@@ -1,0 +1,615 @@
+{
+  "introduction-running-on-empty": {
+    "core": "ISPs ran out of IPv4 addresses to give each customer. Carrier-grade NAT (NAT444) adds a second NAT layer inside the ISP: customer routers get private addresses from 100.64.0.0/10 and the ISP translates many customers onto a small pool of public IPs, often 10 to over 1,000 subscribers per address. It stretches IPv4 but breaks inbound connectivity, complicates logging and degrades some apps.",
+    "first_principles": {
+      "problem": "A new mobile carrier has 2 million subscribers and only 16,000 public IPv4 addresses.",
+      "truths": [
+        "Public IPv4 is scarce.",
+        "Ports can multiplex addresses.",
+        "Sharing has side effects."
+      ],
+      "derivation": [
+        "Assign customers **100.64.0.0/10**.",
+        "Translate at **CGN gateways**.",
+        "Allocate **port blocks** per subscriber.",
+        "**Log** mappings for legal requests.",
+        "Deploy **IPv6** to reduce CGN load."
+      ]
+    },
+    "analogy": {
+      "title": "A shared office building with one mailing address",
+      "story": "Hundreds of companies share one street address; the mailroom sorts by suite number (port).",
+      "mapping": [
+        [
+          "Street address",
+          "Public IPv4"
+        ],
+        [
+          "Suite number",
+          "Port"
+        ],
+        [
+          "Mailroom",
+          "CGN"
+        ]
+      ],
+      "breaks": "Mailrooms know every tenant; external parties can't distinguish CGN users."
+    },
+    "mindmap": {
+      "center": "CGNAT",
+      "branches": [
+        {
+          "label": "Why",
+          "children": [
+            "IPv4 exhaustion"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "NAT444",
+            "100.64.0.0/10",
+            "Port blocks"
+          ]
+        },
+        {
+          "label": "Ratios",
+          "children": [
+            "10–1000+ users/IP"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "Logging",
+            "Broken inbound",
+            "App issues"
+          ]
+        },
+        {
+          "label": "Exit",
+          "children": [
+            "IPv6"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Port-block math",
+      "scenario": "Numbers.",
+      "flow": [
+        "Public IP has ~64,000 usable ports",
+        "Allocate 1,000 ports per subscriber",
+        "→ ~64 subscribers per IP",
+        "16,000 IPs × 64 ≈ 1M subscribers"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "IPv4 stretched; per-user ports limited."
+        }
+      ],
+      "code": [],
+      "outcome": "CGNAT rationale understood."
+    },
+    "summary": {
+      "points": [
+        "IPv4 scarcity.",
+        "Second NAT layer.",
+        "Ports shared."
+      ]
+    },
+    "check": [
+      {
+        "q": "What address range is reserved for CGNAT?",
+        "a": "100.64.0.0/10 (RFC 6598 shared address space)."
+      }
+    ]
+  },
+  "identifying-cgnat-rfc-6598": {
+    "core": "You're likely behind CGNAT if your router's WAN address is in 100.64.0.0/10 (or a private range) while websites report a different public IP, or if traceroute shows 100.64.x.x hops. RFC 6598 reserved that range so ISPs wouldn't collide with customers' own 10/8 and 192.168/16 LANs. It must never be routed on the public internet or used for internal enterprise networks.",
+    "first_principles": {
+      "problem": "Port forwarding configured on a home router does nothing, and the user doesn't know why.",
+      "truths": [
+        "WAN IP vs observed public IP reveals NAT layers.",
+        "100.64/10 signals CGN.",
+        "Shared space avoids LAN collisions."
+      ],
+      "derivation": [
+        "Compare **router WAN IP** with **what-is-my-IP**.",
+        "Check if WAN is **100.64.0.0/10**.",
+        "Run **traceroute** for 100.64 hops.",
+        "Ask ISP for **public IP** option.",
+        "Don't use 100.64 for **your own** LANs."
+      ]
+    },
+    "analogy": {
+      "title": "Realising your 'house number' is really a flat number",
+      "story": "Letters to your flat number never arrive from outside because the building's street address is shared.",
+      "mapping": [
+        [
+          "Flat number",
+          "100.64 WAN IP"
+        ],
+        [
+          "Building address",
+          "Shared public IP"
+        ]
+      ],
+      "breaks": "You can see the building; you can't see the CGN."
+    },
+    "mindmap": {
+      "center": "Identify CGNAT",
+      "branches": [
+        {
+          "label": "Signals",
+          "children": [
+            "WAN in 100.64/10",
+            "WAN ≠ observed IP",
+            "100.64 hops"
+          ]
+        },
+        {
+          "label": "RFC 6598",
+          "children": [
+            "Shared space",
+            "Avoid LAN collision"
+          ]
+        },
+        {
+          "label": "Rules",
+          "children": [
+            "Not internet-routed",
+            "Not for enterprise LANs"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Compare addresses",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Confirms double NAT."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# on router/WAN\nip -4 addr show wan | grep inet      # inet 100.72.14.9/10\ncurl -s https://ifconfig.me          # 203.0.113.77\n# different → behind CGNAT"
+        }
+      ],
+      "outcome": "CGNAT diagnosed."
+    },
+    "summary": {
+      "points": [
+        "100.64/10 WAN.",
+        "Mismatch with public IP.",
+        "Explains broken inbound."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why didn't ISPs just use 10.0.0.0/8 for CGNAT?",
+        "a": "Customers already use 10/8 on their LANs; overlapping ranges would break routing, so RFC 6598 reserved a distinct shared range."
+      }
+    ]
+  },
+  "the-port-forwarding-problem": {
+    "core": "Port forwarding on your router maps an inbound public port to a LAN host, but under CGNAT your router has no public IP. Inbound connections hit the ISP's CGN, which has no mapping for unsolicited traffic and drops it. Self-hosted servers, remote access, cameras and game hosting stop working. Fixes need ISP cooperation, outbound tunnels or IPv6.",
+    "first_principles": {
+      "problem": "A small business can't reach its on-site NVR remotely after the ISP moved it to CGNAT.",
+      "truths": [
+        "NAT allows replies, not unsolicited inbound.",
+        "Your router is not the outermost NAT.",
+        "The CGN is ISP-controlled."
+      ],
+      "derivation": [
+        "Recognise **no inbound path**.",
+        "Request **static/public IPv4** from ISP.",
+        "Use **outbound tunnels** (Cloudflare Tunnel, Tailscale).",
+        "Use **IPv6** with firewall pinholes.",
+        "Use a **VPS relay**."
+      ]
+    },
+    "analogy": {
+      "title": "A gated community with a single gate guard",
+      "story": "You can leave and visitors you called can come back, but strangers asking for your house are turned away, and your own doorbell is behind the gate.",
+      "mapping": [
+        [
+          "Gate guard",
+          "CGN"
+        ],
+        [
+          "Your doorbell",
+          "Router port forward"
+        ],
+        [
+          "Visitors you called",
+          "Return traffic"
+        ]
+      ],
+      "breaks": "Guards can be asked nicely; CGNs need ISP config."
+    },
+    "mindmap": {
+      "center": "Port Forwarding Problem",
+      "branches": [
+        {
+          "label": "Cause",
+          "children": [
+            "No public IP",
+            "CGN drops unsolicited"
+          ]
+        },
+        {
+          "label": "Breaks",
+          "children": [
+            "Self-hosting",
+            "Remote access",
+            "Game hosting",
+            "Cameras"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "Public IP add-on",
+            "Outbound tunnels",
+            "IPv6",
+            "VPS relay",
+            "PCP (if ISP supports)"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Outbound tunnel",
+      "scenario": "Command.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Service reachable without inbound ports."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "cloudflared tunnel --url http://localhost:8080\n# Your quick Tunnel: https://random-words.trycloudflare.com\n# (connection initiated outbound → works through CGNAT)"
+        }
+      ],
+      "outcome": "inbound access restored."
+    },
+    "summary": {
+      "points": [
+        "CGN blocks inbound.",
+        "Router forwarding useless.",
+        "Tunnel out or use IPv6."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why do outbound tunnels work behind CGNAT?",
+        "a": "The connection is initiated from inside, so the CGN creates a mapping and allows the return traffic that carries inbound requests."
+      }
+    ]
+  },
+  "p2p-and-gaming-strict-nat": {
+    "core": "Peer-to-peer apps (games, VoIP, WebRTC) need direct paths between peers behind NATs. STUN discovers each peer's public mapping, and hole punching sends simultaneous packets to open mappings. CGNs often use endpoint-dependent (symmetric) mapping and short timeouts, which defeats hole punching, so consoles show 'Strict NAT' and apps fall back to TURN relays, adding latency and cost.",
+    "first_principles": {
+      "problem": "Gamers behind CGNAT can't host lobbies and get high-latency relayed voice chat.",
+      "truths": [
+        "Direct paths need predictable mappings.",
+        "Symmetric NAT changes ports per destination.",
+        "Relays always work but cost latency."
+      ],
+      "derivation": [
+        "Use **STUN** to learn mappings.",
+        "Try **hole punching** (ICE).",
+        "Fall back to **TURN** relays.",
+        "Prefer **IPv6** for direct paths.",
+        "Ask ISPs for **endpoint-independent mapping**."
+      ]
+    },
+    "analogy": {
+      "title": "Two people in different gated estates trying to meet",
+      "story": "If guards issue predictable visitor passes, they can arrange to meet at the gates; if passes change every time, they need a café in between (relay).",
+      "mapping": [
+        [
+          "Visitor pass",
+          "NAT mapping"
+        ],
+        [
+          "Changing passes",
+          "Symmetric NAT"
+        ],
+        [
+          "Café",
+          "TURN relay"
+        ]
+      ],
+      "breaks": "People can phone each other; peers need a signalling server first."
+    },
+    "mindmap": {
+      "center": "P2P & Strict NAT",
+      "branches": [
+        {
+          "label": "NAT types",
+          "children": [
+            "Full cone",
+            "Restricted",
+            "Port-restricted",
+            "Symmetric"
+          ]
+        },
+        {
+          "label": "Techniques",
+          "children": [
+            "STUN",
+            "Hole punching",
+            "ICE",
+            "TURN"
+          ]
+        },
+        {
+          "label": "CGN effects",
+          "children": [
+            "Strict NAT",
+            "Relays",
+            "Latency"
+          ]
+        },
+        {
+          "label": "Fixes",
+          "children": [
+            "IPv6",
+            "EIM/EIF CGN config",
+            "Public IP"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "ICE candidates",
+      "scenario": "WebRTC.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Call works via relay, with added latency."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "candidate: host  192.168.1.20:50000\ncandidate: srflx 203.0.113.77:61234   (from STUN)\ncandidate: relay 198.51.100.5:3478    (TURN)\n# symmetric CGN → srflx fails, relay chosen"
+        }
+      ],
+      "outcome": "NAT traversal understood."
+    },
+    "summary": {
+      "points": [
+        "STUN and hole punching.",
+        "Symmetric NAT breaks it.",
+        "TURN as fallback."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does symmetric NAT defeat hole punching?",
+        "a": "It assigns a different external port per destination, so the mapping learned via STUN doesn't apply to the peer."
+      }
+    ]
+  },
+  "the-reputation-problem-the-noisy-neighbor": {
+    "core": "Under CGNAT hundreds of users share one public IP, so IP-based reputation and rate limiting punish everyone. One subscriber's spam, scraping or abuse gets the IP blacklisted, CAPTCHAs appear for all, and rate limits hit innocent neighbours. For services, blocking or throttling by IP is unreliable when IPs are shared. Combine it with account, device and behaviour signals.",
+    "first_principles": {
+      "problem": "A whole neighbourhood gets endless CAPTCHAs on a search engine because one user behind the same CGN IP runs a scraper.",
+      "truths": [
+        "Shared IPs share reputation.",
+        "IP-based limits are coarse.",
+        "Abuse attribution needs ports and timestamps."
+      ],
+      "derivation": [
+        "Avoid **IP-only rate limits** for consumers.",
+        "Use **account/token** limits.",
+        "Add **device/behavioural** signals.",
+        "Log **source port + timestamp** for abuse reports.",
+        "Check **CGN IP lists** before banning."
+      ]
+    },
+    "analogy": {
+      "title": "One rowdy guest gets a whole hotel banned",
+      "story": "The bar bans the hotel's address, so every guest is turned away.",
+      "mapping": [
+        [
+          "Hotel address",
+          "Shared public IP"
+        ],
+        [
+          "Rowdy guest",
+          "Abusive subscriber"
+        ],
+        [
+          "Ban",
+          "IP blacklist"
+        ]
+      ],
+      "breaks": "Bars can check ID; services need non-IP identity signals."
+    },
+    "mindmap": {
+      "center": "Reputation Problem",
+      "branches": [
+        {
+          "label": "Effects",
+          "children": [
+            "Blacklists",
+            "CAPTCHAs",
+            "Rate limits"
+          ]
+        },
+        {
+          "label": "Services",
+          "children": [
+            "Don't rely on IP alone",
+            "Account limits",
+            "Device signals"
+          ]
+        },
+        {
+          "label": "Attribution",
+          "children": [
+            "IP + port + timestamp",
+            "ISP CGN logs"
+          ]
+        },
+        {
+          "label": "Lists",
+          "children": [
+            "Known CGN ranges"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Smarter rate limiting",
+      "scenario": "Design.",
+      "flow": [
+        "Anonymous: generous per-IP limit",
+        "Logged in: per-account limit",
+        "Bot signals: challenge only suspicious sessions",
+        "Abuse report includes source port"
+      ],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Abusers limited, neighbours unaffected."
+        }
+      ],
+      "code": [],
+      "outcome": "fair treatment behind shared IPs."
+    },
+    "summary": {
+      "points": [
+        "Shared IP, shared fate.",
+        "Use richer signals.",
+        "Ports for attribution."
+      ]
+    },
+    "check": [
+      {
+        "q": "What extra information is needed to attribute abuse from a CGNAT IP?",
+        "a": "The source port and precise timestamp, which the ISP can match against its CGN translation logs."
+      }
+    ]
+  },
+  "solutions-escaping-the-cage": {
+    "core": "Options to escape CGNAT limits: ask the ISP for a public or static IPv4 (often a paid add-on); use IPv6, which avoids NAT entirely; use outbound overlay networks (Tailscale, ZeroTier, Cloudflare Tunnel, ngrok) for remote access; rent a cheap VPS with a public IP and tunnel to it (WireGuard plus port forwarding); or use ISP-supported Port Control Protocol where available.",
+    "first_principles": {
+      "problem": "A home-lab user needs reliable remote SSH and a web dashboard from behind CGNAT.",
+      "truths": [
+        "Inbound requires a public endpoint.",
+        "Outbound connections always work.",
+        "IPv6 bypasses IPv4 NAT."
+      ],
+      "derivation": [
+        "Try **IPv6** with firewall rules.",
+        "Use **mesh VPN** for private access.",
+        "Use **tunnels** for public web.",
+        "Use **VPS + WireGuard** for full control.",
+        "Buy **public IP** if available."
+      ]
+    },
+    "analogy": {
+      "title": "Getting mail when your building has no letterbox",
+      "story": "Rent a PO box elsewhere (VPS), use a courier who picks up from you (tunnel), or move to a building with letterboxes (IPv6).",
+      "mapping": [
+        [
+          "PO box",
+          "VPS relay"
+        ],
+        [
+          "Courier",
+          "Cloudflare Tunnel"
+        ],
+        [
+          "New building",
+          "IPv6"
+        ]
+      ],
+      "breaks": "PO boxes are cheap and static; relays add a dependency and latency."
+    },
+    "mindmap": {
+      "center": "Escaping CGNAT",
+      "branches": [
+        {
+          "label": "ISP",
+          "children": [
+            "Public IPv4 add-on",
+            "PCP"
+          ]
+        },
+        {
+          "label": "IPv6",
+          "children": [
+            "Direct",
+            "Firewall pinholes"
+          ]
+        },
+        {
+          "label": "Overlays",
+          "children": [
+            "Tailscale",
+            "ZeroTier"
+          ]
+        },
+        {
+          "label": "Tunnels",
+          "children": [
+            "Cloudflare Tunnel",
+            "ngrok"
+          ]
+        },
+        {
+          "label": "DIY",
+          "children": [
+            "VPS + WireGuard + DNAT"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "VPS relay",
+      "scenario": "WireGuard + iptables.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Public 443 on VPS reaches home server through CGNAT."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# on VPS (public IP 198.51.100.9), wg0 peer = home 10.8.0.2\niptables -t nat -A PREROUTING -i eth0 -p tcp --dport 443 -j DNAT --to-destination 10.8.0.2:443\niptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE\n# home keeps WireGuard tunnel up (PersistentKeepalive = 25)"
+        }
+      ],
+      "outcome": "inbound reachability regained."
+    },
+    "summary": {
+      "points": [
+        "IPv6 first.",
+        "Overlays and tunnels.",
+        "VPS relay for control."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does the home side need PersistentKeepalive in a WireGuard relay setup?",
+        "a": "To keep the CGN mapping alive so the VPS can always send traffic back down the tunnel."
+      }
+    ]
+  }
+}

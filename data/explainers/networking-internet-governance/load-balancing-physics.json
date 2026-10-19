@@ -1,0 +1,770 @@
+{
+  "introduction-the-traffic-cop": {
+    "core": "A load balancer spreads requests across a pool of servers so no single server is overwhelmed, and it removes failed servers from rotation. That gives horizontal scaling, high availability and zero-downtime deploys (drain, update, re-add). The design choices are which layer it works at (L4 vs L7), which algorithm, how it checks health, and how packets flow back (proxy vs DSR).",
+    "first_principles": {
+      "problem": "A single web server hits 100% CPU during peak while the company's two spare servers sit idle.",
+      "truths": [
+        "One server has finite capacity.",
+        "Servers fail.",
+        "Clients need a single stable entry point."
+      ],
+      "derivation": [
+        "Put a **VIP** in front of a pool.",
+        "**Distribute** by algorithm.",
+        "**Health-check** and eject failures.",
+        "**Drain** for deploys.",
+        "Choose **L4 vs L7**."
+      ]
+    },
+    "analogy": {
+      "title": "A traffic officer at a busy junction",
+      "story": "Directs cars to the least busy lanes and closes lanes with accidents.",
+      "mapping": [
+        [
+          "Officer",
+          "Load balancer"
+        ],
+        [
+          "Lanes",
+          "Backend servers"
+        ],
+        [
+          "Accident",
+          "Failed server"
+        ]
+      ],
+      "breaks": "Officers see congestion visually; LBs rely on metrics and health checks."
+    },
+    "mindmap": {
+      "center": "Load Balancing",
+      "branches": [
+        {
+          "label": "Goals",
+          "children": [
+            "Scale",
+            "Availability",
+            "Zero-downtime deploys"
+          ]
+        },
+        {
+          "label": "Layers",
+          "children": [
+            "L4",
+            "L7"
+          ]
+        },
+        {
+          "label": "Algorithms",
+          "children": [
+            "Round robin",
+            "Least connections",
+            "Hashing"
+          ]
+        },
+        {
+          "label": "Health",
+          "children": [
+            "Active",
+            "Passive"
+          ]
+        },
+        {
+          "label": "Paths",
+          "children": [
+            "Proxy",
+            "DSR"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Minimal pool",
+      "scenario": "nginx.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Load spread; failing servers skipped."
+        }
+      ],
+      "code": [
+        {
+          "lang": "nginx",
+          "text": "upstream web {\n    least_conn;\n    server 10.0.1.11:8080 max_fails=3 fail_timeout=10s;\n    server 10.0.1.12:8080 max_fails=3 fail_timeout=10s;\n    server 10.0.1.13:8080 max_fails=3 fail_timeout=10s;\n}\nserver { listen 80; location / { proxy_pass http://web; } }"
+        }
+      ],
+      "outcome": "scalable, resilient entry point."
+    },
+    "summary": {
+      "points": [
+        "Spread load.",
+        "Eject failures.",
+        "Enable safe deploys."
+      ]
+    },
+    "check": [
+      {
+        "q": "How does a load balancer enable zero-downtime deploys?",
+        "a": "By draining a server (no new requests, finishing existing ones), updating it, and re-adding it while others serve traffic."
+      }
+    ]
+  },
+  "layer-4-l4-balancing-the-packet-shovel": {
+    "core": "An L4 balancer decides per connection using IPs and ports, without reading the payload. It's fast (millions of packets per second, often in-kernel or hardware), protocol-agnostic (TCP, UDP, TLS passthrough) and keeps the backend connection 1:1 with the client's. It can't route by URL or header, can't see HTTP errors, and balances connections rather than requests.",
+    "first_principles": {
+      "problem": "A team needs to balance raw TCP database and MQTT traffic at very high throughput.",
+      "truths": [
+        "Headers up to L4 are enough to pick a backend.",
+        "Not parsing payload is fast.",
+        "Long connections skew balance."
+      ],
+      "derivation": [
+        "Pick backend on **5-tuple**.",
+        "Use **NAT or DSR** forwarding.",
+        "Support **any TCP/UDP** protocol.",
+        "**TLS passthrough** to backends.",
+        "Watch **long-lived connection** imbalance."
+      ]
+    },
+    "analogy": {
+      "title": "A mail sorter reading only postcodes",
+      "story": "Very fast because it never opens envelopes, but it can't route by what's written inside.",
+      "mapping": [
+        [
+          "Postcode",
+          "IP/port"
+        ],
+        [
+          "Envelope contents",
+          "HTTP payload"
+        ],
+        [
+          "Sorter",
+          "L4 LB"
+        ]
+      ],
+      "breaks": "Mail is one-off; connections persist and pin load."
+    },
+    "mindmap": {
+      "center": "L4 Balancing",
+      "branches": [
+        {
+          "label": "Decision",
+          "children": [
+            "5-tuple",
+            "Per connection"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Fast",
+            "Protocol-agnostic",
+            "TLS passthrough"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "No content routing",
+            "Connection-level balance"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "AWS NLB",
+            "IPVS",
+            "Maglev",
+            "Katran"
+          ]
+        },
+        {
+          "label": "Modes",
+          "children": [
+            "NAT",
+            "DSR",
+            "Tunnel"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "IPVS virtual service",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "In-kernel TCP balancing at line rate."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "ipvsadm -A -t 10.0.0.100:5432 -s lc           # least-connections\nipvsadm -a -t 10.0.0.100:5432 -r 10.0.1.21:5432 -m\nipvsadm -a -t 10.0.0.100:5432 -r 10.0.1.22:5432 -m\nipvsadm -Ln --stats"
+        }
+      ],
+      "outcome": "high-throughput protocol-agnostic balancing."
+    },
+    "summary": {
+      "points": [
+        "Per-connection decisions.",
+        "Fast and generic.",
+        "No content awareness."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why does L4 balancing struggle with HTTP/2 or gRPC?",
+        "a": "All requests share long-lived connections, so balancing per connection pins many requests to one backend."
+      }
+    ]
+  },
+  "layer-7-l7-balancing-the-application-proxy": {
+    "core": "An L7 balancer terminates the client connection, parses HTTP (or gRPC), and opens its own connections to backends. It can route by host, path, header or cookie, balance per request, retry idempotent requests, add headers, terminate TLS, compress, cache and observe status codes. The cost is CPU, a bit of latency and running a full proxy. Envoy, NGINX, HAProxy and AWS ALB are typical.",
+    "first_principles": {
+      "problem": "/api must go to API servers, /static to object storage, and gRPC calls must spread per request.",
+      "truths": [
+        "Content determines routing.",
+        "Requests are the true unit of work.",
+        "Proxies see application outcomes."
+      ],
+      "derivation": [
+        "**Terminate** TLS and HTTP.",
+        "Route by **host/path/header**.",
+        "Balance **per request**.",
+        "Apply **retries, timeouts, circuit breaking**.",
+        "Emit **L7 metrics** (status, latency)."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist who reads each request",
+      "story": "They read why you're visiting and send you to the right department and the least busy person.",
+      "mapping": [
+        [
+          "Receptionist",
+          "L7 proxy"
+        ],
+        [
+          "Visit reason",
+          "Path/header"
+        ],
+        [
+          "Department",
+          "Backend pool"
+        ]
+      ],
+      "breaks": "Receptionists are slow; proxies add only milliseconds, but do cost CPU."
+    },
+    "mindmap": {
+      "center": "L7 Balancing",
+      "branches": [
+        {
+          "label": "Capabilities",
+          "children": [
+            "Host/path routing",
+            "Per-request balance",
+            "Retries",
+            "Header manipulation",
+            "TLS termination"
+          ]
+        },
+        {
+          "label": "Observability",
+          "children": [
+            "Status codes",
+            "Latency",
+            "Traces"
+          ]
+        },
+        {
+          "label": "Costs",
+          "children": [
+            "CPU",
+            "Latency",
+            "Complexity"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "Envoy",
+            "NGINX",
+            "HAProxy",
+            "ALB"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Path routing",
+      "scenario": "Envoy-style (simplified).",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Content-aware routing with retries."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "routes:\n  - match: { prefix: \"/api\" }\n    route: { cluster: api, timeout: 2s, retry_policy: { retry_on: \"5xx\", num_retries: 2 } }\n  - match: { prefix: \"/static\" }\n    route: { cluster: static_assets }\n  - match: { prefix: \"/\", headers: [{ name: \"content-type\", prefix_match: \"application/grpc\" }] }\n    route: { cluster: grpc_backends }"
+        }
+      ],
+      "outcome": "application-aware traffic control."
+    },
+    "summary": {
+      "points": [
+        "Terminates and parses.",
+        "Routes and balances per request.",
+        "Costs CPU."
+      ]
+    },
+    "check": [
+      {
+        "q": "Name two things an L7 LB can do that an L4 LB cannot.",
+        "a": "Route by URL path/host/header and balance per HTTP request (also retries on 5xx, header rewriting)."
+      }
+    ]
+  },
+  "balancing-algorithms-round-robin-weighted-and-least-connections": {
+    "core": "Round robin cycles through servers, which is simple and fair when requests and servers are similar. Weighted round robin sends proportionally more to bigger servers. Least connections picks the server with the fewest active connections, adapting to uneven request durations. Power-of-two-choices (pick two at random and send to the less loaded) gets near-optimal balance with little coordination, which suits many LB instances.",
+    "first_principles": {
+      "problem": "Round robin overloads one server because some requests take 10 s while most take 10 ms.",
+      "truths": [
+        "Requests vary in cost.",
+        "Servers vary in capacity.",
+        "Global state is expensive across many LBs."
+      ],
+      "derivation": [
+        "**Round robin** for uniform work.",
+        "**Weighted** for mixed capacity.",
+        "**Least connections/requests** for variable durations.",
+        "**P2C** for distributed LBs.",
+        "Add **slow start** for new servers."
+      ]
+    },
+    "analogy": {
+      "title": "Supermarket checkouts",
+      "story": "Taking turns works when baskets are similar; with a few full trolleys, pick the shortest queue.",
+      "mapping": [
+        [
+          "Taking turns",
+          "Round robin"
+        ],
+        [
+          "Shortest queue",
+          "Least connections"
+        ],
+        [
+          "Bigger tills",
+          "Weights"
+        ]
+      ],
+      "breaks": "Shoppers see queues; LBs see only their own counts unless shared."
+    },
+    "mindmap": {
+      "center": "Algorithms",
+      "branches": [
+        {
+          "label": "Round robin",
+          "children": [
+            "Simple",
+            "Uniform work"
+          ]
+        },
+        {
+          "label": "Weighted",
+          "children": [
+            "Capacity-aware"
+          ]
+        },
+        {
+          "label": "Least connections",
+          "children": [
+            "Adaptive",
+            "Long requests"
+          ]
+        },
+        {
+          "label": "P2C",
+          "children": [
+            "Random two, pick less loaded"
+          ]
+        },
+        {
+          "label": "Extras",
+          "children": [
+            "Slow start",
+            "Outlier ejection",
+            "EWMA latency"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Weighted least-conn",
+      "scenario": "HAProxy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Big server gets more; long requests don't pile up."
+        }
+      ],
+      "code": [
+        {
+          "lang": "text",
+          "text": "backend app\n  balance leastconn\n  server a 10.0.1.11:8080 weight 100 check slowstart 30s\n  server b 10.0.1.12:8080 weight 100 check slowstart 30s\n  server c 10.0.1.13:8080 weight 200 check slowstart 30s   # 2× bigger"
+        }
+      ],
+      "outcome": "balance matched to workload."
+    },
+    "summary": {
+      "points": [
+        "RR for uniform.",
+        "Least-conn for variable.",
+        "P2C for scale."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why is power-of-two-choices popular in large distributed LBs?",
+        "a": "It achieves near-least-loaded balance using only two random samples, without global coordination between LB instances."
+      }
+    ]
+  },
+  "algorithm-consistent-hashing-and-the-thundering-herd": {
+    "core": "Hash-based balancing maps a key (client IP, session ID, cache key) to a backend, giving stickiness and better cache locality. Plain modulo hashing remaps almost everything when the pool changes, sending a thundering herd of cache misses to backends. Consistent hashing (ring or Maglev) remaps only about 1/N of keys. Bounded-load variants cap any backend's share to avoid hot spots.",
+    "first_principles": {
+      "problem": "Scaling a cache tier from 8 to 9 nodes behind a modulo-hash LB causes a 90% miss storm that overloads the database.",
+      "truths": [
+        "Stickiness improves locality.",
+        "Modulo changes break most mappings.",
+        "Hot keys can overload one backend."
+      ],
+      "derivation": [
+        "Hash a **stable key**.",
+        "Use **ring/Maglev** consistent hashing.",
+        "Expect **~1/N** remapping on change.",
+        "Use **bounded loads** for skew.",
+        "Add **gradual warm-up** for new nodes."
+      ]
+    },
+    "analogy": {
+      "title": "Assigned seating that survives a new table",
+      "story": "Adding a table only moves the few guests nearest it, not everyone.",
+      "mapping": [
+        [
+          "Guests",
+          "Keys"
+        ],
+        [
+          "Tables",
+          "Backends"
+        ],
+        [
+          "Re-seating everyone",
+          "Thundering herd"
+        ]
+      ],
+      "breaks": "Guests move politely; cache misses hit the database all at once."
+    },
+    "mindmap": {
+      "center": "Hash Balancing",
+      "branches": [
+        {
+          "label": "Keys",
+          "children": [
+            "Client IP",
+            "Session",
+            "URL"
+          ]
+        },
+        {
+          "label": "Modulo",
+          "children": [
+            "Mass remap",
+            "Thundering herd"
+          ]
+        },
+        {
+          "label": "Consistent",
+          "children": [
+            "Ring",
+            "Maglev",
+            "~1/N remap"
+          ]
+        },
+        {
+          "label": "Skew",
+          "children": [
+            "Bounded loads",
+            "Replicas"
+          ]
+        },
+        {
+          "label": "Uses",
+          "children": [
+            "Caches",
+            "Sticky sessions"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Envoy ring hash",
+      "scenario": "Config.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Adding a node remaps ~11% of keys, not ~89%."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "clusters:\n  - name: cache\n    lb_policy: RING_HASH\n    ring_hash_lb_config: { minimum_ring_size: 1024 }\n# route: hash_policy: [{ header: { header_name: \"x-cache-key\" } }]"
+        }
+      ],
+      "outcome": "stable, cache-friendly balancing."
+    },
+    "summary": {
+      "points": [
+        "Hash for stickiness.",
+        "Consistent hashing on change.",
+        "Bound load for skew."
+      ]
+    },
+    "check": [
+      {
+        "q": "What's the 'thundering herd' in hash-based load balancing?",
+        "a": "When a pool change remaps most keys, caches miss en masse and the flood of requests overwhelms backends."
+      }
+    ]
+  },
+  "health-checks-how-the-lb-knows-a-server-is-dead": {
+    "core": "Active health checks probe each backend periodically (TCP connect, HTTP GET /healthz expecting 200) and mark it down after N failures and up after M successes. Passive checks (outlier detection) watch real traffic for errors or timeouts. Good health endpoints test what matters (can serve requests) without cascading: a /healthz that checks a shared database can eject every server at once during a DB blip.",
+    "first_principles": {
+      "problem": "A DB hiccup makes every server's /healthz fail, so the LB ejects them all and the site goes fully down.",
+      "truths": [
+        "Failed servers must be removed fast.",
+        "Flapping causes instability.",
+        "Shared dependencies correlate failures."
+      ],
+      "derivation": [
+        "Use **active checks** with thresholds.",
+        "Add **passive outlier detection**.",
+        "Separate **liveness vs readiness**.",
+        "Avoid **deep dependency checks** in LB health.",
+        "Use **fail-open** when all are unhealthy."
+      ]
+    },
+    "analogy": {
+      "title": "A supervisor checking staff are at their posts",
+      "story": "They check regularly, but don't send everyone home just because the shared coffee machine broke.",
+      "mapping": [
+        [
+          "Checking posts",
+          "Active checks"
+        ],
+        [
+          "Noticing mistakes",
+          "Passive checks"
+        ],
+        [
+          "Coffee machine",
+          "Shared dependency"
+        ]
+      ],
+      "breaks": "Supervisors judge context; checks follow fixed rules."
+    },
+    "mindmap": {
+      "center": "Health Checks",
+      "branches": [
+        {
+          "label": "Active",
+          "children": [
+            "TCP",
+            "HTTP",
+            "Interval",
+            "Thresholds"
+          ]
+        },
+        {
+          "label": "Passive",
+          "children": [
+            "Outlier detection",
+            "5xx/timeout tracking"
+          ]
+        },
+        {
+          "label": "Design",
+          "children": [
+            "Shallow readiness",
+            "No shared-dep cascade"
+          ]
+        },
+        {
+          "label": "Safety",
+          "children": [
+            "Fail-open",
+            "Max ejection %"
+          ]
+        },
+        {
+          "label": "Deploys",
+          "children": [
+            "Drain",
+            "Slow start"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "Thresholds + outliers",
+      "scenario": "Envoy.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "Bad servers ejected; never more than half the pool."
+        }
+      ],
+      "code": [
+        {
+          "lang": "yaml",
+          "text": "health_checks:\n  - timeout: 1s\n    interval: 5s\n    unhealthy_threshold: 3\n    healthy_threshold: 2\n    http_health_check: { path: /ready }\noutlier_detection:\n  consecutive_5xx: 5\n  base_ejection_time: 30s\n  max_ejection_percent: 50"
+        }
+      ],
+      "outcome": "reliable failure detection."
+    },
+    "summary": {
+      "points": [
+        "Active and passive.",
+        "Thresholds avoid flapping.",
+        "Avoid correlated ejection."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why limit max_ejection_percent in outlier detection?",
+        "a": "To prevent a widespread or correlated issue from ejecting so many backends that the remaining ones collapse."
+      }
+    ]
+  },
+  "direct-server-return-dsr-the-asymmetric-triangle": {
+    "core": "Responses are usually much larger than requests. With Direct Server Return, the LB forwards only inbound packets (rewriting the MAC or encapsulating them), and backends reply straight to the client using the VIP as source, bypassing the LB on the way out. That gives huge outbound throughput with small LBs. The cost is that backends must hold the VIP on loopback (with ARP suppressed), there is no L7 processing, and asymmetric paths complicate firewalls and debugging.",
+    "first_principles": {
+      "problem": "A video service's LBs saturate at 40 Gbps outbound while inbound requests are only 400 Mbps.",
+      "truths": [
+        "Responses dwarf requests.",
+        "LBs only need to pick the backend.",
+        "Return path can skip the LB."
+      ],
+      "derivation": [
+        "LB forwards **inbound only**.",
+        "Backend binds **VIP on loopback**.",
+        "Suppress **ARP for VIP** on backends.",
+        "Use **L2 (MAC rewrite)** or **IPIP/GUE** tunnels.",
+        "Accept **L4-only** behaviour."
+      ]
+    },
+    "analogy": {
+      "title": "A receptionist who routes visitors, and visitors leave by the back door",
+      "story": "The front desk handles arrivals only; departures don't crowd it.",
+      "mapping": [
+        [
+          "Front desk",
+          "LB"
+        ],
+        [
+          "Back door exit",
+          "Direct return path"
+        ],
+        [
+          "Visitors",
+          "Traffic"
+        ]
+      ],
+      "breaks": "Buildings have one address; backends must pretend to own the VIP."
+    },
+    "mindmap": {
+      "center": "DSR",
+      "branches": [
+        {
+          "label": "Flow",
+          "children": [
+            "Client → LB → backend",
+            "Backend → client directly"
+          ]
+        },
+        {
+          "label": "Requirements",
+          "children": [
+            "VIP on loopback",
+            "ARP suppression",
+            "Same L2 or tunnels"
+          ]
+        },
+        {
+          "label": "Pros",
+          "children": [
+            "Massive egress",
+            "Small LBs"
+          ]
+        },
+        {
+          "label": "Cons",
+          "children": [
+            "L4 only",
+            "Asymmetric",
+            "Harder debugging"
+          ]
+        },
+        {
+          "label": "Examples",
+          "children": [
+            "IPVS -g",
+            "Katran",
+            "Maglev"
+          ]
+        }
+      ]
+    },
+    "example": {
+      "title": "IPVS DR mode",
+      "scenario": "Commands.",
+      "flow": [],
+      "steps": [
+        {
+          "label": "Effect",
+          "detail": "LB handles 400 Mbps in; backends send 40 Gbps out directly."
+        }
+      ],
+      "code": [
+        {
+          "lang": "bash",
+          "text": "# LB\nipvsadm -A -t 203.0.113.10:80 -s mh\nipvsadm -a -t 203.0.113.10:80 -r 10.0.1.21 -g     # -g = gatewaying (DSR)\n# each backend\nip addr add 203.0.113.10/32 dev lo\nsysctl -w net.ipv4.conf.all.arp_ignore=1 net.ipv4.conf.all.arp_announce=2"
+        }
+      ],
+      "outcome": "scalable egress-heavy balancing."
+    },
+    "summary": {
+      "points": [
+        "Inbound via LB.",
+        "Outbound direct.",
+        "L4 only, asymmetric."
+      ]
+    },
+    "check": [
+      {
+        "q": "Why must backends suppress ARP for the VIP in DSR?",
+        "a": "Otherwise they'd answer ARP for the VIP and steal inbound traffic from the LB on the shared network."
+      }
+    ]
+  }
+}
